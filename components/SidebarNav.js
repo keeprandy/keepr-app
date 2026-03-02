@@ -16,6 +16,7 @@ const CONSUMER_ITEMS = [
   { key: "Boats", label: "Boats", icon: "boat-outline" },
   { key: "Notifications", label: "Event Inbox", icon: "notifications-outline" },
   { key: "KeeprPros", label: "Keepr™ Pros", icon: "construct-outline" },
+  { key: "PlanUpgrade", label: "Plan & Upgrade", icon: "pricetag-outline" },
   { key: "Settings", label: "Settings", icon: "settings-outline" },
 ];
 
@@ -67,6 +68,7 @@ function normalizeToSection(routeName) {
     routeName === "HomePublic" ||
     routeName === "TimelineRecord" ||
     routeName === "HomeScreen"
+    
   ) {
     return "MyHome";
   }
@@ -104,6 +106,7 @@ function normalizeToSection(routeName) {
   if (routeName === "KeeprPros") return "KeeprPros";
   if (routeName === "Settings") return "Settings";
   if (routeName === "Dashboard") return "Dashboard";
+  if (routeName === "PlanUpgrade") return "PlanUpgrade";
 
   return "Dashboard";
 }
@@ -244,7 +247,10 @@ export default function SidebarNav({ currentRouteName }) {
         navigationRef.navigate("RootTabs", { screen: "Dashboard" });
         return;
       }
-
+      if (key === "PlanUpgrade") {
+      navigationRef.navigate("PlanUpgrade");
+      return;
+    }
       if (inSuperKeepr) {
         navigationRef.navigate("SuperKeeprStack", { screen: key });
         return;

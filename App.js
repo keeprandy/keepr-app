@@ -181,7 +181,6 @@ const linking = {
           Boats: "boats",
           Notifications: "inbox",
           KeeprPros: "pros",
-          PlanUpgrade: "upgrade",
           Settings: "settings",
         },
       },
@@ -189,6 +188,8 @@ const linking = {
       TimelineRecord: "TimelineRecord",
       AssetQRCodes: "asset/:assetId/qrcodes",
       UploadLab: "upload-lab",
+      PlanUpgrade: "upgrade",
+      QRAssetRouter: "qr/:kac",
       AssetAttachments: "asset/:assetId/attachments",
 
       HomePublic: "public/home/:assetId",
@@ -456,12 +457,21 @@ function Root({ onRouteChange, setCurrentRouteName, currentRouteName }) {
     }
 
 const url = initialUrlRef.current || "";
-const isSpecialDeepLink =
-  url.includes("/k/") ||
-  url.includes("/asset/") ||
-  url.includes("/upgrade");
-  
-if (isSpecialDeepLink) return;
+
+let pathname = "";
+try {
+  // Works for https://... and http://...
+  pathname = url ? new URL(url).pathname || "" : "";
+} catch {
+  // Fallback for anything weird
+  pathname = "";
+}
+
+// Only do the "force landing stack" reset when someone hit the plain site root.
+// If they came in on ANY path (/boats, /garage, /inbox, /upgrade, /k/..., /asset/...), do NOT override it.
+const isPlainLanding = pathname === "" || pathname === "/";
+
+if (!isPlainLanding) return;
 
 // ✅ If initial URL is a tab deep link, don't reset to default tab
 const initialPath = (() => {
