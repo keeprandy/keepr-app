@@ -184,6 +184,10 @@ const linking = {
           Settings: "settings",
         },
       },
+      PlanUpgrade: "upgrade",
+      Team: "team",
+      ManageTeam: "team/manage",
+      Profile: "profile",
 
       TimelineRecord: "TimelineRecord",
       AssetQRCodes: "asset/:assetId/qrcodes",
@@ -441,87 +445,50 @@ function Root({ onRouteChange, setCurrentRouteName, currentRouteName }) {
 
   const lastResetRouteRef = React.useRef(null);
 
-  React.useEffect(() => {
-    if (!targetRoute) return;
-    if (!navigationRef?.isReady?.()) return;
+React.useEffect(() => {
+  if (!targetRoute) return;
+  if (!navigationRef?.isReady?.()) return;
 
-    // Avoid infinite reset loops
-    if (lastResetRouteRef.current === targetRoute) return;
+  // Avoid infinite reset loops
+  if (lastResetRouteRef.current === targetRoute) return;
 
-    const current = navigationRef.getCurrentRoute()?.name;
+  const current = navigationRef.getCurrentRoute()?.name;
 
-    // If we're already in the right stack/screen, do nothing
-    if (current === targetRoute) {
-      lastResetRouteRef.current = targetRoute;
-      return;
-    }
-
-const url = initialUrlRef.current || "";
-
-let pathname = "";
-try {
-  // Works for https://... and http://...
-  pathname = url ? new URL(url).pathname || "" : "";
-} catch {
-  // Fallback for anything weird
-  pathname = "";
-}
-
-// Only do the "force landing stack" reset when someone hit the plain site root.
-// If they came in on ANY path (/boats, /garage, /inbox, /upgrade, /k/..., /asset/...), do NOT override it.
-const isPlainLanding = pathname === "" || pathname === "/";
-
-if (!isPlainLanding) return;
-
-// ✅ If initial URL is a tab deep link, don't reset to default tab
-const initialPath = (() => {
-  try {
-    const u = new URL(url);
-    return u.pathname || "";
-  } catch {
-    return "";
-  }
-})();
-
-const isTabDeepLink = [
-  "/dashboard",
-  "/home",
-  "/garage",
-  "/boats",
-  "/inbox",
-  "/pros",
-  "/settings",
-].some((p) => initialPath === p || initialPath.startsWith(p + "/"));
-
-if (targetRoute === "RootTabs" && isTabDeepLink) {
-  lastResetRouteRef.current = targetRoute;
-  return;
-}
-
-// ✅ preserve linked tab (boats/garage/etc)
-const rootTabChildren = new Set([
-  "Dashboard",
-  "MyHome",
-  "Garage",
-  "Boats",
-  "Notifications",
-  "KeeprPros",
-  "Settings",
-]);
-
-if (targetRoute === "RootTabs") {
-  navigationRef?.reset?.({
-    index: 0,
-    routes: [{ name: "RootTabs" }],
-  });
-} else {
-  navigationRef?.reset?.({
-    index: 0,
-    routes: [{ name: targetRoute }],
-  });
-}
+  // If we're already in the right stack/screen, do nothing
+  if (current === targetRoute) {
     lastResetRouteRef.current = targetRoute;
-  }, [targetRoute]);
+    return;
+  }
+
+  // IMPORTANT:
+  // Only force-reset when user hit the plain site root "/".
+  // If they came in on ANY deep link (/boats, /garage, /inbox, /upgrade, /k/..., etc)
+  // do NOT override it.
+  let pathname = "";
+
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    pathname = window.location.pathname || "";
+  } else {
+    const url = initialUrlRef.current || "";
+    try {
+      pathname = url ? new URL(url).pathname || "" : "";
+    } catch {
+      pathname = "";
+    }
+  }
+
+  const isPlainLanding = pathname === "" || pathname === "/";
+
+  if (!isPlainLanding) return;
+
+  // If it IS plain landing, then enforce the correct stack (RootTabs / Onboarding / SuperKeepr)
+  navigationRef?.reset?.({
+    index: 0,
+    routes: [{ name: targetRoute === "RootTabs" ? "RootTabs" : targetRoute }],
+  });
+
+  lastResetRouteRef.current = targetRoute;
+}, [targetRoute]);
 
 
   React.useEffect(() => {

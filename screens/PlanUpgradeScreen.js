@@ -85,7 +85,7 @@ export default function PlanUpgradeScreen({ navigation }) {
 
   useEffect(() => {
     Animated.timing(teamLift, {
-      toValue: String(plan || "free").toLowerCase() === "team" ? 1 : 0,
+     toValue: (teamContext?.isOwner || String(plan || "free").toLowerCase() === "team") ? 1 : 0,
       duration: 180,
       useNativeDriver: true,
     }).start();
@@ -182,7 +182,7 @@ export default function PlanUpgradeScreen({ navigation }) {
   const currentPlanLabel = useMemo(() => {
     if (loading) return "Loading…";
 
-    const isOwner = !!teamContext?.isOwner && String(plan || "").toLowerCase() === "team";
+    const isOwner = !!teamContext?.isOwner;
     const isMember = !!teamContext?.isMember;
     const orgName = teamContext?.orgName || "a team";
 
@@ -190,7 +190,8 @@ export default function PlanUpgradeScreen({ navigation }) {
     if (isOwner) return "Team Owner";
     if (isMember) return `Team Member (${orgName})`;
 
-    const p = String(plan || "free").toLowerCase();
+    const p = effectivePlan;
+    
     if (p === "free") return "Starter";
     if (p === "plus") return "Plus";
     if (p === "team") return "Team Owner";
@@ -316,11 +317,16 @@ export default function PlanUpgradeScreen({ navigation }) {
     );
   };
 
-  const normalizedPlan = String(plan || "free").toLowerCase();
-  const isOnFree = normalizedPlan === "free";
-  const isOnPlus = normalizedPlan === "plus";
-  const isOnTeam = normalizedPlan === "team";
-  const isTeamOwner = !!teamContext?.isOwner && isOnTeam;
+const normalizedPlan = String(plan || "free").toLowerCase();
+
+// If you're a team owner, treat you as Team for UI purposes even if profile.plan is behind.
+const effectivePlan = teamContext?.isOwner ? "team" : normalizedPlan;
+
+const isOnFree = effectivePlan === "free";
+const isOnPlus = effectivePlan === "plus";
+const isOnTeam = effectivePlan === "team";
+
+const isTeamOwner = !!teamContext?.isOwner;
   const isTeamMember = !!teamContext?.isMember;
   const orgLabel = teamContext?.orgName || "a team";
 
@@ -507,7 +513,7 @@ export default function PlanUpgradeScreen({ navigation }) {
           >
             {isOnTeam && (
               <Pressable
-                onPress={() => navigation.navigate("ManageTeam")}
+                onPress={() => navigation.navigate("Team")}
                 style={({ pressed }) => [
                   styles.manageTeam,
                   pressed && { opacity: 0.9 },
