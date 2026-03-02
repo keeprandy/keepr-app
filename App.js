@@ -165,29 +165,31 @@ const linking = {
     "https://keeprfamily.com",
     "https://keeprfleet.com",
     "https://keeprpros.com",
+    "https://keepr-app-sand.vercel.app",
+    "https://app.keeprhome.com",
   ],
   config: {
     screens: {
       KacResolve: "k/:kac",
       PublicAction: "k/:kac/actions",
       RootTabs: {
+        path: "",
         screens: {
-          Dashboard: "",
+          Dashboard: "dashboard",
           MyHome: "home",
           Garage: "garage",
           Boats: "boats",
           Notifications: "inbox",
           KeeprPros: "pros",
+          PlanUpgrade: "upgrade",
           Settings: "settings",
         },
       },
 
       TimelineRecord: "TimelineRecord",
-
+      AssetQRCodes: "asset/:assetId/qrcodes",
       UploadLab: "upload-lab",
       AssetAttachments: "asset/:assetId/attachments",
-
-      KacResolve: "k/:kac",
 
       HomePublic: "public/home/:assetId",
       GaragePublic: "public/garage/:assetId",
@@ -403,6 +405,18 @@ function Root({ onRouteChange, setCurrentRouteName, currentRouteName }) {
   const [assetCount, setAssetCount] = React.useState(null);
   const [loadingRole, setLoadingRole] = React.useState(false);
 
+  const initialUrlRef = React.useRef(null);
+
+    React.useEffect(() => {
+      (async () => {
+        try {
+          initialUrlRef.current = await Linking.getInitialURL();
+        } catch {
+          initialUrlRef.current = null;
+        }
+      })();
+    }, []);
+
   // Normalize onboarding state (we've had both "complete" and "completed" in the DB)
   const normalizedOnboardingState = (onboardingState || "not_started").toLowerCase();
   const isOnboardingComplete =
@@ -440,6 +454,50 @@ function Root({ onRouteChange, setCurrentRouteName, currentRouteName }) {
       lastResetRouteRef.current = targetRoute;
       return;
     }
+
+const url = initialUrlRef.current || "";
+const isSpecialDeepLink =
+  url.includes("/k/") ||
+  url.includes("/asset/") ||
+  url.includes("/upgrade");
+  
+if (isSpecialDeepLink) return;
+
+// ✅ If initial URL is a tab deep link, don't reset to default tab
+const initialPath = (() => {
+  try {
+    const u = new URL(url);
+    return u.pathname || "";
+  } catch {
+    return "";
+  }
+})();
+
+const isTabDeepLink = [
+  "/dashboard",
+  "/home",
+  "/garage",
+  "/boats",
+  "/inbox",
+  "/pros",
+  "/settings",
+].some((p) => initialPath === p || initialPath.startsWith(p + "/"));
+
+if (targetRoute === "RootTabs" && isTabDeepLink) {
+  lastResetRouteRef.current = targetRoute;
+  return;
+}
+
+// ✅ preserve linked tab (boats/garage/etc)
+const rootTabChildren = new Set([
+  "Dashboard",
+  "MyHome",
+  "Garage",
+  "Boats",
+  "Notifications",
+  "KeeprPros",
+  "Settings",
+]);
 
 if (targetRoute === "RootTabs") {
   navigationRef?.reset?.({
@@ -944,24 +1002,31 @@ export default function App() {
               <BoatsProvider>
                 <EnhanceProvider>
                   <EnhanceBootstrap />
-
                   {isWebShell ? (
-                    <View style={appStyles.webShell}>
-                      {/* Hide sidebar for print preview route */}
-                      {currentRouteName === "StoryPrint" ? null : (
-                        <SidebarNav currentRouteName={currentRouteName} />
-                      )}
+                    (() => {
+                      const hideSidebarRoutes = new Set([
+                        "StoryPrint",
+                        "KacResolve",
+                        "PublicAction",
+                        "KacRoute",
+                      ]);
+                      const hideSidebar = hideSidebarRoutes.has(currentRouteName);
 
-                      <View style={appStyles.webMain}>
-                        <View style={appStyles.webMainInner}>
-                          <Root
-                            onRouteChange={setCurrentRouteName}
-                            setCurrentRouteName={setCurrentRouteName}
-                            currentRouteName={currentRouteName}
-                          />
+                      return (
+                        <View style={appStyles.webShell}>
+                          {hideSidebar ? null : <SidebarNav currentRouteName={currentRouteName} />}
+                          <View style={appStyles.webMain}>
+                            <View style={appStyles.webMainInner}>
+                              <Root
+                                onRouteChange={setCurrentRouteName}
+                                setCurrentRouteName={setCurrentRouteName}
+                                currentRouteName={currentRouteName}
+                              />
+                            </View>
+                          </View>
                         </View>
-                      </View>
-                    </View>
+                      );
+                    })()
                   ) : (
                     <Root
                       onRouteChange={setCurrentRouteName}
