@@ -1,0 +1,178 @@
+[
+  {
+    "system_type": "envelope",
+    "name": "Roof",
+    "location_hint": "Exterior / over main structure",
+    "starter_pack": true,
+    "inspection_core": true,
+    "tags": ["envelope", "exterior", "annual", "big-ticket", "weather-exposed", "starter-pack", "inspection-core"]
+  },
+  {
+    "system_type": "envelope",
+    "name": "Exterior Walls & Siding",
+    "location_hint": "Perimeter of home",
+    "starter_pack": true,
+    "inspection_core": true,
+    "tags": ["envelope", "exterior", "long-cycle", "curb-appeal", "big-ticket", "starter-pack", "inspection-core"]
+  },
+  {
+    "system_type": "structure",
+    "name": "Foundation & Structure",
+    "location_hint": "Basement / crawlspace / slab",
+    "starter_pack": true,
+    "inspection_core": true,
+    "tags": ["structure", "basement", "critical", "big-ticket", "starter-pack", "inspection-core"]
+  },
+    {
+    "system_type": "structure",
+    "name": "Deck",
+    "location_hint": "Attached / detached",
+    "starter_pack": true,
+    "inspection_core": true,
+    "tags": ["structure", "Code", "critical", "big-ticket", "starter-pack", "inspection-core"]
+  },
+  {
+    "system_type": "pool",
+    "name": "Pool",
+    "location_hint": "In Ground / Above Ground",
+    "starter_pack": false,
+    "inspection_core": true,
+    "tags": ["pool", "exterior", "seasonal", "water", "luxury", "inspection-core"]
+  },
+  {
+    "system_type": "hottub",
+    "name": "Hot Tub",
+    "location_hint": "Freestanding / Integrated",
+    "starter_pack": false,
+    "inspection_core": true,
+    "tags": ["hottub", "exterior", "seasonal", "water", "luxury", "inspection-core"]
+  },
+  {
+    "system_type": "hvac",
+    "name": "Primary HVAC System",
+    "location_hint": "Mechanical room / basement / side yard",
+    "starter_pack": true,
+    "inspection_core": true,
+    "tags": ["hvac", "mechanical-room", "annual", "comfort", "energy", "starter-pack", "inspection-core"]
+  },
+  {
+    "system_type": "hvac",
+    "name": "Secondary HVAC / Zone",
+    "location_hint": "Upstairs / separate zone if present",
+    "starter_pack": false,
+    "inspection_core": true,
+    "tags": ["hvac", "mechanical-room", "annual", "comfort", "energy", "zone", "inspection-core"]
+  },
+  {
+    "system_type": "generator",
+    "name": "Whole House Generator",
+    "location_hint": "Front / Rear / Left or Right Side",
+    "starter_pack": false,
+    "inspection_core": true,
+    "tags": ["generator", "exterior", "annual", "safety", "backup-power", "big-ticket", "inspection-core"]
+  },
+  {
+    "system_type": "plumbing",
+    "name": "Domestic Plumbing",
+    "location_hint": "Throughout home – supply & drains",
+    "starter_pack": true,
+    "inspection_core": true,
+    "tags": ["plumbing", "whole-home", "as-needed", "water", "critical", "starter-pack", "inspection-core"]
+  },
+  {
+    "system_type": "plumbing",
+    "name": "Water Heater",
+    "location_hint": "Mechanical room / utility closet / basement",
+    "starter_pack": true,
+    "inspection_core": true,
+    "tags": ["plumbing", "mechanical-room", "annual", "water", "big-ticket", "starter-pack", "inspection-core"]
+  },
+  {
+    "system_type": "sewer",
+    "name": "Sewer / Septic System",
+    "location_hint": "Street connection or septic field",
+    "starter_pack": true,
+    "inspection_core": true,
+    "tags": ["sewer", "exterior", "annual", "waste", "critical", "starter-pack", "inspection-core"]
+  },
+  {
+    "system_type": "electrical",
+    "name": "Main Electrical Service & Panel",
+    "location_hint": "Garage / basement / utility room",
+    "starter_pack": true,
+    "inspection_core": true,
+    "tags": ["electrical", "garage", "basement", "annual", "safety", "big-ticket", "starter-pack", "inspection-core"]
+  },
+  {
+    "system_type": "electrical",
+    "name": "Subpanels & Circuits",
+    "location_hint": "Garage, additions, outbuildings",
+    "starter_pack": false,
+    "inspection_core": true,
+    "tags": ["electrical", "garage", "as-needed", "safety", "inspection-core"]
+  },
+  {
+    "system_type": "openings",
+    "name": "Windows & Exterior Doors",
+    "location_hint": "All levels / exterior envelope",
+    "starter_pack": true,
+    "inspection_core": true,
+    "tags": ["openings", "exterior", "curb-appeal", "energy", "long-cycle", "starter-pack", "inspection-core"]
+  },
+  {
+    "system_type": "interior",
+    "name": "Interior Surfaces & Finishes",
+    "location_hint": "Floors, walls, ceilings, trim",
+    "starter_pack": false,
+    "inspection_core": false,
+    "tags": ["interior", "cosmetic", "curb-appeal", "as-needed"]
+  },
+  {
+    "system_type": "exterior",
+    "name": "Driveway / Walkways",
+    "location_hint": "Front and rear approaches",
+    "starter_pack": false,
+    "inspection_core": false,
+    "tags": ["exterior", "concrete", "curb-appeal", "seasonal"]
+  },
+  {
+    "system_type": "appliances",
+    "name": "Kitchen Appliances",
+    "location_hint": "Kitchen",
+    "starter_pack": true,
+    "inspection_core": false,
+    "tags": ["appliances", "kitchen", "daily-use", "as-needed", "big-ticket", "starter-pack"]
+  },
+  {
+    "system_type": "appliances",
+    "name": "Laundry Appliances",
+    "location_hint": "Laundry room / basement",
+    "starter_pack": true,
+    "inspection_core": false,
+    "tags": ["appliances", "laundry", "daily-use", "as-needed", "big-ticket", "starter-pack"]
+  },
+  {
+    "system_type": "water",
+    "name": "Water Supply (Well / Municipal)",
+    "location_hint": "Meter / well head / pressure tank",
+    "starter_pack": true,
+    "inspection_core": true,
+    "tags": ["water", "utilities", "critical", "annual", "starter-pack", "inspection-core"]
+  },
+  {
+    "system_type": "network",
+    "name": "Internet & Network",
+    "location_hint": "Modem, router, switches, access points",
+    "starter_pack": true,
+    "inspection_core": false,
+    "tags": ["network", "tech", "utilities", "whole-home", "as-needed", "starter-pack"]
+  },
+  {
+    "system_type": "safety",
+    "name": "Life Safety (Smoke/CO, Alarms)",
+    "location_hint": "Throughout home",
+    "starter_pack": true,
+    "inspection_core": true,
+    "tags": ["safety", "life-safety", "whole-home", "annual", "code", "starter-pack", "inspection-core"]
+  }
+]

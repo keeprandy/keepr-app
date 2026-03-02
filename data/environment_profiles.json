@@ -1,0 +1,42 @@
+{
+  "great_lakes_fresh": {
+    "label": "Great Lakes Freshwater",
+    "water_type": "fresh",
+    "uv_level": "medium",
+    "hurricane_zone": false,
+    "maintenance_modifiers": {
+      "anode_interval_factor": 1.5,
+      "hull_clean_interval_factor": 1.5
+    }
+  },
+  "florida_salt": {
+    "label": "Florida Saltwater",
+    "water_type": "salt",
+    "uv_level": "high",
+    "hurricane_zone": true,
+    "maintenance_modifiers": {
+      "anode_interval_factor": 0.8,
+      "hull_clean_interval_factor": 0.7
+    }
+  },
+  "bahamas_salt": {
+    "label": "Bahamas Saltwater",
+    "water_type": "salt",
+    "uv_level": "high",
+    "hurricane_zone": true,
+    "maintenance_modifiers": {
+      "anode_interval_factor": 0.8,
+      "hull_clean_interval_factor": 0.6
+    }
+  },
+  "inland_fresh": {
+    "label": "Inland Freshwater Lake",
+    "water_type": "fresh",
+    "uv_level": "medium",
+    "hurricane_zone": false,
+    "maintenance_modifiers": {
+      "anode_interval_factor": 1.3,
+      "hull_clean_interval_factor": 1.4
+    }
+  }
+}

@@ -9,6 +9,7 @@ dist/
 web-build/
 expo-env.d.ts
 
+
 # Native
 .kotlin/
 *.orig.*
@@ -31,6 +32,7 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
 
 # typescript
@@ -41,3 +43,11 @@ app-example
 # generated native folders
 /ios
 /android
+
+.tmp.driveupload/
+
+# local temp upload artifacts
+.tmp.driveupload/
+
+# Supabase CLI local temp
+supabase/.temp/

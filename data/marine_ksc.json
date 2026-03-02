@@ -1,0 +1,80 @@
+{
+  "systems": {
+    "ENG-MAIN": {
+      "label": "Main Engine",
+      "subsystems": [
+        "Oil & Filter",
+        "Cooling System",
+        "Ignition",
+        "Fuel Delivery",
+        "Exhaust"
+      ],
+      "default_lod": 2
+    },
+    "ENG-LWRUNIT": {
+      "label": "Lower Unit / Gearcase",
+      "subsystems": [
+        "Gear Lube",
+        "Seals",
+        "Prop Shaft"
+      ],
+      "default_lod": 2
+    },
+    "ELC-BAT": {
+      "label": "Electrical & Battery",
+      "subsystems": [
+        "Starting Battery",
+        "House Battery",
+        "Charging System"
+      ],
+      "default_lod": 2
+    },
+    "HULL-EXT": {
+      "label": "Hull Exterior",
+      "subsystems": [
+        "Topsides",
+        "Gelcoat",
+        "Graphics"
+      ],
+      "default_lod": 1
+    },
+    "HULL-BTM": {
+      "label": "Hull Bottom",
+      "subsystems": [
+        "Bottom Paint",
+        "Fouling",
+        "Blisters"
+      ],
+      "default_lod": 2
+    },
+    "BILGE": {
+      "label": "Bilge & Pumps",
+      "subsystems": [
+        "Bilge Pump",
+        "Float Switch",
+        "Hoses & Clamps"
+      ],
+      "default_lod": 2
+    },
+    "STO-WIN": {
+      "label": "Storage & Winterization",
+      "subsystems": [
+        "Shrink Wrap",
+        "Fogging",
+        "Fuel Stabilizer",
+        "Battery Storage"
+      ],
+      "default_lod": 1
+    },
+    "TRL": {
+      "label": "Trailer",
+      "subsystems": [
+        "Tires",
+        "Bearings",
+        "Lights",
+        "Brakes"
+      ],
+      "default_lod": 2
+    }
+  }
+}
