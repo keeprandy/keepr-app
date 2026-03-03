@@ -135,11 +135,11 @@ function upsertStandardRelationships(metadata, relationshipsPatch) {
   return meta;
 }
 
-
-
 export default function VehicleStoryScreen({ navigation, route }) {
-  const { width } = useWindowDimensions();
-  const isWide = IS_WEB && width >= WIDE_BREAKPOINT;
+const { width } = useWindowDimensions();
+
+const heroWideHeight = Math.min(520, Math.max(320, Math.round(width * 0.35)));
+const isWide = IS_WEB && width >= WIDE_BREAKPOINT;
 
   const initialVehicleId =
   route?.params?.assetId ??
@@ -984,6 +984,7 @@ const filteredTimelineItems = useMemo(() => {
         {/* HERO + META (CarGurus-style on web wide) */}
         <View style={[styles.heroCard, isWide && styles.heroCardWide]}>
           <View style={[styles.heroTopRow, isWide && styles.heroTopRowWide]}>
+    
             {/* Left: hero image */}
             <View style={[styles.heroLeft, isWide && styles.heroLeftWide]}>
               <View
@@ -1662,7 +1663,6 @@ const styles = StyleSheet.create({
   heroImage: { width: "100%", height: "100%" },
   heroPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center" },
   heroPlaceholderText: { marginTop: spacing.sm, fontSize: 12, color: colors.textSecondary },
-
   heroMeta: { padding: spacing.md },
   heroTitle: { fontSize: 18, fontWeight: "700", color: colors.textPrimary },
   heroSubtitle: { marginTop: 2, fontSize: 13, color: colors.textSecondary },

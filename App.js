@@ -118,6 +118,8 @@ import SettingsScreen from "./screens/SettingsScreen";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import AuthScreen from "./screens/AuthScreen";
 
+import ResetPasswordScreen from "./screens/ResetPasswordScreen";
+import ChangePasswordScreen from "./screens/ChangePasswordScreen";
 // Context providers
 import { BoatsProvider } from "./context/BoatsContext";
 import { HomeProvider } from "./context/HomeContext";
@@ -165,17 +167,14 @@ const linking = {
     "https://keeprfamily.com",
     "https://keeprfleet.com",
     "https://keeprpros.com",
-    "https://keepr-app-sand.vercel.app",
-    "https://app.keeprhome.com",
   ],
   config: {
     screens: {
       KacResolve: "k/:kac",
       PublicAction: "k/:kac/actions",
       RootTabs: {
-        path: "",
         screens: {
-          Dashboard: "dashboard",
+          Dashboard: "",
           MyHome: "home",
           Garage: "garage",
           Boats: "boats",
@@ -184,17 +183,13 @@ const linking = {
           Settings: "settings",
         },
       },
-      PlanUpgrade: "upgrade",
-      Team: "team",
-      ManageTeam: "team/manage",
-      Profile: "profile",
 
       TimelineRecord: "TimelineRecord",
-      AssetQRCodes: "asset/:assetId/qrcodes",
+
       UploadLab: "upload-lab",
-      PlanUpgrade: "upgrade",
-      QRAssetRouter: "qr/:kac",
       AssetAttachments: "asset/:assetId/attachments",
+
+      KacResolve: "k/:kac",
 
       HomePublic: "public/home/:assetId",
       GaragePublic: "public/garage/:assetId",
@@ -224,7 +219,7 @@ function HomeStack() {
 function OnboardingStack() {
   return (
     <RootStack.Navigator screenOptions={{ headerShown: false }}>
-      <RootStack.Screen name="Onboarding1" component={OnboardingNarrative1Screen} />
+          <RootStack.Screen name="Onboarding1" component={OnboardingNarrative1Screen} />
       <RootStack.Screen name="Onboarding2" component={OnboardingNarrative2Screen} />
       <RootStack.Screen name="Onboarding3" component={OnboardingNarrative3Screen} />
       <RootStack.Screen name="OnboardingChooseAssetType" component={OnboardingChooseAssetTypeScreen} />
@@ -410,18 +405,6 @@ function Root({ onRouteChange, setCurrentRouteName, currentRouteName }) {
   const [assetCount, setAssetCount] = React.useState(null);
   const [loadingRole, setLoadingRole] = React.useState(false);
 
-  const initialUrlRef = React.useRef(null);
-
-    React.useEffect(() => {
-      (async () => {
-        try {
-          initialUrlRef.current = await Linking.getInitialURL();
-        } catch {
-          initialUrlRef.current = null;
-        }
-      })();
-    }, []);
-
   // Normalize onboarding state (we've had both "complete" and "completed" in the DB)
   const normalizedOnboardingState = (onboardingState || "not_started").toLowerCase();
   const isOnboardingComplete =
@@ -445,50 +428,34 @@ function Root({ onRouteChange, setCurrentRouteName, currentRouteName }) {
 
   const lastResetRouteRef = React.useRef(null);
 
-React.useEffect(() => {
-  if (!targetRoute) return;
-  if (!navigationRef?.isReady?.()) return;
+  React.useEffect(() => {
+    if (!targetRoute) return;
+    if (!navigationRef?.isReady?.()) return;
 
-  // Avoid infinite reset loops
-  if (lastResetRouteRef.current === targetRoute) return;
+    // Avoid infinite reset loops
+    if (lastResetRouteRef.current === targetRoute) return;
 
-  const current = navigationRef.getCurrentRoute()?.name;
+    const current = navigationRef.getCurrentRoute()?.name;
 
-  // If we're already in the right stack/screen, do nothing
-  if (current === targetRoute) {
-    lastResetRouteRef.current = targetRoute;
-    return;
-  }
-
-  // IMPORTANT:
-  // Only force-reset when user hit the plain site root "/".
-  // If they came in on ANY deep link (/boats, /garage, /inbox, /upgrade, /k/..., etc)
-  // do NOT override it.
-  let pathname = "";
-
-  if (Platform.OS === "web" && typeof window !== "undefined") {
-    pathname = window.location.pathname || "";
-  } else {
-    const url = initialUrlRef.current || "";
-    try {
-      pathname = url ? new URL(url).pathname || "" : "";
-    } catch {
-      pathname = "";
+    // If we're already in the right stack/screen, do nothing
+    if (current === targetRoute) {
+      lastResetRouteRef.current = targetRoute;
+      return;
     }
-  }
 
-  const isPlainLanding = pathname === "" || pathname === "/";
-
-  if (!isPlainLanding) return;
-
-  // If it IS plain landing, then enforce the correct stack (RootTabs / Onboarding / SuperKeepr)
+if (targetRoute === "RootTabs") {
   navigationRef?.reset?.({
     index: 0,
-    routes: [{ name: targetRoute === "RootTabs" ? "RootTabs" : targetRoute }],
+    routes: [{ name: "RootTabs" }],
   });
-
-  lastResetRouteRef.current = targetRoute;
-}, [targetRoute]);
+} else {
+  navigationRef?.reset?.({
+    index: 0,
+    routes: [{ name: targetRoute }],
+  });
+}
+    lastResetRouteRef.current = targetRoute;
+  }, [targetRoute]);
 
 
   React.useEffect(() => {
@@ -582,8 +549,55 @@ if (error || aErr) {
     else if (!user) setCurrentRouteName("Auth");
   }, [initializing, user, setCurrentRouteName]);
 
+const isResetLink = React.useMemo(() => {
+  if (Platform.OS !== "web") return false;
+  try {
+    const href = window.location.href || "";
+    const path = window.location.pathname || "";
+    const hash = window.location.hash || "";
+    const search = window.location.search || "";
+    if (path.startsWith("/reset")) return true;
+    if (href.includes("/reset")) return true;
+    if (hash.includes("type=recovery")) return true;
+    if (hash.includes("access_token=") && hash.includes("refresh_token=")) return true;
+    if (search.includes("code=")) return true;
+    if (hash.includes("error=")) return true;
+    return false;
+  } catch (_) {
+    return false;
+  }
+}, []);
+
 if (initializing) return <SplashIntroScreen />;
-if (!user) return <AuthScreen />;
+
+// Let password-reset links render ResetPassword even if there is no session yet.
+if (!user) {
+  return (
+    <View style={{ flex: 1 }}>
+      <NavigationContainer
+        theme={navTheme}
+        ref={navigationRef}
+        linking={linking}
+        onStateChange={() => {
+          const route = navigationRef.getCurrentRoute();
+          if (route) {
+            setCurrentRouteName(route.name);
+            onRouteChange(route.name);
+          }
+        }}
+      >
+        <RootStack.Navigator
+          screenOptions={{ headerShown: false }}
+          initialRouteName={isResetLink ? "ResetPassword" : "Auth"}
+        >
+          <RootStack.Screen name="Auth" component={AuthScreen} />
+          <RootStack.Screen name="ResetPassword" component={ResetPasswordScreen} />
+        </RootStack.Navigator>
+      </NavigationContainer>
+    </View>
+  );
+}
+
 if (loadingRole || !role || onboardingState === null || assetCount === null) return <SplashIntroScreen />;
 
 const initialRouteName =
@@ -629,6 +643,9 @@ const initialRouteName =
             screenOptions={{ headerShown: false }}
             initialRouteName={initialRouteName}
           >
+          <RootStack.Screen name="Auth" component={AuthScreen} />
+          <RootStack.Screen name="ResetPassword" component={ResetPasswordScreen} />
+
           <RootStack.Screen name="RootTabs" component={MainTabs} />
           <RootStack.Screen
             name="SuperKeeprStack"
@@ -637,6 +654,7 @@ const initialRouteName =
 
           <RootStack.Screen name="OnboardingStack" component={OnboardingStack} />
           <RootStack.Screen name="Profile" component={ProfileScreen} />
+          <RootStack.Screen name="ChangePassword" component={ChangePasswordScreen} />
           <RootStack.Screen name="AdminSettings" component={SettingsScreen} />
           <RootStack.Screen name="PrivacyTrust" component={PrivacyTrustScreen} options={{ headerShown: false }}/>
           <RootStack.Screen name="PlanUpgrade" component={PlanUpgradeScreen}/>
@@ -979,31 +997,24 @@ export default function App() {
               <BoatsProvider>
                 <EnhanceProvider>
                   <EnhanceBootstrap />
-                  {isWebShell ? (
-                    (() => {
-                      const hideSidebarRoutes = new Set([
-                        "StoryPrint",
-                        "KacResolve",
-                        "PublicAction",
-                        "KacRoute",
-                      ]);
-                      const hideSidebar = hideSidebarRoutes.has(currentRouteName);
 
-                      return (
-                        <View style={appStyles.webShell}>
-                          {hideSidebar ? null : <SidebarNav currentRouteName={currentRouteName} />}
-                          <View style={appStyles.webMain}>
-                            <View style={appStyles.webMainInner}>
-                              <Root
-                                onRouteChange={setCurrentRouteName}
-                                setCurrentRouteName={setCurrentRouteName}
-                                currentRouteName={currentRouteName}
-                              />
-                            </View>
-                          </View>
+                  {isWebShell ? (
+                    <View style={appStyles.webShell}>
+                      {/* Hide sidebar for print preview route */}
+                      {currentRouteName === "StoryPrint" ? null : (
+                        <SidebarNav currentRouteName={currentRouteName} />
+                      )}
+
+                      <View style={appStyles.webMain}>
+                        <View style={appStyles.webMainInner}>
+                          <Root
+                            onRouteChange={setCurrentRouteName}
+                            setCurrentRouteName={setCurrentRouteName}
+                            currentRouteName={currentRouteName}
+                          />
                         </View>
-                      );
-                    })()
+                      </View>
+                    </View>
                   ) : (
                     <Root
                       onRouteChange={setCurrentRouteName}

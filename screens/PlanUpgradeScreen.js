@@ -179,6 +179,19 @@ export default function PlanUpgradeScreen({ navigation }) {
 
   const pricing = PRICES[cycle];
 
+const normalizedPlan = String(plan || "free").toLowerCase();
+
+// If you're a team owner, treat you as Team for UI purposes even if profile.plan is behind.
+const effectivePlan = teamContext?.isOwner ? "team" : normalizedPlan;
+
+const isOnFree = effectivePlan === "free";
+const isOnPlus = effectivePlan === "plus";
+const isOnTeam = effectivePlan === "team";
+
+const isTeamOwner = !!teamContext?.isOwner;
+  const isTeamMember = !!teamContext?.isMember;
+  const orgLabel = teamContext?.orgName || "a team";
+
   const currentPlanLabel = useMemo(() => {
     if (loading) return "Loading…";
 
@@ -316,19 +329,6 @@ export default function PlanUpgradeScreen({ navigation }) {
       </Animated.View>
     );
   };
-
-const normalizedPlan = String(plan || "free").toLowerCase();
-
-// If you're a team owner, treat you as Team for UI purposes even if profile.plan is behind.
-const effectivePlan = teamContext?.isOwner ? "team" : normalizedPlan;
-
-const isOnFree = effectivePlan === "free";
-const isOnPlus = effectivePlan === "plus";
-const isOnTeam = effectivePlan === "team";
-
-const isTeamOwner = !!teamContext?.isOwner;
-  const isTeamMember = !!teamContext?.isMember;
-  const orgLabel = teamContext?.orgName || "a team";
 
   const renderBoolCell = (val) => {
     if (val) {

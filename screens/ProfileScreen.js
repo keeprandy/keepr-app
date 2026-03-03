@@ -554,6 +554,15 @@ const goToSettings = () => navigateToTab("Settings");
         done: true,
         onPress: null,
       },
+
+{
+  id: "journey-password",
+  title: "Change password",
+  subtitle: "Update your login password",
+  done: false,
+  onPress: () => navigation.navigate("ResetPassword"),
+},
+
       {
         id: "journey-assets",
         title: "Add your first asset",
