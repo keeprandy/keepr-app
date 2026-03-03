@@ -331,18 +331,7 @@ if (orgRow?.owner_user_id) {
                       </Text>
                     </View>
 
-                    <TouchableOpacity
-                      onPress={() => handleRemove(m)}
-                      style={styles.memberAction}
-                      activeOpacity={0.85}
-                      disabled={!isTeam || m.member_role === "owner"}
-                    >
-                      <Ionicons
-                        name="remove-circle-outline"
-                        size={20}
-                        color={colors.textMuted}
-                      />
-                    </TouchableOpacity>
+
                   </View>
                 ))
               )}

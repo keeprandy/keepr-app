@@ -913,6 +913,91 @@ const isWide = IS_WEB && width >= 980;
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
   const [draftUrl, setDraftUrl] = useState("");
+
+  // Attachments hook (must be defined before any callbacks that reference `refresh`)
+  const { items: hookItems, loading, error, refresh } = useAssetAttachments(assetId);
+
+  // Safari/iPad web: use native <input type="file"> instead of Expo pickers (they often fail to open)
+  const fileInputRef = useRef(null);
+  const photoInputRef = useRef(null);
+
+  const triggerWebPicker = useCallback((kind) => {
+    const el = kind === "photo" ? photoInputRef.current : fileInputRef.current;
+    if (el && typeof el.click === "function") el.click();
+  }, []);
+
+  const handleWebPickedFile = useCallback(
+    async (file, kind) => {
+      if (!file) return;
+
+      const { data } = await supabase.auth.getUser();
+      const userId = data?.user?.id;
+      if (!userId) throw new Error("Not signed in.");
+
+      const placements = [
+        { target_type: "asset", target_id: assetId, role: "other" },
+      ];
+
+      if (
+        fromTargetType &&
+        fromTargetId &&
+        (fromTargetType === "system" || fromTargetType === "service_record")
+      ) {
+        placements.push({
+          target_type: fromTargetType,
+          target_id: fromTargetId,
+          role: fromTargetRole || "other",
+        });
+      }
+
+      // Use an object URL so our existing upload-from-URI pipeline stays intact.
+      const objectUrl = URL.createObjectURL(file);
+
+      try {
+        await uploadAttachmentFromUri({
+          userId,
+          assetId,
+          kind: kind === "photo" ? "photo" : "file",
+          fileUri: objectUrl,
+          fileName:
+            file.name ||
+            (kind === "photo" ? "photo.jpg" : "file"),
+          mimeType: file.type || "application/octet-stream",
+          sizeBytes: Number.isFinite(file.size) ? file.size : null,
+          placements,
+        });
+
+        await refresh();
+      } finally {
+        try {
+          URL.revokeObjectURL(objectUrl);
+        } catch {
+          // ignore
+        }
+      }
+    },
+    [assetId, fromTargetId, fromTargetRole, fromTargetType, refresh]
+  );
+
+  const onWebFileChange = useCallback(
+    async (e, kind) => {
+      try {
+        const f = e?.target?.files?.[0] || null;
+        // Allow picking the same file again
+        if (e?.target) e.target.value = "";
+        if (!f) return;
+
+        setUploading(true);
+        await handleWebPickedFile(f, kind);
+      } catch (err) {
+        Alert.alert("Upload failed", err?.message || "Could not upload.");
+      } finally {
+        setUploading(false);
+      }
+    },
+    [handleWebPickedFile]
+  );
+
   const [draftNotes, setDraftNotes] = useState("");
 
   const [assocBusy, setAssocBusy] = useState(false);
@@ -950,8 +1035,6 @@ const isWide = IS_WEB && width >= 980;
     const idPart = label ? label : `${targetType} (${shortId(targetId)})`;
     return `Will attach as ${targetRole} to ${idPart}`;
   }, [recordSelection, systemSelection, targetId, targetRole, targetType]);
-
-  const { items: hookItems, loading, error, refresh } = useAssetAttachments(assetId);
 
   // Ensure attachments load reliably on native (and after navigation) by refreshing on focus.
   useFocusEffect(
@@ -1385,6 +1468,12 @@ const isWide = IS_WEB && width >= 980;
   }, []);
 
   const addPhoto = useCallback(async () => {
+    if (IS_WEB) {
+      setAddMenuOpen(false);
+      triggerWebPicker("photo");
+      return;
+    }
+
     try {
       const { data } = await supabase.auth.getUser();
       const userId = data?.user?.id;
@@ -1440,6 +1529,12 @@ const isWide = IS_WEB && width >= 980;
   }, [assetId, ensureMediaPermission, fromTargetId, fromTargetRole, fromTargetType, refresh]);
 
   const addFile = useCallback(async () => {
+    if (IS_WEB) {
+      setAddMenuOpen(false);
+      triggerWebPicker("file");
+      return;
+    }
+
     try {
       const { data } = await supabase.auth.getUser();
       const userId = data?.user?.id;
@@ -1827,6 +1922,25 @@ const isWide = IS_WEB && width >= 980;
 
 return (
   <SafeAreaView style={[layoutStyles.screen, styles.screen]}>
+
+    {IS_WEB ? (
+      <View style={{ width: 0, height: 0, overflow: "hidden" }}>
+        {/* iPad/Safari: native file inputs are the most reliable picker */}
+        <input
+          ref={photoInputRef}
+          type="file"
+          accept="image/*"
+          onChange={(e) => onWebFileChange(e, "photo")}
+        />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="*/*"
+          onChange={(e) => onWebFileChange(e, "file")}
+        />
+      </View>
+    ) : null}
+
     <KeyboardAvoidingView
       style={{ flex: 1 }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -2247,7 +2361,25 @@ return (
                 {label}
               </Text>
             </TouchableOpacity>
+            
           ))}
+              <TouchableOpacity
+              onPress={() => setShowPreview((v) => !v)}
+              style={[
+                styles.pill,
+                showPreview && styles.pillActive,
+                { marginLeft: 8 },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.pillText,
+                  showPreview && styles.pillTextActive,
+                ]}
+              >
+                {showPreview ? "Preview on" : "Preview off"}
+              </Text>
+            </TouchableOpacity>
         </View>
           {/* 2-column */}
           {isWide ? (

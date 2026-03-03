@@ -1925,7 +1925,7 @@ headerWebRow: {
   // Achievements card (clickable)
   achCard: {
     width: "100%",
-    maxWidth: 560,
+    maxWidth: 640,
     borderRadius: 18,
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
