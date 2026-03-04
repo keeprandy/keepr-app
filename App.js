@@ -639,7 +639,6 @@ const initialRouteName =
         }}
       >
           <RootStack.Navigator
-            key={initialRouteName}
             screenOptions={{ headerShown: false }}
             initialRouteName={initialRouteName}
           >
