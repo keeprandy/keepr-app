@@ -231,6 +231,9 @@ function useAttachmentUploadForAsset(assetId, onComplete) {
           { target_type: "asset", target_id: assetId, role: "other" },
         ],
       });
+     
+      await refresh();
+      console.log("Attachment uploaded:", file.name);
 
       await doAfter();
     } catch (e) {
@@ -912,6 +915,7 @@ const isWide = IS_WEB && width >= 980;
   // Web-only add menu (because Alert is unreliable on web)
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
+  const [uploading, setUploading] = useState(false);
   const [draftUrl, setDraftUrl] = useState("");
 
   // Attachments hook (must be defined before any callbacks that reference `refresh`)
@@ -987,13 +991,21 @@ const isWide = IS_WEB && width >= 980;
         if (e?.target) e.target.value = "";
         if (!f) return;
 
+        setAddMenuOpen(false);
+
         setUploading(true);
         await handleWebPickedFile(f, kind);
-      } catch (err) {
-        Alert.alert("Upload failed", err?.message || "Could not upload.");
-      } finally {
-        setUploading(false);
-      }
+        } catch (err) {
+          console.log("Web upload failed:", err);
+          const msg = err?.message || "Could not upload.";
+          if (IS_WEB && typeof window !== "undefined" && typeof window.alert === "function") {
+            window.alert(`Upload failed: ${msg}`);
+          } else {
+            Alert.alert("Upload failed", msg);
+          }
+        } finally {
+  setUploading(false);
+}
     },
     [handleWebPickedFile]
   );
@@ -1468,11 +1480,10 @@ const isWide = IS_WEB && width >= 980;
   }, []);
 
   const addPhoto = useCallback(async () => {
-    if (IS_WEB) {
-      setAddMenuOpen(false);
-      triggerWebPicker("photo");
-      return;
-    }
+if (IS_WEB) {
+  triggerWebPicker("photo");
+  return;
+}
 
     try {
       const { data } = await supabase.auth.getUser();
@@ -1530,7 +1541,6 @@ const isWide = IS_WEB && width >= 980;
 
   const addFile = useCallback(async () => {
     if (IS_WEB) {
-      setAddMenuOpen(false);
       triggerWebPicker("file");
       return;
     }
@@ -1616,11 +1626,12 @@ const isWide = IS_WEB && width >= 980;
     await refresh();
   }, [assetId, fromTargetId, fromTargetRole, fromTargetType, refresh]);
 
-  const openAdd = () => {
-    if (IS_WEB) {
-      setAddMenuOpen((v) => !v);
-      return;
-    }
+const openAdd = () => {
+  if (uploading) return;  
+  if (IS_WEB) {
+    setAddMenuOpen(true);
+    return;
+  }
     Alert.alert("Add attachment", "What would you like to add?", [
       { text: "Cancel", style: "cancel" },
       { text: "Photo", onPress: addPhoto },
@@ -1931,6 +1942,7 @@ return (
           type="file"
           accept="image/*"
           onChange={(e) => onWebFileChange(e, "photo")}
+          
         />
         <input
           ref={fileInputRef}
@@ -1961,92 +1973,41 @@ return (
         
         {/* Refresh Button */}
         <View style={styles.headerRight}>
-          <TouchableOpacity
-            onPress={refresh}
-            style={styles.circleBtn}
-            disabled={loading}
-            accessibilityLabel="Refresh"
-          >
-            {loading ? (
-              <ActivityIndicator size="small" />
-            ) : (
-              <Ionicons name="refresh" size={18} color={colors.textPrimary} />
-            )}
-          </TouchableOpacity>
+        <TouchableOpacity
+          onPress={refresh}
+          style={styles.smallIconBtn}
+          disabled={loading || uploading}
+          accessibilityLabel="Refresh attachments"
+        >
+          {loading ? (
+            <ActivityIndicator size="small" color={colors.textSecondary} />
+          ) : (
+            <Ionicons name="refresh" size={28} color={colors.textSecondary} />
+          )}
+        </TouchableOpacity>
 
-          {/* Add Attachment Paper Clip */}
-          <View style={{ position: "relative" }}>
-            <TouchableOpacity
-              onPress={openAdd}
-              style={[styles.circleBtn, styles.circleBtnPrimary]}
-              accessibilityLabel="Add"
-            >
-              <Ionicons name="attach-outline" size={30} color="#fff" />
-            </TouchableOpacity>
-
-            {IS_WEB && addMenuOpen ? (
-              <Modal
-                transparent
-                animationType="fade"
-                onRequestClose={() => setAddMenuOpen(false)}
+          {!isWide ? (
+            <View style={{ position: "relative" }}>
+              <TouchableOpacity
+                onPress={(e) => {
+                  e?.stopPropagation?.();
+                  openAdd();
+                }}
+                style={[styles.circleBtn, styles.circleBtnPrimary, uploading && { opacity: 0.7 }]}
+                accessibilityLabel="Add"
+                disabled={uploading}
               >
-                <TouchableOpacity
-                  activeOpacity={1}
-                  onPress={() => setAddMenuOpen(false)}
-                  style={styles.addMenuOverlay}
-                >
-                  <View style={styles.addMenuModal}>
-                    <TouchableOpacity
-                      style={styles.addMenuItem}
-                      onPress={() => {
-                        setAddMenuOpen(false);
-                        addPhoto();
-                      }}
-                    >
-                      <Ionicons
-                        name="image-outline"
-                        size={18}
-                        color={colors.textPrimary}
-                      />
-                      <Text style={styles.addMenuText}>Photo</Text>
-                    </TouchableOpacity>
+                {uploading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Ionicons name="attach-outline" size={30} color="#fff" />
+                )}
+              </TouchableOpacity>
 
-                    <TouchableOpacity
-                      style={styles.addMenuItem}
-                      onPress={() => {
-                        setAddMenuOpen(false);
-                        addFile();
-                      }}
-                    >
-                      <Ionicons
-                        name="document-outline"
-                        size={18}
-                        color={colors.textPrimary}
-                      />
-                      <Text style={styles.addMenuText}>File</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={styles.addMenuItem}
-                      onPress={() => {
-                        setAddMenuOpen(false);
-                        setAddLinkOpen(true);
-                      }}
-                    >
-                      <Ionicons
-                        name="link-outline"
-                        size={18}
-                        color={colors.textPrimary}
-                      />
-                      <Text style={styles.addMenuText}>Link</Text>
-                    </TouchableOpacity>
+            </View>
+          ) : null}
                   </View>
-                </TouchableOpacity>
-              </Modal>
-            ) : null}
-          </View>
-        </View>
-      </View>
+                </View>
 
         {/* Scope / breadcrumb cue */}
         {(isScoped || scopeOverride === "none") && scopeExistsOnRoute ? (
@@ -2161,7 +2122,7 @@ return (
                   showPreview && styles.pillTextActive,
                 ]}
               >
-                {showPreview ? "Preview on" : "Preview off"}
+                {showPreview ? "Hide Preview" : "Show Preview"}
               </Text>
             </TouchableOpacity>
           )}
@@ -2310,8 +2271,8 @@ return (
                   </Text>
                   <Text style={styles.previewDocSub}>
                     {heroIsPdf && IS_WEB
-                      ? "Tap to open. Scroll to view preview below."
-                      : "Tap to open"}
+                      ? "Select an attachment to load in the preview panel."
+                      : "Select an attachment to open."}
                   </Text>
 
                   {heroIsPdf && IS_WEB && (
@@ -2377,7 +2338,7 @@ return (
                   showPreview && styles.pillTextActive,
                 ]}
               >
-                {showPreview ? "Preview on" : "Preview off"}
+                {showPreview ? "Hide Preview" : "Show Preview"}
               </Text>
             </TouchableOpacity>
         </View>
@@ -2386,23 +2347,100 @@ return (
             <View
             style={[styles.grid]}
           >
+            {/* Global web add menu (single source of truth) */}
+            {IS_WEB && addMenuOpen ? (
+              <Modal
+                transparent
+                animationType="fade"
+                onRequestClose={() => setAddMenuOpen(false)}
+              >
+                <Pressable
+                  style={styles.addMenuOverlay}
+                  onPress={() => setAddMenuOpen(false)}
+                >
+                  <Pressable
+                    style={styles.addMenuModal}
+                    onPress={(e) => e?.stopPropagation?.()}
+                  >
+                    <Text style={styles.addMenuItem}>Upload an Attachment Type</Text>
+                    <TouchableOpacity
+                      style={styles.addMenuItem}
+                      onPress={() => triggerWebPicker("photo")}
+                    >
+                      <Ionicons name="image-outline" size={18} color={colors.textPrimary} />
+                      <Text style={styles.addMenuText}>Photo</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.addMenuItem}
+                      onPress={() => triggerWebPicker("file")}
+                    >
+                      <Ionicons name="document-outline" size={18} color={colors.textPrimary} />
+                      <Text style={styles.addMenuText}>File</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.addMenuItem}
+                      onPress={() => {
+                        setAddMenuOpen(false);
+                        setAddLinkOpen(true);
+                      }}
+                    >
+                      <Ionicons name="link-outline" size={18} color={colors.textPrimary} />
+                      <Text style={styles.addMenuText}>Link</Text>
+                    </TouchableOpacity>
+                  </Pressable>
+                </Pressable>
+              </Modal>
+            ) : null}
             {/* Left list */}
             <View style={styles.leftCol}>
               <View style={styles.card}>
-                <View style={styles.cardHeaderRow}>
-                  <Text style={styles.cardTitle}>Attachments</Text>
+              <View style={styles.cardHeaderRow}>
+                <Text style={styles.cardTitle}>Attachments</Text>
+
+                {/* Right-side header actions (wide screens only) */}
+                {isWide ? (
+                  <View style={styles.cardHeaderActions}>
+                    <TouchableOpacity
+                      onPress={(e) => {
+                        e?.stopPropagation?.();
+                        openAdd();
+                      }}
+                      style={styles.smallIconBtn}
+                      disabled={loading || uploading}
+                      accessibilityLabel="Upload attachment"
+                    >
+                      {uploading ? (
+                        <ActivityIndicator size="small" color={colors.textSecondary} />
+                      ) : (
+                        <Ionicons name="attach-outline" size={28} color={colors.textSecondary} />
+                      )}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={refresh}
+                      style={styles.smallIconBtn}
+                      disabled={loading || uploading}
+                      accessibilityLabel="Refresh attachments"
+                    >
+                      {loading ? (
+                        <ActivityIndicator size="small" color={colors.textSecondary} />
+                      ) : (
+                        <Ionicons name="refresh" size={28} color={colors.textSecondary} />
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                ) : (
                   <TouchableOpacity
                     onPress={refresh}
                     style={styles.smallIconBtn}
-                    disabled={loading}
+                    disabled={loading || uploading}
+                    accessibilityLabel="Refresh attachments"
                   >
-                    <Ionicons
-                      name="refresh"
-                      size={16}
-                      color={colors.textSecondary}
-                    />
+                    <Ionicons name="refresh" size={16} color={colors.textSecondary} />
                   </TouchableOpacity>
-                </View>
+                )}
+              </View>
 
                 {!assetId ? (
                   <Text style={styles.emptyText}>Missing assetId. Please go back and re-open this screen.</Text>
@@ -3281,7 +3319,7 @@ return (
                         <Text style={styles.sectionTitle}>
                           Where should this be attached?
                         </Text>
-<Text style={styles.textSecondary}>
+                          <Text style={styles.textSecondary}>
                           Every attachment belongs to an Asset. You can also link it to multiple Systems or Records.
                         </Text>
                         {associationsForSelected.map((p) => (
@@ -3810,7 +3848,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
   },
-
+cardHeaderActions: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 8,
+},
   backButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -3883,22 +3925,22 @@ sectionBlockTitle: {
     paddingVertical: 10,
   },
   addMenuText: { marginLeft: 10, fontWeight: "800", color: colors.textPrimary },
-  addMenuOverlay: {
-    flex: 1,
-    backgroundColor: "transparent",
-  },
-  addMenuModal: {
-    position: "absolute",
-    top: 82,
-    right: 24,
-    width: 220,
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...SHADOW,
-    overflow: "hidden",
-  },
+
+addMenuOverlay: {
+  flex: 1,
+  justifyContent: "center",
+  alignItems: "center",
+  backgroundColor: "rgba(0,0,0,0.20)", // optional but helps “modal” feel
+},
+addMenuModal: {
+  width: 300,
+  backgroundColor: colors.surface,
+  borderRadius: radius.lg,
+  borderWidth: 1,
+  borderColor: colors.border,
+  ...SHADOW,
+  overflow: "hidden",
+},
 
   tabRow: {
     paddingHorizontal: spacing.lg,
