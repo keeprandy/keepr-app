@@ -161,6 +161,10 @@ const linking = {
   prefixes: [
     "keepr://",
     "http://localhost:8081",
+        ...(Platform.OS === "web" && typeof window !== "undefined" && window.location?.origin
+      ? [window.location.origin]
+      : []),
+     "https://keepr-app-sand.vercel.app",
     "https://keeprhome.com",
     "https://keeprmarine.com",
     "https://keeprauto.com",
@@ -436,7 +440,22 @@ function Root({ onRouteChange, setCurrentRouteName, currentRouteName }) {
     if (lastResetRouteRef.current === targetRoute) return;
 
     const current = navigationRef.getCurrentRoute()?.name;
+    
+    // ✅ If we’re already on a deep-linked screen, don’t force a reset to RootTabs
+    const allowList = new Set([
+      "Auth",
+      "ResetPassword",
+      "SplashIntro",
+      "RootTabs",
+      "SuperKeeprStack",
+      "OnboardingStack",
+    ]);
 
+    if (current && !allowList.has(current)) {
+      // e.g. AssetAttachments, PublicAction, KacResolve, etc.
+      lastResetRouteRef.current = targetRoute;
+      return;
+    }
     // If we're already in the right stack/screen, do nothing
     if (current === targetRoute) {
       lastResetRouteRef.current = targetRoute;
