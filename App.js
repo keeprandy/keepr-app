@@ -154,6 +154,7 @@ const Tab = createBottomTabNavigator();
 const RootStack = createNativeStackNavigator();
 const SuperKeeprStackNav = createNativeStackNavigator();
 const HomeStackNav = createNativeStackNavigator();
+const didInitialNavResolve = React.useRef(false);
 
 /* ---------------- DEEP LINKING ----------------- */
 
@@ -401,7 +402,7 @@ console.log("✅ Enhance configured: ASSURANCE (no edge functions)");
 
 /* ----------------- ROOT WITH AUTH + ROLE GATE ----------------- */
 
-function Root({ onRouteChange, setCurrentRouteName, currentRouteName }) {
+function Root({ onRouteChange, setCurrentRouteName, currentRouteName, initialNavState, isNavReady, onNavReady, persistenceKey }) {
   const { initializing, user } = useAuth();
 
   const [role, setRole] = React.useState(null);
@@ -432,50 +433,42 @@ function Root({ onRouteChange, setCurrentRouteName, currentRouteName }) {
 
   const lastResetRouteRef = React.useRef(null);
 
-  React.useEffect(() => {
-    if (!targetRoute) return;
-    if (!navigationRef?.isReady?.()) return;
+React.useEffect(() => {
+  if (!targetRoute) return;
+  if (!navigationRef?.isReady?.()) return;
 
-    // Avoid infinite reset loops
-    if (lastResetRouteRef.current === targetRoute) return;
+  // Only allow navigation reset ONCE after boot
+  if (didInitialNavResolve.current) return;
 
-    const current = navigationRef.getCurrentRoute()?.name;
-    
-    // ✅ If we’re already on a deep-linked screen, don’t force a reset to RootTabs
-    const allowList = new Set([
-      "Auth",
-      "ResetPassword",
-      "SplashIntro",
-      "RootTabs",
-      "SuperKeeprStack",
-      "OnboardingStack",
-    ]);
+  const current = navigationRef.getCurrentRoute()?.name;
 
-    if (current && !allowList.has(current)) {
-      // e.g. AssetAttachments, PublicAction, KacResolve, etc.
-      lastResetRouteRef.current = targetRoute;
-      return;
-    }
-    // If we're already in the right stack/screen, do nothing
-    if (current === targetRoute) {
-      lastResetRouteRef.current = targetRoute;
-      return;
-    }
+  // Allow deep linked routes to stay where they are
+  const allowList = new Set([
+    "Auth",
+    "ResetPassword",
+    "SplashIntro",
+    "RootTabs",
+    "SuperKeeprStack",
+    "OnboardingStack",
+  ]);
 
-if (targetRoute === "RootTabs") {
-  navigationRef?.reset?.({
-    index: 0,
-    routes: [{ name: "RootTabs" }],
-  });
-} else {
-  navigationRef?.reset?.({
+  if (current && !allowList.has(current)) {
+    didInitialNavResolve.current = true;
+    return;
+  }
+
+  if (current === targetRoute) {
+    didInitialNavResolve.current = true;
+    return;
+  }
+
+  navigationRef.reset({
     index: 0,
     routes: [{ name: targetRoute }],
   });
-}
-    lastResetRouteRef.current = targetRoute;
-  }, [targetRoute]);
 
+  didInitialNavResolve.current = true;
+}, [targetRoute]);
 
   React.useEffect(() => {
     let mounted = true;
@@ -587,7 +580,43 @@ const isResetLink = React.useMemo(() => {
   }
 }, []);
 
+
+const handleNavStateChange = React.useCallback(
+  (state) => {
+    // Persist nav state (web only) to survive tab switches / reloads
+    if (Platform.OS === "web" && persistenceKey) {
+      try {
+        AsyncStorage.setItem(persistenceKey, JSON.stringify(state));
+      } catch (_) {}
+    }
+
+    const route = navigationRef.getCurrentRoute();
+    if (!route) return;
+
+    if (setCurrentRouteName) setCurrentRouteName(route.name);
+
+    if (onRouteChange) {
+      const homeRoutes = new Set([
+        "MyHome",
+        "HomeScreen",
+        "HomeStory",
+        "HomeShowcase",
+        "MyHomeSystems",
+        "HomeSystemStory",
+        "HomePublic",
+      ]);
+
+      const normalizedName = homeRoutes.has(route.name) ? "MyHome" : route.name;
+      onRouteChange(normalizedName);
+    }
+  },
+  [onRouteChange, setCurrentRouteName, persistenceKey]
+);
+
 if (initializing) return <SplashIntroScreen />;
+
+// Web: wait until navigation state (if any) has been restored before rendering the navigator.
+if (Platform.OS === "web" && !isNavReady) return <SplashIntroScreen />;
 
 // Let password-reset links render ResetPassword even if there is no session yet.
 if (!user) {
@@ -597,13 +626,9 @@ if (!user) {
         theme={navTheme}
         ref={navigationRef}
         linking={linking}
-        onStateChange={() => {
-          const route = navigationRef.getCurrentRoute();
-          if (route) {
-            setCurrentRouteName(route.name);
-            onRouteChange(route.name);
-          }
-        }}
+        initialState={Platform.OS === "web" ? initialNavState : undefined}
+        onReady={onNavReady}
+        onStateChange={handleNavStateChange}
       >
         <RootStack.Navigator
           screenOptions={{ headerShown: false }}
@@ -633,29 +658,9 @@ const initialRouteName =
         theme={navTheme}
         ref={navigationRef}
         linking={linking}
-        onStateChange={() => {
-          const route = navigationRef.getCurrentRoute();
-          if (!route) return;
-
-          if (setCurrentRouteName) setCurrentRouteName(route.name);
-
-          if (onRouteChange) {
-            const homeRoutes = new Set([
-              "MyHome",
-              "HomeScreen",
-              "HomeStory",
-              "HomeShowcase",
-              "MyHomeSystems",
-              "HomeSystemStory",
-              "HomePublic",
-            ]);
-
-            const normalizedName = homeRoutes.has(route.name)
-              ? "MyHome"
-              : route.name;
-            onRouteChange(normalizedName);
-          }
-        }}
+        initialState={Platform.OS === "web" ? initialNavState : undefined}
+        onReady={onNavReady}
+        onStateChange={handleNavStateChange}
       >
           <RootStack.Navigator
             screenOptions={{ headerShown: false }}
@@ -1029,6 +1034,10 @@ export default function App() {
                             onRouteChange={setCurrentRouteName}
                             setCurrentRouteName={setCurrentRouteName}
                             currentRouteName={currentRouteName}
+                            initialNavState={initialState}
+                            isNavReady={isNavReady}
+                            onNavReady={() => setIsNavReady(true)}
+                            persistenceKey={PERSISTENCE_KEY}
                           />
                         </View>
                       </View>
@@ -1038,6 +1047,10 @@ export default function App() {
                       onRouteChange={setCurrentRouteName}
                       setCurrentRouteName={setCurrentRouteName}
                       currentRouteName={currentRouteName}
+                      initialNavState={initialState}
+                      isNavReady={isNavReady}
+                      onNavReady={() => setIsNavReady(true)}
+                      persistenceKey={PERSISTENCE_KEY}
                     />
                   )}
                 </EnhanceProvider>
