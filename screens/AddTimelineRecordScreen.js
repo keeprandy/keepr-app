@@ -192,6 +192,78 @@ export default function AddTimelineRecordScreen({ route, navigation }) {
   const [submitError, setSubmitError] = useState(null);
   const [loadingLookups, setLoadingLookups] = useState(true);
 
+  // Web-only: persist in-progress draft so tab switches / refresh don't lose work
+  const draftKey = useMemo(() => {
+    if (Platform.OS !== "web") return null;
+    if (!assetId) return null;
+    return `keepr.draft.timeline.add.${assetId}`;
+  }, [assetId]);
+
+  const clearDraft = useMemo(() => {
+    if (!draftKey) return () => {};
+    return () => {
+      try {
+        window?.sessionStorage?.removeItem(draftKey);
+      } catch {}
+    };
+  }, [draftKey]);
+
+  // Restore any saved draft once
+  useEffect(() => {
+    if (!draftKey) return;
+    try {
+      const raw = window?.sessionStorage?.getItem(draftKey);
+      if (!raw) return;
+      const d = JSON.parse(raw);
+
+      if (d.serviceType != null) setServiceType(d.serviceType);
+      if (d.date != null) setDate(d.date);
+      if (d.title != null) setTitle(d.title);
+      if (d.provider != null) setProvider(d.provider);
+      if (d.location != null) setLocation(d.location);
+      if (d.cost != null) setCost(d.cost);
+      if (d.notes != null) setNotes(d.notes);
+
+      if (d.selectedSystemId !== undefined) setSelectedSystemId(d.selectedSystemId || null);
+      if (d.selectedKeeprProId !== undefined) setSelectedKeeprProId(d.selectedKeeprProId || null);
+      if (d.selectedKeeprProLabel !== undefined) setSelectedKeeprProLabel(d.selectedKeeprProLabel || "");
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey]);
+
+  // Persist draft as the user types (web only)
+  useEffect(() => {
+    if (!draftKey) return;
+    try {
+      const draft = {
+        serviceType,
+        date,
+        title,
+        provider,
+        location,
+        cost,
+        notes,
+        selectedSystemId,
+        selectedKeeprProId,
+        selectedKeeprProLabel,
+      };
+      window?.sessionStorage?.setItem(draftKey, JSON.stringify(draft));
+    } catch {}
+  }, [
+    draftKey,
+    serviceType,
+    date,
+    title,
+    provider,
+    location,
+    cost,
+    notes,
+    selectedSystemId,
+    selectedKeeprProId,
+    selectedKeeprProLabel,
+  ]);
+
+
   const contextLabel = useMemo(() => {
     if (assetName && systemName) return `${assetName} · ${systemName}`;
     if (assetName) return assetName;
@@ -480,6 +552,9 @@ const notesHasUrls = useMemo(() => {
     }
 
     setSaving(false);
+
+    // Clear any in-progress draft on success
+    clearDraft();
 
     // Navigate to the story view for this new record
     if (recordId) {

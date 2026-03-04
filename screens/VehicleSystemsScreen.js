@@ -1,7 +1,7 @@
 // screens/VehicleSystemsScreen.js
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
-import React, { useCallback, useState, useMemo } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -180,18 +180,6 @@ const VehicleSystemsScreen = ({ route, navigation }) => {
     }, [loadSystems, loadTimelineMeta])
   );
 
-  const filteredSystems = useMemo(() => {
-    const q = (systemSearch || "").trim().toLowerCase();
-    if (!q) return systems;
-    return (systems || []).filter((s) => {
-      const name = String(getDisplayName(s) || "").toLowerCase();
-      const type = String(s?.system_type || "").toLowerCase();
-      const ksc = String(s?.ksc_code || "").toLowerCase();
-      return name.includes(q) || type.includes(q) || ksc.includes(q);
-    });
-  }, [systems, systemSearch]);
-
-
   const handleViewVehicleStory = () => {
     if (!vehicleId) return;
     navigation.navigate("VehicleStory", { vehicleId });
@@ -218,7 +206,6 @@ const VehicleSystemsScreen = ({ route, navigation }) => {
       systemKey: system.id,
     });
   };
-
 
   const handleOpenSystemAttachments = (system) => {
     if (!system?.id) return;
@@ -404,7 +391,6 @@ const VehicleSystemsScreen = ({ route, navigation }) => {
     Keyboard.dismiss();
   };
 
-
   const openRename = (system) => {
     setRenameSystem(system);
     setRenameDraft(getDisplayName(system));
@@ -452,7 +438,6 @@ const VehicleSystemsScreen = ({ route, navigation }) => {
       setSavingRename(false);
     }
   };
-
 
   const handleSavePlaybook = async () => {
     if (!activePlaybookSystem?.id) return;
@@ -517,6 +502,113 @@ const VehicleSystemsScreen = ({ route, navigation }) => {
       },
     ]);
   };
+
+  const listHeader = (
+    <View>
+      <View style={styles.overviewCard}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.overviewTitle}>Systems overview</Text>
+          <Text style={styles.overviewBody}>
+            Track each major system, add timeline entries, and keep a clean ownership story you can trust.
+          </Text>
+        </View>
+
+        <TouchableOpacity style={styles.overviewButton} onPress={handleViewVehicleStory}>
+          <Ionicons name="car-outline" size={16} color={colors.accentBlue} style={{ marginRight: 6 }} />
+          <Text style={styles.overviewButtonText}>Vehicle story</Text>
+        </TouchableOpacity>
+      </View>
+
+
+      <View style={styles.searchRow}>
+        <Ionicons
+          name="search-outline"
+          size={18}
+          color={colors.textMuted}
+          style={{ marginRight: 8 }}
+        />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search systems..."
+          value={systemSearch}
+          onChangeText={setSystemSearch}
+          placeholderTextColor={colors.textMuted}
+          returnKeyType="search"
+        />
+
+        {systemSearch.trim() ? (
+          <TouchableOpacity
+            onPress={() => setSystemSearch("")}
+            style={styles.searchClearBtn}
+          >
+            <Ionicons
+              name="close-circle"
+              size={18}
+              color={colors.textMuted}
+            />
+          </TouchableOpacity>
+        ) : null}
+      </View>
+
+      <View style={styles.addSystemActionsRow}>
+        <TouchableOpacity
+          style={styles.addSystemCta}
+          onPress={openAddSystemModal}
+          activeOpacity={0.9}
+        >
+          <Ionicons
+            name="add-circle-outline"
+            size={18}
+            color={colors.brandWhite}
+            style={{ marginRight: 8 }}
+          />
+          <Text style={styles.addSystemCtaText}>Add system</Text>
+        </TouchableOpacity>
+      </View>
+
+
+      <View style={{ height: spacing.sm }} />
+    </View>
+  );
+
+  const listEmpty = () => {
+    if (systemsLoading) {
+      return (
+        <View style={styles.centered}>
+          <ActivityIndicator size="small" />
+          <Text style={styles.loadingText}>Loading systems…</Text>
+        </View>
+      );
+    }
+
+    if (loadError) {
+      return (
+        <View style={styles.centered}>
+          <Text style={styles.errorText}>{loadError}</Text>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.emptyState}>
+        <Text style={styles.emptyTitle}>No systems yet</Text>
+        <Text style={styles.emptyBody}>
+          Add a few systems you care about and start logging timeline entries.
+        </Text>
+      </View>
+    );
+  };
+
+  const filteredSystems = useMemo(() => {
+    const q = (systemSearch || "").trim().toLowerCase();
+    if (!q) return systems;
+    return (systems || []).filter((s) => {
+      const name = String(getDisplayName(s) || "").toLowerCase();
+      const type = String(s?.system_type || "").toLowerCase();
+      const ksc = String(s?.ksc_code || "").toLowerCase();
+      return name.includes(q) || type.includes(q) || ksc.includes(q);
+    });
+  }, [systems, systemSearch]);
 
   const renderSystemItem = ({ item: system }) => {
     const meta = timelineMeta[system.id];
@@ -611,6 +703,19 @@ const VehicleSystemsScreen = ({ route, navigation }) => {
           </View>
         </View>
 
+        {IS_WEB ? (
+          <FlatList
+            data={filteredSystems}
+            keyExtractor={(item) => item.id}
+            renderItem={renderSystemItem}
+            ListHeaderComponent={listHeader}
+            ListEmptyComponent={listEmpty}
+            ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
+            contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          />
+        ) : (
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
@@ -705,6 +810,7 @@ const VehicleSystemsScreen = ({ route, navigation }) => {
             />
           )}
         </ScrollView>
+        )}
 
         
         {/* Add system modal */}
@@ -1016,6 +1122,7 @@ export default VehicleSystemsScreen;
 const styles = StyleSheet.create({
   screen: { flex: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.lg },
   scrollContent: { paddingBottom: spacing.xl },
+  listContent: { paddingBottom: spacing.xl, paddingTop: 0 },
   headerRow: { flexDirection: "row", alignItems: "center", marginBottom: spacing.md },
   backButton: { marginRight: spacing.sm, paddingRight: spacing.sm, paddingVertical: 4 },
   screenTitle: { ...typography.title },

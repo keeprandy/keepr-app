@@ -1,4 +1,6 @@
 // screens/HomeSystemsScreen.js
+import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect } from "@react-navigation/native";
 import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -17,15 +19,13 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "@react-navigation/native";
 
 import { layoutStyles } from "../styles/layout";
 import { colors, radius, shadows, spacing, typography } from "../styles/theme";
 
+import homeKsc from "../data/home_ksc.json";
 import { supabase } from "../lib/supabaseClient";
 import { formatDateUS } from "../utils/format";
-import homeKsc from "../data/home_ksc.json";
 
 const IS_WEB = Platform.OS === "web";
 
@@ -174,6 +174,14 @@ const HomeSystemsScreen = ({ route, navigation }) => {
     []
   );
 
+  // Navigation helpers needed by listHeader
+  const handleViewHomeStory = () => {
+    if (!homeId) return;
+    navigation.navigate("HomeStory", { homeId });
+  };
+
+  const openStarterPack = () => setStarterModalVisible(true);
+
   const filteredSystems = useMemo(() => {
     const q = (systemSearch || "").trim().toLowerCase();
     if (!q) return systems;
@@ -184,6 +192,135 @@ const HomeSystemsScreen = ({ route, navigation }) => {
       return name.includes(q) || type.includes(q) || ksc.includes(q);
     });
   }, [systems, systemSearch]);
+
+  const listHeader = (
+    <View>
+      <View style={styles.overviewCard}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.overviewTitle}>Systems overview</Text>
+          <Text style={styles.overviewBody}>
+            Track each major system in your home, add service
+            records, and see how everything comes together in your
+            home's story.
+          </Text>
+        </View>
+
+        <TouchableOpacity
+          style={styles.overviewButton}
+          onPress={handleViewHomeStory}
+        >
+          <Ionicons
+            name="book-outline"
+            size={16}
+            color={colors.accentBlue}
+            style={{ marginRight: 6 }}
+          />
+          <Text style={styles.overviewButtonText}>
+            View home story
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.sectionHeaderRow}>
+        <View>
+          <Text style={styles.sectionLabel}>
+            SYSTEMS FOR {homeLabel.toUpperCase()}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.searchRow}>
+        <Ionicons
+          name="search-outline"
+          size={18}
+          color={colors.textMuted}
+          style={{ marginRight: 8 }}
+        />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search systems..."
+          value={systemSearch}
+          onChangeText={setSystemSearch}
+          placeholderTextColor={colors.textMuted}
+          returnKeyType="search"
+        />
+
+        {systemSearch.trim() ? (
+          <TouchableOpacity
+            onPress={() => setSystemSearch("")}
+            style={styles.searchClearBtn}
+          >
+            <Ionicons
+              name="close-circle"
+              size={18}
+              color={colors.textMuted}
+            />
+          </TouchableOpacity>
+        ) : null}
+      </View>
+
+      <View style={styles.addSystemActionsRow}>
+        <TouchableOpacity
+          style={styles.addSystemCta}
+          onPress={() => {
+            setAddSystemDraft("");
+            setAddSystemModalVisible(true);
+          }}
+        >
+          <Ionicons
+            name="add-circle-outline"
+            size={18}
+            color={colors.brandWhite}
+            style={{ marginRight: 8 }}
+          />
+          <Text style={styles.addSystemCtaText}>Add system</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.starterPackButton}
+          onPress={openStarterPack}
+        >
+          <Ionicons
+            name="sparkles-outline"
+            size={16}
+            color={colors.accentBlue}
+            style={{ marginRight: 6 }}
+          />
+          <Text style={styles.starterPackText}>Starter pack</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={{ height: spacing.sm }} />
+    </View>
+  );
+
+  const listEmpty = () => {
+    if (systemsLoading && !filteredSystems.length) {
+      return (
+        <View style={styles.centered}>
+          <ActivityIndicator size="small" />
+          <Text style={styles.loadingText}>Loading systems…</Text>
+        </View>
+      );
+    }
+
+    if (loadError) {
+      return (
+        <View style={styles.centered}>
+          <Text style={styles.errorText}>{loadError}</Text>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.emptyState}>
+        <Text style={styles.emptyTitle}>No systems yet</Text>
+        <Text style={styles.emptyBody}>
+          Use Starter pack to add the most common home systems, or add your own custom systems below.
+        </Text>
+      </View>
+    );
+  };
 
 
   const handleBack = () => navigation.goBack();
@@ -388,12 +525,7 @@ const HomeSystemsScreen = ({ route, navigation }) => {
     }, [loadSystems, loadServiceMeta])
   );
 
-  /* ----------------- NAV HELPERS ----------------- */
-
-  const handleViewHomeStory = () => {
-    if (!homeId) return;
-    navigation.navigate("HomeStory", { homeId });
-  };
+  /* ----------------- NAV HELPERS (handleViewHomeStory moved before listHeader) ----------------- */
 
   const handleViewSystemStory = (system) => {
     if (!system?.id || !homeId) return;
@@ -700,8 +832,6 @@ const HomeSystemsScreen = ({ route, navigation }) => {
   };
 
   /* ----------------- STARTER PACK (FOUNDATION + EXTENSION) ----------------- */
-
-  const openStarterPack = () => setStarterModalVisible(true);
 
   const closeStarterPack = () => {
     setStarterModalVisible(false);
@@ -1313,6 +1443,19 @@ const HomeSystemsScreen = ({ route, navigation }) => {
           </View>
         </View>
 
+        {IS_WEB ? (
+          <FlatList
+            data={filteredSystems}
+            keyExtractor={(item) => item.id}
+            renderItem={renderSystemItem}
+            ListHeaderComponent={listHeader}
+            ListEmptyComponent={listEmpty}
+            ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
+            contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          />
+        ) : (
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
@@ -1448,6 +1591,7 @@ const HomeSystemsScreen = ({ route, navigation }) => {
             />
           )}
         </ScrollView>
+        )}
 
 
         {/* Add system modal */}
@@ -2098,6 +2242,7 @@ contentWrap: {
   scrollContent: {
     paddingBottom: spacing.xl,
   },
+  listContent: { paddingBottom: spacing.xl, paddingTop: 0 },
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
