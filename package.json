@@ -7,10 +7,10 @@
     "ios": "expo start --ios",
     "build:web": "npx expo export --platform web",
     "web": "expo start --web"
-    
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
+    "@react-native-async-storage/async-storage": "^3.0.1",
     "@react-navigation/bottom-tabs": "*",
     "@react-navigation/native": "*",
     "@react-navigation/native-stack": "*",

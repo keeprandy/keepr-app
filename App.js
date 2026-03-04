@@ -154,7 +154,6 @@ const Tab = createBottomTabNavigator();
 const RootStack = createNativeStackNavigator();
 const SuperKeeprStackNav = createNativeStackNavigator();
 const HomeStackNav = createNativeStackNavigator();
-const didInitialNavResolve = React.useRef(false);
 
 /* ---------------- DEEP LINKING ----------------- */
 
@@ -162,10 +161,6 @@ const linking = {
   prefixes: [
     "keepr://",
     "http://localhost:8081",
-        ...(Platform.OS === "web" && typeof window !== "undefined" && window.location?.origin
-      ? [window.location.origin]
-      : []),
-     "https://keepr-app-sand.vercel.app",
     "https://keeprhome.com",
     "https://keeprmarine.com",
     "https://keeprauto.com",
@@ -193,8 +188,6 @@ const linking = {
 
       UploadLab: "upload-lab",
       AssetAttachments: "asset/:assetId/attachments",
-
-      KacResolve: "k/:kac",
 
       HomePublic: "public/home/:assetId",
       GaragePublic: "public/garage/:assetId",
@@ -402,13 +395,29 @@ console.log("✅ Enhance configured: ASSURANCE (no edge functions)");
 
 /* ----------------- ROOT WITH AUTH + ROLE GATE ----------------- */
 
-function Root({ onRouteChange, setCurrentRouteName, currentRouteName, initialNavState, isNavReady, onNavReady, persistenceKey }) {
+function Root({ onRouteChange, setCurrentRouteName, currentRouteName }) {
   const { initializing, user } = useAuth();
+
+// Web navigation state persistence (prevents tab-switch / refresh from dumping to Dashboard)
+const NAV_PERSIST_KEY = "keepr.nav.state.v1";
+const [initialNavState, setInitialNavState] = React.useState(undefined);
+const [isNavReady, setIsNavReady] = React.useState(Platform.OS !== "web");
+
+React.useEffect(() => {
+  if (Platform.OS !== "web") return;
+  try {
+    const raw = window?.sessionStorage?.getItem(NAV_PERSIST_KEY);
+    if (raw) setInitialNavState(JSON.parse(raw));
+  } catch (_) {}
+  setIsNavReady(true);
+}, []);
 
   const [role, setRole] = React.useState(null);
   const [onboardingState, setOnboardingState] = React.useState(null);
   const [assetCount, setAssetCount] = React.useState(null);
   const [loadingRole, setLoadingRole] = React.useState(false);
+
+  const lastRoleLoadAtRef = React.useRef(0);
 
   // Normalize onboarding state (we've had both "complete" and "completed" in the DB)
   const normalizedOnboardingState = (onboardingState || "not_started").toLowerCase();
@@ -431,49 +440,49 @@ function Root({ onRouteChange, setCurrentRouteName, currentRouteName, initialNav
       : "RootTabs";
   }, [role, onboardingState, assetCount, shouldShowOnboarding]);
 
+  const didInitialNavResolve = React.useRef(false);
   const lastResetRouteRef = React.useRef(null);
 
-React.useEffect(() => {
+  React.useEffect(() => {
   if (!targetRoute) return;
   if (!navigationRef?.isReady?.()) return;
 
-  // Only allow navigation reset ONCE after boot
+  // ✅ Boot-only navigation enforcement:
+  // After the first successful resolve, NEVER reset nav again on web tab-focus / token refresh.
   if (didInitialNavResolve.current) return;
 
   const current = navigationRef.getCurrentRoute()?.name;
 
-  // Allow deep linked routes to stay where they are
-  const allowList = new Set([
-    "Auth",
-    "ResetPassword",
-    "SplashIntro",
-    "RootTabs",
-    "SuperKeeprStack",
-    "OnboardingStack",
-  ]);
-
-  if (current && !allowList.has(current)) {
-    didInitialNavResolve.current = true;
-    return;
-  }
-
+  // If we're already in the right stack/screen, lock and stop.
   if (current === targetRoute) {
     didInitialNavResolve.current = true;
+    lastResetRouteRef.current = targetRoute;
     return;
   }
 
-  navigationRef.reset({
+  navigationRef?.reset?.({
     index: 0,
     routes: [{ name: targetRoute }],
   });
 
+  lastResetRouteRef.current = targetRoute;
   didInitialNavResolve.current = true;
 }, [targetRoute]);
+
 
   React.useEffect(() => {
     let mounted = true;
 
-    const loadRole = async () => {
+    const loadRole = async (reason = "unknown", opts = {}) => {
+      const force = !!opts.force;
+      // Web tab-focus / token refresh can fire auth events frequently.
+      // Throttle role loads to avoid UI flicker / Splash remount.
+      const now = Date.now();
+      if (!force && now - lastRoleLoadAtRef.current < 30_000) {
+        return;
+      }
+      lastRoleLoadAtRef.current = now;
+
       if (!user?.id) {
         if (!mounted) return;
         setRole(null);
@@ -483,7 +492,8 @@ React.useEffect(() => {
         return;
       }
 
-      setLoadingRole(true);
+      // Only show Splash during the very first bootstrap.
+      if (!didInitialNavResolve.current) setLoadingRole(true);
 
       try {
         const { data, error } = await supabase
@@ -512,7 +522,7 @@ if (error || aErr) {
 
   // retry once shortly after (session often hydrates right after first render)
   setTimeout(() => {
-    if (mounted) loadRole();
+        if (mounted) loadRole("retry", { force: true });
   }, 400);
 
   return;
@@ -534,7 +544,7 @@ if (error || aErr) {
   setAssetCount(null);
 
   setTimeout(() => {
-    if (mounted) loadRole();
+        if (mounted) loadRole("retry", { force: true });
   }, 400);
 
   return;
@@ -544,9 +554,13 @@ if (error || aErr) {
 }
 
     };
-    loadRole();
-    const { data: sub } = supabase.auth.onAuthStateChange(() => {
-      loadRole();
+    loadRole("boot", { force: true });
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      // Token refresh happens on tab focus; don't treat it like a cold boot.
+      // We still refresh role info, but throttled and without remounting navigation.
+      if (event === "TOKEN_REFRESHED" || event === "SIGNED_IN" || event === "USER_UPDATED" || event === "INITIAL_SESSION") {
+        loadRole(event);
+      }
     });
 
     return () => {
@@ -583,10 +597,9 @@ const isResetLink = React.useMemo(() => {
 
 const handleNavStateChange = React.useCallback(
   (state) => {
-    // Persist nav state (web only) to survive tab switches / reloads
-    if (Platform.OS === "web" && persistenceKey) {
+    if (Platform.OS === "web") {
       try {
-        AsyncStorage.setItem(persistenceKey, JSON.stringify(state));
+        window?.sessionStorage?.setItem(NAV_PERSIST_KEY, JSON.stringify(state));
       } catch (_) {}
     }
 
@@ -610,13 +623,13 @@ const handleNavStateChange = React.useCallback(
       onRouteChange(normalizedName);
     }
   },
-  [onRouteChange, setCurrentRouteName, persistenceKey]
+  [onRouteChange, setCurrentRouteName]
 );
 
-if (initializing) return <SplashIntroScreen />;
-
-// Web: wait until navigation state (if any) has been restored before rendering the navigator.
+// Web: wait until persisted navigation state (if any) is restored before rendering.
 if (Platform.OS === "web" && !isNavReady) return <SplashIntroScreen />;
+
+if (initializing) return <SplashIntroScreen />;
 
 // Let password-reset links render ResetPassword even if there is no session yet.
 if (!user) {
@@ -627,7 +640,7 @@ if (!user) {
         ref={navigationRef}
         linking={linking}
         initialState={Platform.OS === "web" ? initialNavState : undefined}
-        onReady={onNavReady}
+        onReady={() => setIsNavReady(true)}
         onStateChange={handleNavStateChange}
       >
         <RootStack.Navigator
@@ -659,7 +672,7 @@ const initialRouteName =
         ref={navigationRef}
         linking={linking}
         initialState={Platform.OS === "web" ? initialNavState : undefined}
-        onReady={onNavReady}
+        onReady={() => setIsNavReady(true)}
         onStateChange={handleNavStateChange}
       >
           <RootStack.Navigator
@@ -1034,10 +1047,6 @@ export default function App() {
                             onRouteChange={setCurrentRouteName}
                             setCurrentRouteName={setCurrentRouteName}
                             currentRouteName={currentRouteName}
-                            initialNavState={initialState}
-                            isNavReady={isNavReady}
-                            onNavReady={() => setIsNavReady(true)}
-                            persistenceKey={PERSISTENCE_KEY}
                           />
                         </View>
                       </View>
@@ -1047,10 +1056,6 @@ export default function App() {
                       onRouteChange={setCurrentRouteName}
                       setCurrentRouteName={setCurrentRouteName}
                       currentRouteName={currentRouteName}
-                      initialNavState={initialState}
-                      isNavReady={isNavReady}
-                      onNavReady={() => setIsNavReady(true)}
-                      persistenceKey={PERSISTENCE_KEY}
                     />
                   )}
                 </EnhanceProvider>
