@@ -1,5 +1,6 @@
 {
   "rewrites": [
+    { "source": "/k/:kac", "destination": "/api/og/k/:kac" },
     { "source": "/(.*)", "destination": "/" }
   ]
 }
