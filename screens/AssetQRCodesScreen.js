@@ -1,13 +1,13 @@
 // screens/AssetQRCodesScreen.js
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import QRCode from "react-native-qrcode-svg";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Alert, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import QRCode from "react-native-qrcode-svg";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { supabase } from "../lib/supabaseClient";
-import { colors, spacing, radius, shadows } from "../styles/theme";
+import { colors, radius, shadows, spacing } from "../styles/theme";
 
 function genKac() {
   // Simple, stable-ish V1 generator (we can improve format later)
@@ -16,9 +16,9 @@ function genKac() {
 }
 
 function getBaseUrl() {
-  // V1: keep this simple. For production you’ll use https://keepr.app
+  // V1: keep this simple. For production you’ll use https://app.keeprhome.com
   // If you want local QR codes while testing, set EXPO_PUBLIC_KEEPR_BASE_URL in .env.
-  return process.env.EXPO_PUBLIC_KEEPR_BASE_URL || "https://keepr.app";
+  return process.env.EXPO_PUBLIC_KEEPR_BASE_URL || "https://app.keeprhome.com";
 }
 
 function htmlForSticker({ assetName, kac, qrDataUrl, url }) {
@@ -72,7 +72,10 @@ export default function AssetQRCodesScreen({ route, navigation }) {
 
   const baseUrl = useMemo(() => getBaseUrl(), []);
   const kac = asset?.kac_id || null;
-  const url = useMemo(() => (kac ? `${baseUrl}/k/${encodeURIComponent(kac)}` : null), [baseUrl, kac]);
+  const url = useMemo(
+  () => (kac ? `${baseUrl}/k/${encodeURIComponent(kac)}/actions` : null),
+  [baseUrl, kac]
+);
 
   useEffect(() => {
     let mounted = true;
@@ -253,7 +256,7 @@ export default function AssetQRCodesScreen({ route, navigation }) {
 
               <View style={styles.qrWrap}>
                 <QRCode
-                  value={url || "https://keepr.app"}
+                  value={url || "https://app.keeprhome.com"}
                   size={220}
                   getRef={(c) => (qrRef.current = c)}
                 />

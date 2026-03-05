@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "mvp-final---11-22-2025",
-    "slug": "snack-3c3dc58c-0ca8-4d1b-b291-5c9e17116501",
+    "name": "Keepr V1",
+    "slug": "keepr",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/favicon-48.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
@@ -23,7 +23,7 @@
       "edgeToEdgeEnabled": true
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon-48.png"
     }
   }
 }
