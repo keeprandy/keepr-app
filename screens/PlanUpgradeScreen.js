@@ -63,7 +63,7 @@ const PRICES = {
     free: { label: "$0", suffix: "/year" },
     plus: { label: "$120", suffix: "/year" },
     team: { label: "$180", suffix: "/year" },
-    savings: { plus: "Save $60 vs monthly", team: "Save $60 vs monthly" },
+    savings: { plus: "Save $60 vs $15 monthly", team: "Save $60 vs $20 monthly" },
   },
   monthly: {
     free: { label: "$0", suffix: "/month" },

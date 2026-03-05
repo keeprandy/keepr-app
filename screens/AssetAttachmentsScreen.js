@@ -1035,7 +1035,7 @@ const isWide = IS_WEB && width >= 980;
 
   const assocSummaryText = useMemo(() => {
     if (!targetType || !targetId) {
-      return "Choose a system or record to attach this to.";
+      return "Choose a system or record below";
     }
     const label =
       targetType === "system"
@@ -2709,7 +2709,30 @@ return (
                       textAlignVertical="top"
                     />
                     </View>
-
+                                          <View style={styles.actionRow}>
+                      <TouchableOpacity
+                        onPress={saveMeta}
+                        disabled={loading}
+                        style={[
+                          styles.saveBtn,
+                          loading && { opacity: 0.6 },
+                        ]}
+                      >
+                        {loading ? (
+                          <ActivityIndicator color="#fff" />
+                        ) : (
+                          <>
+                            <Ionicons
+                              name="save-outline"
+                              size={18}
+                              color="#fff"
+                            />
+                            <Text style={styles.saveBtnText}>Save</Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                    <View style={{ height:1, backgroundColor:"#E5E7EB", marginVertical:16 }} />
                     {/* Block C - Existing associations list */}
                     {associationsForSelected.length > 0 && (
                       <View style={{ marginTop: spacing.lg }}>
@@ -2807,10 +2830,7 @@ return (
 
                     {/* Block D - Add/Edit Association */}
                     <View style={{ marginTop: spacing.lg }}>
-                      <Text style={styles.sectionTitle}>Add or Edit how this is attached.</Text>
-                                              <Text style={styles.textSecondary}>
-                          Asset, Systems, or a Record - Always an Asset, then optional.
-                        </Text>
+
 
                       {/* Role pills 
 
@@ -2839,7 +2859,12 @@ return (
                           </TouchableOpacity>
                         ))}
                       </View>*/}
-
+                {/* Summary */}
+                      <View style={styles.assocSummary}>
+                        <Text style={styles.assocSummaryText}>
+                          {assocSummaryText}
+                        </Text>
+                      </View>
                       {/* Picker rows */}
                       <TouchableOpacity
                         style={styles.selectorRow}
@@ -2876,109 +2901,8 @@ return (
                           color={colors.textSecondary}
                         />
                       </TouchableOpacity>
-                                          <View style={styles.actionRow}>
-                      <TouchableOpacity
-                        onPress={saveMeta}
-                        disabled={loading}
-                        style={[
-                          styles.saveBtn,
-                          loading && { opacity: 0.6 },
-                        ]}
-                      >
-                        {loading ? (
-                          <ActivityIndicator color="#fff" />
-                        ) : (
-                          <>
-                            <Ionicons
-                              name="save-outline"
-                              size={18}
-                              color="#fff"
-                            />
-                            <Text style={styles.saveBtnText}>Save</Text>
-                          </>
-                        )}
-                      </TouchableOpacity>
 
-                      <TouchableOpacity
-                        onPress={() => openAttachment(selected)}
-                        style={styles.previewBtn}
-                      >
-                        <Ionicons
-                          name="open-outline"
-                          size={18}
-                          color={colors.textPrimary}
-                        />
-                        <Text style={styles.previewBtnText}>Open</Text>
-                      </TouchableOpacity>
-                    </View>
-
-
-                      {/* Summary */}
-                      <View style={styles.assocSummary}>
-                        <Text style={styles.assocSummaryText}>
-                          {assocSummaryText}
-                        </Text>
-                      </View>
-
-                      {/* Advanced toggle */}
-                      <TouchableOpacity
-                        onPress={() =>
-                          setAdvancedAssocOpen((prev) => !prev)
-                        }
-                        style={{ marginTop: spacing.sm }}
-                      >
-                        <Text style={styles.assocAdvancedToggle}>
-                          {advancedAssocOpen
-                            ? "Hide advanced (type + paste ID)"
-                            : "Advanced: edit type or paste a custom ID"}
-                        </Text>
-                      </TouchableOpacity>
-
-                      {/* Advanced: type pills + ID field */}
-                      {advancedAssocOpen && (
-                        <>
-                          <View style={styles.assocPills}>
-                            {[
-                              "system",
-                              "service_record",
-                              "event",
-                              "asset",
-                            ].map((t) => (
-                              <TouchableOpacity
-                                key={t}
-                                onPress={() => setTargetType(t)}
-                                style={[
-                                  styles.pill,
-                                  targetType === t && styles.pillActive,
-                                  {
-                                    marginRight: 8,
-                                    marginBottom: 8,
-                                  },
-                                ]}
-                              >
-                                <Text
-                                  style={[
-                                    styles.pillText,
-                                    targetType === t &&
-                                      styles.pillTextActive,
-                                  ]}
-                                >
-                                  {t === "service_record" ? "record" : t}
-                                </Text>
-                              </TouchableOpacity>
-                            ))}
-                          </View>
-
-                          <TextInput
-                            value={targetId}
-                            onChangeText={setTargetId}
-                            placeholder="Target ID (uuid)"
-                            autoCapitalize="none"
-                            autoCorrect={false}
-                            style={[styles.input, { marginTop: spacing.sm }]}
-                          />
-                        </>
-                      )}
+      
 
                       {/* Attach button */}
                       <TouchableOpacity
@@ -3312,7 +3236,31 @@ return (
                       textAlignVertical="top"
                     />
                     </View>
-
+                    <View style={styles.actionRow}>
+                      <TouchableOpacity
+                        onPress={saveMeta}
+                        disabled={loading}
+                        style={[
+                          styles.saveBtn,
+                          loading && { opacity: 0.6 },
+                        ]}
+                      >
+                        {loading ? (
+                          <ActivityIndicator color="#fff" />
+                        ) : (
+                          <>
+                            <Ionicons
+                              name="save-outline"
+                              size={18}
+                              color="#fff"
+                            />
+                            <Text style={styles.saveBtnText}>Save</Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                    <View style={{ height:1, backgroundColor:"#E5E7EB", marginVertical:16 }} />
+                   
                     {/* Existing associations list */}
                     {associationsForSelected.length > 0 && (
                       <View style={{ marginTop: spacing.lg }}>
@@ -3366,43 +3314,6 @@ return (
                       </View>
                     )}
 
-                    <View style={styles.actionRow}>
-                      <TouchableOpacity
-                        onPress={saveMeta}
-                        disabled={loading}
-                        style={[
-                          styles.saveBtn,
-                          loading && { opacity: 0.6 },
-                        ]}
-                      >
-                        {loading ? (
-                          <ActivityIndicator color="#fff" />
-                        ) : (
-                          <>
-                            <Ionicons
-                              name="save-outline"
-                              size={18}
-                              color="#fff"
-                            />
-                            <Text style={styles.saveBtnText}>Save</Text>
-                          </>
-                        )}
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        onPress={() => openAttachment(selected)}
-                        style={styles.previewBtn}
-                      >
-                        <Ionicons
-                          name="open-outline"
-                          size={18}
-                          color={colors.textPrimary}
-                        />
-                        <Text style={styles.previewBtnText}>Open</Text>
-                      </TouchableOpacity>
-                    </View>
-
-
                     {/* Context-aware quick attach */}
                     {hasContextRoute && (
                       <View style={{ marginTop: spacing.sm }}>
@@ -3447,7 +3358,7 @@ return (
                     {/* Associations editor – now picker-first, UUID as advanced */}
                     <View style={{ marginTop: spacing.lg }}>
                       <Text style={styles.sectionTitle}>Add or Edit how this is attached.</Text>
-<Text style={styles.textSecondary}>
+                      <Text style={styles.textSecondary}>
                           Asset, Systems, or Records - Always an Asset, then optional.
                         </Text>
 
@@ -3522,66 +3433,6 @@ return (
                           {assocSummaryText}
                         </Text>
                       </View>
-
-                      {/* Advanced toggle */}
-                      <TouchableOpacity
-                        onPress={() =>
-                          setAdvancedAssocOpen((prev) => !prev)
-                        }
-                        style={{ marginTop: spacing.sm }}
-                      >
-                        <Text style={styles.assocAdvancedToggle}>
-                          {advancedAssocOpen
-                            ? "Hide advanced (type + paste ID)"
-                            : "Advanced: edit type or paste a custom ID"}
-                        </Text>
-                      </TouchableOpacity>
-
-                      {/* Advanced: type pills + ID field */}
-                      {advancedAssocOpen && (
-                        <>
-                          <View style={styles.assocPills}>
-                            {[
-                              "system",
-                              "service_record",
-                              "event",
-                              "asset",
-                            ].map((t) => (
-                              <TouchableOpacity
-                                key={t}
-                                onPress={() => setTargetType(t)}
-                                style={[
-                                  styles.pill,
-                                  targetType === t && styles.pillActive,
-                                  {
-                                    marginRight: 8,
-                                    marginBottom: 8,
-                                  },
-                                ]}
-                              >
-                                <Text
-                                  style={[
-                                    styles.pillText,
-                                    targetType === t &&
-                                      styles.pillTextActive,
-                                  ]}
-                                >
-                                  {t === "service_record" ? "record" : t}
-                                </Text>
-                              </TouchableOpacity>
-                            ))}
-                          </View>
-
-                          <TextInput
-                            value={targetId}
-                            onChangeText={setTargetId}
-                            placeholder="Target ID (uuid)"
-                            autoCapitalize="none"
-                            autoCorrect={false}
-                            style={[styles.input, { marginTop: spacing.sm }]}
-                          />
-                        </>
-                      )}
 
                       {/* Attach button */}
                       <TouchableOpacity
