@@ -256,7 +256,7 @@ export default function AssetQRCodesScreen({ route, navigation }) {
 
               <View style={styles.qrWrap}>
                 <QRCode
-                  value={url || "https://app.keeprhome.com"}
+                  value={url || `${baseUrl}/k/unknown/actions`}
                   size={220}
                   getRef={(c) => (qrRef.current = c)}
                 />
