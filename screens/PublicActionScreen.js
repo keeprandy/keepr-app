@@ -185,6 +185,23 @@ export default function PublicActionScreen({ route, navigation }) {
 
   const assetId = resolved?.asset_id || null;
   const asset = resolved?.asset || null;
+  // Owner inbox email (derived from public resolve payload).
+  // We support multiple possible field names to stay backward compatible.
+const inboxUsername =
+  resolved?.inbox_username ||
+  resolved?.owner_username ||
+  resolved?.ownerUsername ||
+  resolved?.asset?.owner_username ||
+  resolved?.asset?.ownerUsername ||
+  resolved?.asset?.username ||
+  "owner"; // safe fallback
+
+const inboxEmailAddress = kac
+  ? `${inboxUsername}+${kac}@inbox.keeprhome.com`
+  : `${inboxUsername}@inbox.keeprhome.com`;
+
+const inboxEmailDisplay = `${inboxUsername}@inbox.keeprhome.com`;
+
 
   const allowedActions = Array.isArray(resolved?.allowed_actions)
     ? resolved.allowed_actions
@@ -265,12 +282,12 @@ const openInboxMailto = async () => {
   try {
     const canOpen = await Linking.canOpenURL(url);
     if (!canOpen) {
-      Alert.alert("Email", inboxEmailAddress);
+      Alert.alert("Email", inboxEmailDisplay || inboxEmailAddress);
       return;
     }
     await Linking.openURL(url);
   } catch {
-    Alert.alert("Email", inboxEmailAddress);
+    Alert.alert("Email", inboxEmailDisplay || inboxEmailAddress);
   }
 };
 
@@ -446,7 +463,7 @@ const openInboxMailto = async () => {
             Send invoices, receipts, or documents to:
           </Text>
         <TouchableOpacity onPress={openInboxMailto}>
-          <Text style={styles.emailLinkText}>{inboxEmailAddress}</Text>
+          <Text style={styles.emailLinkText}>{inboxEmailDisplay || inboxEmailAddress}</Text>
           <Text style={styles.emailLinkHint}>Tap to open your email app</Text>
         </TouchableOpacity>
         </View>
