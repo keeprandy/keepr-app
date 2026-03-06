@@ -413,6 +413,20 @@ React.useEffect(() => {
   setIsNavReady(true);
 }, []);
 
+// Clear persisted web nav state on sign-out so we do not restore stale routes
+// like PublicAction without a valid KAC/token after logout.
+React.useEffect(() => {
+  if (Platform.OS !== "web") return;
+  if (initializing) return;
+  if (user) return;
+
+  try {
+    window?.sessionStorage?.removeItem(NAV_PERSIST_KEY);
+  } catch (_) {}
+
+  setInitialNavState(undefined);
+}, [initializing, user]);
+
   const [role, setRole] = React.useState(null);
   const [onboardingState, setOnboardingState] = React.useState(null);
   const [assetCount, setAssetCount] = React.useState(null);
@@ -636,14 +650,14 @@ if (initializing) return <SplashIntroScreen />;
 if (!user) {
   return (
     <View style={{ flex: 1 }}>
-      <NavigationContainer
-        theme={navTheme}
-        ref={navigationRef}
-        linking={linking}
-        initialState={Platform.OS === "web" ? initialNavState : undefined}
-        onReady={() => setIsNavReady(true)}
-        onStateChange={handleNavStateChange}
-      >
+        <NavigationContainer
+          key="logged-out"
+          theme={navTheme}
+          ref={navigationRef}
+          linking={linking}
+          initialState={undefined}
+          onReady={() => setIsNavReady(true)}
+        >
         <RootStack.Navigator
           screenOptions={{ headerShown: false }}
           initialRouteName={isResetLink ? "ResetPassword" : "Auth"}
