@@ -291,7 +291,7 @@ const openInboxMailto = async () => {
   }
 };
 
-
+// Force a git push
   const handleLogEvent = async () => {
     if (!requireIdentity()) return;
     const t = title.trim();
