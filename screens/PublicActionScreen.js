@@ -430,13 +430,6 @@ const openInboxMailto = async () => {
             </View>
           ) : null}
 
-          {assetId ? (
-            <View style={styles.chip}>
-              <Text style={styles.chipLabel}>Asset</Text>
-              <Text style={styles.chipValue}>{shortId(assetId)}</Text>
-            </View>
-          ) : null}
-
           <View style={[styles.chip, styles.chipAccessNo]}>
             <Text style={styles.chipLabel}>Access</Text>
             <Text style={styles.chipValue}>public</Text>
@@ -607,7 +600,7 @@ const styles = StyleSheet.create({
   headerChips: { flexDirection: "row", alignItems: "center" },
   chip: {
     marginLeft: spacing.sm,
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     borderRadius: 999,
     borderWidth: 1,

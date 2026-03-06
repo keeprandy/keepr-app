@@ -133,6 +133,49 @@ async function confirmDestructive(title, message) {
     ]);
   });
 }
+function getOriginLabel(ev) {
+  const t = String(ev?.origin_type || "").toLowerCase();
+
+  switch (t) {
+    case "portal":
+      return "Portal Intake";
+    case "email":
+      return "Email Intake";
+    case "owner":
+      return "Owner Entry";
+    case "reminder":
+      return "Reminder";
+    case "team":
+      return "Team Activity";
+    default:
+      return null;
+  }
+}
+
+function getSourceLabel(ev) {
+  const t = String(ev?.source_type || "").toLowerCase();
+
+  switch (t) {
+    case "quick_log":
+      return "Quick Log";
+    case "question":
+      return "Question";
+    case "manual_entry":
+      return "Manual Entry";
+    case "email":
+      return "Email";
+    case "reminder":
+      return "Reminder";
+    case "task":
+      return "Task";
+    case "invoice":
+      return "Invoice";
+    case "service_update":
+      return "Service Update";
+    default:
+      return null;
+  }
+}
 
 /**
  * Resolve an attachment’s URL.
@@ -216,6 +259,43 @@ const [loading, setLoading] = useState(true);
     () => attachmentsByEvent[selectedEventId] || [],
     [selectedEventId, attachmentsByEvent]
   );
+
+  const selectedEventPublicSender = useMemo(() => {
+    const ctx = selectedEvent?.context || {};
+    const publicAction = ctx?.public_action || {};
+    const contact =
+      publicAction?.contact ||
+      ctx?.contact || {
+        name:
+          publicAction?.contact_name ||
+          ctx?.contact_name ||
+          null,
+        email:
+          publicAction?.contact_email ||
+          ctx?.contact_email ||
+          null,
+        phone:
+          publicAction?.contact_phone ||
+          ctx?.contact_phone ||
+          null,
+      };
+
+    const isPublic =
+      ctx?.source?.channel === "public" ||
+      !!publicAction?.type ||
+      !!contact?.name ||
+      !!contact?.email ||
+      !!contact?.phone;
+
+    return {
+      isPublic: !!isPublic,
+      name: contact?.name || null,
+      email: contact?.email || null,
+      phone: contact?.phone || null,
+      actionType: publicAction?.type || null,
+    };
+  }, [selectedEvent]);
+
 
   const draftEvents = useMemo(
     () =>
@@ -835,6 +915,9 @@ const [loading, setLoading] = useState(true);
     const isSelected = ev?.id === selectedEventId;
     const attCount = (attachmentsByEvent[ev.id] || []).length;
     const assetName = ev.asset_id ? assetNameById[ev.asset_id] : null;
+    const originLabel = getOriginLabel(ev);
+    const sourceLabel = getSourceLabel(ev);
+    const intakeLine = [originLabel, sourceLabel].filter(Boolean).join(" • ");
 
     const ctxBits = [];
     if (assetName) ctxBits.push(assetName);
@@ -862,6 +945,13 @@ const [loading, setLoading] = useState(true);
             <Text style={styles.cardTitle} numberOfLines={2}>
               {ev.title || "Event"}
             </Text>
+
+            {intakeLine ? (
+              <Text style={styles.cardOriginLine} numberOfLines={1}>
+                {intakeLine}
+              </Text>
+            ) : null}
+
             <Text style={styles.cardMeta} numberOfLines={1}>
               {formatDateTimeUS(ev.created_at)}
               {ev.status ? ` · ${String(ev.status).toUpperCase()}` : ""}
@@ -1558,15 +1648,37 @@ const [loading, setLoading] = useState(true);
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: spacing.lg }} showsVerticalScrollIndicator>
+            <ScrollView
+              style={{ flex: 1 }}
+              contentContainerStyle={styles.modalScrollContent}
+              showsVerticalScrollIndicator
+            >
               <View style={styles.modalHeader}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.modalTitle} numberOfLines={2}>
                     {selectedEvent?.title || "Event"}
                   </Text>
                   <Text style={styles.modalMeta}>
-                    {formatDateTimeUS(selectedEvent?.created_at)}
+                    {(selectedEvent?.asset_id
+                      ? assetNameById[selectedEvent.asset_id] || "No asset yet"
+                      : "No asset yet") +
+                      " • " +
+                      formatDateTimeUS(selectedEvent?.created_at)}
                   </Text>
+
+                  <View style={styles.modalBadgeRow}>
+                    <View style={[styles.statusPill, styles.statusDraft]}>
+                      <Text style={[styles.statusText, styles.statusTextDraft]}>
+                        {String(selectedEvent?.status || "draft").toUpperCase()}
+                      </Text>
+                    </View>
+
+                    {selectedEventPublicSender?.isPublic ? (
+                      <View style={styles.modalSourcePill}>
+                        <Text style={styles.modalSourcePillText}>PUBLIC</Text>
+                      </View>
+                    ) : null}
+                  </View>
                 </View>
 
                 <TouchableOpacity
@@ -1579,229 +1691,301 @@ const [loading, setLoading] = useState(true);
               </View>
 
               <View style={styles.modalBody}>
-                <Text style={styles.modalSectionLabel}>NOTES</Text>
-                <Text style={styles.modalNotes}>
-                  {selectedEvent?.notes || "—"}
-                </Text>
+                {selectedEventPublicSender?.isPublic ? (
+                  <>
+                    <View style={styles.modalSection}>
+                      <Text style={styles.modalSectionLabel}>PUBLIC SENDER</Text>
+                      <View style={styles.senderCard}>
+                        <View style={styles.senderRow}>
+                          <Text style={styles.senderLabel}>Name</Text>
+                          <Text style={styles.senderValue}>
+                            {selectedEventPublicSender?.name || "Unknown"}
+                          </Text>
+                        </View>
 
-                <View style={{ height: spacing.md }} />
+                        <View style={styles.senderRow}>
+                          <Text style={styles.senderLabel}>Email</Text>
+                          <Text style={styles.senderValue}>
+                            {selectedEventPublicSender?.email || "—"}
+                          </Text>
+                        </View>
 
-                <Text style={styles.modalSectionLabel}>CONTEXT</Text>
-                <View style={styles.contextRow}>
-                  <Text style={styles.contextLabel}>Asset:</Text>
-                  <Text style={styles.contextValue}>
-                    {selectedEvent?.asset_id
-                      ? assetNameById[selectedEvent.asset_id] || "—"
-                      : "—"}
-                  </Text>
-                </View>
+                        <View style={styles.senderRow}>
+                          <Text style={styles.senderLabel}>Phone</Text>
+                          <Text style={styles.senderValue}>
+                            {selectedEventPublicSender?.phone || "—"}
+                          </Text>
+                        </View>
 
-                <View style={styles.contextRow}>
-                  <Text style={styles.contextLabel}>Home system:</Text>
-                  <Text style={styles.contextValue}>
-                    {selectedEvent?.home_system_id
-                      ? homeSystemNameById[selectedEvent.home_system_id] || "—"
-                      : "—"}
-                  </Text>
-                </View>
+                        <View style={styles.senderRow}>
+                          <Text style={styles.senderLabel}>Action</Text>
+                          <Text style={styles.senderValue}>
+                            {selectedEventPublicSender?.actionType
+                              ? String(selectedEventPublicSender.actionType)
+                                  .replace(/_/g, " ")
+                                  .replace(/\b\w/g, (c) => c.toUpperCase())
+                              : "Public action"}
+                          </Text>
+                        </View>
 
-                <View style={styles.contextRow}>
-                  <Text style={styles.contextLabel}>System:</Text>
-                  <Text style={styles.contextValue}>
-                    {selectedEvent?.system_id
-                      ? systemNameById[selectedEvent.system_id] || "—"
-                      : "—"}
-                  </Text>
-                </View>
-
-                <View style={{ height: spacing.md }} />
-
-                <Text style={styles.modalSectionLabel}>ATTACHMENTS</Text>
-
-                {selectedAttachments.length === 0 ? (
-                  <Text style={styles.modalNotesMuted}>
-                    No attachments yet. Add photos or PDFs from the event editor
-                    when you enrich this into the asset’s story.
-                  </Text>
-                ) : (
-                  <View style={{ marginTop: spacing.sm }}>
-                    {selectedAttachments.map((a) => {
-                      const url = resolveAttachmentUrl(a);
-                      const mime = a.mime_type || a.content_type || "unknown";
-                      const isImg = isProbablyImage(mime);
-
-                      return (
-                        <View key={a.id} style={styles.attachmentRow}>
-                          <View style={styles.attachmentIcon}>
-                            <Ionicons
-                              name={
-                                isImg
-                                  ? "image-outline"
-                                  : "document-text-outline"
-                              }
-                              size={16}
-                              color={colors.textSecondary}
-                            />
-                          </View>
-
+                        {selectedEventPublicSender?.email ? (
                           <TouchableOpacity
-                            style={{ flex: 1 }}
+                            style={styles.replyLinkBtn}
                             activeOpacity={0.85}
                             onPress={() =>
-                              openAttachmentFromEventModal(selectedEvent, a)
+                              Linking.openURL(
+                                `mailto:${selectedEventPublicSender.email}`
+                              ).catch(() => {
+                                Alert.alert(
+                                  "Can’t open email",
+                                  selectedEventPublicSender.email
+                                );
+                              })
                             }
                           >
-                            <Text
-                              style={styles.attachmentName}
-                              numberOfLines={1}
-                            >
-                              {a.file_name || "Attachment"}
-                            </Text>
-                            <Text
-                              style={styles.attachmentMeta}
-                              numberOfLines={1}
-                            >
-                              {mime} {url ? "· tap to open" : "· no public url"}
-                            </Text>
-                          </TouchableOpacity>
-
-                          <TouchableOpacity
-                            onPress={() => deleteAttachment(a)}
-                            activeOpacity={0.85}
-                            hitSlop={10}
-                            disabled={busyDelete}
-                          >
                             <Ionicons
-                              name="trash-outline"
-                              size={18}
-                              color={colors.textMuted}
+                              name="mail-outline"
+                              size={14}
+                              color="rgb(45, 125, 227)"
                             />
+                            <Text style={styles.replyLinkText}>
+                              Reply by email
+                            </Text>
                           </TouchableOpacity>
-                        </View>
-                      );
-                    })}
+                        ) : null}
+                      </View>
+                    </View>
+
+                    <View style={styles.modalDivider} />
+                  </>
+                ) : null}
+
+                <View style={styles.modalSection}>
+                  <Text style={styles.modalSectionLabel}>NOTES</Text>
+                  <Text
+                    style={
+                      selectedEvent?.notes
+                        ? styles.modalBodyText
+                        : styles.modalBodyTextMuted
+                    }
+                  >
+                    {selectedEvent?.notes || "No notes added yet."}
+                  </Text>
+                </View>
+
+                <View style={styles.modalDivider} />
+
+                <View style={styles.modalSection}>
+                  <Text style={styles.modalSectionLabel}>ATTACHMENTS</Text>
+
+                  {selectedAttachments.length === 0 ? (
+                    <Text style={styles.modalBodyTextMuted}>
+                      No attachments yet. Add photos or PDFs when enriching this
+                      into the asset story.
+                    </Text>
+                  ) : (
+                    <View style={{ marginTop: spacing.sm }}>
+                      {selectedAttachments.map((a) => {
+                        const url = resolveAttachmentUrl(a);
+                        const mime = a.mime_type || a.content_type || "unknown";
+                        const isImg = isProbablyImage(mime);
+
+                        return (
+                          <View key={a.id} style={styles.attachmentRow}>
+                            <View style={styles.attachmentIcon}>
+                              <Ionicons
+                                name={
+                                  isImg
+                                    ? "image-outline"
+                                    : "document-text-outline"
+                                }
+                                size={16}
+                                color={colors.textSecondary}
+                              />
+                            </View>
+
+                            <TouchableOpacity
+                              style={{ flex: 1 }}
+                              activeOpacity={0.85}
+                              onPress={() =>
+                                openAttachmentFromEventModal(selectedEvent, a)
+                              }
+                            >
+                              <Text
+                                style={styles.attachmentName}
+                                numberOfLines={1}
+                              >
+                                {a.file_name || "Attachment"}
+                              </Text>
+                              <Text
+                                style={styles.attachmentMeta}
+                                numberOfLines={1}
+                              >
+                                {mime} {url ? "· tap to open" : ""}
+                              </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              onPress={() => deleteAttachment(a)}
+                              activeOpacity={0.85}
+                              hitSlop={10}
+                              disabled={busyDelete}
+                            >
+                              <Ionicons
+                                name="trash-outline"
+                                size={18}
+                                color={colors.textMuted}
+                              />
+                            </TouchableOpacity>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  )}
+                </View>
+
+                <View style={styles.modalDivider} />
+
+                <View style={styles.modalSection}>
+                  <Text style={styles.modalSectionLabel}>CONTEXT</Text>
+
+                  <View style={styles.contextGrid}>
+                    <Text style={styles.contextGridKey}>Asset</Text>
+                    <Text style={styles.contextGridValue}>
+                      {selectedEvent?.asset_id
+                        ? assetNameById[selectedEvent.asset_id] || "None assigned"
+                        : "None assigned"}
+                    </Text>
+
+                    <Text style={styles.contextGridKey}>Home system</Text>
+                    <Text style={styles.contextGridValue}>
+                      {selectedEvent?.home_system_id
+                        ? homeSystemNameById[selectedEvent.home_system_id] || "None assigned"
+                        : "None assigned"}
+                    </Text>
+
+                    <Text style={styles.contextGridKey}>System</Text>
+                    <Text style={styles.contextGridValue}>
+                      {selectedEvent?.system_id
+                        ? systemNameById[selectedEvent.system_id] || "None assigned"
+                        : "None assigned"}
+                    </Text>
                   </View>
-                )}
+                </View>
               </View>
 
               <View style={styles.modalFooter}>
-                <View style={styles.modalActionRow}>
-                  <View style={styles.modalTripleRow}>
-                    <TouchableOpacity
-                      style={[styles.dangerBtnSmall, Platform.OS !== "web" && { width: "100%", flex: 0 },
-                        busyDelete && { opacity: 0.6 },
-                      ]}
-                      onPress={() => deleteEvent(selectedEvent)}
-                      disabled={busyDelete}
-                      activeOpacity={0.9}
-                    >
-                      {busyDelete ? (
-                        <ActivityIndicator
-                          color={colors.brandWhite || "#FFF"}
-                        />
-                      ) : (
-                        <>
-                          <Ionicons
-                            name="trash-outline"
-                            size={16}
-                            color={colors.brandWhite || "#FFF"}
-                          />
-                          <Text style={styles.primaryText}>Delete</Text>
-                        </>
-                      )}
-                    </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.commitBtnLarge,
+                    !selectedEvent?.asset_id && styles.commitBtnDisabled,
+                    busyDelete && { opacity: 0.7 },
+                  ]}
+                  onPress={() => submitEventToTimeline(selectedEvent)}
+                  disabled={busyDelete || !selectedEvent?.asset_id}
+                  activeOpacity={0.9}
+                >
+                  <Ionicons
+                    name="checkmark-circle-outline"
+                    size={16}
+                    color="#FFFFFF"
+                  />
+                  <Text style={styles.primaryText}>Save to Timeline</Text>
+                </TouchableOpacity>
 
-                    <TouchableOpacity
-                      style={[styles.commitBtn, Platform.OS !== "web" && { width: "100%", flex: 0 },
-                        !selectedEvent?.asset_id && styles.commitBtnDisabled,
-                        busyDelete && { opacity: 0.7 },
-                      ]}
-                      onPress={() => submitEventToTimeline(selectedEvent)}
-                      disabled={busyDelete || !selectedEvent?.asset_id}
-                      activeOpacity={0.9}
-                    >
-                      <Ionicons
-                        name="checkmark-circle-outline"
-                        size={16}
-                        color="#FFFFFF"
-                      />
-                      <Text style={styles.primaryText}>Save to Timeline</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[styles.primaryBtn, Platform.OS !== "web" && { width: "100%", flex: 0 },
-                        busyDelete && { opacity: 0.7 },
-                      ]}
-                      onPress={() => goToEditEvent(selectedEvent, "enrich")}
-                      disabled={busyDelete}
-                      activeOpacity={0.9}
-                    >
-                      <Ionicons
-                        name="create-outline"
-                        size={16}
-                        color="#FFFFFF"
-                      />
-                      <Text style={styles.primaryText}>Edit</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[styles.secondaryBtn, Platform.OS !== "web" && { width: "100%", flex: 0 },
-                        busyDelete && { opacity: 0.7 },
-                      ]}
-                      onPress={() => {
-                        if (!selectedEvent) return;
-                        closeModal();
-                        navigation.navigate("CreateReminder", {
-                          prefill: {
-                            title: selectedEvent?.title
-                              ? `Follow up: ${selectedEvent.title}`
-                              : "Follow up",
-                            notes: selectedEvent?.notes || "",
-                            due_at: new Date(
-                              Date.now() + 1000 * 60 * 60 * 24 * 30
-                            ).toISOString(),
-                            has_time: true,
-                            is_urgent: false,
-                            repeat_rule: null,
-                            status: "open",
-                            asset_id: selectedEvent?.asset_id || null,
-                            system_id: selectedEvent?.system_id || null,
-                            record_id: null,
-                            event_id: selectedEvent?.id || null,
-                            extra_metadata: {
-                              source: "event_inbox_modal",
-                            },
-                          },
-                          afterSave: "Notifications",
-                        });
-                      }}
-                      disabled={busyDelete}
-                      activeOpacity={0.9}
-                    >
-                      <Ionicons
-                        name="alarm-outline"
-                        size={16}
-                        color={colors.textPrimary}
-                      />
-                      <Text style={styles.secondaryText}>Reminder</Text>
-                    </TouchableOpacity>
-                  </View>
+                <View style={styles.modalSecondaryActions}>
+                  <TouchableOpacity
+                    style={[
+                      styles.secondaryBtn,
+                      busyDelete && { opacity: 0.7 },
+                    ]}
+                    onPress={() => goToEditEvent(selectedEvent, "enrich")}
+                    disabled={busyDelete}
+                    activeOpacity={0.9}
+                  >
+                    <Ionicons
+                      name="create-outline"
+                      size={16}
+                      color={colors.textPrimary}
+                    />
+                    <Text style={styles.secondaryText}>Edit</Text>
+                  </TouchableOpacity>
 
                   <TouchableOpacity
-                    style={styles.keepDraftLink}
-                    onPress={closeModal}
+                    style={[
+                      styles.secondaryBtn,
+                      busyDelete && { opacity: 0.7 },
+                    ]}
+                    onPress={() => {
+                      if (!selectedEvent) return;
+                      closeModal();
+                      navigation.navigate("CreateReminder", {
+                        prefill: {
+                          title: selectedEvent?.title
+                            ? `Follow up: ${selectedEvent.title}`
+                            : "Follow up",
+                          notes: selectedEvent?.notes || "",
+                          due_at: new Date(
+                            Date.now() + 1000 * 60 * 60 * 24 * 30
+                          ).toISOString(),
+                          has_time: true,
+                          is_urgent: false,
+                          repeat_rule: null,
+                          status: "open",
+                          asset_id: selectedEvent?.asset_id || null,
+                          system_id: selectedEvent?.system_id || null,
+                          record_id: null,
+                          event_id: selectedEvent?.id || null,
+                          extra_metadata: {
+                            source: "event_inbox_modal",
+                          },
+                        },
+                        afterSave: "Notifications",
+                      });
+                    }}
                     disabled={busyDelete}
-                    activeOpacity={0.85}
+                    activeOpacity={0.9}
                   >
-                    <Text style={styles.keepDraftText}>
-                      Keep this as a draft, or submit it into the asset
-                      timeline when you’re ready.
-                    </Text>
-                    <Text style={styles.keepDraftText}>
-                      Add an Asset to file this moment into a KeeprStory.
-                    </Text>
+                    <Ionicons
+                      name="alarm-outline"
+                      size={16}
+                      color={colors.textPrimary}
+                    />
+                    <Text style={styles.secondaryText}>Reminder</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.dangerBtnOutline,
+                      busyDelete && { opacity: 0.6 },
+                    ]}
+                    onPress={() => deleteEvent(selectedEvent)}
+                    disabled={busyDelete}
+                    activeOpacity={0.9}
+                  >
+                    {busyDelete ? (
+                      <ActivityIndicator color="#DC2626" />
+                    ) : (
+                      <>
+                        <Ionicons
+                          name="trash-outline"
+                          size={16}
+                          color="#DC2626"
+                        />
+                        <Text style={styles.dangerTextOutline}>Delete</Text>
+                      </>
+                    )}
                   </TouchableOpacity>
                 </View>
+
+                <Text style={styles.modalHelperText}>
+                  Draft event. Save to timeline when ready.
+                </Text>
+                {!selectedEvent?.asset_id ? (
+                  <Text style={styles.modalHelperText}>
+                    Add an Asset before filing this moment into a KeeprStory.
+                  </Text>
+                ) : null}
               </View>
             </ScrollView>
           </View>
@@ -2147,6 +2331,12 @@ intakeSub: {
     fontWeight: "900",
     color: colors.textPrimary,
   },
+  cardOriginLine: {
+  marginTop: 3,
+  fontSize: 11,
+  fontWeight: "800",
+  color: colors.textSecondary,
+},
   cardMeta: {
     marginTop: 2,
     fontSize: 11,
@@ -2424,39 +2614,104 @@ modalCard: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
   },
+  modalScrollContent: {
+    paddingBottom: spacing.lg,
+  },
   modalSectionLabel: {
     fontSize: 12,
     fontWeight: "900",
     color: colors.textMuted,
     letterSpacing: 0.6,
   },
-  modalNotes: {
-    marginTop: 6,
-    fontSize: 13,
+  modalSection: {
+    marginTop: spacing.xs,
+  },
+  modalDivider: {
+    marginTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderSubtle,
+  },
+  modalBadgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 10,
+  },
+  modalSourcePill: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(45, 125, 227, 0.25)",
+    backgroundColor: "rgba(45, 125, 227, 0.08)",
+  },
+  modalSourcePillText: {
+    fontSize: 11,
+    fontWeight: "900",
+    color: "rgb(45, 125, 227)",
+    letterSpacing: 0.4,
+  },
+  modalBodyText: {
+    marginTop: 8,
+    fontSize: 14,
+    lineHeight: 20,
+    color: colors.textPrimary,
+  },
+  modalBodyTextMuted: {
+    marginTop: 8,
+    fontSize: 14,
     lineHeight: 20,
     color: colors.textSecondary,
   },
-  modalNotesMuted: {
-    marginTop: 6,
-    fontSize: 12,
-    lineHeight: 18,
-    color: colors.textMuted,
+  senderCard: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.lg,
+    backgroundColor: colors.background,
+    padding: spacing.md,
+    gap: 8,
   },
-  contextRow: {
-    marginTop: 6,
+  senderRow: {
     flexDirection: "row",
     gap: 8,
   },
-  contextLabel: {
-    width: 110,
+  senderLabel: {
+    width: 72,
     fontSize: 12,
     fontWeight: "800",
     color: colors.textSecondary,
   },
-  contextValue: {
+  senderValue: {
     flex: 1,
+    fontSize: 13,
+    color: colors.textPrimary,
+  },
+  replyLinkBtn: {
+    marginTop: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    alignSelf: "flex-start",
+  },
+  replyLinkText: {
     fontSize: 12,
+    fontWeight: "800",
+    color: "rgb(45, 125, 227)",
+  },
+  contextGrid: {
+    marginTop: 8,
+    rowGap: 10,
+  },
+  contextGridKey: {
+    fontSize: 12,
+    fontWeight: "800",
     color: colors.textSecondary,
+  },
+  contextGridValue: {
+    fontSize: 13,
+    color: colors.textPrimary,
+    marginBottom: 2,
   },
 
   attachmentRow: {
@@ -2489,11 +2744,18 @@ modalCard: {
   },
   modalFooter: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
+    paddingTop: spacing.lg,
     paddingBottom: spacing.lg,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderSubtle,
   },
   modalActionRow: {
     flexDirection: "column",
+    gap: spacing.sm,
+  },
+  modalSecondaryActions: {
+    marginTop: spacing.sm,
+    flexDirection: Platform.OS === "web" ? "row" : "column",
     gap: spacing.sm,
   },
   secondaryBtn: {
@@ -2564,6 +2826,17 @@ modalCard: {
     alignItems: "center",
     justifyContent: "center",
   },
+  commitBtnLarge: {
+    width: "100%",
+    borderRadius: radius.lg,
+    backgroundColor: "rgb(34, 197, 94)",
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   commitBtnDisabled: {
     backgroundColor: "rgba(34, 197, 94, 0.35)",
   },
@@ -2584,6 +2857,24 @@ modalCard: {
     alignItems: "center",
     justifyContent: "center",
   },
+  dangerBtnOutline: {
+    flex: 1,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: "#DC2626",
+    backgroundColor: colors.surface,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dangerTextOutline: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#DC2626",
+  },
 
   keepDraftLink: {
     marginTop: spacing.sm,
@@ -2595,6 +2886,12 @@ modalCard: {
     fontSize: 12,
     fontWeight: "800",
     color: colors.textMuted,
+  },
+  modalHelperText: {
+    marginTop: spacing.sm,
+    fontSize: 12,
+    color: colors.textMuted,
+    textAlign: "center",
   },
 
   /* ---------------- attachment viewer ---------------- */
