@@ -161,6 +161,7 @@ const linking = {
   prefixes: [
     "keepr://",
     "http://localhost:8081",
+    "https://app.keeprhome.com",
     "https://keeprhome.com",
     "https://keeprmarine.com",
     "https://keeprauto.com",
@@ -647,6 +648,11 @@ if (!user) {
           screenOptions={{ headerShown: false }}
           initialRouteName={isResetLink ? "ResetPassword" : "Auth"}
         >
+          {/* Public KAC routes MUST be accessible without auth */}
+          <RootStack.Screen name="KacRoute" component={KacRouteScreen} />
+          <RootStack.Screen name="PublicAction" component={PublicActionScreen} />
+          <RootStack.Screen name="KacResolve" component={KacResolveScreen} />
+
           <RootStack.Screen name="Auth" component={AuthScreen} />
           <RootStack.Screen name="ResetPassword" component={ResetPasswordScreen} />
         </RootStack.Navigator>

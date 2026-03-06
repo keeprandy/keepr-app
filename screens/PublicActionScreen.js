@@ -3,8 +3,10 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   Platform,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -49,12 +51,12 @@ function getKacFromUrlFallback() {
 
     // 2) Path: /k/KPR-XXXX-YYYY or /kac/KPR-...
     const path = (url.pathname || "").replace(/\/+$/, "");
-    const m = path.match(/\/(k|kac)\/([^/]+)$/i);
+    const m = path.match(/\/(k|kac)\/([^/]+)(?:\/actions)?$/i);
     if (m?.[2]) return decodeURIComponent(m[2]).trim();
 
     // 3) Hash: #/k/KPR-...
     const hash = (url.hash || "").replace(/^#/, "");
-    const mh = hash.match(/\/(k|kac)\/([^/]+)$/i);
+    const mh = hash.match(/\/(k|kac)\/([^/]+)(?:\/actions)?$/i);
     if (mh?.[2]) return decodeURIComponent(mh[2]).trim();
 
     return null;
@@ -171,6 +173,11 @@ export default function PublicActionScreen({ route, navigation }) {
   const [notes, setNotes] = useState("");
   const [question, setQuestion] = useState("");
 
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+
+
   const headerSubtitle = useMemo(() => {
     const aType = resolved?.asset_type ? String(resolved.asset_type) : "asset";
     return `${aType} • public`;
@@ -183,10 +190,6 @@ export default function PublicActionScreen({ route, navigation }) {
     ? resolved.allowed_actions
     : [];
 
-  // Public actions:
-  // - Ask: always allowed (creates inbox message)
-  // - Log: allowed when we have an asset context (token or KAC)
-  // - Upload: still placeholder
   const canAsk = allowedActions.length
     ? allowedActions.includes("answer_question")
     : true;
@@ -200,6 +203,15 @@ export default function PublicActionScreen({ route, navigation }) {
     : false;
 
   const canRequestAccess = true; // always visible for public mental model
+
+  function requireIdentity() {
+    if (!name.trim() || !email.trim()) {
+      Alert.alert("Identify yourself", "Please enter your name and email.");
+      return false;
+    }
+    return true;
+  }
+
 
   // Resolve token/KAC into an asset context
   useEffect(() => {
@@ -243,33 +255,28 @@ export default function PublicActionScreen({ route, navigation }) {
     };
   }, [kac, token]);
 
-  const handleRequestAccess = async () => {
-    try {
-      // V1: write a request as an Event Inbox item too (same pipeline).
-      // This keeps the “greyed actions drive onboarding” model.
-      await postFunction(
-        "public-action",
-        {
-          kac: resolved?.kac || kac || null,
-          token: token || null,
-          intent: "capture_event_inbox",
-          payload: {
-            title: "Request access",
-            notes:
-              "Someone requested access from the public asset page. (V1 placeholder)",
-            type: "request_access",
-          },
-        },
-        null
-      );
+const openInboxMailto = async () => {
+  const kacCode = String(resolved?.kac || kac || "").trim();
+  const subject = encodeURIComponent(
+    kacCode ? `Keepr intake ${kacCode}` : "Keepr intake"
+  );
+  const url = `mailto:${inboxEmailAddress}?subject=${subject}`;
 
-      Alert.alert("Request sent", "We’ll notify the asset owner.");
-    } catch (e) {
-      Alert.alert("Could not send", e?.message || "Try again.");
+  try {
+    const canOpen = await Linking.canOpenURL(url);
+    if (!canOpen) {
+      Alert.alert("Email", inboxEmailAddress);
+      return;
     }
-  };
+    await Linking.openURL(url);
+  } catch {
+    Alert.alert("Email", inboxEmailAddress);
+  }
+};
+
 
   const handleLogEvent = async () => {
+    if (!requireIdentity()) return;
     const t = title.trim();
     if (!t) {
       Alert.alert("Missing title", "Add a quick title (ex: Changed filter).");
@@ -293,6 +300,9 @@ export default function PublicActionScreen({ route, navigation }) {
             notes: notes.trim() || null,
             occurred_at: new Date().toISOString().slice(0, 10),
             type: "quick_log",
+            contact_name: name,
+            contact_email: email,
+            contact_phone: phone || null,
           },
         },
         null
@@ -311,6 +321,7 @@ export default function PublicActionScreen({ route, navigation }) {
   };
 
   const handleAskQuestion = async () => {
+    if (!requireIdentity()) return;
     const q = question.trim();
     if (!q) {
       Alert.alert("Ask a question", "Type a question first.");
@@ -329,6 +340,9 @@ export default function PublicActionScreen({ route, navigation }) {
             notes: q,
             occurred_at: new Date().toISOString().slice(0, 10),
             type: "question",
+            contact_name: name,
+            contact_email: email,
+            contact_phone: phone || null,
           },
         },
         null
@@ -362,7 +376,7 @@ export default function PublicActionScreen({ route, navigation }) {
           <Text style={styles.errorText}>Missing KAC.</Text>
           {IS_WEB ? (
             <Text style={styles.metaText}>
-              Try /k/KPR-XXXX-YYYY or ?kac=KPR-XXXX-YYYY or ?token=...
+              Try /k/KPR-XXXX-YYYY/actions or ?kac=KPR-XXXX-YYYY or ?token=...
             </Text>
           ) : null}
         </View>
@@ -420,7 +434,52 @@ export default function PublicActionScreen({ route, navigation }) {
       ) : null}
 
       {/* Body */}
-      <View style={styles.body}>
+      <ScrollView
+        style={styles.body}
+        contentContainerStyle={styles.bodyContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Prefer email?</Text>
+          <Text style={styles.cardHint}>
+            Send invoices, receipts, or documents to:
+          </Text>
+        <TouchableOpacity onPress={openInboxMailto}>
+          <Text style={styles.emailLinkText}>{inboxEmailAddress}</Text>
+          <Text style={styles.emailLinkHint}>Tap to open your email app</Text>
+        </TouchableOpacity>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Identify yourself</Text>
+          <Text style={styles.cardHint}>This helps the owner reply to you.</Text>
+
+          <TextInput
+            value={name}
+            onChangeText={setName}
+            placeholder="Name"
+            style={styles.input}
+          />
+
+          <TextInput
+            value={email}
+            onChangeText={setEmail}
+            placeholder="Email"
+            autoCapitalize="none"
+            keyboardType="email-address"
+            style={styles.input}
+          />
+
+          <TextInput
+            value={phone}
+            onChangeText={setPhone}
+            placeholder="Phone (optional)"
+            keyboardType="phone-pad"
+            style={styles.input}
+          />
+        </View>
+
         {/* Ask a question */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Ask a question</Text>
@@ -482,49 +541,12 @@ export default function PublicActionScreen({ route, navigation }) {
           ) : null}
         </View>
 
-        {/* Upload proof (still placeholder) */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Upload proof</Text>
-          <Text style={styles.cardHint}>
-            Upload a photo or document as proof. (Wired after we finalize public
-            permissions.)
-          </Text>
-          <TouchableOpacity
-            onPress={() =>
-              Alert.alert(
-                "Coming soon",
-                "Next: upload proof → create proposal → owner accepts."
-              )
-            }
-            style={[styles.secondaryBtn, !canUpload && styles.btnDisabled]}
-            disabled={!canUpload}
-          >
-            <Text style={styles.secondaryBtnText}>Upload</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Request access */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Request access</Text>
-          <Text style={styles.cardHint}>
-            If you’re a service provider, steward, or buyer, ask the owner for
-            access.
-          </Text>
-          <TouchableOpacity
-            onPress={handleRequestAccess}
-            style={[styles.secondaryBtn, !canRequestAccess && styles.btnDisabled]}
-            disabled={!canRequestAccess}
-          >
-            <Text style={styles.secondaryBtnText}>Request access</Text>
-          </TouchableOpacity>
-        </View>
-
         <View style={styles.footerNote}>
           <Text style={styles.footerNoteText}>
-            Public view: actions create Event Inbox drafts for the owner.
+            Public view: actions and emails create Event Inbox drafts for the owner.
           </Text>
         </View>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -597,7 +619,8 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
 
-  body: { flex: 1, padding: spacing.lg },
+  body: { flex: 1 },
+  bodyContent: { padding: spacing.lg, paddingBottom: spacing.xl * 2 },
 
   card: {
     borderWidth: 1,
@@ -609,6 +632,18 @@ const styles = StyleSheet.create({
   },
   cardTitle: { fontSize: 14, fontWeight: "900", color: colors.textPrimary },
   cardHint: { marginTop: 6, fontSize: 12, color: colors.textMuted },
+  emailLinkText: {
+    fontWeight: "800",
+    marginTop: 8,
+    fontSize: 14,
+    color: "#2563EB",
+    textDecorationLine: "underline",
+  },
+  emailLinkHint: {
+    marginTop: 6,
+    fontSize: 12,
+    color: colors.textMuted,
+  },
 
   input: {
     marginTop: spacing.sm,

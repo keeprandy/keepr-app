@@ -213,6 +213,12 @@ export default function SidebarNav({ currentRouteName }) {
 
   const navItems = useMemo(() => (inSuperKeepr ? SUPER_ITEMS : CONSUMER_ITEMS), [inSuperKeepr]);
 
+    // Public View SideBar Collapse
+  const isPublicFlow = useMemo(() => {
+  const rn = String(leafRouteName || currentRouteName || "");
+  return rn === "PublicAction" || rn === "KacRoute" || rn === "KacResolve";
+}, [leafRouteName, currentRouteName]);
+
   const fetchInboxCount = useCallback(async () => {
     if (!userId) return;
     try {
@@ -261,7 +267,7 @@ export default function SidebarNav({ currentRouteName }) {
       // no-op
     }
   };
-
+if (isPublicFlow) return null;
   return (
     <View
       style={[styles.shell, isCollapsed && styles.shellCollapsed]}
