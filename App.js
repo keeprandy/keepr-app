@@ -107,6 +107,7 @@ import QRScanScreen from "./screens/QRScanScreen";
 import ScanScreen from "./screens/ScanScreen";
 
 // Generic asset chat intake
+import AddAssetChatScreen from "./screens/AddAssetChatScreen";
 
 // Add / Edit asset
 import EditAssetScreen from "./screens/EditAssetScreen";
@@ -805,6 +806,11 @@ const initialRouteName =
           <RootStack.Screen
             name="AddHomeAsset"
             component={AddHomeAssetScreen}
+          />
+          <RootStack.Screen
+            name="AddAssetChat"
+            component={AddAssetChatScreen}
+            options={{ headerShown: false }}
           />
 
           {/* Vehicles */}

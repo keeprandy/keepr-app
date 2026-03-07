@@ -209,11 +209,9 @@ export default function HomeStoryScreen({ navigation, route }) {
   const home = homeSnapshot || currentHome;
 
   // Keep snapshot in sync when user switches homes
-  useEffect(() => {
-    if (home?.id && home?.id !== homeSnapshot?.id) {
-      setHomeSnapshot(currentHome);
-    }
-  }, [home?.id]);
+    useEffect(() => {
+      setHomeSnapshot(currentHome || null);
+    }, [currentHome?.id]);
 
   const refreshHome = useCallback(async () => {
     if (!home?.id) return;
@@ -599,16 +597,19 @@ export default function HomeStoryScreen({ navigation, route }) {
     });
   };
 
-  const handleAddHome = () => {
-    navigation.navigate("AddHomeAsset");
-  };
+const handleAddHome = () => {
+  setHomePickerVisible(false);
+  navigation.navigate("AddHomeAsset");
+};
 
-  const handleAddHomeChat = () => {
-    navigation.navigate("AddAssetChat", {
-      assetType: "home",
-      flow: "asset-intake",
-    });
-  };
+const handleAddHomeChat = () => {
+  setHomePickerVisible(false);
+  navigation.navigate("AddAssetChat", {
+    assetType: "home",
+    flow: "asset-intake",
+    source: "home-picker-chat",
+  });
+};
 
 const goToPublicView = () => {
   if (!home?.id) return;
