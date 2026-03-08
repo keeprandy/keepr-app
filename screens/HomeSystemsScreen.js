@@ -1282,8 +1282,8 @@ const HomeSystemsScreen = ({ route, navigation }) => {
               onPress={() => handleEditSystemEnrichment(system)}
             >
               <Ionicons
-                name="pencil-outline"
-                size={16}
+                name="create-outline"
+                size={18}
                 color={colors.textSecondary}
               />
             </TouchableOpacity>
@@ -1293,7 +1293,7 @@ const HomeSystemsScreen = ({ route, navigation }) => {
             >
               <Ionicons
                 name="text-outline"
-                size={16}
+                size={18}
                 color={colors.textSecondary}
               />
             </TouchableOpacity>
@@ -1304,7 +1304,7 @@ const HomeSystemsScreen = ({ route, navigation }) => {
             >
               <Ionicons
                 name="attach-outline"
-                size={16}
+                size={18}
                 color={colors.textSecondary}
               />
             </TouchableOpacity>

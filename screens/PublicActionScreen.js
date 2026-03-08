@@ -1,4 +1,7 @@
-// screens/PublicActionScreen.js
+// PublicActionScreen – Portal V1 (careful extension of current behavior)
+// Preserves existing resolve / identity / ask question / quick log / email intake flows.
+// Adds portal framing and light V1 structure without removing current Event Inbox mapping.
+
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -15,11 +18,6 @@ import {
 } from "react-native";
 
 import { colors, spacing, radius } from "../styles/theme";
-
-// NOTE:
-// - Works as in-app screen (route.params) AND deep-linked public web entry.
-// - Token-based links (public-resolve) may not return the same fields as KAC resolve,
-//   so we normalize it into a "resolved" shape that this screen can use.
 
 const PROJECT_REF = "jjzjuqxysucqutgjnrkk";
 const FUNCTIONS_BASE = `https://${PROJECT_REF}.supabase.co/functions/v1`;
@@ -45,16 +43,13 @@ function getKacFromUrlFallback() {
     if (!href) return null;
     const url = new URL(href);
 
-    // 1) Querystring (?kac=KPR-XXXX-YYYY)
     const q = url.searchParams.get("kac") || url.searchParams.get("KAC");
     if (q) return decodeURIComponent(q).trim();
 
-    // 2) Path: /k/KPR-XXXX-YYYY or /kac/KPR-...
     const path = (url.pathname || "").replace(/\/+$/, "");
     const m = path.match(/\/(k|kac)\/([^/]+)(?:\/actions)?$/i);
     if (m?.[2]) return decodeURIComponent(m[2]).trim();
 
-    // 3) Hash: #/k/KPR-...
     const hash = (url.hash || "").replace(/^#/, "");
     const mh = hash.match(/\/(k|kac)\/([^/]+)(?:\/actions)?$/i);
     if (mh?.[2]) return decodeURIComponent(mh[2]).trim();
@@ -81,8 +76,6 @@ function getTokenFromUrlFallback() {
 async function postFunction(path, payload, accessToken) {
   if (!ANON_KEY) throw new Error("Missing EXPO_PUBLIC_SUPABASE_ANON_KEY");
 
-  // On web we MUST send Authorization or Supabase will complain;
-  // use anon token when we don't have a session token available.
   const bearer = accessToken ? accessToken : ANON_KEY;
 
   const res = await fetch(`${FUNCTIONS_BASE}/${path}`, {
@@ -112,11 +105,9 @@ async function postFunction(path, payload, accessToken) {
 }
 
 function normalizeResolved(input, { kac, token }) {
-  // Goal: always return an object with { asset_id, asset_type, has_access, allowed_actions, asset }
   const r = input && typeof input === "object" ? input : null;
   if (!r) return null;
 
-  // Case A: KAC resolve already returns expected fields.
   if (r.master_asset_id || r.asset_id || r.has_access !== undefined) {
     return {
       ...r,
@@ -131,17 +122,16 @@ function normalizeResolved(input, { kac, token }) {
     };
   }
 
-  // Case B: public-resolve (token-based) returns { asset, system, mode, public_link_id }
   const assetId = r?.asset?.id || r?.asset_id || null;
   return {
     ok: true,
     source: "token",
     token: token || null,
-    kac: r.kac || kac || null, // token links might not include kac yet
+    kac: r.kac || kac || null,
     public_link_id: r.public_link_id || r.public_linkId || null,
     asset_type: "asset",
     asset_id: assetId,
-    has_access: false, // token-based public view: treat as public
+    has_access: false,
     allowed_actions: [
       "answer_question",
       "capture_event_inbox",
@@ -165,10 +155,8 @@ export default function PublicActionScreen({ route, navigation }) {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-
   const [resolved, setResolved] = useState(null);
 
-  // action inputs
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
   const [question, setQuestion] = useState("");
@@ -177,31 +165,27 @@ export default function PublicActionScreen({ route, navigation }) {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
 
-
-  const headerSubtitle = useMemo(() => {
-    const aType = resolved?.asset_type ? String(resolved.asset_type) : "asset";
-    return `${aType} • public`;
-  }, [resolved]);
-
   const assetId = resolved?.asset_id || null;
   const asset = resolved?.asset || null;
-  // Owner inbox email (derived from public resolve payload).
-  // We support multiple possible field names to stay backward compatible.
-const inboxUsername =
-  resolved?.inbox_username ||
-  resolved?.owner_username ||
-  resolved?.ownerUsername ||
-  resolved?.asset?.owner_username ||
-  resolved?.asset?.ownerUsername ||
-  resolved?.asset?.username ||
-  "owner"; // safe fallback
 
-const inboxEmailAddress = kac
-  ? `${inboxUsername}+${kac}@inbox.keeprhome.com`
-  : `${inboxUsername}@inbox.keeprhome.com`;
+  const headerSubtitle = useMemo(() => {
+    return "Keepr Owner Portal";
+  }, []);
 
-const inboxEmailDisplay = `${inboxUsername}@inbox.keeprhome.com`;
+  const inboxUsername =
+    resolved?.inbox_username ||
+    resolved?.owner_username ||
+    resolved?.ownerUsername ||
+    resolved?.asset?.owner_username ||
+    resolved?.asset?.ownerUsername ||
+    resolved?.asset?.username ||
+    "owner";
 
+  const inboxEmailAddress = kac
+    ? `${inboxUsername}+${kac}@inbox.keeprhome.com`
+    : `${inboxUsername}@inbox.keeprhome.com`;
+
+  const inboxEmailDisplay = `${inboxUsername}@inbox.keeprhome.com`;
 
   const allowedActions = Array.isArray(resolved?.allowed_actions)
     ? resolved.allowed_actions
@@ -215,12 +199,6 @@ const inboxEmailDisplay = `${inboxUsername}@inbox.keeprhome.com`;
     ? allowedActions.includes("capture_event_inbox")
     : !!assetId;
 
-  const canUpload = allowedActions.length
-    ? allowedActions.includes("attach_proof_to_record")
-    : false;
-
-  const canRequestAccess = true; // always visible for public mental model
-
   function requireIdentity() {
     if (!name.trim() || !email.trim()) {
       Alert.alert("Identify yourself", "Please enter your name and email.");
@@ -229,8 +207,6 @@ const inboxEmailDisplay = `${inboxUsername}@inbox.keeprhome.com`;
     return true;
   }
 
-
-  // Resolve token/KAC into an asset context
   useEffect(() => {
     let cancelled = false;
 
@@ -272,26 +248,25 @@ const inboxEmailDisplay = `${inboxUsername}@inbox.keeprhome.com`;
     };
   }, [kac, token]);
 
-const openInboxMailto = async () => {
-  const kacCode = String(resolved?.kac || kac || "").trim();
-  const subject = encodeURIComponent(
-    kacCode ? `Keepr intake ${kacCode}` : "Keepr intake"
-  );
-  const url = `mailto:${inboxEmailAddress}?subject=${subject}`;
+  const openInboxMailto = async () => {
+    const kacCode = String(resolved?.kac || kac || "").trim();
+    const subject = encodeURIComponent(
+      kacCode ? `Keepr intake ${kacCode}` : "Keepr intake"
+    );
+    const url = `mailto:${inboxEmailAddress}?subject=${subject}`;
 
-  try {
-    const canOpen = await Linking.canOpenURL(url);
-    if (!canOpen) {
+    try {
+      const canOpen = await Linking.canOpenURL(url);
+      if (!canOpen) {
+        Alert.alert("Email", inboxEmailDisplay || inboxEmailAddress);
+        return;
+      }
+      await Linking.openURL(url);
+    } catch {
       Alert.alert("Email", inboxEmailDisplay || inboxEmailAddress);
-      return;
     }
-    await Linking.openURL(url);
-  } catch {
-    Alert.alert("Email", inboxEmailDisplay || inboxEmailAddress);
-  }
-};
+  };
 
-// Force a git push
   const handleLogEvent = async () => {
     if (!requireIdentity()) return;
     const t = title.trim();
@@ -376,6 +351,10 @@ const openInboxMailto = async () => {
     }
   };
 
+  const showNotLiveYet = (label) => {
+    Alert.alert(label, "Coming soon in Portal V1. This will publish structured demand into the owner’s Event Inbox.");
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={styles.screen}>
@@ -403,7 +382,6 @@ const openInboxMailto = async () => {
 
   return (
     <SafeAreaView style={styles.screen}>
-      {/* Header */}
       <View style={styles.headerBar}>
         <View style={{ flexDirection: "row", alignItems: "center" }}>
           {navigation?.canGoBack?.() ? (
@@ -443,27 +421,24 @@ const openInboxMailto = async () => {
         </View>
       ) : null}
 
-      {/* Body */}
       <ScrollView
         style={styles.body}
         contentContainerStyle={styles.bodyContent}
         keyboardShouldPersistTaps="handled"
       >
-        
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Prefer email?</Text>
-          <Text style={styles.cardHint}>
-            Send invoices, receipts, or documents to:
+        <View style={styles.portalIntroCard}>
+          <Text style={styles.portalIntroTitle}>Portal Access</Text>
+          <Text style={styles.portalIntroText}>
+            Use this portal to communicate with the owner, submit documents,
+            and add work-related items to this asset’s Event Inbox.
           </Text>
-        <TouchableOpacity onPress={openInboxMailto}>
-          <Text style={styles.emailLinkText}>{inboxEmailDisplay || inboxEmailAddress}</Text>
-          <Text style={styles.emailLinkHint}>Tap to open your email app</Text>
-        </TouchableOpacity>
         </View>
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Identify yourself</Text>
-          <Text style={styles.cardHint}>This helps the owner reply to you.</Text>
+          <Text style={styles.cardHint}>
+            This maps your submission back to the Event Inbox so the owner can reply and accept it into the timeline.
+          </Text>
 
           <TextInput
             value={name}
@@ -490,7 +465,7 @@ const openInboxMailto = async () => {
           />
         </View>
 
-        {/* Ask a question */}
+        <Text style={styles.sectionTitle}>COMMUNICATE</Text>
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Ask a question</Text>
           <Text style={styles.cardHint}>
@@ -512,7 +487,21 @@ const openInboxMailto = async () => {
           </TouchableOpacity>
         </View>
 
-        {/* Quick log */}
+        <Text style={styles.sectionTitle}>DOCUMENT</Text>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Prefer email?</Text>
+          <Text style={styles.cardHint}>
+            Send invoices, receipts, quotes, or documents to:
+          </Text>
+          <TouchableOpacity onPress={openInboxMailto}>
+            <Text style={styles.emailLinkText}>
+              {inboxEmailDisplay || inboxEmailAddress}
+            </Text>
+            <Text style={styles.emailLinkHint}>Tap to open your email app</Text>
+          </TouchableOpacity>
+        </View>
+
+        <Text style={styles.sectionTitle}>RECORD</Text>
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Quick log</Text>
           <Text style={styles.cardHint}>
@@ -549,6 +538,47 @@ const openInboxMailto = async () => {
               This link didn’t resolve to an asset yet.
             </Text>
           ) : null}
+        </View>
+
+        <Text style={styles.sectionTitle}>SUBMIT / REQUEST </Text>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Communication Portal</Text>
+          <Text style={styles.cardHint}>
+            Soon this portal will support structured requests like quotes,
+            service requests, warranty claims, and insurance claims.
+          </Text>
+
+          <View style={styles.comingSoonRow}>
+            <TouchableOpacity
+              onPress={() => showNotLiveYet("Submit quote")}
+              style={styles.secondaryBtn}
+            >
+              <Text style={styles.secondaryBtnText}>Submit Quote</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => showNotLiveYet("Submit Service Proposal")}
+              style={styles.secondaryBtn}
+            >
+              <Text style={styles.secondaryBtnText}>Submit Service Proposal</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.comingSoonRow}>
+            <TouchableOpacity
+              onPress={() => showNotLiveYet("View Warranty Claim")}
+              style={styles.secondaryBtn}
+            >
+              <Text style={styles.secondaryBtnText}>View Warranty claim</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => showNotLiveYet("View Insurance Claim")}
+              style={styles.secondaryBtn}
+            >
+              <Text style={styles.secondaryBtnText}>View Insurance Claim</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View style={styles.footerNote}>
@@ -632,6 +662,31 @@ const styles = StyleSheet.create({
   body: { flex: 1 },
   bodyContent: { padding: spacing.lg, paddingBottom: spacing.xl * 2 },
 
+  portalIntroCard: {
+    marginBottom: spacing.lg,
+    paddingHorizontal: spacing.xs,
+  },
+  portalIntroTitle: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: colors.textPrimary,
+  },
+  portalIntroText: {
+    marginTop: 6,
+    fontSize: 13,
+    lineHeight: 20,
+    color: colors.textMuted,
+  },
+
+  sectionTitle: {
+    marginBottom: spacing.sm,
+    fontSize: 11,
+    fontWeight: "900",
+    color: colors.textMuted,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+
   card: {
     borderWidth: 1,
     borderColor: "#11182722",
@@ -641,7 +696,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   cardTitle: { fontSize: 14, fontWeight: "900", color: colors.textPrimary },
-  cardHint: { marginTop: 6, fontSize: 12, color: colors.textMuted },
+  cardHint: { marginTop: 6, fontSize: 12, color: colors.textMuted, lineHeight: 18 },
   emailLinkText: {
     fontWeight: "800",
     marginTop: 8,
@@ -679,6 +734,7 @@ const styles = StyleSheet.create({
   primaryBtnText: { color: "#fff", fontWeight: "900" },
 
   secondaryBtn: {
+    flex: 1,
     marginTop: spacing.sm,
     paddingVertical: 12,
     borderRadius: 999,
@@ -689,6 +745,11 @@ const styles = StyleSheet.create({
     borderColor: "#11182722",
   },
   secondaryBtnText: { color: colors.textPrimary, fontWeight: "900" },
+
+  comingSoonRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
 
   btnDisabled: { opacity: 0.5 },
 
