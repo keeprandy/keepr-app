@@ -267,6 +267,56 @@ const dashboardMode = useMemo(() => {
   return "activation";
 }, [ach]);
 
+const keeprProgress = useMemo(() => {
+  const hasAsset = Number(ach?.asset_count || 0) > 0;
+  const hasSystem = Number(ach?.system_count || 0) > 0;
+  const hasRecord = Number(ach?.service_record_count || 0) > 0;
+  const hasProof = Number(ach?.attachment_count || 0) > 0;
+
+  const steps = [
+    {
+      key: "asset",
+      label: "Add Asset",
+      done: hasAsset,
+      helper: "Start with something you own.",
+    },
+    {
+      key: "system",
+      label: "Add System",
+      done: hasSystem,
+      helper: "Add a system inside an asset.",
+    },
+    {
+      key: "record",
+      label: "Add Record",
+      done: hasRecord,
+      helper: "Log a service, install, or event.",
+    },
+    {
+      key: "proof",
+      label: "Add Proof",
+      done: hasProof,
+      helper: "Upload a photo, invoice, or manual.",
+    },
+  ];
+
+  const nextStep = steps.find((s) => !s.done)?.key || null;
+  const nextStepLabel = steps.find((s) => !s.done)?.label || null;
+  const completedCount = steps.filter((s) => s.done).length;
+  const complete = completedCount === steps.length;
+
+
+return {
+  steps,
+  nextStep,
+  nextStepLabel,
+  completedCount,
+  complete,
+};
+}, [ach]);
+
+
+
 // Systems Check - good to go or something else?
 const [systemModeSummary, setSystemModeSummary] = useState(null);
 const [systemModeLoading, setSystemModeLoading] = useState(false);
@@ -347,6 +397,7 @@ return (
 
   // Add asset picker
   const [addPickerVisible, setAddPickerVisible] = useState(false);
+  const [dismissKeeprProgress, setDismissKeeprProgress] = useState(false);
 
   const allAssets = useMemo(
     () => [...homesSorted, ...vehiclesSorted, ...boatsSorted],
@@ -611,6 +662,46 @@ return (
     ]);
   }, [goAddHome, goAddVehicle, goAddBoat]);
 
+   // Keepr Progress
+const handleKeeprProgressPress = useCallback(() => {
+  const next = keeprProgress?.nextStep;
+
+  if (next === "asset") {
+    openAddAssetPicker();
+    return;
+  }
+
+  if (next === "system" || next === "record" || next === "proof") {
+    const firstAsset =
+      homesSorted?.[0] || vehiclesSorted?.[0] || boatsSorted?.[0] || null;
+
+    if (!firstAsset?.id) {
+      openAddAssetPicker();
+      return;
+    }
+
+    const type =
+      homesSorted?.some((a) => a.id === firstAsset.id)
+        ? "home"
+        : vehiclesSorted?.some((a) => a.id === firstAsset.id)
+        ? "vehicle"
+        : "boat";
+
+    goStory(type, firstAsset);
+    return;
+  }
+
+  // fully complete
+  goProfile();
+}, [
+  keeprProgress,
+  openAddAssetPicker,
+  homesSorted,
+  vehiclesSorted,
+  boatsSorted,
+  goStory,
+  goProfile,
+]);
   /* ---- Reorder helpers ---- */
 
   const moveAsset = useCallback(
@@ -763,7 +854,7 @@ return (
             <View style={styles.headerWrap}>
               {isWide ? (
                 <View style={styles.headerWebRow}>
-                  {/* Left: identity + headlines + chips */}
+                  {/* Left: identity + headlines + chips + stable status */}
                   <View style={styles.headerLeft}>
                     <View style={styles.headerTopRow}>
                       <TouchableOpacity
@@ -797,17 +888,29 @@ return (
                       <WorldChip icon="car-outline" label="Garage" count={vehiclesSorted.length} onPress={goGarage} />
                       <WorldChip icon="boat-outline" label="Water" count={boatsSorted.length} onPress={goBoats} />
                     </ScrollView>
-                  </View>
 
-                  {/* Right: achievements */}
-                  <View style={styles.headerRight}>
-                    <View style={styles.headerRightCol}>
+                    <View style={styles.headerStableStack}>
                       <AchievementsCard
                         ach={ach}
                         loading={achLoading}
                         dashboardMode={dashboardMode}
                         onPress={goProfile}
                       />
+
+                      {!dismissKeeprProgress ? (
+                        <KeeprProgressCard
+                          progress={keeprProgress}
+                          loading={achLoading}
+                          onPress={handleKeeprProgressPress}
+                          onDismiss={keeprProgress?.complete ? () => setDismissKeeprProgress(true) : null}
+                        />
+                      ) : null}
+                    </View>
+                  </View>
+
+                  {/* Right: fluid attention / notifications */}
+                  <View style={styles.headerRight}>
+                    <View style={styles.headerRightCol}>
                       {renderSystemModeWidget()}
                     </View>
                   </View>
@@ -856,8 +959,24 @@ return (
                     <WorldChip icon="boat-outline" label="Water" count={boatsSorted.length} onPress={goBoats} />
                   </ScrollView>
 
+                  {!dismissKeeprProgress ? (
+                    <View style={{ marginTop: spacing.md }}>
+                      <KeeprProgressCard
+                        progress={keeprProgress}
+                        loading={achLoading}
+                        onPress={handleKeeprProgressPress}
+                        onDismiss={keeprProgress?.complete ? () => setDismissKeeprProgress(true) : null}
+                      />
+                    </View>
+                  ) : null}
+
                   <View style={{ marginTop: spacing.md }}>
-                    <AchievementsCard ach={ach} loading={achLoading} onPress={goProfile} />
+                    <AchievementsCard
+                      ach={ach}
+                      loading={achLoading}
+                      dashboardMode={dashboardMode}
+                      onPress={goProfile}
+                    />
                   </View>
 
                   {/* System modes (subtle) */}
@@ -1305,6 +1424,113 @@ function AchievementsCard({ ach, loading, dashboardMode, onPress }) {
   );
 }
 
+function KeeprProgressCard({ progress, loading, onPress, onDismiss }) {
+  return (
+    <TouchableOpacity
+      style={styles.progressCard}
+      activeOpacity={0.92}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel="View Keepr progress"
+    >
+      <View style={styles.progressTopRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.progressTitle}>
+            {progress?.complete ? "You’re a Keepr" : "Become a Keepr"}
+          </Text>
+          <Text style={styles.progressSub}>
+            {progress?.complete
+              ? "Your first ownership story is complete."
+              : "Follow the core workflow to build your first verified story."}
+          </Text>
+        </View>
+          {!progress?.complete && progress?.nextStepLabel && (
+            <View style={styles.progressNextRow}>
+              <View style={styles.progressNextBadge}>
+                <Text style={styles.progressNextBadgeText}>Next Step</Text>
+              </View>
+
+              <Text style={styles.progressNextAction}>
+                {progress.nextStepLabel}
+              </Text>
+            </View>
+          )}
+        <View style={styles.progressTopActions}>
+          {onDismiss ? (
+            <TouchableOpacity
+              onPress={onDismiss}
+              activeOpacity={0.85}
+              style={styles.progressDismissBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss Keepr progress"
+            >
+              <Ionicons name="close" size={14} color={colors.textMuted} />
+            </TouchableOpacity>
+          ) : null}
+          <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+        </View>
+      </View>
+
+      {loading ? (
+        <Text style={styles.progressMuted}>Loading…</Text>
+      ) : (
+        <View style={styles.progressStepsWrap}>
+          {progress?.steps?.map((step, index) => {
+            const isCurrent = !step.done && progress?.nextStep === step.key;
+
+            return (
+              <React.Fragment key={step.key}>
+                <View
+                  style={[
+                    styles.progressStepChip,
+                    step.done && styles.progressStepChipDone,
+                    isCurrent && styles.progressStepChipCurrent,
+                  ]}
+                >
+                  <Ionicons
+                    name={
+                      step.done
+                        ? "checkmark-circle"
+                        : isCurrent
+                        ? "radio-button-on"
+                        : "ellipse-outline"
+                    }
+                    size={14}
+                    color={
+                      step.done
+                        ? colors.brandBlue
+                        : isCurrent
+                        ? colors.textPrimary
+                        : colors.textMuted
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.progressStepText,
+                      step.done && styles.progressStepTextDone,
+                    ]}
+                  >
+                    {step.label}
+                  </Text>
+                </View>
+
+                {index < progress.steps.length - 1 ? (
+                  <Ionicons
+                    name="chevron-forward"
+                    size={14}
+                    color={colors.textMuted}
+                    style={{ marginHorizontal: 4 }}
+                  />
+                ) : null}
+              </React.Fragment>
+            );
+          })}
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+}
+
 function BackgroundWash() {
   return (
     <View pointerEvents="none" style={styles.bgWrap}>
@@ -1467,6 +1693,7 @@ headerWebRow: {
   headerRightRow: { flexDirection: "row", alignItems: "flex-start", gap: spacing.md },
   headerRightCol: { width: 420, maxWidth: "100%", gap: spacing.sm },
   headerTopRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.xs, marginBottom: spacing.sm },
+  headerStableStack: { marginTop: spacing.md, width: "100%", maxWidth: 640, gap: spacing.md },
   headerTextBlock: { flex: 1, minWidth: 0 },
   headerMobileTop: { flexDirection: "row", alignItems: "center", marginBottom: spacing.sm },
   header: {
@@ -1474,6 +1701,121 @@ headerWebRow: {
     marginBottom: 0,
     alignItems: "center",
   },
+  progressCard: {
+  width: "100%",
+  maxWidth: 640,
+  borderRadius: 18,
+  backgroundColor: "#FFFFFF",
+  borderWidth: 1,
+  borderColor: colors.borderSubtle,
+  paddingVertical: 12,
+  paddingHorizontal: 14,
+  ...cardStyles.shadowSoft,
+},
+progressNext: {
+  marginTop: 6,
+  fontSize: 12,
+  fontWeight: "700",
+  color: colors.brandBlue,
+},
+progressNextRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 8,
+  marginTop: 8,
+},
+
+progressNextBadge: {
+  backgroundColor: "rgba(45,125,227,0.12)",
+  borderRadius: 6,
+  paddingHorizontal: 6,
+  paddingVertical: 2,
+},
+
+progressNextBadgeText: {
+  fontSize: 10,
+  fontWeight: "800",
+  color: colors.brandBlue,
+  letterSpacing: 0.4,
+},
+
+progressNextAction: {
+  fontSize: 12,
+  fontWeight: "700",
+  color: colors.textPrimary,
+},
+progressTopRow: {
+  flexDirection: "row",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+  marginBottom: 8,
+},
+progressTopActions: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 8,
+  marginLeft: 12,
+},
+progressDismissBtn: {
+  width: 24,
+  height: 24,
+  borderRadius: 12,
+  alignItems: "center",
+  justifyContent: "center",
+  backgroundColor: "rgba(15,23,42,0.04)",
+  borderWidth: 1,
+  borderColor: colors.borderSubtle,
+},
+progressTitle: {
+  fontSize: 13,
+  fontWeight: "900",
+  color: colors.textPrimary,
+  letterSpacing: 0.2,
+},
+progressSub: {
+  marginTop: 4,
+  fontSize: 12,
+  color: colors.textMuted,
+  lineHeight: 17,
+},
+progressMuted: {
+  marginTop: 4,
+  fontSize: 12,
+  color: colors.textMuted,
+},
+progressStepsWrap: {
+  flexDirection: "row",
+  alignItems: "center",
+  flexWrap: "wrap",
+  marginTop: 2,
+},
+progressStepChip: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 6,
+  paddingHorizontal: 10,
+  paddingVertical: 7,
+  borderRadius: radius.pill,
+  backgroundColor: "#ffffff",
+  borderWidth: 1,
+  borderColor: colors.borderSubtle,
+},
+progressStepChipDone: {
+  backgroundColor: "rgba(45, 125, 227, 0.08)",
+  borderColor: "rgba(45, 125, 227, 0.22)",
+},
+progressStepChipCurrent: {
+  backgroundColor: "rgba(15,23,42,0.04)",
+  borderColor: colors.borderSubtle,
+},
+progressStepText: {
+  fontSize: 11,
+  fontWeight: "800",
+  color: colors.textSecondary,
+},
+progressStepTextDone: {
+  color: colors.textPrimary,
+},
   avatarBtn: {
     width: 44,
     height: 44,
