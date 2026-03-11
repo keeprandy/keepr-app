@@ -26,6 +26,9 @@ import { useAssets } from "../hooks/useAssets";
 import { supabase } from "../lib/supabaseClient";
 import { formatDateUS } from "../utils/format";
 import * as ImagePicker from "expo-image-picker";
+import KeeprProgressCard, {
+  buildKeeprProgressModel,
+} from "../components/KeeprProgressCard";
 
 // ✅ low-level upload helper (NOT a hook)
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
@@ -92,6 +95,9 @@ function TimelineFilterChip({ label, active, onPress }) {
 }
 // TEMP: Public QR test token (replace later with per-asset QR management)
 const PUBLIC_QR_TEST_TOKEN = "xMgfiowNQ6g0ovLjheBnnufFwsRwXS2YdW3_YXAuRU4";
+
+// TEMP: Status of Completion for an Asset)
+
 
 /* --------------------------- TIMELINE ROW --------------------------- */
 
@@ -195,6 +201,44 @@ export default function HomeStoryScreen({ navigation, route }) {
   route?.params?.assetId ??
   route?.params?.homeId ??
   null;
+  
+const loadAssetProgress = useCallback(async (assetId) => {
+  if (!assetId) {
+    setAssetProgress(null);
+    return;
+  }
+
+  try {
+    const { data, error } = await supabase.rpc("get_asset_keepr_progress", {
+      p_asset_id: assetId,
+    });
+
+    if (error) {
+      console.log("Asset progress load failed", error);
+      setAssetProgress(null);
+      return;
+    }
+
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row) {
+      setAssetProgress(null);
+      return;
+    }
+
+    const normalized = buildKeeprProgressModel({
+      mode: "asset",
+      assetCount: 1,
+      systemCount: row.system ? 1 : 0,
+      recordCount: row.record ? 1 : 0,
+      proofCount: row.proof ? 1 : 0,
+    });
+
+    setAssetProgress(normalized);
+  } catch (err) {
+    console.warn("Asset progress load failed", err);
+    setAssetProgress(null);
+  }
+}, []);
 
   const { assets: homes = [], loading, error } = useAssets("home");
 
@@ -213,6 +257,14 @@ export default function HomeStoryScreen({ navigation, route }) {
       setHomeSnapshot(currentHome || null);
     }, [currentHome?.id]);
 
+useEffect(() => {
+  if (home?.id) {
+    loadAssetProgress(home.id);
+  } else {
+    setAssetProgress(null);
+  }
+}, [home?.id, loadAssetProgress]);
+
   const refreshHome = useCallback(async () => {
     if (!home?.id) return;
     const { data, error } = await supabase
@@ -225,6 +277,14 @@ export default function HomeStoryScreen({ navigation, route }) {
   }, [home?.id]);
 
   const [reportsOpen, setReportsOpen] = useState(false);
+ const [assetProgress, setAssetProgress] = useState(null);
+
+useEffect(() => {
+  if (home?.id) {
+    loadAssetProgress(home.id);
+  }
+}, [home?.id]);
+
 
   // ✅ Persistent hero resolved from hero_placement_id
   const [heroUri, setHeroUri] = useState(null);
@@ -596,6 +656,32 @@ export default function HomeStoryScreen({ navigation, route }) {
       homeName: home.name || "Home",
     });
   };
+
+      const handleKeeprProgressPress = useCallback(
+  (step) => {
+    if (!home?.id) return;
+
+    if (step === "asset") {
+      return;
+    }
+
+    if (step === "system") {
+      goToHomeSystems();
+      return;
+    }
+
+    if (step === "record") {
+      goToAddTimelineRecord();
+      return;
+    }
+
+    if (step === "proof") {
+      goToAttachments();
+      return;
+    }
+  },
+  [home?.id, goToHomeSystems, goToAddTimelineRecord, goToAttachments]
+);
 
 const handleAddHome = () => {
   setHomePickerVisible(false);
@@ -1141,6 +1227,7 @@ const filteredTimelineItems = useMemo(() => {
             )}
           </View>
 
+          {/* Hero Meta Including Asset Completion Status */}
           <View style={[styles.heroMeta, isWide && styles.heroMetaWide]}>
             <Text style={styles.heroTitle} numberOfLines={1}>
               {homeName}
@@ -1202,6 +1289,21 @@ const filteredTimelineItems = useMemo(() => {
                   </View>
                 )}
               </View>
+            )}
+            {!!assetProgress && (
+            <View style={{ marginTop: spacing.md }}>
+              <KeeprProgressCard
+                mode="asset"
+                progress={assetProgress}
+                loading={false}
+                onPress={handleKeeprProgressPress}
+                onStepPress={(step) => {
+                  if (step === "system") goToHomeSystems();
+                  if (step === "record") goToAddTimelineRecord();
+                  if (step === "proof") goToAttachments();
+                }}
+              />
+            </View>
             )}
           </View>
         </View>
