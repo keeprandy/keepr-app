@@ -2562,35 +2562,36 @@ return (
               </View>
             </View>
 
-            {/* Right editor */}
-            
+            {/* Right editor */}  
             <View style={styles.rightCol}>
               <View style={styles.card}>
                 <View style={styles.cardHeaderRow}>
-                  <Text style={styles.cardTitle}>Attachments Role and Association</Text>          
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                    }}
+                  <Text style={styles.cardTitle}>Attachments Role and Association</Text>
+                </View>
+
+                <View
+                  style={{
+                    marginTop: 10,
+                    marginBottom: 10,
+                    flexDirection: "row",
+                    alignItems: "center",
+                  }}
+                >
+                  <TouchableOpacity
+                    onPress={removeFromThisAsset}
+                    disabled={loading || !selected}
+                    style={[
+                      styles.deleteBtnTop,
+                      (loading || !selected) && { opacity: 0.5 },
+                    ]}
                   >
-                    <TouchableOpacity
-                      onPress={removeFromThisAsset}
-                      disabled={loading || !selected}
-                      style={[
-                        styles.deleteBtnTop,
-                        (loading || !selected) && { opacity: 0.5 },
-                        { marginRight: 10 },
-                      ]}
-                    >
-                      <Ionicons
-                        name="remove-circle-outline"
-                        size={16}
-                        color="#fff"
-                      />
-                      <Text style={styles.deleteBtnTopText}>Remove</Text>
-                    </TouchableOpacity>
-                  </View>
+                    <Ionicons
+                      name="remove-circle-outline"
+                      size={16}
+                      color="#fff"
+                    />
+                    <Text style={styles.deleteBtnTopText}>Remove from Asset</Text>
+                  </TouchableOpacity>
                 </View>
 
                 {!selected ? (
@@ -2772,16 +2773,18 @@ return (
                                 {assocDisplayName(p) || p.target_id}
                               </Text>
                             </TouchableOpacity>
-                            <TouchableOpacity
-                              style={styles.assocRemoveBtn}
-                              onPress={() => removeAssociation(p.id)}
-                            >
-                              <Ionicons
-                                name="close-circle-outline"
-                                size={16}
-                                color={colors.textSecondary}
-                              />
-                            </TouchableOpacity>
+                            {p.target_type !== "asset" && (
+                              <TouchableOpacity
+                                style={styles.assocRemoveBtn}
+                                onPress={() => removeAssociation(p.id)}
+                              >
+                                <Ionicons
+                                  name="close-circle-outline"
+                                  size={16}
+                                  color={colors.textSecondary}
+                                />
+                              </TouchableOpacity>
+                            )}
                           </View>
                         ))}
                       </View>
@@ -3085,59 +3088,52 @@ return (
               </View>
             </View>
 
-            <View style={{height: mobilePaneHeight, marginTop: spacing.md}}>
-            <View style={styles.sectionBlock}></View>    
+              <View style={{ height: mobilePaneHeight, marginTop: spacing.md }}>
+              <View style={styles.sectionBlock}></View>
               <View style={[styles.card, { flex: 1 }]}>
                 <View style={styles.cardHeaderRow}>
                   <Text style={styles.cardTitle}>Attachments Role and Association</Text>
-
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                    }}
-                  >
-                  </View>
-                
-                {/* Remove Button Pushed to botton on mobile */}
-                      <TouchableOpacity
-                      onPress={removeFromThisAsset}
-                      disabled={loading || !selected}
-                      style={[
-                        styles.deleteBtnTop,
-                        (loading || !selected) && { opacity: 0.5 },
-                        { marginRight: 10 },
-                      ]}
-                    >
-                      <Ionicons
-                        name="remove-circle-outline"
-                        size={16}
-                        color="#fff"
-                      />
-                      <Text style={styles.deleteBtnTopText}>Remove</Text>
-                    </TouchableOpacity>
                 </View>
+
+                {/* Remove given its own line on mobile and web */}
+                <TouchableOpacity
+                  onPress={removeFromThisAsset}
+                  disabled={loading || !selected}
+                  style={[
+                    styles.deleteBtnTop,
+                    (loading || !selected) && { opacity: 0.5 },
+                    { marginTop: 10, marginBottom: 10, marginHorizontal: 12 },
+                  ]}
+                >
+                  <Ionicons
+                    name="remove-circle-outline"
+                    size={16}
+                    color="#fff"
+                  />
+                  <Text style={styles.deleteBtnTopText}>Remove from Asset</Text>
+                </TouchableOpacity>
+
                 <ScrollView
                   style={styles.contextScroll}
                   contentContainerStyle={styles.contextScrollContent}
                   keyboardShouldPersistTaps="handled"
                 >
-                {!selected ? (
-                  <View style={styles.noSelection}>
-                    <Ionicons
-                      name="information-circle-outline"
-                      size={22}
-                      color={colors.textSecondary}
-                    />
-                    <Text style={styles.noSelectionTitle}>
-                      Select an attachment
-                    </Text>
-                    <Text style={styles.noSelectionSub}>
-                      Pick an item to add Keepr context.
-                    </Text>
-                  </View>
-                ) : (
-                  <>
+                  {!selected ? (
+                    <View style={styles.noSelection}>
+                      <Ionicons
+                        name="information-circle-outline"
+                        size={22}
+                        color={colors.textSecondary}
+                      />
+                      <Text style={styles.noSelectionTitle}>
+                        Select an attachment
+                      </Text>
+                      <Text style={styles.noSelectionSub}>
+                        Pick an item to add Keepr context.
+                      </Text>
+                    </View>
+                  ) : (
+                    <>
 
                     {/* Role editor for this asset placement */}
                     <Text style={styles.label}>"What story role does this play in ownership?"</Text>
@@ -3299,16 +3295,18 @@ return (
                                 {assocDisplayName(p) || p.target_id}
                               </Text>
                             </TouchableOpacity>
-                            <TouchableOpacity
-                              style={styles.assocRemoveBtn}
-                              onPress={() => removeAssociation(p.id)}
-                            >
-                              <Ionicons
-                                name="close-circle-outline"
-                                size={16}
-                                color={colors.textSecondary}
-                              />
-                            </TouchableOpacity>
+                            {p.target_type !== "asset" && (
+                              <TouchableOpacity
+                                style={styles.assocRemoveBtn}
+                                onPress={() => removeAssociation(p.id)}
+                              >
+                                <Ionicons
+                                  name="close-circle-outline"
+                                  size={16}
+                                  color={colors.textSecondary}
+                                />
+                              </TouchableOpacity>
+                            )}
                           </View>
                         ))}
                       </View>

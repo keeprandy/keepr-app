@@ -608,6 +608,7 @@ const [loading, setLoading] = useState(true);
       const mime = attachment?.mime_type || attachment?.content_type || "";
       const isImg = isProbablyImage(mime);
 
+      console.log("ATT STORAGE PATH", attachment.storage_path);
       // Prefer a signed URL when we have a storage_path.
       let url = resolveAttachmentUrl(attachment);
       if (attachment?.storage_path) {
