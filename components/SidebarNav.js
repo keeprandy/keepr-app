@@ -94,14 +94,16 @@ function normalizeToSection(routeName) {
     return "Boats";
   }
 
-  if (
-    routeName === "Notifications" ||
-    routeName === "EventInbox" ||
-    routeName === "Inbox" ||
-    routeName === "Notification"
-  ) {
-    return "Notifications";
-  }
+if (
+  routeName === "Notifications" ||
+  routeName === "EventInbox" ||
+  routeName === "Inbox" ||
+  routeName === "Notification" ||
+  routeName?.includes("Inbox") ||
+  routeName?.includes("Notification")
+) {
+  return "Notifications";
+}
 
   if (routeName === "KeeprPros") return "KeeprPros";
   if (routeName === "Settings") return "Settings";
