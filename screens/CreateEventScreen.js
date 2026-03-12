@@ -28,6 +28,7 @@ import { colors, radius, shadows, spacing } from "../styles/theme";
 
 // Shared attachments engine
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
+import KeeprDateField from "../components/KeeprDateField";
 
 const EVENT_ATTACHMENTS_BUCKET = "asset-files";
 
@@ -45,39 +46,6 @@ const todayISO = () => {
   return `${yyyy}-${mm}-${dd}`;
 };
 
-const isoToUS = (iso) => {
-  if (!iso || typeof iso !== "string") return "";
-  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return "";
-  const mm = pad2(Number(m[2]));
-  const dd = pad2(Number(m[3]));
-  const yyyy = m[1];
-  return `${mm}/${dd}/${yyyy}`;
-};
-
-const usToISO = (us) => {
-  if (!us || typeof us !== "string") return null;
-  const m = us.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (!m) return null;
-
-  const mm = pad2(Number(m[1]));
-  const dd = pad2(Number(m[2]));
-  const yyyy = m[3];
-
-  const M = Number(mm);
-  const D = Number(dd);
-  const Y = Number(yyyy);
-
-  if (Y < 1900 || Y > 2100 || M < 1 || M > 12 || D < 1 || D > 31) return null;
-  return `${yyyy}-${mm}-${dd}`;
-};
-
-const normalizeDateInputToISO = (s) => {
-  const v = String(s || "").trim();
-  if (!v) return null;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
-  return usToISO(v);
-};
 
 /* ------------------------------------------------------------------ */
 /* Money helpers                                                      */
@@ -202,7 +170,6 @@ export default function CreateEventScreen({ navigation, route }) {
   const [notes, setNotes] = useState(contextNotes);
 
   const [occurredAtISO, setOccurredAtISO] = useState(todayISO());
-  const [occurredAtText, setOccurredAtText] = useState(isoToUS(todayISO()));
   const [amountDollars, setAmountDollars] = useState("");
 
   const [assetName, setAssetName] = useState("");
@@ -254,8 +221,7 @@ export default function CreateEventScreen({ navigation, route }) {
       setNotes(ev?.notes || "");
 
       const iso = ev?.occurred_at || todayISO();
-      setOccurredAtISO(iso);
-      setOccurredAtText(isoToUS(iso));
+      setOccurredAtISO((iso || "").slice(0, 10));
 
       setAmountDollars(centsToDollars(ev?.amount_cents));
 
@@ -535,14 +501,13 @@ export default function CreateEventScreen({ navigation, route }) {
 
   const validate = useCallback(() => {
     if (!ownerId) return "Not signed in.";
-    const iso = normalizeDateInputToISO(occurredAtText);
-    if (!iso) return "Date must be MM/DD/YYYY (or YYYY-MM-DD).";
+    if (!occurredAtISO) return "Please select a date.";
     return null;
-  }, [ownerId, occurredAtText]);
+ }, [ownerId, occurredAtISO]);
 
   const upsertEventRow = useCallback(
     async ({ nextStatus }) => {
-      const iso = normalizeDateInputToISO(occurredAtText) || todayISO();
+      const iso = occurredAtISO || todayISO();
       const amount_cents = dollarsToCents(amountDollars);
 
       // Preserve existing context and extend with mode if provided
@@ -606,7 +571,7 @@ export default function CreateEventScreen({ navigation, route }) {
       eventId,
       title,
       notes,
-      occurredAtText,
+      occurredAtISO,
       amountDollars,
       assetId,
       systemId,
@@ -940,16 +905,9 @@ export default function CreateEventScreen({ navigation, route }) {
           <View style={styles.row}>
             <View style={[styles.card, { flex: 1 }]}>
               <Text style={styles.label}>Date</Text>
-              <TextInput
-                value={occurredAtText}
-                onChangeText={(t) => {
-                  setOccurredAtText(t);
-                  const iso = normalizeDateInputToISO(t);
-                  if (iso) setOccurredAtISO(iso);
-                }}
-                placeholder="MM/DD/YYYY"
-                placeholderTextColor={colors.textMuted}
-                style={styles.input}
+              <KeeprDateField
+                value={occurredAtISO}
+                onChange={setOccurredAtISO}
               />
               <Text style={styles.help}>
                 Stored as {occurredAtISO || "—"}

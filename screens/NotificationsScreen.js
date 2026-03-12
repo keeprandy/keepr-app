@@ -26,6 +26,17 @@ import { colors, spacing, radius, shadows } from "../styles/theme";
 
 /* --------------------------- helpers --------------------------- */
 
+function localDateKey(d) {
+  if (!d) return null;
+  const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return null;
+
+  const yyyy = dt.getFullYear();
+  const mm = String(dt.getMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 function formatDateTimeUS(d) {
   try {
     if (!d) return "";
@@ -335,18 +346,16 @@ const [loading, setLoading] = useState(true);
     });
   }, [reminders]);
 
-  const remindersByDate = useMemo(() => {
-    const map = {};
-    sortedReminders.forEach((r) => {
-      if (!r?.due_at) return;
-      const d = new Date(r.due_at);
-      if (Number.isNaN(d.getTime())) return;
-      const key = d.toISOString().slice(0, 10); // YYYY-MM-DD
-      if (!map[key]) map[key] = [];
-      map[key].push(r);
-    });
-    return map;
-  }, [sortedReminders]);
+const remindersByDate = useMemo(() => {
+  const map = {};
+  sortedReminders.forEach((r) => {
+    const key = localDateKey(r?.due_at);
+    if (!key) return;
+    if (!map[key]) map[key] = [];
+    map[key].push(r);
+  });
+  return map;
+}, [sortedReminders]);
 
   const reminderDateKeys = useMemo(
     () => Object.keys(remindersByDate).sort(),

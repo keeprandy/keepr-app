@@ -25,6 +25,7 @@ import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { layoutStyles } from "../styles/layout";
 import { colors, spacing, radius, shadows } from "../styles/theme";
+import KeeprDateField from "../components/KeeprDateField";
 
 /* ------------------------------------------------------------- */
 /* Date helpers                                                  */
@@ -38,38 +39,6 @@ const todayISO = () => {
   const mm = pad2(d.getMonth() + 1);
   const dd = pad2(d.getDate());
   return `${yyyy}-${mm}-${dd}`;
-};
-
-const isoToUS = (iso) => {
-  if (!iso || typeof iso !== "string") return "";
-  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return "";
-  const [, yyyy, mm, dd] = m;
-  return `${mm}/${dd}/${yyyy}`;
-};
-
-const usToISO = (us) => {
-  if (!us || typeof us !== "string") return null;
-  const m = us.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (!m) return null;
-
-  const mm = pad2(Number(m[1]));
-  const dd = pad2(Number(m[2]));
-  const yyyy = m[3];
-
-  const M = Number(mm);
-  const D = Number(dd);
-  const Y = Number(yyyy);
-
-  if (Y < 1900 || Y > 2100 || M < 1 || M > 12 || D < 1 || D > 31) return null;
-  return `${yyyy}-${mm}-${dd}`;
-};
-
-const normalizeDateInputToISO = (s) => {
-  const v = String(s || "").trim();
-  if (!v) return null;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
-  return usToISO(v);
 };
 
 /* ------------------------------------------------------------- */
@@ -105,7 +74,8 @@ export default function CreateReminderScreen({ navigation, route }) {
   const [notes, setNotes] = useState(prefill.notes || "");
 
   const [dueDateISO, setDueDateISO] = useState(initialISO);
-  const [dueDateText, setDueDateText] = useState(isoToUS(initialISO));
+  const [timeText, setTimeText] = useState("09:00");
+
   const [hasTime, setHasTime] = useState(
     typeof prefill.has_time === "boolean" ? prefill.has_time : true
   );
@@ -163,8 +133,8 @@ export default function CreateReminderScreen({ navigation, route }) {
         const iso = data.due_at
           ? new Date(data.due_at).toISOString().slice(0, 10)
           : todayISO();
+
         setDueDateISO(iso);
-        setDueDateText(isoToUS(iso));
 
         setHasTime(
           typeof data.has_time === "boolean" ? data.has_time : true
@@ -376,11 +346,10 @@ export default function CreateReminderScreen({ navigation, route }) {
       d.getDate()
     )}`;
     setDueDateISO(iso);
-    setDueDateText(isoToUS(iso));
   };
 
   const buildDueAtISO = () => {
-    const isoDate = normalizeDateInputToISO(dueDateText) || todayISO();
+    const isoDate = dueDateISO || todayISO();
     const [yyyy, mm, dd] = isoDate.split("-").map((x) => Number(x));
     const d = new Date();
     d.setFullYear(yyyy, mm - 1, dd);
@@ -394,18 +363,17 @@ export default function CreateReminderScreen({ navigation, route }) {
 
   /* ---------------------- save / validate ---------------------------- */
 
-  const canSave = useMemo(
-    () => !!title && !!ownerId && !!dueDateText,
-    [title, ownerId, dueDateText]
-  );
+const canSave = useMemo(
+  () => !!title && !!ownerId && !!dueDateISO,
+  [title, ownerId, dueDateISO]
+);
 
   const validate = useCallback(() => {
     if (!ownerId) return "Not signed in.";
-    const iso = normalizeDateInputToISO(dueDateText);
-    if (!iso) return "Date must be MM/DD/YYYY (or YYYY-MM-DD).";
+    if (!dueDateISO) return "Please select a date.";
     if (!title.trim()) return "Title is required.";
     return null;
-  }, [ownerId, dueDateText, title]);
+  }, [ownerId, dueDateISO, title]);
 
   const onSave = useCallback(
     async (nextStatus) => {
@@ -726,19 +694,24 @@ export default function CreateReminderScreen({ navigation, route }) {
           {/* When */}
           <View style={styles.card}>
             <Text style={styles.label}>When</Text>
-            <TextInput
-              value={dueDateText}
-              onChangeText={(t) => {
-                setDueDateText(t);
-                const iso = normalizeDateInputToISO(t);
-                if (iso) setDueDateISO(iso);
-              }}
-              placeholder="MM/DD/YYYY"
-              placeholderTextColor={colors.textMuted}
-              style={styles.input}
+            <KeeprDateField
+              value={dueDateISO}
+              onChange={setDueDateISO}
             />
-          <Text style={styles.help}>Stored as {dueDateISO || "—"}</Text>
-
+            <Text style={styles.help}>Stored as {dueDateISO || "—"}</Text>
+            {hasTime ? (
+            <>
+              <Text style={styles.label}>Time</Text>
+              <TextInput
+                value={timeText}
+                onChangeText={setTimeText}
+                placeholder="08:00"
+                placeholderTextColor={colors.textMuted}
+                style={styles.input}
+              />
+              <Text style={styles.help}>Use 24-hour time, e.g. 08:00 or 17:30</Text>
+            </>
+          ) : null}
             <View style={styles.chipRow}>
               <TouchableOpacity
                 style={styles.chip}
