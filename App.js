@@ -18,6 +18,10 @@ import OnboardingChooseAssetTypeScreen from "./screens/onboarding/OnboardingChoo
 import OnboardingNarrative1Screen from "./screens/onboarding/OnboardingNarrative1Screen";
 import OnboardingNarrative2Screen from "./screens/onboarding/OnboardingNarrative2Screen";
 import OnboardingNarrative3Screen from "./screens/onboarding/OnboardingNarrative3Screen";
+import KaiWelcomeScreen from "./screens/KaiWelcomeScreen";
+import KaiOnboardingScreen from "./screens/KaiOnboardingScreen";
+
+
 // Billing / Team
 import PlanUpgradeScreen from "./screens/PlanUpgradeScreen";
 import TeamScreen from "./screens/TeamScreen";
@@ -222,11 +226,19 @@ function HomeStack() {
 }
 function OnboardingStack() {
   return (
-    <RootStack.Navigator screenOptions={{ headerShown: false }}>
+    <RootStack.Navigator
+      screenOptions={{ headerShown: false }}
+      initialRouteName="KaiWelcome"
+    >
+      <RootStack.Screen name="KaiWelcome" component={KaiWelcomeScreen} />
       <RootStack.Screen name="Onboarding1" component={OnboardingNarrative1Screen} />
       <RootStack.Screen name="Onboarding2" component={OnboardingNarrative2Screen} />
       <RootStack.Screen name="Onboarding3" component={OnboardingNarrative3Screen} />
-      <RootStack.Screen name="OnboardingChooseAssetType" component={OnboardingChooseAssetTypeScreen} />
+      <RootStack.Screen name="KaiOnboarding" component={KaiOnboardingScreen} />
+      <RootStack.Screen
+        name="OnboardingChooseAssetType"
+        component={OnboardingChooseAssetTypeScreen}
+      />
     </RootStack.Navigator>
   );
 }
@@ -812,6 +824,8 @@ const initialRouteName =
             component={AddAssetChatScreen}
             options={{ headerShown: false }}
           />
+          <RootStack.Screen name="KaiWelcome" component={KaiWelcomeScreen} />
+          <RootStack.Screen name="KaiOnboarding" component={KaiOnboardingScreen} />
 
           {/* Vehicles */}
           <RootStack.Screen name="Garage" component={GarageScreen} />

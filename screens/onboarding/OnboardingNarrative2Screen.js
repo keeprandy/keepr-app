@@ -4,6 +4,7 @@ import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { supabase } from "../../lib/supabaseClient";
 import { navigationRef } from "../../navigationRoot";
+import KaiOrb from "../../components/KaiOrb";
 
 async function dismissOnboarding() {
   const { data } = await supabase.auth.getUser();
@@ -33,6 +34,15 @@ export default function OnboardingNarrative2Screen() {
     <SafeAreaView style={styles.screen}>
       <View style={styles.container}>
         <View style={styles.card}>
+            <View style={styles.kaiGuideWrap}>
+            <KaiOrb size={88} variant="compact" rotate={false} />
+            <View style={styles.kaiGuideTextWrap}>
+              <Text style={styles.kaiGuideLabel}>Kai</Text>
+              <Text style={styles.kaiGuideSub}>
+                I’ll walk you through how Keepr™ works.
+              </Text>
+            </View>
+          </View>
           <Text style={styles.h1}>How Keepr™ works: 4 Basics</Text>
 
           <View style={styles.row}>
@@ -118,4 +128,28 @@ const styles = StyleSheet.create({
   secondaryBtnText: { color: "#111827", fontWeight: "900", fontSize: 15 },
   skipWrap: { marginTop: 16, alignItems: "center" },
   skipText: { color: "#6B7280", fontSize: 13, fontWeight: "700" },
+
+  kaiGuideWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 14,
+  },
+
+  kaiGuideTextWrap: {
+    marginLeft: 12,
+    flex: 1,
+  },
+
+  kaiGuideLabel: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#111827",
+  },
+
+  kaiGuideSub: {
+    marginTop: 2,
+    fontSize: 13,
+    lineHeight: 18,
+    color: "#6B7280",
+  },
 });

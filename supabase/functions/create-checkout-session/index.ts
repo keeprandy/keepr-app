@@ -92,8 +92,8 @@ Deno.serve(async (req) => {
         metadata: { user_id: user.id, plan, cycle },
       },
       line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${siteUrl}/?billing=success`,
-      cancel_url: `${siteUrl}/?billing=cancel`,
+      success_url: `${siteUrl}/PlanUpgrade?success=true&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${siteUrl}/PlanUpgrade?canceled=true`,
       allow_promotion_codes: false,
     });
 

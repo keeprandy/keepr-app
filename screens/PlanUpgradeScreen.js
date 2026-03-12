@@ -19,7 +19,7 @@ import { supabase } from "../lib/supabaseClient";
 const PLAN_LIMITS = {
   free: {
     assets: 3,
-    systems: "5 per asset",
+    systems: "15 per asset",
     storage: "100MB",
     teamMembers: "Just you",
     reports: "Basic",
@@ -80,16 +80,18 @@ export default function PlanUpgradeScreen({ navigation }) {
   const [billingCycle, setBillingCycle] = useState(null);
   const [cycle, setCycle] = useState("yearly");
   const [teamContext, setTeamContext] = useState({ isOwner: false, isMember: false, orgName: null, orgId: null });
+  const [checkoutModalVisible, setCheckoutModalVisible] = useState(false);
+  const [pendingPlan, setPendingPlan] = useState(null);
 
   const teamLift = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.timing(teamLift, {
-     toValue: (teamContext?.isOwner || String(plan || "free").toLowerCase() === "team") ? 1 : 0,
+      toValue: (teamContext?.isOwner || String(plan || "free").toLowerCase() === "team") ? 1 : 0,
       duration: 180,
       useNativeDriver: true,
     }).start();
-  }, [plan, teamLift]);
+  }, [plan, teamLift, teamContext?.isOwner]);
 
   useEffect(() => {
     let isMounted = true;
@@ -116,12 +118,9 @@ export default function PlanUpgradeScreen({ navigation }) {
         setBillingCycle(prof.billing_cycle || null);
       }
 
-      // Team context (owner vs member) – used only for labeling and CTAs.
-      // Server-side enforcement remains authoritative.
       if (isMounted) {
         let ctx = { isOwner: false, isMember: false, orgName: null, orgId: null };
 
-        // Owner?
         const { data: ownedOrg } = await supabase
           .from("orgs")
           .select("id, display_name, name")
@@ -138,7 +137,6 @@ export default function PlanUpgradeScreen({ navigation }) {
             orgName: ownedOrg.display_name || ownedOrg.name || null,
           };
         } else {
-          // Member?
           const { data: mem } = await supabase
             .from("org_members")
             .select("org_id, created_at")
@@ -179,18 +177,14 @@ export default function PlanUpgradeScreen({ navigation }) {
 
   const pricing = PRICES[cycle];
 
-const normalizedPlan = String(plan || "free").toLowerCase();
+  const normalizedPlan = String(plan || "free").toLowerCase();
+  const effectivePlan = teamContext?.isOwner ? "team" : normalizedPlan;
 
-// If you're a team owner, treat you as Team for UI purposes even if profile.plan is behind.
-const effectivePlan = teamContext?.isOwner ? "team" : normalizedPlan;
+  const isOnFree = effectivePlan === "free";
+  const isOnPlus = effectivePlan === "plus";
+  const isOnTeam = effectivePlan === "team";
 
-const isOnFree = effectivePlan === "free";
-const isOnPlus = effectivePlan === "plus";
-const isOnTeam = effectivePlan === "team";
-
-const isTeamOwner = !!teamContext?.isOwner;
-  const isTeamMember = !!teamContext?.isMember;
-  const orgLabel = teamContext?.orgName || "a team";
+  const isTeamOwner = !!teamContext?.isOwner;
 
   const currentPlanLabel = useMemo(() => {
     if (loading) return "Loading…";
@@ -199,17 +193,16 @@ const isTeamOwner = !!teamContext?.isOwner;
     const isMember = !!teamContext?.isMember;
     const orgName = teamContext?.orgName || "a team";
 
-    // Team membership can exist even if profile.plan is "free" (payer is the team owner).
     if (isOwner) return "Team Owner";
     if (isMember) return `Team Member (${orgName})`;
 
     const p = effectivePlan;
-    
+
     if (p === "free") return "Starter";
     if (p === "plus") return "Plus";
     if (p === "team") return "Team Owner";
     return p.charAt(0).toUpperCase() + p.slice(1);
-  }, [loading, plan, teamContext]);
+  }, [loading, effectivePlan, teamContext]);
 
   const openUrl = (url) => {
     if (!url) return;
@@ -217,8 +210,6 @@ const isTeamOwner = !!teamContext?.isOwner;
       window.location.assign(url);
       return;
     }
-    // native
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { Linking } = require("react-native");
     Linking.openURL(url);
   };
@@ -248,6 +239,16 @@ const isTeamOwner = !!teamContext?.isOwner;
     }
   };
 
+  const handleUpgrade = (planKey) => {
+    setPendingPlan(planKey);
+    setCheckoutModalVisible(true);
+  };
+
+  const pendingPlanLabel = useMemo(() => {
+    if (pendingPlan === "plus") return "Keepr Plus";
+    if (pendingPlan === "team") return "Keepr Team Owner";
+    return "Keepr";
+  }, [pendingPlan]);
 
   const PlanButton = ({ title, disabled, onPress, variant }) => {
     const isPrimary = variant === "primary";
@@ -342,15 +343,9 @@ const isTeamOwner = !!teamContext?.isOwner;
   };
 
   const getCellValue = (tier, row) => {
-    if (row.type === "boolStatic") {
-      return row[tier];
-    }
-    if (row.type === "bool") {
-      return !!PLAN_LIMITS?.[tier]?.[row.key];
-    }
-    if (row.type === "limit" || row.type === "text") {
-      return PLAN_LIMITS?.[tier]?.[row.key];
-    }
+    if (row.type === "boolStatic") return row[tier];
+    if (row.type === "bool") return !!PLAN_LIMITS?.[tier]?.[row.key];
+    if (row.type === "limit" || row.type === "text") return PLAN_LIMITS?.[tier]?.[row.key];
     return null;
   };
 
@@ -438,28 +433,27 @@ const isTeamOwner = !!teamContext?.isOwner;
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        
-      {teamContext?.isMember && !teamContext?.isOwner && (
-        <View style={styles.teamMemberNote}>
-          <Ionicons name="people-outline" size={16} color="#374151" />
-          <Text style={styles.teamMemberNoteText}>
-            You’re a Team Member{teamContext?.orgName ? ` of ${teamContext.orgName}` : ""}. You can still upgrade your personal plan.
-          </Text>
-        </View>
-      )}
+        {teamContext?.isMember && !teamContext?.isOwner && (
+          <View style={styles.teamMemberNote}>
+            <Ionicons name="people-outline" size={16} color="#374151" />
+            <Text style={styles.teamMemberNoteText}>
+              You’re a Team Member{teamContext?.orgName ? ` of ${teamContext.orgName}` : ""}. You can still upgrade your personal plan.
+            </Text>
+          </View>
+        )}
 
-<View style={styles.cardsRow}>
+        <View style={styles.cardsRow}>
           <Card
             tier="free"
             title="Starter"
             subtitle="Get organized. Stay calm."
             bullets={[
-            "1 User",
-            "3 assets",
-            "5 systems per asset",
-            "100MB storage",
-            "Commercial tagging",
-            "Basic inventory + cost tracking",
+              "1 User",
+              "3 assets",
+              "15 systems per asset",
+              "100MB storage",
+              "Commercial tagging",
+              "Basic inventory + cost tracking",
             ]}
           >
             {isOnFree && (
@@ -476,19 +470,19 @@ const isTeamOwner = !!teamContext?.isOwner;
             title="Plus"
             subtitle="For serious owners."
             bullets={[
-            "Single Owner Account",
-            "10 assets",
-            "Unlimited systems",
-            "2GB storage",
-            "Packages + warranty workflows",
-            "Commercial asset reporting",
-            "Export-ready reports",
+              "Single Owner Account",
+              "10 assets",
+              "Unlimited systems",
+              "2GB storage",
+              "Packages + warranty workflows",
+              "Commercial asset reporting",
+              "Export-ready reports",
             ]}
           >
             <PlanButton
               title={isOnPlus ? "Current plan" : "Upgrade to Plus"}
               disabled={isOnPlus || loading}
-              onPress={() => startCheckout("plus")}
+              onPress={() => handleUpgrade("plus")}
               variant={isOnPlus ? "secondary" : "primary"}
             />
           </Card>
@@ -498,15 +492,15 @@ const isTeamOwner = !!teamContext?.isOwner;
             title="Team Owner"
             subtitle="Run ownership as a team."
             bullets={[
-            "Multiple Users - We're a keepr Team!",
-            "20 assets",
-            "Unlimited systems",
-            "5GB storage",
-            "Up to 5 members",
-            "Shared visibility across assets",
-            "Managed-on-behalf-of workflows",
-            "Commercial + operational reporting",
-            "Ideal for families, partnerships, and property portfolios",
+              "Multiple Users - We're a keepr Team!",
+              "20 assets",
+              "Unlimited systems",
+              "5GB storage",
+              "Up to 5 members",
+              "Shared visibility across assets",
+              "Managed-on-behalf-of workflows",
+              "Commercial + operational reporting",
+              "Ideal for families, partnerships, and property portfolios",
             ]}
             badge="Most popular"
             elevated
@@ -527,12 +521,11 @@ const isTeamOwner = !!teamContext?.isOwner;
             <PlanButton
               title={isTeamOwner ? "Current plan" : "Upgrade to Team Owner"}
               disabled={isTeamOwner || loading}
-              onPress={() => startCheckout("team")}
+              onPress={() => handleUpgrade("team")}
               variant={isTeamOwner ? "secondary" : "primary"}
             />
           </Card>
         </View>
-
 
         <View style={styles.footerNote}>
           <Ionicons name="shield-checkmark-outline" size={16} color="#6B7280" />
@@ -550,6 +543,63 @@ const isTeamOwner = !!teamContext?.isOwner;
           </Text>
         </View>
       </ScrollView>
+
+      {checkoutModalVisible && (
+        <View style={styles.checkoutOverlay}>
+          <View style={styles.checkoutModal}>
+            <Ionicons name="lock-closed" size={28} color="#1e3a8a" />
+
+            <Text style={styles.checkoutTitle}>Secure Checkout</Text>
+
+            <Text style={styles.checkoutText}>
+              You are upgrading to <Text style={styles.inlineStrong}>{pendingPlanLabel}</Text>.
+            </Text>
+
+            <Text style={styles.checkoutText}>
+              Billing is processed securely by Stripe.
+            </Text>
+
+            <Text style={styles.checkoutSubtext}>
+              Your charge will appear as <Text style={styles.inlineStrong}>SeeYouThen, Inc.</Text>.
+            </Text>
+            <Text style={styles.checkoutSubtext}>
+              <Text style={styles.inlineStrong}>You'll return to Keepr immediately after checkout.</Text>.
+            </Text>
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.checkoutButton,
+                pressed && { opacity: 0.92 },
+              ]}
+              onPress={() => {
+                const selectedPlan = pendingPlan;
+                setCheckoutModalVisible(false);
+                if (selectedPlan) startCheckout(selectedPlan);
+              }}
+            >
+              <Text style={styles.checkoutButtonText}>
+                Continue to Secure Checkout
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.checkoutCancel,
+                pressed && { opacity: 0.8 },
+              ]}
+              onPress={() => {
+                setCheckoutModalVisible(false);
+                setPendingPlan(null);
+              }}
+            >
+              <Text style={styles.checkoutCancelText}>Cancel</Text>
+            </Pressable>
+              <Text style={styles.checkoutSubtext}>
+              <Text style={styles.inlineStrong}>Payments securely powered by Stripe.</Text>
+            </Text>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -734,7 +784,6 @@ const styles = StyleSheet.create({
   matrixBool: { height: 18, alignItems: "flex-start", justifyContent: "center" },
   matrixFootText: { fontSize: 12, color: "#6B7280", lineHeight: 16 },
 
-
   teamMemberNote: {
     flexDirection: "row",
     alignItems: "center",
@@ -764,4 +813,79 @@ const styles = StyleSheet.create({
 
   debugRow: { marginTop: 10, paddingHorizontal: 6 },
   debugText: { fontSize: 12, color: "#9CA3AF" },
+
+  checkoutOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(15, 23, 42, 0.38)",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 20,
+  },
+  checkoutModal: {
+    width: "100%",
+    maxWidth: 420,
+    backgroundColor: "#FFFFFF",
+    padding: 24,
+    borderRadius: 18,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    shadowColor: "#000",
+    shadowOpacity: 0.14,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
+  },
+  checkoutTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#111827",
+    marginTop: 8,
+  },
+  checkoutText: {
+    fontSize: 14,
+    textAlign: "center",
+    color: "#111827",
+    marginTop: 10,
+    lineHeight: 20,
+  },
+  checkoutSubtext: {
+    fontSize: 12,
+    color: "#6B7280",
+    marginTop: 8,
+    textAlign: "center",
+    lineHeight: 18,
+  },
+  inlineStrong: {
+    fontWeight: "800",
+    color: "#111827",
+  },
+  checkoutButton: {
+    marginTop: 18,
+    backgroundColor: "#0F172A",
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderRadius: 999,
+    minWidth: 250,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  checkoutButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "800",
+    fontSize: 14,
+  },
+  checkoutCancel: {
+    marginTop: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  checkoutCancelText: {
+    color: "#6B7280",
+    fontSize: 13,
+    fontWeight: "700",
+  },
 });
