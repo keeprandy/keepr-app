@@ -25,7 +25,7 @@ import { colors, radius, shadows, spacing, typography } from "../styles/theme";
 
 import marineKsc from "../data/marine_ksc.json";
 import { supabase } from "../lib/supabaseClient";
-import { formatDateUS } from "../utils/format";
+import { formatKeeprDate } from "../lib/dateFormat";
 
 const IS_WEB = Platform.OS === "web";
 const SYSTEMS_TABLE = "systems";
@@ -804,7 +804,7 @@ const BoatSystemsScreen = ({ route, navigation }) => {
     const hasRecords = !!meta;
 
     const countLabel = !meta ? "No records" : meta.count === 1 ? "1 record" : `${meta.count} records`;
-    const lastService = meta?.lastDate ? formatDateUS(meta.lastDate) : null;
+    const lastService = meta?.lastDate ? formatKeeprDate(meta.lastDate) : null;
 
     const playbookText = getPlaybookFromSystem(system);
     const hasPlaybook = !!(playbookText && playbookText.trim().length > 0);

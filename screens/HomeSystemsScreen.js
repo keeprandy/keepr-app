@@ -25,7 +25,7 @@ import { colors, radius, shadows, spacing, typography } from "../styles/theme";
 
 import homeKsc from "../data/home_ksc.json";
 import { supabase } from "../lib/supabaseClient";
-import { formatDateUS } from "../utils/format";
+import { formatKeeprDate } from "../lib/dateFormat";
 
 const IS_WEB = Platform.OS === "web";
 
@@ -1254,7 +1254,7 @@ const HomeSystemsScreen = ({ route, navigation }) => {
       ? "1 record"
       : `${meta.count} records`;
     const lastService = meta?.lastDate
-      ? formatDateUS(meta.lastDate)
+      ? formatKeeprDate(meta.lastDate)
       : null;
     const hasPlaybook = !!system.playbook;
     const draftEvent = draftBySystemId[system.id] || null;

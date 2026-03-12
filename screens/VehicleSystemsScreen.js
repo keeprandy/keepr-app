@@ -22,6 +22,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { supabase } from "../lib/supabaseClient";
 import { layoutStyles } from "../styles/layout";
 import { colors, radius, shadows, spacing, typography } from "../styles/theme";
+import { formatKeeprDate } from "../lib/dateFormat";
 
 const IS_WEB = Platform.OS === "web";
 const SYSTEMS_TABLE = "systems";
@@ -30,13 +31,6 @@ const EXT_TABLE = "vehicle_systems";
 // Web: RN Alert can be unreliable when a Modal is already visible (modal-within-modal).
 // Use a lightweight Modal for plan-limit + errors on web.
 const PLAN_LIMIT_TRIGGER = "plan_limit_systems_per_asset";
-
-function formatDateUS(isoDateOrTs) {
-  if (!isoDateOrTs) return null;
-  const d = new Date(isoDateOrTs);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-}
 
 
 const getDisplayName = (system) => {
@@ -613,7 +607,9 @@ const VehicleSystemsScreen = ({ route, navigation }) => {
   const renderSystemItem = ({ item: system }) => {
     const meta = timelineMeta[system.id];
     const countLabel = !meta ? "No entries" : meta.count === 1 ? "1 entry" : `${meta.count} entries`;
-    const lastEntry = meta?.lastDate ? formatDateUS(meta.lastDate) : null;
+    const lastEntry = meta?.lastDate
+  ? formatKeeprDate(String(meta.lastDate).slice(0, 10))
+  : null;
     const hasPlaybook = !!system.playbook;
 
     return (

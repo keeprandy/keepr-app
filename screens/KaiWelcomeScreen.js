@@ -36,13 +36,12 @@ organizes the story of the things you own.
             Guided setup in under a minute
           </Text>
         </Pressable>
-
         <Pressable
           style={({ pressed }) => [
             styles.secondaryCard,
             pressed && { opacity: 0.96 },
           ]}
-          onPress={() => navigation.navigate(standardOnboardingRoute)}
+          onPress={() => navigation.navigate("Onboarding1", { mode: "standard" })}
         >
           <Text style={styles.secondaryTitle}>Use standard onboarding</Text>
           <Text style={styles.secondarySub}>

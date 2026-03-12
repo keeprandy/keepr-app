@@ -77,12 +77,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#F5F6F8",
   },
 
-  container: {
-    flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 28,
-    paddingBottom: 28,
-  },
+container: { flex: 1, padding: 24, justifyContent: "center" },
+
   orbWrap: {
     alignItems: "center",
     marginBottom: 18,
@@ -118,9 +114,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     borderColor: "#E5E7EB",
-    paddingVertical: 28,
-    paddingHorizontal: 28,
-    maxWidth: 760,
+    padding: 22,
   },
 
   h1: {

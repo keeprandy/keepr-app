@@ -20,6 +20,7 @@ import { supabase } from "../lib/supabaseClient";
 import { useOperationFeedback } from "../context/OperationFeedbackContext";
 import { layoutStyles } from "../styles/layout";
 import { colors, radius, spacing } from "../styles/theme";
+import KeeprDateField from "../components/KeeprDateField";
 
 const IS_WEB = Platform.OS === "web";
 const SYSTEMS_TABLE = "systems";
@@ -79,16 +80,7 @@ function safeStr(v) {
   return typeof v === "string" ? v : v == null ? "" : String(v);
 }
 
-function toIsoDateOrNull(s) {
-  const raw = safeStr(s).trim();
-  if (!raw) return null;
-  const re = /^(\d{4})-(\d{2})-(\d{2})$/;
-  const m = raw.match(re);
-  if (!m) return null;
-  const d = new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00Z`);
-  if (Number.isNaN(d.getTime())) return null;
-  return `${m[1]}-${m[2]}-${m[3]}`;
-}
+
 
 function toNumberOrNull(s) {
   const raw = safeStr(s).trim();
@@ -313,15 +305,15 @@ export default function EditSystemEnrichmentScreen({ route, navigation }) {
         setModel(identity.model || "");
         setSerial(identity.serial_number || "");
         setYear(identity.year != null ? String(identity.year) : "");
-        setInstalledOn(identity.installed_on || "");
+        setInstalledOn((identity.installed_on || "").slice(0, 10));
         setInstalledBy(identity.installed_by || "");
         setLocation(identity.location || "");
         setNotes(identity.notes || "");
 
         setWProvider(warranty.provider || "");
         setWPolicy(warranty.policy_number || "");
-        setWStarts(warranty.starts_on || "");
-        setWExpires(warranty.expires_on || "");
+        setWStarts((warranty.starts_on || "").slice(0, 10));
+       setWExpires((warranty.expires_on || "").slice(0, 10));
         setWNotes(warranty.coverage_notes || "");
 
         setLastServiceBy(service.last_service_by || "");
@@ -475,23 +467,9 @@ export default function EditSystemEnrichmentScreen({ route, navigation }) {
   const save = async () => {
     if (!systemId || saving) return;
 
-    const inst = installedOn.trim() ? toIsoDateOrNull(installedOn) : null;
-    if (installedOn.trim() && !inst) {
-      Alert.alert("Invalid date", "Installed on must be YYYY-MM-DD.");
-      return;
-    }
-
-    const ws = wStarts.trim() ? toIsoDateOrNull(wStarts) : null;
-    if (wStarts.trim() && !ws) {
-      Alert.alert("Invalid date", "Warranty start must be YYYY-MM-DD.");
-      return;
-    }
-
-    const we = wExpires.trim() ? toIsoDateOrNull(wExpires) : null;
-    if (wExpires.trim() && !we) {
-      Alert.alert("Invalid date", "Warranty expires must be YYYY-MM-DD.");
-      return;
-    }
+    const inst = installedOn || null;
+    const ws = wStarts || null;
+    const we = wExpires || null;
 
     const extObj = validateExtended();
     if (extObj === null) return;
@@ -641,8 +619,13 @@ export default function EditSystemEnrichmentScreen({ route, navigation }) {
             <Field label="Model" value={model} onChange={setModel} placeholder="e.g., GPSMAP 8616" />
             <Field label="Serial number" value={serial} onChange={setSerial} placeholder="e.g., ABC123" />
             <Field label="Year" value={year} onChange={setYear} placeholder="e.g., 2021" keyboardType="numeric" />
-            <Field label="Installed on (YYYY-MM-DD)" value={installedOn} onChange={setInstalledOn} placeholder="2024-05-10" />
-            <Field label="Installed by" value={installedBy} onChange={setInstalledBy} placeholder="Vendor or person" />
+            <View style={styles.fieldRow}>
+              <Text style={styles.fieldLabel}>Installed on</Text>
+              <KeeprDateField
+                value={installedOn}
+                onChange={setInstalledOn}
+              />
+            </View>            <Field label="Installed by" value={installedBy} onChange={setInstalledBy} placeholder="Vendor or person" />
             <Field label="Location" value={location} onChange={setLocation} placeholder="Basement / Engine room / etc." />
             <Field
               label="Notes"
@@ -669,18 +652,20 @@ export default function EditSystemEnrichmentScreen({ route, navigation }) {
               placeholder="Manufacturer / 3rd party"
             />
             <Field label="Policy #" value={wPolicy} onChange={setWPolicy} placeholder="Optional" />
-            <Field
-              label="Starts (YYYY-MM-DD)"
-              value={wStarts}
-              onChange={setWStarts}
-              placeholder="2024-05-10"
-            />
-            <Field
-              label="Expires (YYYY-MM-DD)"
-              value={wExpires}
-              onChange={setWExpires}
-              placeholder="2027-05-10"
-            />
+            <View style={styles.fieldRow}>
+              <Text style={styles.fieldLabel}>Starts</Text>
+              <KeeprDateField
+                value={wStarts}
+                onChange={setWStarts}
+              />
+            </View>
+            <View style={styles.fieldRow}>
+              <Text style={styles.fieldLabel}>Expires</Text>
+              <KeeprDateField
+                value={wExpires}
+                onChange={setWExpires}
+              />
+            </View>
             <Field
               label="Coverage notes"
               value={wNotes}

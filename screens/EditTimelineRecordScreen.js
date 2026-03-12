@@ -26,11 +26,12 @@ import { normalizeUrl, openExternalUrl, tokenizeWithUrls } from "../components/l
 import { supabase } from "../lib/supabaseClient";
 import { layoutStyles } from "../styles/layout";
 import { colors, radius, shadows, spacing } from "../styles/theme";
-import { formatMMDDYYYY, toIsoDateOrEmpty, isValidDateInput } from "../utils/dateFormat";
+import { formatDateForInput } from "../lib/dateFormat";
 import { useOperationFeedback } from "../context/OperationFeedbackContext";
 
 import { getSignedUrl, listAttachmentsForTarget, removePlacementById } from "../lib/attachmentsApi";
 import { createLinkAttachment, uploadAttachmentFromUri } from "../lib/attachmentsUploader";
+import KeeprDateField from "../components/KeeprDateField";
 /* ---------------- helpers ---------------- */
 
 
@@ -274,7 +275,7 @@ const notesHasUrls = useMemo(() => {
 
       const st = rec.service_type || "moment";
       setServiceType(st === "diy" ? "diy" : st === "pro" ? "pro" : "moment");
-      setDate(formatMMDDYYYY(rec.performed_at));
+      setDate(rec.performed_at || "");
       setTitle(rec.title || "");
       setProvider(rec.provider || rec.vendor || rec.keepr_pro_name || ""); // FIX: don’t set provider from location
       setLocation(rec.location || "");
@@ -567,9 +568,9 @@ const notesHasUrls = useMemo(() => {
     Keyboard.dismiss();
     if (saving || !recordId) return;
 
-    const dateIso = toIsoDateOrEmpty(date);
+    const dateIso = date;
     if (!dateIso) {
-      showError("Invalid date. Use MM-DD-YYYY.");
+      showError("Please select a date.");
       return;
     }
 
@@ -753,17 +754,13 @@ const notesHasUrls = useMemo(() => {
                     placeholderTextColor={colors.textMuted}
                   />
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Date</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="MM-DD-YYYY"
-                    value={date}
-                    onChangeText={setDate}
-                    placeholderTextColor={colors.textMuted}
-                    keyboardType="numbers-and-punctuation"
-                  />
-                </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.label}>Date</Text>
+                <KeeprDateField
+                  value={date}
+                  onChange={setDate}
+                />
+              </View>
               </View>
 
               <View style={styles.row}>

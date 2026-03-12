@@ -24,7 +24,7 @@ import {
   spacing,
   typography,
 } from "../styles/theme";
-import { formatMMDDYYYY, toIsoDateOrEmpty } from "../utils/dateFormat";
+import KeeprDateField from "../components/KeeprDateField";
 
 /** ---------- Keepr input wrapper ---------- **/
 const KInput = (props) => {
@@ -61,7 +61,7 @@ export default function EditAssetScreen({ route, navigation }) {
   // Financial / dates
   const [purchasePrice, setPurchasePrice] = useState("");
   const [estimatedValue, setEstimatedValue] = useState("");
-  const [purchaseDate, setPurchaseDate] = useState(""); // MM-DD-YYYY
+  const [purchaseDate, setPurchaseDate] = useState(""); // ISO: YYYY-MM-DD
 
   // Home-specific metadata
   const [propertyType, setPropertyType] = useState("");
@@ -192,7 +192,7 @@ export default function EditAssetScreen({ route, navigation }) {
         setEstimatedValue(
           data.estimated_value != null ? String(data.estimated_value) : ""
         );
-        setPurchaseDate(formatMMDDYYYY(data.purchase_date));
+        setPurchaseDate(data.purchase_date || "");
 
         // Home
         setPropertyType(data.property_type || "");
@@ -277,10 +277,10 @@ export default function EditAssetScreen({ route, navigation }) {
     setSaving(true);
     setError(null);
 
-    const purchaseIso = toIsoDateOrEmpty(purchaseDate);
-    if (purchaseDate.trim() && !purchaseIso) {
+    const purchaseIso = purchaseDate;
+    if (purchaseDate && !purchaseIso) {
       setSaving(false);
-      setError("Purchase date must be MM-DD-YYYY.");
+      setError("Please select a purchase date.");
       return;
     }
 
@@ -597,15 +597,13 @@ export default function EditAssetScreen({ route, navigation }) {
                 placeholder="e.g. 1100000"
               />
             </View>
-
-            <View style={styles.field}>
-              <Text style={styles.fieldLabel}>Purchase date</Text>
-              <KInput
-                value={purchaseDate}
-                onChangeText={setPurchaseDate}
-                placeholder="MM-DD-YYYY"
-              />
-            </View>
+          <View style={styles.field}>
+            <Text style={styles.fieldLabel}>Purchase date</Text>
+            <KeeprDateField
+              value={purchaseDate}
+              onChange={setPurchaseDate}
+            />
+          </View>
           </View>
 
           {/* Home-specific section */}

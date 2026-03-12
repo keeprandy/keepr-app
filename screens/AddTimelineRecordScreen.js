@@ -23,59 +23,9 @@ import { tokenizeWithUrls } from "../components/links/linkUtils";
 import { supabase } from "../lib/supabaseClient";
 import { layoutStyles } from "../styles/layout";
 import { colors, radius, shadows, spacing } from "../styles/theme";
+import KeeprDateField from "../components/KeeprDateField";
 
 /* ---------------- helpers ---------------- */
-
-function getTodayISO() {
-  const now = new Date();
-  const yyyy = String(now.getFullYear());
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const dd = String(now.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-function isoToUS(iso) {
-  if (!iso) return "";
-  try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return "";
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    const yyyy = String(d.getFullYear());
-    return `${mm}/${dd}/${yyyy}`;
-  } catch {
-    return "";
-  }
-}
-
-function usToISO(value) {
-  const raw = String(value || "").trim();
-  if (!raw) return getTodayISO();
-
-  // accept MM/DD/YYYY or MM-DD-YYYY or YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-
-  const parts = raw.split(/[-/]/).map((p) => p.trim());
-  if (parts.length !== 3) return null;
-
-  let mm = parts[0], dd = parts[1], yyyy = parts[2];
-  if (mm.length === 4) {
-    yyyy = parts[0];
-    mm = parts[1];
-    dd = parts[2];
-  }
-
-  const m = Number(mm);
-  const d = Number(dd);
-  const y = Number(yyyy);
-  if (!Number.isInteger(m) || !Number.isInteger(d) || !Number.isInteger(y)) return null;
-  if (y < 1900 || y > 2100) return null;
-  if (m < 1 || m > 12) return null;
-  if (d < 1 || d > 31) return null;
-
-  return `${String(y)}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-}
-
 function safeMoney(raw) {
   if (raw == null) return null;
   const cleaned = String(raw).replace(/[^0-9.,-]/g, "");
@@ -84,6 +34,13 @@ function safeMoney(raw) {
   const n = Number(normalized);
   if (Number.isNaN(n)) return null;
   return n;
+}
+function getTodayISO() {
+  const now = new Date();
+  const yyyy = String(now.getFullYear());
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
 }
 
 function buildKeeprProLabel(row) {
@@ -163,7 +120,7 @@ export default function AddTimelineRecordScreen({ route, navigation }) {
   }, [backTo, origin]);
 
   const [serviceType, setServiceType] = useState("moment"); // moment | diy | pro
-  const [date, setDate] = useState(() => isoToUS(getTodayISO()));
+  const [date, setDate] = useState(() => getTodayISO());
   const [title, setTitle] = useState("");
   const [provider, setProvider] = useState("");
   const [location, setLocation] = useState("");
@@ -498,10 +455,10 @@ const notesHasUrls = useMemo(() => {
       return;
     }
 
-    const dateIso = usToISO(date);
+    const dateIso = date;
     if (!dateIso) {
       setSaving(false);
-      setSubmitError("Invalid date. Use MM/DD/YYYY.");
+      setSubmitError("Please select a date.");
       return;
     }
 
@@ -683,17 +640,13 @@ const notesHasUrls = useMemo(() => {
                     placeholderTextColor={colors.textMuted}
                   />
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Date</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="MM/DD/YYYY"
-                    value={date}
-                    onChangeText={setDate}
-                    placeholderTextColor={colors.textMuted}
-                    keyboardType="numbers-and-punctuation"
-                  />
-                </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.label}>Date</Text>
+                <KeeprDateField
+                  value={date}
+                  onChange={setDate}
+                />
+              </View>
               </View>
 
               <View style={styles.row}>

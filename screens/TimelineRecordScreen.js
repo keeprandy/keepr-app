@@ -29,6 +29,7 @@ import { colors, spacing, radius, typography, shadows } from "../styles/theme";
 import { supabase } from "../lib/supabaseClient";
 import AttachmentViewerModal from "../components/AttachmentViewerModal";
 import { confirmDestructive } from "../lib/confirm";
+import { formatKeeprDateWithWeekday } from "../lib/dateFormat";
 
 import {
   listAttachmentsForTarget,
@@ -68,15 +69,8 @@ function domainFromUrl(url) {
 }
 
 function formatDate(d) {
-  if (!d) return "";
-  const dt = typeof d === "string" ? new Date(d) : d;
-  if (Number.isNaN(dt.getTime())) return "";
-  return dt.toLocaleDateString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  if (!d || typeof d !== "string") return "";
+  return formatKeeprDateWithWeekday(d);
 }
 
 function money(v) {

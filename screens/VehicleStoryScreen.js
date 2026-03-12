@@ -31,7 +31,7 @@ import { colors, spacing, radius, typography, shadows } from "../styles/theme";
 
 import { useAssets } from "../hooks/useAssets";
 import { supabase } from "../lib/supabaseClient";
-import { formatDateUS } from "../utils/format";
+import { formatKeeprDate } from "../lib/dateFormat";
 
 import EventPill from "../components/EventPill";
 import { getSignedUrl } from "../lib/attachmentsApi";
@@ -1047,7 +1047,7 @@ const filteredTimelineItems = useMemo(() => {
                       </Text>
                     )}
                     {meta.purchased && (
-                      <Text style={styles.metaLine}>Purchased: {formatDateUS(meta.purchased)}</Text>
+                      <Text style={styles.metaLine}>Purchased: {formatKeeprDate(meta.purchased)}</Text>
                     )}
                   </View>
                 )}
@@ -1199,7 +1199,7 @@ const filteredTimelineItems = useMemo(() => {
           {!!filteredTimelineItems.length && (
             <View style={styles.timelineList}>
               {filteredTimelineItems.map((item) => {
-                const dateLabel = item.date ? formatDateUS(item.date) : "Date unknown";
+                const dateLabel = item.date ? formatKeeprDate(item.date) : "Date unknown";
                 const isService = item.kind === "service";
 
                 return (

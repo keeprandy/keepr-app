@@ -24,7 +24,7 @@ import { colors, radius, shadows, spacing, typography } from "../styles/theme";
 
 import { useAssets } from "../hooks/useAssets";
 import { supabase } from "../lib/supabaseClient";
-import { formatDateUS } from "../utils/format";
+import { formatKeeprDate } from "../lib/dateFormat";
 import * as ImagePicker from "expo-image-picker";
 import KeeprProgressCard, {
   buildKeeprProgressModel,
@@ -135,7 +135,7 @@ function TimelineRow({ item, onPress, hasAttachment }) {
             {item.title || (isService ? "Service visit" : "Story update")}
           </Text>
           <Text style={styles.timelineDate}>
-            {item.date ? formatDateUS(item.date) : ""}
+            {item.date ? formatKeeprDate(item.date) : ""}
           </Text>
         </View>
 
@@ -1268,7 +1268,7 @@ const filteredTimelineItems = useMemo(() => {
                   <View style={styles.metaTile}>
                     <Text style={styles.metaLabel}>Purchased</Text>
                     <Text style={styles.metaValue}>
-                      {formatDateUS(meta.purchaseDate)}
+                      {formatKeeprDate(meta.purchaseDate)}
                     </Text>
                   </View>
                 )}
