@@ -795,7 +795,6 @@ const isWide = IS_WEB && width >= 980;
       { id: "receipt", label: "Receipt" },
       { id: "invoice", label: "Invoice" },
       { id: "estimate_quote", label: "Estimate / Quote" },
-      { id: "warranty", label: "Warranty" },
       { id: "service_report", label: "Service Report" },
       { id: "owners_manual", label: "Owner's Manual" },
       { id: "inspection", label: "Inspection" },

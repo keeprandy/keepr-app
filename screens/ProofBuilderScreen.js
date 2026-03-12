@@ -22,6 +22,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { getSignedUrl } from "../lib/attachmentsApi";
 import { supabase } from "../lib/supabaseClient";
 import { colors, radius, spacing } from "../styles/theme";
+import KeeprDateField from "../components/KeeprDateField";
+import { isoToMDY, mdyToISO } from "../lib/dateFormat";
 
 const IS_WEB = Platform.OS === "web";
 const PREVIEW_BUCKET_FALLBACK = "asset-files";
@@ -89,47 +91,53 @@ function shortId(id) {
   if (s.length <= 12) return s;
   return `${s.slice(0, 8)}…${s.slice(-4)}`;
 }
+function extractWarrantyDates(text = "") {
+  if (!text) return {};
 
-function toISODateMaybe(s) {
-  const v = safeStr(s).trim();
-  if (!v) return "";
-  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return "";
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
+  const patterns = {
+    start: [
+      /effective\s*date[:\s]*([0-9\/\-]+)/i,
+      /start\s*date[:\s]*([0-9\/\-]+)/i,
+      /coverage\s*begins[:\s]*([0-9\/\-]+)/i,
+    ],
+    end: [
+      /expiration\s*date[:\s]*([0-9\/\-]+)/i,
+      /expires[:\s]*([0-9\/\-]+)/i,
+      /coverage\s*ends[:\s]*([0-9\/\-]+)/i,
+    ],
+    provider: [
+      /provider[:\s]*([A-Za-z0-9 &]+)/i,
+      /administrator[:\s]*([A-Za-z0-9 &]+)/i,
+    ],
+    policy: [
+      /policy\s*(number|#)[:\s]*([A-Za-z0-9\-]+)/i,
+      /contract\s*(number|#)[:\s]*([A-Za-z0-9\-]+)/i,
+    ],
+  };
 
-function isoToUS(iso) {
-  const v = safeStr(iso).trim();
-  if (!v) return "";
-  const m = v.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return v;
-  return `${m[2]}/${m[3]}/${m[1]}`;
-}
+  const result = {};
 
-function usToISO(us) {
-  const v = safeStr(us).trim();
-  if (!v) return "";
-  // Accept MM/DD/YYYY or MM-DD-YYYY
-  const m = v.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-  if (m) {
-    const mm = String(parseInt(m[1], 10)).padStart(2, "0");
-    const dd = String(parseInt(m[2], 10)).padStart(2, "0");
-    const yyyy = m[3];
-    return `${yyyy}-${mm}-${dd}`;
+  for (const r of patterns.start) {
+    const m = text.match(r);
+    if (m) result.start = m[1];
   }
-  // If already ISO, return as-is
-  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
-  // Last resort parse
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return "";
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
+
+  for (const r of patterns.end) {
+    const m = text.match(r);
+    if (m) result.end = m[1];
+  }
+
+  for (const r of patterns.provider) {
+    const m = text.match(r);
+    if (m) result.provider = m[1];
+  }
+
+  for (const r of patterns.policy) {
+    const m = text.match(r);
+    if (m) result.policy = m[2] || m[1];
+  }
+
+  return result;
 }
 
 export default function ProofBuilderScreen({ route, navigation }) {
@@ -273,22 +281,51 @@ export default function ProofBuilderScreen({ route, navigation }) {
   );
 
 // Resolve the user's personal org (Org-of-1). Used for object creation/linking.
-  const resolveOrgId = useCallback(async () => {
-    const { data: u, error: uErr } = await supabase.auth.getUser();
-    if (uErr) throw new Error(uErr.message || "Could not resolve user");
-    const userId = u?.user?.id;
-    if (!userId) throw new Error("Missing user");
+const resolveOrgId = useCallback(async () => {
+  const { data: u, error: uErr } = await supabase.auth.getUser();
+  if (uErr) throw new Error(uErr.message || "Could not resolve user");
 
-    const { data: org, error } = await supabase
-      .from("orgs")
-      .select("id")
-      .eq("org_type", "personal")
-      .eq("owner_user_id", userId)
-      .maybeSingle();
+  const userId = u?.user?.id;
+  if (!userId) throw new Error("Missing user");
 
-    if (error) throw new Error(error.message || "Could not resolve personal org");
-    return org?.id || null;
-  }, []);
+  // Prefer personal org
+  const { data: personalOrg, error: personalErr } = await supabase
+    .from("orgs")
+    .select("id, org_type")
+    .eq("owner_user_id", userId)
+    .eq("org_type", "personal")
+    .maybeSingle();
+
+  if (personalErr) throw new Error(personalErr.message || "Could not resolve personal org");
+
+  if (personalOrg?.id) {
+    console.log("[ProofBuilder] resolveOrgId", {
+      userId,
+      orgId: personalOrg.id,
+      orgType: personalOrg.org_type,
+    });
+    return personalOrg.id;
+  }
+
+  // Fallback to any owned org (team, etc.)
+  const { data: fallbackOrg, error: fallbackErr } = await supabase
+    .from("orgs")
+    .select("id, org_type")
+    .eq("owner_user_id", userId)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (fallbackErr) throw new Error(fallbackErr.message || "Could not resolve fallback org");
+
+  console.log("[ProofBuilder] resolveOrgId", {
+    userId,
+    orgId: fallbackOrg?.id || null,
+    orgType: fallbackOrg?.org_type || null,
+  });
+
+  return fallbackOrg?.id || null;
+}, []);
 
   const hydrateFromDb = useCallback(async () => {
     if (!attachmentId) {
@@ -314,6 +351,22 @@ export default function ProofBuilderScreen({ route, navigation }) {
       }
 
       setAttachment(att);
+
+      // Try to extract warranty info from attachment metadata / OCR text
+        const rawText =
+          att?.ai_metadata?.ocr_text ||
+          att?.ai_metadata?.extracted_text ||
+          "";
+
+        if (rawText && !warrantyObjectId) {
+          const inferred = extractWarrantyDates(rawText);
+
+          if (inferred.provider && !wProvider) setWProvider(inferred.provider);
+          if (inferred.policy && !wPolicy) setWPolicy(inferred.policy);
+
+          if (inferred.start && !wStarts) setWStarts(inferred.start);
+          if (inferred.end && !wExpires) setWExpires(inferred.end);
+        }
 
       // preview url
       setPreviewLoading(true);
@@ -387,8 +440,8 @@ export default function ProofBuilderScreen({ route, navigation }) {
         setWProvider(safeStr(d.provider_name));
         setWPolicy(safeStr(d.policy_number || d.contract_number));
         // Store dates in US format for editing, save as ISO
-        setWStarts(isoToUS(safeStr(d.start_date || d.effective_date)));
-        setWExpires(isoToUS(safeStr(d.end_date || d.expiration_date)));
+setWStarts(isoToMDY(safeStr(d.start_date || d.effective_date)));
+setWExpires(isoToMDY(safeStr(d.end_date || d.expiration_date)));
         setWCoverageNotes(safeStr(d.coverage_notes || d.notes));
         setWarrantySavedAt(wObj.updated_at ? String(wObj.updated_at) : "");
       } else {
@@ -516,8 +569,8 @@ export default function ProofBuilderScreen({ route, navigation }) {
         attachment_id: attachmentId,
         provider_name: wProvider || "",
         policy_number: wPolicy || "",
-        start_date: usToISO(wStarts) || "",
-        end_date: usToISO(wExpires) || "",
+        start_date: mdyToISO(wStarts) || "",
+        end_date: mdyToISO(wExpires) || "",
         coverage_notes: wCoverageNotes || "",
       };
 
@@ -624,8 +677,15 @@ export default function ProofBuilderScreen({ route, navigation }) {
   const saveAll = useCallback(async () => {
     if (!attachment) return;
     const effectiveOrgId = orgId;
+    console.log("[ProofBuilder] saveAll org check", {
+  orgId,
+  assetId,
+  attachmentId,
+  roleValue,
+  isWarranty,
+});
     if (!effectiveOrgId && isWarranty) {
-      Alert.alert("Save", "This asset isn't linked to an org yet. Warranty objects require an org.");
+      Alert.alert("Save", "Your account does not have a personal org record yet. Warranty objects require one.");
       return;
     }
 
@@ -843,24 +903,18 @@ export default function ProofBuilderScreen({ route, navigation }) {
 
             <View style={{ flexDirection: isWide ? "row" : "column", gap: 10 }}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.fieldLabel}>Starts (MM/DD/YYYY)</Text>
-                <TextInput
-                  value={wStarts}
-                  onChangeText={setWStarts}
-                  placeholder="MM/DD/YYYY"
-                  placeholderTextColor={colors.textMuted}
-                  style={styles.input}
+                <Text style={styles.fieldLabel}>Start Date</Text>
+                <KeeprDateField
+                  value={mdyToISO(wStarts)}
+                  onChange={(iso) => setWStarts(isoToMDY(iso))}
                 />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.fieldLabel}>Expires (MM/DD/YYYY)</Text>
-                <TextInput
-                  value={wExpires}
-                  onChangeText={setWExpires}
-                  placeholder="MM/DD/YYYY"
-                  placeholderTextColor={colors.textMuted}
-                  style={styles.input}
-                />
+                <Text style={styles.fieldLabel}>Expiration Date</Text>
+              <KeeprDateField
+                value={mdyToISO(wExpires)}
+                onChange={(iso) => setWExpires(isoToMDY(iso))}
+              />
               </View>
             </View>
 

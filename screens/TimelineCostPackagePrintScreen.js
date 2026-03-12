@@ -10,6 +10,18 @@ import { exportToXlsx } from "../utils/exportPackageToXlsx";
  * - Uses only "detail" rows from package_rows (row.section === 'detail')
  * - Computes year totals client-side and renders a single table grouped by year.
  */
+
+function formatReportDate(value) {
+  const s = String(value || "").trim();
+  if (!s) return "";
+
+  const raw = s.slice(0, 10);
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return s;
+
+  const [, yyyy, mm, dd] = m;
+  return `${mm}/${dd}/${yyyy}`;
+}
 export default function TimelineCostPackagePrintScreen({ route, navigation }) {
   const packageId = route?.params?.packageId || null;
   const isWeb = Platform.OS === "web";
@@ -283,7 +295,7 @@ export default function TimelineCostPackagePrintScreen({ route, navigation }) {
                 {g.rows.map((r, idx) => (
                   <View key={`${g.year}-${r.performed_at}-${idx}`} style={styles.tr}>
                     <Text style={[styles.td, styles.colDate]} numberOfLines={1}>
-                      {r.performed_at || ""}
+                      {formatReportDate(r.performed_at)}
                     </Text>
                     <Text style={[styles.td, styles.colTitle]} numberOfLines={2}>
                       {r.title || ""}

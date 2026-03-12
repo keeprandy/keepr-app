@@ -42,26 +42,38 @@ export default function OwnerSystemsPackagePrintScreen({ route, navigation }) {
   const [pickForSystemId, setPickForSystemId] = useState(null);
 
   // ---------------------------
-  // Date helpers (DD-MM-YYYY UI)
+  // Date helpers (MM-DD-YYYY UI)
   // ---------------------------
   const pad2 = (n) => String(n).padStart(2, "0");
 
   const isIsoDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
   const isDdMmYyyy = (s) => /^\d{2}-\d{2}-\d{4}$/.test(String(s || "").trim());
 
-  const formatDDMMYYYY = (value) => {
-    const s = String(value || "").trim();
-    if (!s) return "";
-    if (isDdMmYyyy(s)) return s;
-    if (isIsoDate(s)) {
-      const [y, m, d] = s.split("-");
-      return `${d}-${m}-${y}`;
-    }
-    // Attempt to parse other date strings
-    const dt = new Date(s);
-    if (Number.isNaN(dt.getTime())) return s;
-    return `${pad2(dt.getDate())}-${pad2(dt.getMonth() + 1)}-${dt.getFullYear()}`;
-  };
+const formatDDMMYYYY = (value) => {
+  const s = String(value || "").trim();
+  if (!s) return "";
+
+  if (isDdMmYyyy(s)) {
+    const [d, m, y] = s.split("-");
+    return `${m}/${d}/${y}`;
+  }
+
+  if (isIsoDate(s)) {
+    const [y, m, d] = s.split("-");
+    return `${m}/${d}/${y}`;
+  }
+
+  const raw = s.slice(0, 10);
+  if (isIsoDate(raw)) {
+    const [y, m, d] = raw.split("-");
+    return `${m}/${d}/${y}`;
+  }
+
+  const dt = new Date(s);
+  if (Number.isNaN(dt.getTime())) return s;
+
+  return `${pad2(dt.getMonth() + 1)}/${pad2(dt.getDate())}/${dt.getFullYear()}`;
+};
 
   const toIsoDateOrEmpty = (value) => {
     const s = String(value || "").trim();
@@ -440,7 +452,7 @@ export default function OwnerSystemsPackagePrintScreen({ route, navigation }) {
           placeholderTextColor="#9aa0a6"
           style={[styles.input, value?.trim() ? null : styles.inputEmpty, invalid && styles.inputInvalid]}
         />
-        {invalid ? <Text style={styles.hintBad}>Use DD-MM-YYYY</Text> : null}
+        {invalid ? <Text style={styles.hintBad}>Use MM/DD/YYYY</Text> : null}
       </View>
     );
   };
@@ -590,9 +602,9 @@ export default function OwnerSystemsPackagePrintScreen({ route, navigation }) {
           <Text style={[styles.th, styles.colSerial]}>Serial</Text>
           <Text style={[styles.th, styles.colWarranty]}>Warranty</Text>
           <Text style={[styles.th, styles.colAssigned]}>Assigned</Text>
-          <Text style={[styles.th, styles.colLast]}>Last</Text>
-          <Text style={[styles.th, styles.colNum]}>Svc</Text>
-          <Text style={[styles.th, styles.colNum]}>Proof</Text>
+          <Text style={[styles.th, styles.colLast]}>Last Service</Text>
+          <Text style={[styles.th, styles.colNum]}>Services</Text>
+          <Text style={[styles.th, styles.colNum]}>Proofs</Text>
         </View>
 
         {computed.items.map((r, idx) => {
@@ -798,7 +810,7 @@ const styles = StyleSheet.create({
   colWarranty: { flex: 0.9, paddingRight: 10 },
   colAssigned: { flex: 1.1, paddingRight: 10 },
   colLast: { flex: 0.8, paddingRight: 10 },
-  colNum: { flex: 0.5 },
+  colNum: { flex: 0.7 },
 
   input: {
     borderWidth: 1,
