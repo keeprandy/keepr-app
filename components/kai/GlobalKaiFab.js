@@ -181,28 +181,37 @@ useEffect(() => {
 
   let active = true;
 
-  const loadNotes = async () => {
-    setLoadingNotes(true);
+const loadNotes = async () => {
+  setLoadingNotes(true);
 
-    const { data, error } = await supabase
-      .from("loose_notes")
-      .select(
-  "id, note, created_at, updated_at, route_context, created_from_route, asset_id, asset_name, system_id, system_name"
-)
-      .eq("route_context", "kai_global")
-      .order("updated_at", { ascending: false });
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-    if (!active) return;
-
-    if (error) {
-      console.log("Kai notes load error:", error.message);
-      setNotes([]);
-    } else {
-      setNotes(data || []);
-    }
-
+  if (!user?.id) {
+    setNotes([]);
     setLoadingNotes(false);
-  };
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from("loose_notes")
+    .select(
+      "id, note, created_at, updated_at, route_context, created_from_route, asset_id, asset_name, system_id, system_name"
+    )
+    .eq("user_id", user.id)
+    .eq("route_context", "kai_global")
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    console.log("Kai notes load error:", error.message);
+    setNotes([]);
+  } else {
+    setNotes(data || []);
+  }
+
+  setLoadingNotes(false);
+};
 
   loadNotes();
 
