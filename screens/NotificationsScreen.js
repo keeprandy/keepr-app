@@ -1211,7 +1211,7 @@ const remindersByDate = useMemo(() => {
         </TouchableOpacity>
 
         <View style={styles.headerTextWrap}>
-          <Text style={styles.title}>Notifications & Inbox</Text>
+          <Text style={styles.title}>Notifications, Reminders, and Events Inbox</Text>
           <Text style={styles.subtitle}>
             Transfer requests, reminders, and quick-capture events all land
             here. This is your staging area before moments become part of a

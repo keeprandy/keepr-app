@@ -21,6 +21,9 @@ import OnboardingNarrative3Screen from "./screens/onboarding/OnboardingNarrative
 import KaiWelcomeScreen from "./screens/KaiWelcomeScreen";
 import KaiOnboardingScreen from "./screens/KaiOnboardingScreen";
 
+// KAI Orb Everywhere
+import GlobalKaiFab from "./components/kai/GlobalKaiFab";
+import { KaiProvider } from "./context/KaiContext";
 
 // Billing / Team
 import PlanUpgradeScreen from "./screens/PlanUpgradeScreen";
@@ -159,6 +162,8 @@ const Tab = createBottomTabNavigator();
 const RootStack = createNativeStackNavigator();
 const SuperKeeprStackNav = createNativeStackNavigator();
 const HomeStackNav = createNativeStackNavigator();
+
+
 
 /* ---------------- DEEP LINKING ----------------- */
 
@@ -385,10 +390,16 @@ const navTheme = {
   },
 };
 
-/* ----------------- GLOBAL EVENT FAB ----------------- */
+/* ----------------- GLOBAL KAI FAB ----------------- */
 
-function GlobalEventFab() {
-  return null;
+function GlobalEventFab({ currentRouteName, role, kaiContext }) {
+  return (
+    <GlobalKaiFab
+      currentRouteName={currentRouteName}
+      role={role}
+      kaiContext={kaiContext}
+    />
+  );
 }
 
 /* ----------------- ENHANCE BOOTSTRAP ----------------- */

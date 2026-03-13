@@ -834,7 +834,7 @@ export default function CreateEventScreen({ navigation, route }) {
           )}
 
           <Text style={styles.topTitle}>
-            {isEdit ? "Edit event" : "New event"}
+            {isEdit ? "Edit Quick Event" : "New Quick Event"}
           </Text>
 
           <TouchableOpacity

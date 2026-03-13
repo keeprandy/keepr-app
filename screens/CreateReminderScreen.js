@@ -50,8 +50,23 @@ export default function CreateReminderScreen({ navigation, route }) {
   const reminderIdFromRoute = route?.params?.reminderId ?? null;
   const isEdit = !!reminderIdFromRoute;
 
-  const prefill = route?.params?.prefill || {};
+  const prefillTitle = route?.params?.prefillTitle || "";
+  const prefillNotes = route?.params?.prefillNotes || "";
+  
+
+  const prefill = {
+  ...(route?.params?.prefill || {}),
+  title:
+    route?.params?.prefill?.title ||
+    prefillTitle ||
+    "",
+  notes:
+    route?.params?.prefill?.notes ||
+    prefillNotes ||
+    "",
+};
   const afterSave = route?.params?.afterSave || "Notifications";
+
 
   const contextAssetId = prefill.asset_id ?? route?.params?.assetId ?? null;
   const contextSystemId = prefill.system_id ?? route?.params?.systemId ?? null;

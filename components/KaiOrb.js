@@ -159,18 +159,20 @@ export default function KaiOrb({
   `;
 
   return (
-    <View
-      style={[
-        {
-          width: canvas,
-          height: canvas,
-          alignItems: "center",
-          justifyContent: "center",
-        },
-        style,
-      ]}
-      pointerEvents="none"
-    >
+        <View
+          style={[
+            {
+              width: canvas,
+              height: canvas,
+              borderRadius: canvas / 2,
+              overflow: "hidden",
+              alignItems: "center",
+              justifyContent: "center",
+            },
+            style,
+          ]}
+          pointerEvents="none"
+        >
       {/* ambient glow */}
       <AnimatedView
         style={{
