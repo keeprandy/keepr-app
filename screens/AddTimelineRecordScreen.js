@@ -552,7 +552,7 @@ const notesHasUrls = useMemo(() => {
             </TouchableOpacity>
 
             <View style={{ flex: 1 }}>
-              <Text style={styles.headerTitle}>New story moment</Text>
+              <Text style={styles.headerTitle}>Add Timeline Record</Text>
               <Text style={styles.headerSubtitle}>{contextLabel}</Text>
             </View>
 

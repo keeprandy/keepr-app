@@ -876,7 +876,7 @@ useFocusEffect(
           >
             <Ionicons name="chevron-back-outline" size={22} color={UI.text} />
             <Text style={styles.kHeaderTitle} numberOfLines={1}>
-              Story moment
+              Timeline Record
             </Text>
           </TouchableOpacity>
 

@@ -666,8 +666,8 @@ const notesHasUrls = useMemo(() => {
             </TouchableOpacity>
 
             <View style={{ flex: 1 }}>
-              <Text style={styles.headerTitle}>Edit story moment</Text>
-              <Text style={styles.headerSubtitle}>Make it clear. Make it provable.</Text>
+              <Text style={styles.headerTitle}>Edit Timeline Record</Text>
+              <Text style={styles.headerSubtitle}>Make it official, then upload proof.</Text>
             </View>
 
             <TouchableOpacity

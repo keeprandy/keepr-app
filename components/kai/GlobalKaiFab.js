@@ -674,17 +674,17 @@ const deleteNote = async (id) => {
 }
 
 const styles = StyleSheet.create({
-  fabWrap: {
-    position: "absolute",
-    top: 5,
-    right: 18,
-    zIndex: 10002,
-    elevation: 40,
-  },
+fabWrap: {
+  position: "absolute",
+  top: 64,
+  right: 18,
+  zIndex: 10002,
+  elevation: 40,
+},
 
 modalOrbWrap: {
   position: "absolute",
-  top: 18,
+  top: 64,
   right: 18,
   zIndex: 10002,
   elevation: 40,
@@ -692,7 +692,7 @@ modalOrbWrap: {
   height: 74,
   alignItems: "center",
   justifyContent: "center",
-  backgroundColor: "transparent"
+  backgroundColor: "transparent",
 },
 
 orbAnimatedWrap: {
@@ -723,7 +723,7 @@ orbAnimatedWrap: {
 
 panel: {
   position: "absolute",
-  top: 86,
+  top: 145,
   right: 30,
   width: 440,
   maxHeight: "75%",

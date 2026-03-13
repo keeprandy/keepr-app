@@ -196,10 +196,10 @@ export default function CreateEventScreen({ navigation, route }) {
   const [contextJson, setContextJson] = useState(null);
 
   const subtitle = useMemo(() => {
-    if (isEdit) return "Edit draft details, context, and attachments.";
+    if (isEdit) return "Edit Event draft details, context, and attachments. When you're ready promote to your Timeline.";
     if (assetId && systemId) return "Captured with asset + system context.";
     if (assetId) return "Captured with asset context.";
-    return "Captured as a draft. Edit later in Event Inbox.";
+    return "Events start as a Draft, then can be promoted to a Timeline Record. Captured as a draft. Edit later in Event Inbox.";
   }, [isEdit, assetId, systemId]);
 
   /* ---------------------- load event + attachments ---------------------- */
