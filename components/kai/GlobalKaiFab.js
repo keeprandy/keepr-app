@@ -469,7 +469,7 @@ const deleteNote = async (id) => {
               <View style={styles.noticeCard}>
                 <Text style={styles.noticeLabel}>Kai is active</Text>
                 <Text style={styles.noticeText}>
-                  Start small. You do not need to update Keepr every day.
+                  Start with a 30 day goal. What can you accomplish?
                 </Text>
               </View>
 
