@@ -31,7 +31,7 @@ const ASSET_OPTIONS = [
   { key: "home", label: "My home" },
   { key: "vehicle", label: "A vehicle" },
   { key: "boat", label: "A boat" },
-  { key: "other", label: "Something else" },
+  { key: "other", label: "Return to Dashboard" },
 ];
 
 export default function KaiOnboardingScreen({ navigation, route }) {

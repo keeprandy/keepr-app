@@ -36,7 +36,7 @@ function getKaiContext(currentRouteName) {
   if (route.includes("dashboard")) {
     return {
       label: "Dashboard",
-      subtitle: "Kai is here to help you know what to do next.",
+      subtitle: "Here's some quick actions to try.",
       suggestions: [
         "Add another Asset",
         "Add Systems to your Assets",
@@ -486,7 +486,7 @@ const deleteNote = async (id) => {
                   />
                   <Text style={styles.actionTitle}>Add an Inbox Reminder</Text>
                   <Text style={styles.actionHint}>
-                    Keep track of something for later
+                    Need a Reminder?  Add one here.
                   </Text>
                 </TouchableOpacity>
 
@@ -501,7 +501,7 @@ const deleteNote = async (id) => {
                   />
                   <Text style={styles.actionTitle}>Add an Inbox Quick Event</Text>
                   <Text style={styles.actionHint}>
-                    Capture something that happened
+                    Quick Events are "Records in Progress" - then can be promoted to an Official Timeline Record
                   </Text>
                 </TouchableOpacity>
               </View>

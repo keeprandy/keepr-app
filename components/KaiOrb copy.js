@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useMemo } from "react";
+import React, { useEffect, useRef } from "react";
 import { Animated, Easing, View } from "react-native";
 import Svg, {
   Defs,
@@ -49,13 +49,6 @@ export default function KaiOrb({
  const glow = useRef(new Animated.Value(1)).current;
   const spin = useRef(new Animated.Value(0)).current;
   const ripple = useRef(new Animated.Value(0)).current;
-  const gradientIds = useMemo(() => {
-  const uid = Math.random().toString(36).slice(2, 9);
-  return {
-    core: `kaiHexCore_${uid}`,
-    glow: `kaiHexGlow_${uid}`,
-  };
-}, []);
 
   useEffect(() => {
     if (!pulse) return;
@@ -281,14 +274,14 @@ export default function KaiOrb({
       >
         <Svg width={coreBox} height={coreBox} viewBox={`0 0 ${coreBox} ${coreBox}`}>
           <Defs>
-              <LinearGradient id={gradientIds.core} x1="0%" y1="0%" x2="100%" y2="100%">
-                <Stop offset="0%" stopColor="#a7c7ff" />
+            <LinearGradient id="kaiHexCore" x1="0%" y1="0%" x2="100%" y2="100%">
+              <Stop offset="0%" stopColor="#a7c7ff" />
               <Stop offset="26%" stopColor="#69a0ff" />
               <Stop offset="60%" stopColor="#2F6BFF" />
               <Stop offset="100%" stopColor="#14307D" />
             </LinearGradient>
 
-            <RadialGradient id={gradientIds.glow} cx="50%" cy="42%" r="62%">
+            <RadialGradient id="kaiHexGlow" cx="50%" cy="42%" r="62%">
               <Stop offset="0%" stopColor="rgba(255,255,255,0.35)" />
               <Stop offset="55%" stopColor="rgba(255,255,255,0.06)" />
               <Stop offset="100%" stopColor="rgba(255,255,255,0)" />
@@ -298,7 +291,7 @@ export default function KaiOrb({
           <G>
             <Polygon
               points={coreOuter}
-             fill={`url(#${gradientIds.core})`}
+              fill="url(#kaiHexCore)"
               stroke="rgba(255,255,255,0.16)"
               strokeWidth="1.2"
             />
@@ -334,7 +327,7 @@ export default function KaiOrb({
             {/* inner glow */}
             <Polygon
               points={coreOuter}
-              fill={`url(#${gradientIds.glow})`}
+              fill="url(#kaiHexGlow)"
               opacity="0.55"
             />
           </G>

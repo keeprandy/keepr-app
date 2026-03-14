@@ -108,6 +108,7 @@ export default function KeeprProgressCard({
   onPress,
   onStepPress,
   onDismiss,
+  onRestartGuidedSetup,
 }) {
   const cardCopy = useMemo(() => {
     if (mode === "asset") {
@@ -150,19 +151,32 @@ export default function KeeprProgressCard({
           <Text style={styles.progressSub}>{cardCopy.subtitle}</Text>
         </View>
 
-        <View style={styles.progressTopActions}>
-          {onDismiss ? (
-            <TouchableOpacity
-              onPress={onDismiss}
-              style={styles.dismissBtn}
-              hitSlop={8}
-              accessibilityRole="button"
-              accessibilityLabel="Dismiss Keepr progress"
-            >
-              <Ionicons name="close" size={16} color={colors.textMuted} />
-            </TouchableOpacity>
-          ) : null}
-        </View>
+<View style={styles.progressTopActions}>
+
+  {onRestartGuidedSetup ? (
+    <TouchableOpacity
+      onPress={onRestartGuidedSetup}
+      style={styles.restartBtn}
+      accessibilityRole="button"
+      accessibilityLabel="Restart guided setup"
+    >
+      <Text style={styles.restartText}>Restart Guided Setup</Text>
+    </TouchableOpacity>
+  ) : null}
+
+  {onDismiss ? (
+    <TouchableOpacity
+      onPress={onDismiss}
+      style={styles.dismissBtn}
+      hitSlop={8}
+      accessibilityRole="button"
+      accessibilityLabel="Dismiss Keepr progress"
+    >
+      <Ionicons name="close" size={16} color={colors.textMuted} />
+    </TouchableOpacity>
+  ) : null}
+
+</View>
       </View>
 
       <TouchableOpacity
@@ -388,4 +402,17 @@ const styles = StyleSheet.create({
   progressStepTextDone: {
     color: colors.textPrimary,
   },
+  restartBtn: {
+  backgroundColor: "#F3F4F6",
+  paddingHorizontal: 10,
+  paddingVertical: 6,
+  borderRadius: 8,
+  marginRight: 6,
+},
+
+restartText: {
+  fontSize: 11,
+  fontWeight: "800",
+  color: colors.textMuted,
+},
 });

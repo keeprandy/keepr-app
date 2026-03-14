@@ -193,7 +193,7 @@ export default function AddAssetChatScreen({ navigation, route }) {
           role: BOT,
           text:
             friendlyLabel === "home"
-              ? "Great. What do you call this place? (e.g., “Brighton home”, “Lake house”)"
+              ? "Great. What do you call this place? (e.g., “Home Sweet home”, “Lake house”)"
               : friendlyLabel === "boat"
               ? "Great. What do you call this boat? (e.g., “Formula 380”, “Bennington M Series”)"
               : "Got it. What do you call this vehicle? (e.g., “Porsche Boxster S”, “Family SUV”)",

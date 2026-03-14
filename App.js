@@ -392,14 +392,27 @@ const navTheme = {
 
 /* ----------------- GLOBAL KAI FAB ----------------- */
 
-function GlobalEventFab({ currentRouteName, role, kaiContext }) {
-  return (
-    <GlobalKaiFab
-      currentRouteName={currentRouteName}
-      role={role}
-      kaiContext={kaiContext}
-    />
-  );
+function GlobalEventFab({ currentRouteName, role }) {
+  const route = String(currentRouteName || "");
+
+  const hiddenRoutes = [
+    "KaiWelcome",
+    "KaiOnboarding",
+    "Onboarding1",
+    "Onboarding2",
+    "Onboarding3",
+    "OnboardingChooseAssetType",
+    "SplashIntro",
+    "Login",
+    "Signup",
+    "Auth",
+  ];
+
+  if (hiddenRoutes.includes(route)) {
+    return null;
+  }
+
+  return <GlobalKaiFab currentRouteName={currentRouteName} role={role} />;
 }
 
 /* ----------------- ENHANCE BOOTSTRAP ----------------- */

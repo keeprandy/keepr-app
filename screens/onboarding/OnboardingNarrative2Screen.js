@@ -52,7 +52,7 @@ export default function OnboardingNarrative2Screen() {
 
           <View style={styles.row}>
             <Text style={styles.term}>System</Text>
-            <Text style={styles.def}>How it works: Think Furnace, or Tires</Text>
+            <Text style={styles.def}>Things inside the asset: Think Furnace, Generator, Tires, Motor </Text>
           </View>
 
           <View style={styles.row}>
@@ -61,8 +61,10 @@ export default function OnboardingNarrative2Screen() {
           </View>
 
           <View style={styles.row}>
-            <Text style={styles.term}>Attachment</Text>
+            <Text style={styles.term}>Attachments</Text>
             <Text style={styles.def}>What proves it: Receipt, Invoice, Warranty</Text>
+            <Text style={styles.def}>Sometimes, Records start with receipts.</Text>
+
           </View>
 
           <View style={{ height: 16 }} />

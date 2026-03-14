@@ -660,6 +660,24 @@ return (
     boatsSorted,
     goProfile,
   ]);
+  const restartGuidedSetup = async () => {
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) return;
+
+    await supabase
+      .from("profiles")
+      .update({ onboarding_completed: false })
+      .eq("id", user.id);
+
+    navigation.replace("KaiWelcome");
+  } catch (err) {
+    console.log("Restart onboarding failed", err);
+  }
+};
 
   /* ---- Reorder helpers ---- */
 
@@ -859,12 +877,13 @@ return (
 
                     {!dismissKeeprProgress ? (
                       <View style={{ marginTop: spacing.md, maxWidth: 640 }}>
-                        <KeeprProgressCard
-                          progress={keeprProgress}
-                          loading={achLoading}
-                          onPress={handleKeeprProgressPress}
-                          onDismiss={keeprProgress?.complete ? () => setDismissKeeprProgress(true) : null}
-                        />
+                      <KeeprProgressCard
+                        progress={keeprProgress}
+                        loading={achLoading}
+                        onPress={handleKeeprProgressPress}
+                        onRestartGuidedSetup={restartGuidedSetup}
+                        onDismiss={keeprProgress?.complete ? () => setDismissKeeprProgress(true) : null}
+                      />                    
                       </View>
                     ) : null}
                   </View>

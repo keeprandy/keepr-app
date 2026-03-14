@@ -29,7 +29,9 @@ organizes the story of the things you own.
             styles.primaryBtn,
             pressed && { opacity: 0.94 },
           ]}
-          onPress={() => navigation.navigate("Onboarding1")}
+          onPress={() =>
+  navigation.navigate("OnboardingStack", { screen: "Onboarding1" })
+}
         >
           <Text style={styles.primaryBtnText}>Start with Kai</Text>
           <Text style={styles.primaryBtnSub}>
@@ -54,7 +56,12 @@ organizes the story of the things you own.
             styles.ghostBtn,
             pressed && { opacity: 0.8 },
           ]}
-          onPress={() => navigation.navigate(skipRoute)}
+          onPress={() =>
+            navigation.reset({
+              index: 0,
+              routes: [{ name: "RootTabs", params: { screen: "Dashboard" } }],
+            })
+          }
         >
           <Text style={styles.ghostBtnText}>Skip for now</Text>
         </Pressable>

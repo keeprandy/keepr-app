@@ -41,11 +41,19 @@ export default function OnboardingNarrative1Screen() {
                         </Text>
                     </View>
                 </View>
-          <Text style={styles.h1}>Ownership deserves structure.</Text>
+          <Text style={styles.h1}>What do you want Keepr™ to help you do?</Text>
+          <Text style={styles.h1}>It's a journey... start with a goal. Here are some ideas.</Text>
 
-          <Text style={styles.p}>The day you need proof is not the day to start organizing.</Text>
-
-          <Text style={styles.p}>Keepr™ gives your assets a clear story.</Text>
+          <Text style={styles.p}>Get Organized - Reduce Clutter</Text>
+          <Text style={styles.p}>Document My Home - No more Papers everywhere...</Text>
+          <Text style={styles.p}>Track my vehicles, RV's, Toys, Equipment</Text>
+          <Text style={styles.p}>Prepare to sell something by proving its upkeep and care.</Text>
+          <Text style={styles.p}>Have one place for everything related to what I own.</Text>
+         <Text style={styles.p}>No more lost receipts or digging for what you need.</Text>
+          
+          <Text style={styles.p}>Organize your rental property or 2nd Home</Text>
+<View style={{ height: 28 }} />
+          <Text style={styles.h1}>Keepr™ gives your assets a clear story.</Text>
 
           <View style={{ height: 28 }} />
 
