@@ -19,7 +19,7 @@ export default function EventPill({
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
 
-  if (hidden) return null;
+  return null;
 
   const bottom = useMemo(() => {
     return (Platform.OS === "web" ? spacing.lg : 72) + (insets.bottom || 0);

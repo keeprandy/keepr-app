@@ -1554,90 +1554,91 @@ const remindersByDate = useMemo(() => {
       </ScrollView>
 
       {/* Add chooser: Event or Reminder */}
-      <Modal
-        visible={showAddChoice}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowAddChoice(false)}
-      >
-        <View style={styles.addChoiceOverlay}>
-          <TouchableOpacity
-            style={{ flex: 1 }}
-            activeOpacity={1}
-            onPress={() => setShowAddChoice(false)}
+<Modal
+  visible={showAddChoice}
+  transparent
+  animationType="fade"
+  onRequestClose={() => setShowAddChoice(false)}
+>
+  <View style={styles.modalRoot}>
+    <TouchableOpacity
+      style={StyleSheet.absoluteFillObject}
+      activeOpacity={1}
+      onPress={() => setShowAddChoice(false)}
+    />
+
+    <View style={styles.addChoiceCard}>
+      <Text style={styles.addChoiceTitle}>
+        What would you like to add?
+      </Text>
+
+      <View style={styles.addChoiceButtons}>
+        <TouchableOpacity
+          style={styles.addChoiceBtn}
+          activeOpacity={0.9}
+          onPress={() => {
+            setShowAddChoice(false);
+            navigation.navigate("CreateEvent", {
+              assetId: contextAssetId,
+              systemId: contextSystemId,
+              recordId: contextRecordId,
+              afterSave: "Notifications",
+            });
+          }}
+        >
+          <Ionicons
+            name="sparkles-outline"
+            size={18}
+            color={colors.textPrimary}
           />
-          <View style={styles.addChoiceCard}>
-            <Text style={styles.addChoiceTitle}>
-              What would you like to add?
+          <View style={{ flex: 1 }}>
+            <Text style={styles.addChoiceBtnText}>Quick event - Not a Record yet, but could be soon.</Text>
+            <Text style={styles.addChoiceBtnSub}>
+              Quick way to Capture a visit, repair, or note for your timeline before you make it official.
             </Text>
-
-            <View style={styles.addChoiceButtons}>
-              <TouchableOpacity
-                style={styles.addChoiceBtn}
-                activeOpacity={0.9}
-                onPress={() => {
-                  setShowAddChoice(false);
-                  navigation.navigate("CreateEvent", {
-                    assetId: contextAssetId,
-                    systemId: contextSystemId,
-                    recordId: contextRecordId,
-                    afterSave: "Notifications",
-                  });
-                }}
-              >
-                <Ionicons
-                  name="sparkles-outline"
-                  size={18}
-                  color={colors.textPrimary}
-                />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.addChoiceBtnText}>Quick event - Not a Record yet, but could be soon.</Text>
-                  <Text style={styles.addChoiceBtnSub}>
-                    Quick way to Capture a visit, repair, or note for your timeline before you make it official.
-                  </Text>
-                </View>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.addChoiceBtn}
-                activeOpacity={0.9}
-                onPress={() => {
-                  setShowAddChoice(false);
-                  navigation.navigate("CreateReminder", {
-                    prefill: {
-                      asset_id: contextAssetId,
-                      system_id: contextSystemId,
-                      record_id: contextRecordId,
-                      status: "open",
-                    },
-                    afterSave: "Notifications",
-                  });
-                }}
-              >
-                <Ionicons
-                  name="alarm-outline"
-                  size={18}
-                  color={colors.textPrimary}
-                />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.addChoiceBtnText}>Reminder</Text>
-                  <Text style={styles.addChoiceBtnSub}>
-                    Set a follow-up, renewal, or maintenance reminder.
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity
-              style={styles.addChoiceCancel}
-              onPress={() => setShowAddChoice(false)}
-              activeOpacity={0.9}
-            >
-              <Text style={styles.addChoiceCancelText}>Cancel</Text>
-            </TouchableOpacity>
           </View>
-        </View>
-      </Modal>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.addChoiceBtn}
+          activeOpacity={0.9}
+          onPress={() => {
+            setShowAddChoice(false);
+            navigation.navigate("CreateReminder", {
+              prefill: {
+                asset_id: contextAssetId,
+                system_id: contextSystemId,
+                record_id: contextRecordId,
+                status: "open",
+              },
+              afterSave: "Notifications",
+            });
+          }}
+        >
+          <Ionicons
+            name="alarm-outline"
+            size={18}
+            color={colors.textPrimary}
+          />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.addChoiceBtnText}>Reminder</Text>
+            <Text style={styles.addChoiceBtnSub}>
+              Set a follow-up, renewal, or maintenance reminder.
+            </Text>
+          </View>
+        </TouchableOpacity>
+      </View>
+
+      <TouchableOpacity
+        style={styles.addChoiceCancel}
+        onPress={() => setShowAddChoice(false)}
+        activeOpacity={0.9}
+      >
+        <Text style={styles.addChoiceCancelText}>Cancel</Text>
+      </TouchableOpacity>
+    </View>
+  </View>
+</Modal>
 
       {/* Floating add */}
       <TouchableOpacity
@@ -3152,22 +3153,24 @@ modalCard: {
   badgeRed: { backgroundColor: "#FEF2F2", borderColor: "#FCA5A522" },
   badgeText: { fontSize: 11, fontWeight: "900", color: colors.textPrimary },
 
-  // Add choice bottom sheet
-  addChoiceOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.45)",
-    justifyContent: "flex-end",
-  },
-  addChoiceCard: {
-    backgroundColor: colors.surface,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.xl,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
-    borderTopWidth: 1,
-    borderColor: colors.borderSubtle,
-  },
+  // Add choice floating Modal sheet
+addChoiceOverlay: {
+  flex: 1,
+  backgroundColor: "rgba(0,0,0,0.45)",
+  justifyContent: "center",
+  alignItems: "center",
+  padding: 24,
+},
+addChoiceCard: {
+  width: "100%",
+  maxWidth: 520,
+  backgroundColor: colors.surface,
+  borderRadius: radius.xl,
+  padding: spacing.lg,
+  borderWidth: 1,
+  borderColor: colors.borderSubtle,
+  ...shadows.card,
+},
   addChoiceTitle: {
     fontSize: 16,
     fontWeight: "900",

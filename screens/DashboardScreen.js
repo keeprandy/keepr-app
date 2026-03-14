@@ -1313,10 +1313,10 @@ return (
           </Modal>
 
           {/* FAB */}
-          <TouchableOpacity style={styles.fab} onPress={goCreateEvent} activeOpacity={0.95}>
-            <Ionicons name="add" size={22} color="#fff" />
-            <Text style={styles.fabText}>Add Event </Text>
-          </TouchableOpacity>
+{/* <TouchableOpacity style={styles.fab} onPress={goCreateEvent} activeOpacity={0.95}>
+  <Ionicons name="add" size={22} color="#fff" />
+  <Text style={styles.fabText}>Add Event </Text>
+</TouchableOpacity> */}
         </View>
       </View>
     </SafeAreaView>
@@ -2012,7 +2012,7 @@ headerWebRow: {
     paddingHorizontal: spacing.sm,
     height: 42,
     borderRadius: 999,
-    backgroundColor: "rgba(45, 124, 227, 0.8);",
+    backgroundColor: "rgba(45, 124, 227, 0.8)",
     ...cardStyles.shadowStrong,
   },
   fabText: {
