@@ -2179,7 +2179,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   title: {
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: "800",
     color: colors.textPrimary,
   },
