@@ -245,10 +245,10 @@ export default function AuthScreen() {
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.subtitle}>
             {isSignUp
-              ? "Document the story. Add proof. Build calm over time."
+              ? "Thanks for joining! You're about to become a Keepr. The goal: Keepr Calm over time."
               : isForgot
               ? "Enter your email and we’ll send a reset link."
-              : "Use the email and password for your Keepr (Supabase) account."}
+              : "Enter the Email and Password for your Keepr Account"}
           </Text>
         </View>
 
@@ -337,7 +337,7 @@ export default function AuthScreen() {
               {touched.password && passwordErr ? <Text style={styles.errorText}>{passwordErr}</Text> : null}
               {isSignUp ? (
                 <Text style={styles.hintText}>
-                  Use at least 6 characters. (If leaked password protection is enabled in Supabase, compromised passwords will be rejected.)
+                  Use at least 8 characters. (Keepr is extremely secure and private.)
                 </Text>
               ) : null}
             </>
@@ -395,7 +395,7 @@ export default function AuthScreen() {
           )}
 
           <Text style={styles.helperText}>
-            Tip: if you’re testing, your Admin Tools remain available under your superkeepr role.
+            Tip: You will be able to change your email and password in Keepr later.
           </Text>
         </View>
       </View>
