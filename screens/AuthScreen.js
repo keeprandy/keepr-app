@@ -17,6 +17,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { supabase } from "../lib/supabaseClient";
 import { layoutStyles } from "../styles/layout";
 import { colors, radius, spacing, typography } from "../styles/theme";
+import { Image } from "react-native";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -237,20 +238,29 @@ export default function AuthScreen() {
 
   return (
     <SafeAreaView style={layoutStyles.screen}>
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <View style={styles.logoCircle}>
-            <Ionicons name="shield-checkmark-outline" size={24} color={colors.brandBlue} />
+     <View style={styles.container}>
+      <View style={styles.authCard}>
+      <View style={styles.header}>
+        <View style={styles.brandRow}>
+        <Image
+          source={require("../assets/app_logo_icon.png")}
+          style={styles.logo}
+        />
+          <View style={styles.brandTextWrap}>
+            <Text style={styles.brand}>Keepr™</Text>
+            <Text style={styles.brandSub}>Asset Lifecycle Intelligence</Text>
           </View>
-          <Text style={styles.title}>{title}</Text>
-          <Text style={styles.subtitle}>
-            {isSignUp
-              ? "Thanks for joining! You're about to become a Keepr. The goal: Keepr Calm over time."
-              : isForgot
-              ? "Enter your email and we’ll send a reset link."
-              : "Enter the Email and Password for your Keepr Account"}
-          </Text>
         </View>
+
+        <Text style={styles.title}>{title}</Text>
+        <Text style={styles.subtitle}>
+          {isSignUp
+            ? "Create your Keepr account and start building the story of what you own."
+            : isForgot
+            ? "Enter your email and we’ll send a reset link."
+            : "Welcome back. Sign in to continue your Keepr story."}
+        </Text>
+      </View>
 
         {!isForgot && (
           <View style={styles.modeRow}>
@@ -278,7 +288,7 @@ export default function AuthScreen() {
               activeOpacity={0.9}
             >
               <Text style={[styles.modePillText, mode === "signup" && styles.modePillTextActive]}>
-                Create account
+                Create your Keepr account
               </Text>
             </TouchableOpacity>
           </View>
@@ -341,6 +351,7 @@ export default function AuthScreen() {
                 </Text>
               ) : null}
             </>
+            
           )}
 
           {formError ? <Text style={styles.formError}>{formError}</Text> : null}
@@ -397,14 +408,26 @@ export default function AuthScreen() {
           <Text style={styles.helperText}>
             Tip: You will be able to change your email and password in Keepr later.
           </Text>
+          <Text style={styles.trustText}>
+            We do not share your data.  
+            We do not use your data to train our system.  
+            You own what you put in.
+            </Text>
         </View>
+      </View>
       </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.xl },
+  container: {
+  flex: 1,
+  paddingHorizontal: spacing.xl,
+  paddingTop: spacing.xl,
+  alignItems: "stretch",
+},
+  
   header: { marginBottom: spacing.lg },
   logoCircle: {
     width: 48,
@@ -417,6 +440,64 @@ const styles = StyleSheet.create({
   },
   title: { ...typography.title },
   subtitle: { ...typography.subtitle, marginTop: 4 },
+  logo: {
+  width: 48,
+  height: 48,
+  resizeMode: "contain",
+  marginBottom: 12,
+},
+
+  authCard: {
+  width: "100%",
+  maxWidth: 760,
+  alignSelf: "center",
+  backgroundColor: "#FFFFFF",
+  borderRadius: 20,
+  borderWidth: 1,
+  borderColor: colors.borderSubtle,
+  padding: spacing.xl,
+  shadowColor: "#000",
+  shadowOpacity: 0.08,
+  shadowRadius: 18,
+  shadowOffset: { width: 0, height: 8 },
+  elevation: 6,
+},
+
+brandRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  marginBottom: spacing.sm,
+},
+
+brandTextWrap: {
+  marginLeft: 12,
+},
+
+brand: {
+  fontSize: 18,
+  fontWeight: "800",
+  color: colors.textPrimary,
+},
+
+brandSub: {
+  fontSize: 12,
+  color: colors.textMuted,
+  marginTop: 2,
+},
+
+  brand: {
+  fontSize: 16,
+  fontWeight: "800",
+  color: colors.brandBlue,
+  marginBottom: 4,
+},
+
+trustText: {
+  fontSize: 12,
+  color: colors.textMuted,
+  marginTop: 14,
+  lineHeight: 18,
+},
 
   modeRow: {
     flexDirection: "row",

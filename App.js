@@ -1068,6 +1068,7 @@ const boundaryStyles = StyleSheet.create({
 export default function App() {
   const isWebShell = Platform.OS === "web";
   const [currentRouteName, setCurrentRouteName] = React.useState("SplashIntro");
+  const hideSidebarRoutes = ["StoryPrint", "Auth", "ResetPassword"];
 
   // Global handler for tapping push/local notifications
   React.useEffect(() => {
@@ -1103,13 +1104,12 @@ export default function App() {
                   <EnhanceBootstrap />
 
                   {isWebShell ? (
-                    <View style={appStyles.webShell}>
-                      {/* Hide sidebar for print preview route */}
-                      {currentRouteName === "StoryPrint" ? null : (
-                        <SidebarNav currentRouteName={currentRouteName} />
-                      )}
+                      <View style={appStyles.webShell}>
+                        {hideSidebarRoutes.includes(currentRouteName) ? null : (
+                          <SidebarNav currentRouteName={currentRouteName} />
+                        )}
 
-                      <View style={appStyles.webMain}>
+                        <View style={appStyles.webMain}>
                         <View style={appStyles.webMainInner}>
                           <Root
                             onRouteChange={setCurrentRouteName}
@@ -1140,11 +1140,11 @@ export default function App() {
 }
 
 const appStyles = StyleSheet.create({
-  webShell: {
-    flex: 1,
-    flexDirection: "row",
-    backgroundColor: "#020617",
-  },
+webShell: {
+  flex: 1,
+  flexDirection: "row",
+  backgroundColor: colors.background,
+},
   webMain: {
     flex: 1,
     alignItems: "stretch",
