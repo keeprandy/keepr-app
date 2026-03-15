@@ -238,7 +238,35 @@ export default function AuthScreen() {
 
   return (
     <SafeAreaView style={layoutStyles.screen}>
-     <View style={styles.container}>
+     <View style={[
+        styles.container,
+        Platform.OS === "web" && styles.webContainer
+      ]}>
+        {Platform.OS === "web" && (
+        
+       <View style={styles.brandPanel}>
+      <View style={styles.brandContent}>
+          <Image
+            source={require("../assets/login_image_keepr.png")}
+            style={{ width: 400, height: 250, marginBottom: 24 }}
+          />
+          <Text style={styles.brandHeadline}>
+            Everything you own has a story.
+          </Text>
+
+          <Text style={styles.brandMessage}>
+            Keepr records the life of the things you care about —
+            homes, vehicles, boats, and more.
+          </Text>
+
+          <Text style={styles.brandTag}>
+            Become a keepr.
+          </Text>
+        </View>
+        </View>
+      )}
+      
+      <View style={styles.loginPanel}>
       <View style={styles.authCard}>
       <View style={styles.header}>
         <View style={styles.brandRow}>
@@ -247,8 +275,8 @@ export default function AuthScreen() {
           style={styles.logo}
         />
           <View style={styles.brandTextWrap}>
-            <Text style={styles.brand}>Keepr™</Text>
-            <Text style={styles.brandSub}>Asset Lifecycle Intelligence</Text>
+            <Text style={styles.brand}>Keepr™ </Text>
+            <Text style={styles.brandSub}>Asset Lifecycle Intelligence - - early access V1</Text>
           </View>
         </View>
 
@@ -416,6 +444,7 @@ export default function AuthScreen() {
         </View>
       </View>
       </View>
+      </View>
     </SafeAreaView>
   );
 }
@@ -450,6 +479,7 @@ const styles = StyleSheet.create({
   authCard: {
   width: "100%",
   maxWidth: 760,
+  minWidth: 420,
   alignSelf: "center",
   backgroundColor: "#FFFFFF",
   borderRadius: 20,
@@ -461,6 +491,50 @@ const styles = StyleSheet.create({
   shadowRadius: 18,
   shadowOffset: { width: 0, height: 8 },
   elevation: 6,
+},
+webContainer: {
+  flex: 1,
+  flexDirection: "row",
+  justifyContent: "center",
+  alignItems: "center",
+  gap: 48,
+  paddingHorizontal: 48,
+},
+
+brandContent: {
+  maxWidth: 420,
+  minWidth: 420,
+
+},
+
+brandPanel: {
+  width: 420,
+  justifyContent: "center",
+},
+
+brandHeadline: {
+  fontSize: 28,
+  fontWeight: "700",
+  marginBottom: 16,
+},
+
+brandMessage: {
+  fontSize: 16,
+  lineHeight: 24,
+  color: "#475569",
+  marginBottom: 20,
+},
+
+brandTag: {
+  fontSize: 16,
+  fontWeight: "600",
+  color: "#2563EB",
+},
+
+loginPanel: {
+  width: 760,
+  maxWidth: "100%",
+  justifyContent: "center",
 },
 
 brandRow: {

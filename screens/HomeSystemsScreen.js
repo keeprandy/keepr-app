@@ -1442,20 +1442,34 @@ const HomeSystemsScreen = ({ route, navigation }) => {
             </Text>
           </View>
         </View>
+{IS_WEB ? (
+  <ScrollView
+    contentContainerStyle={styles.listContent}
+    showsVerticalScrollIndicator={false}
+    keyboardShouldPersistTaps="handled"
+  >
+    {listHeader}
 
-        {IS_WEB ? (
-          <FlatList
-            data={filteredSystems}
-            keyExtractor={(item) => item.id}
-            renderItem={renderSystemItem}
-            ListHeaderComponent={listHeader}
-            ListEmptyComponent={listEmpty}
-            ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
-            contentContainerStyle={styles.listContent}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-          />
-        ) : (
+    {systemsLoading && !filteredSystems.length ? (
+      <View style={styles.centered}>
+        <ActivityIndicator size="small" />
+        <Text style={styles.loadingText}>Loading systems…</Text>
+      </View>
+    ) : loadError ? (
+      <View style={styles.centered}>
+        <Text style={styles.errorText}>{loadError}</Text>
+      </View>
+    ) : !filteredSystems.length ? (
+      listEmpty()
+    ) : (
+      filteredSystems.map((system) => (
+        <View key={system.id} style={{ marginBottom: spacing.sm }}>
+          {renderSystemItem({ item: system })}
+        </View>
+      ))
+    )}
+  </ScrollView>
+) : (
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"

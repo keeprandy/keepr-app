@@ -1054,21 +1054,69 @@ const BoatSystemsScreen = ({ route, navigation }) => {
   };
 
   return (
-    <SafeAreaView style={layoutStyles.screen}>
-      <View style={styles.screen}>
-        <FlatList
-          data={filteredSystems}
-          keyExtractor={(item) => item.id}
-          renderItem={renderSystemItem}
-          ListHeaderComponent={listHeader}
-          ListEmptyComponent={listEmpty}
-          ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-        />
+<SafeAreaView style={layoutStyles.screen}>
+  <View style={styles.screen}>
+    {IS_WEB ? (
+      <ScrollView
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        {listHeader}
+
+        {systemsLoading && !filteredSystems.length ? (
+          <View style={styles.centered}>
+            <ActivityIndicator size="small" />
+            <Text style={styles.loadingText}>Loading systems…</Text>
+          </View>
+        ) : loadError ? (
+          <View style={styles.centered}>
+            <Text style={styles.errorText}>{loadError}</Text>
+          </View>
+        ) : !filteredSystems.length ? (
+          listEmpty()
+        ) : (
+          filteredSystems.map((system) => (
+            <View key={system.id} style={{ marginBottom: spacing.sm }}>
+              {renderSystemItem({ item: system })}
+            </View>
+          ))
+        )}
+      </ScrollView>
+    ) : (
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
+        {listHeader}
+
+        {systemsLoading && !filteredSystems.length ? (
+          <View style={styles.centered}>
+            <ActivityIndicator size="small" />
+            <Text style={styles.loadingText}>Loading systems…</Text>
+          </View>
+        ) : loadError ? (
+          <View style={styles.centered}>
+            <Text style={styles.errorText}>{loadError}</Text>
+          </View>
+        ) : !filteredSystems.length ? (
+          listEmpty()
+        ) : (
+          <FlatList
+            data={filteredSystems}
+            keyExtractor={(item) => item.id}
+            renderItem={renderSystemItem}
+            scrollEnabled={false}
+            ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
+            contentContainerStyle={{ paddingTop: spacing.sm }}
+          />
+        )}
+      </ScrollView>
+    )}
 
         
         {/* Add system modal */}
@@ -1607,7 +1655,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textSecondary,
   },
-
+    scrollContent: {
+      paddingBottom: spacing.xl,
+    },
   systemCard: {
     borderRadius: radius.lg,
     backgroundColor: colors.surface,
