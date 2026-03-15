@@ -176,45 +176,34 @@ export default function AddHomeAssetScreen({ navigation, route }) {
     }
   }
 
-  function validate() {
-    const trimmedName = safeStr(name).trim();
-    const trimmedStreet = safeStr(street).trim();
-    const trimmedCity = safeStr(city).trim();
-    const trimmedState = safeStr(stateRegion).trim();
-    const trimmedPostal = safeStr(postalCode).trim();
-    const trimmedYear = safeStr(yearBuilt).trim();
+ function validate() {
+  const trimmedStreet = safeStr(street).trim();
+  const trimmedCity = safeStr(city).trim();
+  const trimmedState = safeStr(stateRegion).trim();
+  const trimmedPostal = safeStr(postalCode).trim();
+  const trimmedYear = safeStr(yearBuilt).trim();
 
-    if (!photoLocal?.uri) {
-      return {
-        ok: false,
-        title: "Add a hero photo",
-        message: "Choose or take 1 photo — this becomes your hero image and shows up in Attachments.",
-      };
-    }
-
-    if (!trimmedName && !trimmedStreet) {
-      return {
-        ok: false,
-        title: "Name or address needed",
-        message: "Enter at least a home name or a street address.",
-      };
-    }
-
-    if (trimmedYear) {
-      const y = parseInt(trimmedYear, 10);
-      if (Number.isNaN(y) || y < 1600 || y > 2100) {
-        return { ok: false, title: "Check year built", message: "Enter a valid year built (example: 1998)." };
-      }
-    }
-
-    // Optional fields; no further validation
-    void trimmedCity;
-    void trimmedState;
-    void trimmedPostal;
-
-    return { ok: true };
+  if (!trimmedStreet || !trimmedCity || !trimmedState || !trimmedPostal) {
+    return {
+      ok: false,
+      title: "Full address required",
+      message: "Enter street address, city, state / region, and postal code.",
+    };
   }
 
+  if (trimmedYear) {
+    const y = parseInt(trimmedYear, 10);
+    if (Number.isNaN(y) || y < 1600 || y > 2100) {
+      return {
+        ok: false,
+        title: "Check year built",
+        message: "Enter a valid year built (example: 1998).",
+      };
+    }
+  }
+
+  return { ok: true };
+}
   async function handleSaveHome() {
     setError(null);
 
@@ -235,10 +224,9 @@ export default function AddHomeAssetScreen({ navigation, route }) {
 
     const yearNumber = trimmedYear ? parseInt(trimmedYear, 10) : null;
 
-    const displayName =
-      trimmedName ||
-      [trimmedStreet, trimmedCity, trimmedState].filter(Boolean).join(", ") ||
-      "My home";
+   const displayName =
+    trimmedName ||
+    [trimmedStreet, trimmedCity, trimmedState].filter(Boolean).join(", ");
 
     const locationString = [trimmedStreet, trimmedCity, trimmedState, trimmedPostal].filter(Boolean).join(", ");
 
@@ -269,59 +257,54 @@ export default function AddHomeAssetScreen({ navigation, route }) {
       if (!assetId) throw new Error("Asset create did not return an id.");
 
       // 2) Upload hero photo (DB-backed)
-      setUploadingPhoto(true);
+ let heroUrl = null;
+let heroPlacementId = null;
 
-      const receipt = await uploadAttachmentFromUri({
-        userId,
-        assetId,
-        kind: "photo",
-        fileUri: photoLocal.uri,
-        fileName: photoLocal.fileName || "home.jpg",
-        mimeType: photoLocal.mimeType || "image/jpeg",
-        sizeBytes: photoLocal.fileSize || null,
-        title: "Hero photo",
-        notes: null,
-        sourceContext: "add_home_asset",
-        bucket: HERO_BUCKET,
-        placements: [
-          {
-            target_type: "asset",
-            target_id: assetId,
-            role: HERO_ROLE,
-            label: "Hero",
-            sort_order: 0,
-            is_showcase: true,
-          },
-        ],
-      });
-        // After successful photo upload
-        const { data: assetRow } = await supabase
-          .from("assets")
-          .select("hero_image_url")
-          .eq("id", assetId)
-          .single();
+if (photoLocal?.uri) {
+  setUploadingPhoto(true);
 
-        if (!assetRow?.hero_image_url) {
-          await supabase
-            .from("assets")
-            .update({ hero_image_url: created.url })
-            .eq("id", assetId);
-        }
-      const uploadedAttachment = receipt?.attachment;
-      const uploadedPlacement = receipt?.placements?.[0];
+  const receipt = await uploadAttachmentFromUri({
+    userId,
+    assetId,
+    kind: "photo",
+    fileUri: photoLocal.uri,
+    fileName: photoLocal.fileName || "home.jpg",
+    mimeType: photoLocal.mimeType || "image/jpeg",
+    sizeBytes: photoLocal.fileSize || null,
+    title: "Hero photo",
+    notes: null,
+    sourceContext: "add_home_asset",
+    bucket: HERO_BUCKET,
+    placements: [
+      {
+        target_type: "asset",
+        target_id: assetId,
+        role: HERO_ROLE,
+        label: "Hero",
+        sort_order: 0,
+        is_showcase: true,
+      },
+    ],
+  });
 
-      if (!uploadedAttachment?.bucket || !uploadedAttachment?.storage_path) {
-        throw new Error("Upload completed but no storage path returned.");
-      }
-      if (!uploadedPlacement?.id) {
-        throw new Error("Upload completed but no placement id returned.");
-      }
+  const uploadedAttachment = receipt?.attachment;
+  const uploadedPlacement = receipt?.placements?.[0];
 
-      const heroUrl = getPublicUrl(uploadedAttachment.bucket, uploadedAttachment.storage_path);
+  heroPlacementId = uploadedPlacement?.id || null;
+
+  if (uploadedAttachment?.bucket && uploadedAttachment?.storage_path) {
+    heroUrl = getPublicUrl(
+      uploadedAttachment.bucket,
+      uploadedAttachment.storage_path
+    );
+  }
+
+  setUploadingPhoto(false);
+}
 
       // 3) Update asset fields
       const updatePayload = {
-        hero_placement_id: uploadedPlacement.id,
+        hero_placement_id: heroPlacementId,
         hero_image_url: heroUrl,
         location: locationString || null,
         notes: trimmedNotes || null,
@@ -369,12 +352,11 @@ export default function AddHomeAssetScreen({ navigation, route }) {
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
             <Text style={styles.title}>Add home</Text>
-            <Text style={styles.subtitle}>Add a hero photo + name or address. You can add docs after.</Text>
-          </View>
+            <Text style={styles.subtitle}>Enter the full property address. Photo and documents can be added anytime.</Text>          </View>
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Hero photo (required)</Text>
+          <Text style={styles.sectionLabel}>Hero photo (optional)</Text>
 
           <View style={styles.photoRow}>
             <TouchableOpacity style={styles.photoButton} onPress={takePhoto} disabled={saving || uploadingPhoto}>
@@ -438,20 +420,22 @@ export default function AddHomeAssetScreen({ navigation, route }) {
             </>
           )}
 
-          <TextInput style={styles.input} placeholder="Home name (optional)" value={name} onChangeText={setName} />
-          <TextInput style={styles.input} placeholder="Street address" value={street} onChangeText={setStreet} />
-          <TextInput style={styles.input} placeholder="City" value={city} onChangeText={setCity} />
-
+          <TextInput style={styles.input} placeholder="Home name (optional display name: but helpful)" value={name} onChangeText={setName} />          
+          <Text style={styles.fieldLabel}>Street address *</Text>
+          <TextInput style={styles.input} placeholder="Street address (required)" value={street} onChangeText={setStreet} />
+          <Text style={styles.fieldLabel}>City *</Text>
+          <TextInput style={styles.input} placeholder="City (required)" value={city} onChangeText={setCity} />
+          <Text style={styles.fieldLabel}>State / region and postal code *</Text>   
           <View style={styles.inlineInputsRow}>
             <TextInput
               style={[styles.input, styles.inputHalf]}
-              placeholder="State / region"
+              placeholder="State / region (required)"
               value={stateRegion}
               onChangeText={setStateRegion}
             />
             <TextInput
               style={[styles.input, styles.inputHalf, { marginRight: 0 }]}
-              placeholder="Postal code"
+              placeholder="Postal code (required)"
               value={postalCode}
               onChangeText={setPostalCode}
             />

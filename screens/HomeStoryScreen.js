@@ -567,7 +567,16 @@ useEffect(() => {
         fileName: a.fileName || a.uri.split("/").pop() || "hero.jpg",
         mimeType: a.mimeType || "image/jpeg",
         sizeBytes: a.fileSize || null,
-        placements: [{ target_type: "asset", target_id: home.id, role: "other" }],
+        placements: [
+        {
+          target_type: "asset",
+          target_id: home.id,
+          role: "hero",
+          label: "Hero",
+          sort_order: 0,
+          is_showcase: true,
+        },
+      ],
       });
 
       // Find newest image placement for this asset and set as hero
@@ -1059,11 +1068,11 @@ const filteredTimelineItems = useMemo(() => {
 
   return (
     <SafeAreaView style={layoutStyles.screen}>
-      <ScrollView
-        ref={scrollRef}
-        contentContainerStyle={[styles.scrollContent, IS_WEB && styles.scrollContentWeb]}
-        showsVerticalScrollIndicator={false}
-      >
+    <ScrollView
+      ref={scrollRef}
+      contentContainerStyle={styles.scrollContent}
+      showsVerticalScrollIndicator={false}
+    >
         {/* Header row */}
         <View style={styles.headerRow}>
           <TouchableOpacity
@@ -1210,13 +1219,16 @@ const filteredTimelineItems = useMemo(() => {
               <Image
                 source={heroImage}
                 style={[styles.heroImage, isWide && styles.heroImageWide]}
-                resizeMode={isWide ? "cover" : "contain"}
               />
             ) : (
-              <View style={styles.heroPlaceholder}>
-                <Ionicons name="home-outline" size={34} color={colors.textMuted} />
-                <Text style={styles.heroPlaceholderText}>Add a hero photo</Text>
-              </View>
+              <TouchableOpacity
+                style={styles.heroPlaceholder}
+                activeOpacity={0.85}
+                onPress={uploadHeroPhoto}
+              >
+                <Ionicons name="image-outline" size={28} color={colors.textMuted} />
+                <Text style={styles.heroPlaceholderText}>Upload a photo</Text>
+              </TouchableOpacity>
             )}
 
             {/* Tiny spinner while resolving placement */}
@@ -1562,11 +1574,6 @@ const styles = StyleSheet.create({
   },
 
   // Web-only: keep content comfortably readable on large monitors.
-  scrollContentWeb: {
-    maxWidth: 1120,
-    width: "100%",
-    alignSelf: "center",
-  },
 
   centered: {
     flex: 1,
