@@ -376,49 +376,6 @@ async function pickPhotoFromLibrary() {
           </View>
         </View>
 
-        {/* Photo */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Hero photo (required)</Text>
-
-          <View style={styles.photoRow}>
-            <TouchableOpacity
-              style={styles.photoButton}
-              onPress={takePhoto}
-              disabled={saving || uploadingPhoto}
-            >
-              {uploadingPhoto ? (
-                <ActivityIndicator color="white" size="small" />
-              ) : (
-                <>
-                  <Ionicons name="camera-outline" size={18} color="white" style={{ marginRight: 6 }} />
-                  <Text style={styles.photoButtonText}>Take photo</Text>
-                </>
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.photoButtonSecondary}
-              onPress={pickPhotoFromLibrary}
-              disabled={saving || uploadingPhoto}
-            >
-              <Ionicons
-                name="images-outline"
-                size={18}
-                color={colors.textPrimary}
-                style={{ marginRight: 6 }}
-              />
-              <Text style={styles.photoButtonSecondaryText}>Choose from library</Text>
-            </TouchableOpacity>
-          </View>
-
-          {!!photoLocal?.uri && (
-            <View style={styles.photoPreviewCard}>
-              <Image source={{ uri: photoLocal.uri }} style={styles.photo} />
-              <Text style={styles.photoCaption}>{heroLabel}</Text>
-            </View>
-          )}
-        </View>
-
         {/* Details */}
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Vehicle details</Text>
@@ -506,7 +463,48 @@ async function pickPhotoFromLibrary() {
             onChangeText={setNotes}
           />
         </View>
+        {/* Photo */}
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Hero photo (required)</Text>
 
+          <View style={styles.photoRow}>
+            <TouchableOpacity
+              style={styles.photoButton}
+              onPress={takePhoto}
+              disabled={saving || uploadingPhoto}
+            >
+              {uploadingPhoto ? (
+                <ActivityIndicator color="white" size="small" />
+              ) : (
+                <>
+                  <Ionicons name="camera-outline" size={18} color="white" style={{ marginRight: 6 }} />
+                  <Text style={styles.photoButtonText}>Take photo</Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.photoButtonSecondary}
+              onPress={pickPhotoFromLibrary}
+              disabled={saving || uploadingPhoto}
+            >
+              <Ionicons
+                name="images-outline"
+                size={18}
+                color={colors.textPrimary}
+                style={{ marginRight: 6 }}
+              />
+              <Text style={styles.photoButtonSecondaryText}>Choose from library</Text>
+            </TouchableOpacity>
+          </View>
+
+          {!!photoLocal?.uri && (
+            <View style={styles.photoPreviewCard}>
+              <Image source={{ uri: photoLocal.uri }} style={styles.photo} />
+              <Text style={styles.photoCaption}>{heroLabel}</Text>
+            </View>
+          )}
+        </View>
         {/* Helper copy */}
         <View style={styles.section}>
           <Text style={styles.helperText}>

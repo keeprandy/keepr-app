@@ -352,42 +352,11 @@ if (photoLocal?.uri) {
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
             <Text style={styles.title}>Add home</Text>
-            <Text style={styles.subtitle}>Enter the full property address. Photo and documents can be added anytime.</Text>          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Hero photo (optional)</Text>
-
-          <View style={styles.photoRow}>
-            <TouchableOpacity style={styles.photoButton} onPress={takePhoto} disabled={saving || uploadingPhoto}>
-              {uploadingPhoto ? (
-                <ActivityIndicator color="white" size="small" />
-              ) : (
-                <>
-                  <Ionicons name="camera-outline" size={18} color="white" style={{ marginRight: 6 }} />
-                  <Text style={styles.photoButtonText}>Attach Photo</Text>
-                </>
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.photoButtonSecondary} onPress={pickPhotoFromLibrary} disabled={saving || uploadingPhoto}>
-              <Ionicons name="images-outline" size={18} color={colors.textPrimary} style={{ marginRight: 6 }} />
-              <Text style={styles.photoButtonSecondaryText}>Attach from Library</Text>
-            </TouchableOpacity>
-          </View>
-
-          {!!photoLocal?.uri && (
-            <View style={styles.photoPreviewCard}>
-              <Image source={{ uri: photoLocal.uri }} style={styles.photo} />
-              <Text style={styles.photoCaption}>{heroLabel}</Text>
+            <Text style={styles.subtitle}>Enter the full property address. Photo and documents can be added anytime.</Text>          
             </View>
-          )}
         </View>
-
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Home details</Text>
-
-
           <Text style={styles.fieldLabel}>Asset use</Text>
           <View style={styles.modeRow}>
             <TouchableOpacity
@@ -448,8 +417,35 @@ if (photoLocal?.uri) {
             value={yearBuilt}
             onChangeText={setYearBuilt}
           />
-
           <TextInput style={[styles.input, styles.notesInput]} placeholder="Notes (optional)" multiline value={notes} onChangeText={setNotes} />
+        </View>
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Hero photo (optional) add more in Showcase</Text>
+
+          <View style={styles.photoRow}>
+            <TouchableOpacity style={styles.photoButton} onPress={takePhoto} disabled={saving || uploadingPhoto}>
+              {uploadingPhoto ? (
+                <ActivityIndicator color="white" size="small" />
+              ) : (
+                <>
+                  <Ionicons name="camera-outline" size={18} color="white" style={{ marginRight: 6 }} />
+                  <Text style={styles.photoButtonText}>Attach Photo</Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.photoButtonSecondary} onPress={pickPhotoFromLibrary} disabled={saving || uploadingPhoto}>
+              <Ionicons name="images-outline" size={18} color={colors.textPrimary} style={{ marginRight: 6 }} />
+              <Text style={styles.photoButtonSecondaryText}>Attach from Library</Text>
+            </TouchableOpacity>
+          </View>
+
+          {!!photoLocal?.uri && (
+            <View style={styles.photoPreviewCard}>
+              <Image source={{ uri: photoLocal.uri }} style={styles.photo} />
+              <Text style={styles.photoCaption}>{heroLabel}</Text>
+            </View>
+          )}
         </View>
 
         <View style={styles.section}>
