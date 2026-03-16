@@ -11,6 +11,7 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../../styles/theme";
@@ -109,6 +110,8 @@ export default function GlobalKaiFab({ currentRouteName, role, kaiContext }) {
   const [savingNote, setSavingNote] = useState(false);
   const [editingNoteId, setEditingNoteId] = useState(null);
   const [loadingNotes, setLoadingNotes] = useState(false);
+  const { width } = useWindowDimensions();
+const isMobile = width < 768;
 
   const context = useMemo(
     () => getKaiContext(currentRouteName),
@@ -432,19 +435,25 @@ const deleteNote = async (id) => {
               <KaiOrb size={orbSize} />
             </Animated.View>
           </View>
-
-          <Animated.View
-            style={[
-              styles.panel,
-              {
-                opacity: opacityAnim,
-                transform: [
-                  { translateX: translateAnim },
-                  { scale: scaleAnim },
-                ],
-              },
-            ]}
-          >
+            <Animated.View
+              style={[
+                styles.panel,
+                isMobile && {
+                  left: 16,
+                  right: 16,
+                  width: undefined,
+                  top: 120,
+                  maxHeight: "78%",
+                },
+                {
+                  opacity: opacityAnim,
+                  transform: [
+                    { translateX: translateAnim },
+                    { scale: scaleAnim },
+                  ],
+                },
+              ]}
+            >
             <View style={styles.headerRow}>
               <View style={styles.headerTextWrap}>
                 <Text style={styles.kaiEyebrow}>What can we do next?</Text>
@@ -676,16 +685,16 @@ const deleteNote = async (id) => {
 const styles = StyleSheet.create({
 fabWrap: {
   position: "absolute",
-  top: 64,
-  right: 18,
+  top: 96,
+  right: 14,
   zIndex: 10002,
   elevation: 40,
 },
 
 modalOrbWrap: {
   position: "absolute",
-  top: 64,
-  right: 18,
+  top: 96,
+  right: 14,
   zIndex: 10002,
   elevation: 40,
   width: 74,
