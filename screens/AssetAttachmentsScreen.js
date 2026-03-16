@@ -1725,26 +1725,31 @@ const openAdd = () => {
     [assetId, refresh, selected]
   );
 
-  const removeFromThisAsset = useCallback(async () => {
-    if (!selected?.asset_placement_id && !(selected?.asset_placement_ids?.length > 0)) return;
-    const ok = await confirmDestructive("Remove from this asset? (Keeps it if used elsewhere.)");
-    if (!ok) return;
+    const removeFromThisAsset = useCallback(async (target = selected) => {
+      if (!target?.asset_placement_id && !(target?.asset_placement_ids?.length > 0)) return;
 
-    try {
-      const ids = selected?.asset_placement_ids?.length
-        ? selected.asset_placement_ids
-        : [selected.asset_placement_id];
+      const ok = await confirmDestructive("Remove from this asset? (Keeps it if used elsewhere.)");
+      if (!ok) return;
 
-      for (const id of ids) {
-        if (!id) continue;
-        await apiDeletePlacementById(id);
+      try {
+        const ids = target?.asset_placement_ids?.length
+          ? target.asset_placement_ids
+          : [target.asset_placement_id];
+
+        for (const id of ids) {
+          if (!id) continue;
+          await apiDeletePlacementById(id);
+        }
+
+        if (selected?.attachment_id === target?.attachment_id) {
+          setSelected(null);
+        }
+
+        await refresh();
+      } catch (e) {
+        Alert.alert("Remove failed", e?.message || "Could not remove from asset.");
       }
-      setSelected(null);
-      await refresh();
-    } catch (e) {
-      Alert.alert("Remove failed", e?.message || "Could not remove from asset.");
-    }
-  }, [refresh, selected]);
+    }, [refresh, selected]);
 
   const addAssociation = useCallback(async () => {
     if (!selected?.attachment_id) return;
@@ -2401,21 +2406,25 @@ return (
                 {/* Right-side header actions (wide screens only) */}
                 {isWide ? (
                   <View style={styles.cardHeaderActions}>
-                    <TouchableOpacity
-                      onPress={(e) => {
-                        e?.stopPropagation?.();
-                        openAdd();
-                      }}
-                      style={styles.smallIconBtn}
-                      disabled={loading || uploading}
-                      accessibilityLabel="Upload attachment"
-                    >
-                      {uploading ? (
-                        <ActivityIndicator size="small" color={colors.textSecondary} />
-                      ) : (
+                    
+                  <TouchableOpacity
+                    onPress={(e) => {
+                      e?.stopPropagation?.();
+                      openAdd();
+                    }}
+                    style={styles.smallIconBtn}
+                    disabled={loading || uploading}
+                    accessibilityLabel="Upload attachment"
+                  >
+                    {uploading ? (
+                      <ActivityIndicator size="small" color={colors.textSecondary} />
+                    ) : (
+                      <View style={styles.smallIconBtnContent}>
+                        <Text style={styles.smallIconBtnText}>Upload Attachments</Text>
                         <Ionicons name="attach-outline" size={28} color={colors.textSecondary} />
-                      )}
-                    </TouchableOpacity>
+                      </View>
+                    )}
+                  </TouchableOpacity>
                     <TouchableOpacity
                       onPress={refresh}
                       style={styles.smallIconBtn}
@@ -2517,41 +2526,63 @@ return (
 
                             {/* ✅ Proof Builder and Keepr Intelligence entry point */}
                             <View style={styles.rowRight}>
+
                               {/* Keepr Intelligence */}
-                            <TouchableOpacity
-                              style={styles.eyeBtn}
-                              onPress={() => {
-                                const systemId =
-                                  effectiveScopeType === "system" ? effectiveScopeId : null;
+                              <TouchableOpacity
+                                style={styles.rowAction}
+                                onPress={() => {
+                                  const systemId =
+                                    effectiveScopeType === "system" ? effectiveScopeId : null;
 
-                                const attachmentId = row.attachment_id || row.id;
+                                  const attachmentId = row.attachment_id || row.id;
 
-                                navigation.navigate("KeeprIntelligence", { assetId, systemId, attachmentId });
-                              }}
-                              accessibilityLabel="Intelligence"
-                            >
-                              <Ionicons name="sparkles-outline" size={18} color={colors.textSecondary} />
-                            </TouchableOpacity>
+                                  navigation.navigate("KeeprIntelligence", {
+                                    assetId,
+                                    systemId,
+                                    attachmentId,
+                                  });
+                                }}
+                                accessibilityLabel="Intelligence"
+                              >
+                                <Ionicons name="sparkles-outline" size={18} color={colors.textSecondary} />
+                              </TouchableOpacity>
+
                               {/* Proof Builder */}
                               <TouchableOpacity
-                                style={styles.eyeBtn}
-                                onPress={() => navigation.navigate("ProofBuilder", { assetId, attachmentId: row.attachment_id || row.id, role: row.role })}
+                                style={styles.rowAction}
+                                onPress={() =>
+                                  navigation.navigate("ProofBuilder", {
+                                    assetId,
+                                    attachmentId: row.attachment_id || row.id,
+                                    role: row.role,
+                                  })
+                                }
                                 accessibilityLabel="Proof Builder"
                               >
                                 <Ionicons name="document-text-outline" size={18} color={colors.textSecondary} />
                               </TouchableOpacity>
 
+                              {/* Open */}
+                              <TouchableOpacity
+                                style={styles.rowAction}
+                                onPress={() => openAttachment(row)}
+                                accessibilityLabel="Open attachment"
+                              >
+                                <Ionicons name="open-outline" size={18} color={colors.textSecondary} />
+                              </TouchableOpacity>
+
+                              {/* Remove */}
+                              <TouchableOpacity
+                                style={styles.rowAction}
+                                onPress={(e) => {
+                                  e?.stopPropagation?.();
+                                  removeFromThisAsset(row);
+                                }}
+                                accessibilityLabel="Remove attachment"
+                              >
+                                <Ionicons name="trash-outline" size={18} color={colors.textSecondary} />
+                              </TouchableOpacity>
                             </View>
-                            <TouchableOpacity
-                              style={styles.eyeBtn}
-                              onPress={() => openAttachment(row)}
-                            >
-                              <Ionicons
-                                name="open-outline"
-                                size={18}
-                                color={colors.textSecondary}
-                              />
-                            </TouchableOpacity>
                           </View>
                         </TouchableOpacity>
                       );
@@ -2564,35 +2595,6 @@ return (
             {/* Right editor */}  
             <View style={styles.rightCol}>
               <View style={styles.card}>
-                <View style={styles.cardHeaderRow}>
-                  <Text style={styles.cardTitle}>Attachments Role and Association</Text>
-                </View>
-
-                <View
-                  style={{
-                    marginTop: 10,
-                    marginBottom: 10,
-                    flexDirection: "row",
-                    alignItems: "center",
-                  }}
-                >
-                  <TouchableOpacity
-                    onPress={removeFromThisAsset}
-                    disabled={loading || !selected}
-                    style={[
-                      styles.deleteBtnTop,
-                      (loading || !selected) && { opacity: 0.5 },
-                    ]}
-                  >
-                    <Ionicons
-                      name="remove-circle-outline"
-                      size={16}
-                      color="#fff"
-                    />
-                    <Text style={styles.deleteBtnTopText}>Remove from Asset</Text>
-                  </TouchableOpacity>
-                </View>
-
                 {!selected ? (
                   <View style={styles.noSelection}>
                     <Ionicons
@@ -2609,31 +2611,7 @@ return (
                   </View>
                 ) : (
                   <>
-                    {/* Block A – Role + Showcase */}
-                    <View style={styles.sectionBlock}>
-                    <Text style={styles.label}>“What role does this play in your ownership story?”</Text>
-                                            <Text style={styles.textSecondary}>
-                          The more context, the more you'll know. 
-                        </Text>
-                    <TouchableOpacity
-                      onPress={() => setRoleEditOpen(true)}
-                      disabled={!selected?.asset_placement_id}
-                      style={[
-                        styles.roleEditBtn,
-                        !selected?.asset_placement_id && { opacity: 0.5 },
-                      ]}
-                    >
-                      <Text style={styles.label} numberOfLines={1}>
-                       Role: {selected?.role ? roleLabel(selected.role) : "Pick One Here"}
-                      </Text>
-                      <Ionicons
-                        name="git-compare-outline"
-                        size={30}
-                        color={colors.textSecondary}
-                        style={{ marginLeft: 8 }}
-                      />
-                    </TouchableOpacity>
-                    </View>
+
                     {/* Showcase toggle */}
                     {canToggleShowcase && (
                       <View style={styles.showcaseRow}>
@@ -2672,12 +2650,12 @@ return (
                         </TouchableOpacity>
                       </View>
                     )}
-                    {/* Block B – Attachment Metadata */}
+                    {/* Block A – Attachment Metadata */}
                     <View style={styles.sectionBlock}>
-                    <Text style={styles.label}>Title</Text>
-                                            <Text style={styles.textSecondary}>
-                          Change the file name to something meaningful.
-                        </Text>
+                    <Text style={styles.sectionTitle}>Details</Text>
+                    <Text style={styles.textSecondary}>
+                      Rename this file and add searchable notes.
+                    </Text>
                     <TextInput
                       value={draftTitle}
                       onChangeText={setDraftTitle}
@@ -2709,7 +2687,7 @@ return (
                       textAlignVertical="top"
                     />
                     </View>
-                                          <View style={styles.actionRow}>
+                    <View style={styles.actionRow}>
                       <TouchableOpacity
                         onPress={saveMeta}
                         disabled={loading}
@@ -2732,17 +2710,42 @@ return (
                         )}
                       </TouchableOpacity>
                     </View>
-                    <View style={{ height:1, backgroundColor:"#E5E7EB", marginVertical:16 }} />
+                   
+                    <View style={styles.sectionBlock}>
+                    <Text style={styles.label}>“What role does this play in your ownership story?”</Text>
+                        <Text style={styles.textSecondary}>
+                          The more context, the more you'll know. 
+                        </Text>
+                    <TouchableOpacity
+                      onPress={() => setRoleEditOpen(true)}
+                      disabled={!selected?.asset_placement_id}
+                      style={[
+                        styles.roleEditBtn,
+                        !selected?.asset_placement_id && { opacity: 0.5 },
+                      ]}
+                    >
+                      <Text style={styles.label} numberOfLines={1}>
+                       Role: {selected?.role ? roleLabel(selected.role) : "Pick One Here"}
+                      </Text>
+                      <Ionicons
+                        name="git-compare-outline"
+                        size={30}
+                        color={colors.textSecondary}
+                        style={{ marginLeft: 8 }}
+                      />
+                    </TouchableOpacity>
+                    </View>
+
+                  <View style={{ height:1, backgroundColor:"#E5E7EB", marginVertical:16 }} />
                     {/* Block C - Existing associations list */}
                     {associationsForSelected.length > 0 && (
                       <View style={{ marginTop: spacing.lg }}>
-                        <Text style={styles.sectionTitle}>
-                          Where should this be attached?
-                        </Text>
+
+                        <Text style={styles.sectionTitle}>Current Associations</Text>
                         <Text style={styles.textSecondary}>
-                         Every attachment belongs to an Asset.
-                          You can also link it to multiple Systems or Records.
+                          This attachment belongs to this asset and can also be linked to systems or records.
                         </Text>
+                        
                         {associationsForSelected.map((p) => (
                           <View key={p.id} style={styles.assocRow}>
                             <TouchableOpacity
@@ -2788,7 +2791,11 @@ return (
                         ))}
                       </View>
                     )}
-
+                    <View style={{ height:1, backgroundColor:"#E5E7EB", marginVertical:16 }} />
+                    <Text style={styles.sectionTitle}>Add Association</Text>
+                    <Text style={styles.textSecondary}>
+                      Link this attachment to a system or record.
+                    </Text>
                     {/* Context-aware quick attach */}
                     {hasContextRoute && (
                       <View style={{ marginTop: spacing.sm }}>
@@ -3699,7 +3706,9 @@ const styles = StyleSheet.create({
 cardHeaderActions: {
   flexDirection: "row",
   alignItems: "center",
-  gap: 8,
+  justifyContent: "flex-end",
+  gap: 10,
+  flexShrink: 0,
 },
   backButton: {
     flexDirection: "row",
@@ -3733,6 +3742,15 @@ cardHeaderActions: {
   borderTopWidth: 1,
   borderTopColor: colors.borderSubtle,
 },
+rowRight: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 12,
+},
+rowAction: {
+  padding: 6,
+  borderRadius: 6,
+},
 
 sectionBlockTitle: {
   fontSize: 13,
@@ -3765,6 +3783,18 @@ sectionBlockTitle: {
     fontWeight: "800",
     color: colors.textPrimary,
   },
+smallIconBtnContent: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 6,
+},
+
+smallIconBtnText: {
+  fontSize: 14,
+  fontWeight: "700",
+  color: colors.textSecondary,
+  lineHeight: 16,
+},
 
   addMenuItem: {
     flexDirection: "row",
@@ -4015,14 +4045,17 @@ addMenuModal: {
     justifyContent: "space-between",
   },
   cardTitle: { fontSize: 14, fontWeight: "900", color: colors.textPrimary },
-  smallIconBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: colors.surfaceSubtle,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+ smallIconBtn: {
+  minHeight: 40,
+  paddingHorizontal: 12,
+  borderRadius: radius.pill,
+  borderWidth: 1,
+  borderColor: colors.borderSubtle,
+  backgroundColor: colors.surface,
+  alignItems: "center",
+  justifyContent: "center",
+  flexShrink: 0,
+},
 
   emptyText: { marginTop: spacing.sm, color: colors.textSecondary },
 
@@ -4074,6 +4107,20 @@ addMenuModal: {
     justifyContent: "center",
     marginLeft: 8,
   },
+
+  primaryActionBtn: {
+  minHeight: 40,
+  paddingHorizontal: 14,
+  borderRadius: radius.pill,
+  backgroundColor: colors.primary, // Keepr blue
+  alignItems: "center",
+  justifyContent: "center",
+},
+primaryActionText: {
+  fontSize: 14,
+  fontWeight: "700",
+  color: "#fff",
+},
 
   badge: {
     paddingHorizontal: 10,

@@ -160,12 +160,12 @@
     "tags": ["water", "utilities", "critical", "annual", "starter-pack", "inspection-core"]
   },
   {
-    "system_type": "network",
-    "name": "Internet & Network",
-    "location_hint": "Modem, router, switches, access points",
+    "system_type": "technology",
+    "name": "Technology",
+    "location_hint": "Music, Video, Modem, access points, Cameras, Security",
     "starter_pack": true,
     "inspection_core": false,
-    "tags": ["network", "tech", "utilities", "whole-home", "as-needed", "starter-pack"]
+    "tags": ["network", "tech", "utilities", "whole-home", "music", "starter-pack"]
   },
   {
     "system_type": "safety",
