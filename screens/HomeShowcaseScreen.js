@@ -307,7 +307,7 @@ export default function HomeShowcaseScreen({ navigation, route }) {
 
     const picked = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.9,
+      quality: 0.6,
       selectionLimit: 1,
     });
 
@@ -331,7 +331,7 @@ export default function HomeShowcaseScreen({ navigation, route }) {
       const fileName =
         selected.fileName || `home-${asset.id}-${Date.now()}.jpg`;
 
-      await uploadAttachmentFromUri({
+      const uploadResult = await uploadAttachmentFromUri({
         userId,
         assetId: asset.id,
         kind: "photo",
@@ -352,7 +352,25 @@ export default function HomeShowcaseScreen({ navigation, route }) {
           asset_id: asset.id,
         },
       });
+      // If there is no hero yet, promote newest photo
+    const { data: assetRow } = await supabase
+      .from("assets")
+      .select("hero_placement_id")
+      .eq("id", asset.id)
+      .maybeSingle();
 
+    if (!assetRow?.hero_placement_id) {
+      const newPlacementId = uploadResult?.placement_id;
+
+      if (newPlacementId) {
+        await supabase
+          .from("assets")
+          .update({ hero_placement_id: newPlacementId })
+          .eq("id", asset.id);
+
+        setHeroPlacementId(newPlacementId);
+      }
+    }
       await loadPhotos({ useFallback: false });
     } catch (e) {
       console.error("Home showcase add photo error", e);
@@ -445,17 +463,31 @@ export default function HomeShowcaseScreen({ navigation, route }) {
                   )
                 );
 
-                // If we removed the hero photo from showcase, clear hero_placement_id
+                // If we removed the hero photo, promote another photo
                 if (photo.isHero && currentHome?.id) {
-                  const { error: clearErr } = await supabase
-                    .from("assets")
-                    .update({ hero_placement_id: null })
-                    .eq("id", currentHome.id);
 
-                  if (clearErr) {
-                    console.log("Clear hero_placement_id error", clearErr);
+                  const remaining = (photos || []).filter(
+                    (p) => p.placement_id !== photo.placement_id
+                  );
+
+                  const nextHero = remaining
+                      ?.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+
+                  if (nextHero?.placement_id) {
+                    await supabase
+                      .from("assets")
+                      .update({ hero_placement_id: nextHero.placement_id })
+                      .eq("id", currentHome.id);
+
+                    setHeroPlacementId(nextHero.placement_id);
+                  } else {
+                    await supabase
+                      .from("assets")
+                      .update({ hero_placement_id: null })
+                      .eq("id", currentHome.id);
+
+                    setHeroPlacementId(null);
                   }
-                  setHeroPlacementId(null);
                 }
 
                 await loadPhotos({ useFallback: true });
@@ -780,7 +812,7 @@ const styles = StyleSheet.create({
     left: spacing.sm,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgb(45, 125, 227);",
+    backgroundColor: "rgb(45, 125, 227)",
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 999,
@@ -802,7 +834,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 8,
     borderRadius: 999,
-    backgroundColor: "rgba(45, 124, 227, 0.6);",
+    backgroundColor: "rgba(45, 124, 227, 0.6)",
     alignItems: "center",
     justifyContent: "center",
   },

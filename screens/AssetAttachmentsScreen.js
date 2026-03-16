@@ -125,177 +125,6 @@ async function apiSetPlacementShowcase({ attachment_id, target_type, target_id, 
   if (error) throw error;
 }
 
-// Shared upload engine for this screen
-function useAttachmentUploadForAsset(assetId, onComplete) {
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState(null);
-
-  const ensureMediaPermission = useCallback(async () => {
-    if (Platform.OS === "web") return true;
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    return status === "granted";
-  }, [ensureSignedUrlForRow]);
-
-  const doAfter = useCallback(
-    async () => {
-      try {
-        if (onComplete) {
-          await onComplete();
-        }
-      } catch (e) {
-        console.log("post-upload callback failed", e?.message || e);
-      }
-    },
-    [onComplete]
-  );
-
-  const uploadFromCamera = useCallback(async () => {
-    try {
-      setUploadError(null);
-      const ok = await ensureMediaPermission();
-      if (!ok) {
-        Alert.alert(
-          "Permission required",
-          "Please allow photo library access."
-        );
-        return;
-      }
-
-      const { data } = await supabase.auth.getUser();
-      const userId = data?.user?.id;
-      if (!userId) throw new Error("Not signed in.");
-
-      const res = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.9,
-      });
-
-      if (res.canceled) return;
-      const a = res.assets?.[0];
-      if (!a?.uri) return;
-
-      setUploading(true);
-      await uploadAttachmentFromUri({
-        userId,
-        assetId,
-        kind: "photo",
-        fileUri: a.uri,
-        fileName: a.fileName || a.uri.split("/").pop() || "photo.jpg",
-        mimeType: a.mimeType || "image/jpeg",
-        sizeBytes: a.fileSize || null,
-        placements: [
-          { target_type: "asset", target_id: assetId, role: "other" },
-        ],
-      });
-      await doAfter();
-    } catch (e) {
-      console.log("uploadFromCamera failed", e);
-      setUploadError(e);
-      Alert.alert(
-        "Upload failed",
-        e?.message || "Could not upload photo from camera."
-      );
-    } finally {
-      setUploading(false);
-    }
-  }, [assetId, ensureMediaPermission, doAfter]);
-
-  const uploadFromDevice = useCallback(async () => {
-    try {
-      setUploadError(null);
-
-      const { data } = await supabase.auth.getUser();
-      const userId = data?.user?.id;
-      if (!userId) throw new Error("Not signed in.");
-
-      const res = await DocumentPicker.getDocumentAsync({
-        type: "*/*",
-        multiple: false,
-        copyToCacheDirectory: true,
-      });
-
-      if (res.canceled) return;
-      const f = res.assets?.[0];
-      if (!f?.uri) return;
-
-      setUploading(true);
-      await uploadAttachmentFromUri({
-        userId,
-        assetId,
-        kind: "file",
-        fileUri: f.uri,
-        fileName: f.name || f.uri.split("/").pop() || "file",
-        mimeType: f.mimeType || "application/octet-stream",
-        sizeBytes: f.size || null,
-        placements: [
-          { target_type: "asset", target_id: assetId, role: "other" },
-        ],
-      });
-     
-      await refresh();
-      console.log("Attachment uploaded:", file.name);
-
-      await doAfter();
-    } catch (e) {
-      console.log("uploadFromDevice failed", e);
-      setUploadError(e);
-      Alert.alert(
-        "Upload failed",
-        e?.message || "Could not upload file from device."
-      );
-    } finally {
-      setUploading(false);
-    }
-  }, [assetId, doAfter]);
-
-  const addLink = useCallback(
-    async ({ url, title, notes }) => {
-      try {
-        setUploadError(null);
-
-        const { data } = await supabase.auth.getUser();
-        const userId = data?.user?.id;
-        if (!userId) throw new Error("Not signed in.");
-
-        // let your existing normalizeUrl helper clean this up if you call it
-        const cleanedUrl = url?.trim();
-
-        setUploading(true);
-        await createLinkAttachment({
-          userId,
-          assetId,
-          url: cleanedUrl,
-          title: title?.trim() || null,
-          notes: notes?.trim() || null,
-          placements: [
-            { target_type: "asset", target_id: assetId, role: "other" },
-          ],
-        });
-
-        await doAfter();
-      } catch (e) {
-        console.log("addLink failed", e);
-        setUploadError(e);
-        Alert.alert(
-          "Save failed",
-          e?.message || "Could not save link attachment."
-        );
-      } finally {
-        setUploading(false);
-      }
-    },
-    [assetId, doAfter]
-  );
-
-  return {
-    uploadFromDevice,
-    uploadFromCamera,
-    addLink,
-    uploading,
-    uploadError,
-  };
-}
-
 function safeStr(v) {
   return typeof v === "string" ? v : "";
 }
@@ -1477,35 +1306,101 @@ const isWide = IS_WEB && width >= 980;
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     return status === "granted";
   }, []);
+const addCameraPhoto = useCallback(async () => {
+  if (IS_WEB) {
+    triggerWebPicker("photo");
+    return;
+  }
 
-  const addPhoto = useCallback(async () => {
-if (IS_WEB) {
-  triggerWebPicker("photo");
-  return;
-}
+  try {
+    const cameraPerm = await ImagePicker.requestCameraPermissionsAsync();
+    if (cameraPerm.status !== "granted") {
+      Alert.alert("Permission required", "Please allow camera access.");
+      return;
+    }
 
-    try {
-      const { data } = await supabase.auth.getUser();
-      const userId = data?.user?.id;
-      if (!userId) throw new Error("Not signed in.");
+    const { data } = await supabase.auth.getUser();
+    const userId = data?.user?.id;
+    if (!userId) throw new Error("Not signed in.");
 
-      const ok = await ensureMediaPermission();
-      if (!ok) {
-        Alert.alert("Permission required", "Please allow photo library access.");
-        return;
-      }
+const res = await ImagePicker.launchCameraAsync({
+  mediaTypes: ImagePicker.MediaTypeOptions.Images,
+  quality: 0.6,
+  allowsEditing: false,
+  exif: false,
+});
+
+    if (res.canceled) return;
+    const a = res.assets?.[0];
+    if (!a?.uri) return;
+
+    const placements = [
+      { target_type: "asset", target_id: assetId, role: "other" },
+    ];
+
+    if (
+      fromTargetType &&
+      fromTargetId &&
+      (fromTargetType === "system" || fromTargetType === "service_record")
+    ) {
+      placements.push({
+        target_type: fromTargetType,
+        target_id: fromTargetId,
+        role: fromTargetRole || "other",
+      });
+    }
+
+    setUploading(true);
+
+    await uploadAttachmentFromUri({
+      userId,
+      assetId,
+      kind: "photo",
+      fileUri: a.uri,
+      fileName: a.fileName || a.uri.split("/").pop() || "camera-photo.jpg",
+      mimeType: a.mimeType || "image/jpeg",
+      sizeBytes: a.fileSize || null,
+      placements,
+    });
+
+    await refresh();
+  } catch (e) {
+    Alert.alert("Upload failed", e?.message || "Could not upload photo.");
+  } finally {
+    setUploading(false);
+  }
+}, [assetId, fromTargetId, fromTargetRole, fromTargetType, refresh, triggerWebPicker]);
+
+const addPhotoFromLibrary = useCallback(async () => {
+  if (IS_WEB) {
+    triggerWebPicker("photo");
+    return;
+  }
+
+  try {
+    setUploading(true);
+
+    const { data } = await supabase.auth.getUser();
+    const userId = data?.user?.id;
+    if (!userId) throw new Error("Not signed in.");
+
+    const ok = await ensureMediaPermission();
+    if (!ok) {
+      Alert.alert("Permission required", "Please allow photo library access.");
+      return;
+    }
 
       const res = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.9,
+        quality: 0.6,
+        allowsEditing: false,
+        exif: false,
       });
 
       if (res.canceled) return;
       const a = res.assets?.[0];
       if (!a?.uri) return;
 
-      // Build placements so that uploads from a System Story (or record) are
-      // *immediately* associated to that context as well as the asset.
       const placements = [
         { target_type: "asset", target_id: assetId, role: "other" },
       ];
@@ -1532,65 +1427,87 @@ if (IS_WEB) {
         sizeBytes: a.fileSize || null,
         placements,
       });
+
       await refresh();
     } catch (e) {
       Alert.alert("Upload failed", e?.message || "Could not upload photo.");
+    } finally {
+      setUploading(false);
     }
-  }, [assetId, ensureMediaPermission, fromTargetId, fromTargetRole, fromTargetType, refresh]);
+  }, [
+    assetId,
+    ensureMediaPermission,
+    fromTargetId,
+    fromTargetRole,
+    fromTargetType,
+    refresh,
+    triggerWebPicker,
+  ]);
 
   const addFile = useCallback(async () => {
-    if (IS_WEB) {
-      triggerWebPicker("file");
-      return;
+  if (IS_WEB) {
+    triggerWebPicker("file");
+    return;
+  }
+
+  try {
+    setUploading(true);
+
+    const { data } = await supabase.auth.getUser();
+    const userId = data?.user?.id;
+    if (!userId) throw new Error("Not signed in.");
+
+    const res = await DocumentPicker.getDocumentAsync({
+      type: "*/*",
+      multiple: false,
+      copyToCacheDirectory: true,
+    });
+
+    if (res.canceled) return;
+    const f = res.assets?.[0];
+    if (!f?.uri) return;
+
+    const placements = [
+      { target_type: "asset", target_id: assetId, role: "other" },
+    ];
+
+    if (
+      fromTargetType &&
+      fromTargetId &&
+      (fromTargetType === "system" || fromTargetType === "service_record")
+    ) {
+      placements.push({
+        target_type: fromTargetType,
+        target_id: fromTargetId,
+        role: fromTargetRole || "other",
+      });
     }
 
-    try {
-      const { data } = await supabase.auth.getUser();
-      const userId = data?.user?.id;
-      if (!userId) throw new Error("Not signed in.");
+    await uploadAttachmentFromUri({
+      userId,
+      assetId,
+      kind: "file",
+      fileUri: f.uri,
+      fileName: f.name || f.uri.split("/").pop() || "file",
+      mimeType: f.mimeType || "application/octet-stream",
+      sizeBytes: f.size || null,
+      placements,
+    });
 
-      const res = await DocumentPicker.getDocumentAsync({
-        type: "*/*",
-        multiple: false,
-        copyToCacheDirectory: true,
-      });
-
-      if (res.canceled) return;
-      const f = res.assets?.[0];
-      if (!f?.uri) return;
-
-      const placements = [
-        { target_type: "asset", target_id: assetId, role: "other" },
-      ];
-
-      if (
-        fromTargetType &&
-        fromTargetId &&
-        (fromTargetType === "system" || fromTargetType === "service_record")
-      ) {
-        placements.push({
-          target_type: fromTargetType,
-          target_id: fromTargetId,
-          role: fromTargetRole || "other",
-        });
-      }
-
-      await uploadAttachmentFromUri({
-        userId,
-        assetId,
-        kind: "file",
-        fileUri: f.uri,
-        fileName: f.name || f.uri.split("/").pop() || "file",
-        mimeType: f.mimeType || "application/octet-stream",
-        sizeBytes: f.size || null,
-        placements,
-      });
-
-      await refresh();
-    } catch (e) {
-      Alert.alert("Upload failed", e?.message || "Could not upload file.");
-    }
-  }, [assetId, fromTargetId, fromTargetRole, fromTargetType, refresh]);
+    await refresh();
+  } catch (e) {
+    Alert.alert("Upload failed", e?.message || "Could not upload file.");
+  } finally {
+    setUploading(false);
+  }
+}, [
+  assetId,
+  fromTargetId,
+  fromTargetRole,
+  fromTargetType,
+  refresh,
+  triggerWebPicker,
+]);
 
   const addLink = useCallback(async ({ url, title, notes }) => {
     const { data } = await supabase.auth.getUser();
@@ -1631,12 +1548,13 @@ const openAdd = () => {
     setAddMenuOpen(true);
     return;
   }
-    Alert.alert("Add attachment", "What would you like to add?", [
-      { text: "Cancel", style: "cancel" },
-      { text: "Photo", onPress: addPhoto },
-      { text: "File", onPress: addFile },
-      { text: "Link", onPress: () => setAddLinkOpen(true) },
-    ]);
+  Alert.alert("Add attachment", "What would you like to add?", [
+    { text: "Cancel", style: "cancel" },
+    { text: "Camera", onPress: addCameraPhoto },
+    { text: "Photo Library", onPress: addPhotoFromLibrary },
+    { text: "File", onPress: addFile },
+    { text: "Link", onPress: () => setAddLinkOpen(true) },
+  ]);
   };
 
   const saveMeta = useCallback(async () => {
@@ -2953,7 +2871,6 @@ return (
             </View>
           </View>
           ) : 
-          
           (
             <View style={styles.mobileSplit}>
             <View style={{height: mobilePaneHeight}}>
@@ -4184,7 +4101,7 @@ deleteBtnTopText: {
   },
   showcaseToggleActive: {
     borderColor: colors.primary,
-    backgroundColor: "rgb(45, 125, 227);",
+    backgroundColor: "rgb(45, 125, 227)",
   },
   showcaseToggleText: {
     marginLeft: 6,
@@ -4201,7 +4118,7 @@ deleteBtnTopText: {
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: radius.pill,
-    backgroundColor: "rgb(45, 125, 227);",
+    backgroundColor: "rgb(45, 125, 227)",
     marginRight: 6,
   },
   showcaseChipText: {

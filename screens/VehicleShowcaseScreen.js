@@ -196,7 +196,7 @@ export default function VehicleShowcaseScreen({ navigation, route }) {
           const looksLikeImage =
             kind === "photo" ||
             mime.startsWith("image/") ||
-            ["jpg", "jpeg", "png", "webp", "heic"].includes(ext);
+            ["jpg", "jpeg", "png", "webp"].includes(ext)
 
           if (!looksLikeImage) continue;
 
@@ -394,7 +394,7 @@ export default function VehicleShowcaseScreen({ navigation, route }) {
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: pickerMediaTypes,
-      quality: 0.9,
+      quality: 0.6,
       selectionLimit: 1,
     });
 
@@ -519,12 +519,27 @@ export default function VehicleShowcaseScreen({ navigation, route }) {
               await removePlacementById(photo.placement_id);
 
               if (photo.isHero) {
-                await supabase
-                  .from("assets")
-                  .update({ hero_placement_id: null })
-                  .eq("id", currentVehicle.id);
 
-                setHeroPlacementId(null);
+                // remove hero flag first
+              const remaining = (photos || [])
+                .filter((p) => p.placement_id && p.placement_id !== photo.placement_id)
+                .sort((a, b) => {
+                  const aT = a.created_at ? new Date(a.created_at).getTime() : 0;
+                  const bT = b.created_at ? new Date(b.created_at).getTime() : 0;
+                  return bT - aT;
+                });
+
+              const nextHero = remaining[0] || null;
+
+              await supabase
+                .from("assets")
+                .update({
+                  hero_placement_id: nextHero?.placement_id || null,
+                })
+                .eq("id", currentVehicle.id);
+
+              setHeroPlacementId(nextHero?.placement_id || null);
+                return;
               }
 
               await loadPhotos({ useFallback: true });
@@ -877,7 +892,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 8,
     borderRadius: 999,
-    backgroundColor: "rgba(45, 124, 227, 0.6);",
+    backgroundColor: "rgba(45, 124, 227, 0.6)",
     alignItems: "center",
     justifyContent: "center",
   },

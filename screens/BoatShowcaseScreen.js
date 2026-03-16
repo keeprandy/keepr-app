@@ -275,7 +275,7 @@ export default function BoatShowcaseScreen({ navigation, route }) {
           const looksLikeImage =
             kind === "photo" ||
             mime.startsWith("image/") ||
-            ["jpg", "jpeg", "png", "webp", "heic"].includes(ext);
+           ["jpg", "jpeg", "png", "webp"].includes(ext)
 
           if (!looksLikeImage) continue;
 
@@ -775,24 +775,25 @@ export default function BoatShowcaseScreen({ navigation, route }) {
                           <Text style={styles.heroBadgeText}>Hero photo</Text>
                         </View>
                       )}
-
-                      <View style={styles.tileActionsRow}>
+                    <View style={styles.tileActionsRow}>
+                      {!photo.isHero && (
                         <TouchableOpacity
                           style={styles.tileActionButton}
                           onPress={() => handleSetHero(photo)}
-                          disabled={photosLoading}
+                          activeOpacity={0.85}
                         >
                           <Text style={styles.tileActionText}>Set as hero</Text>
                         </TouchableOpacity>
+                      )}
 
-                        <TouchableOpacity
-                          style={styles.tileActionButtonDanger}
-                          onPress={() => handleDeletePhoto(photo)}
-                          disabled={photosLoading}
-                        >
-                          <Text style={styles.tileActionText}>Remove</Text>
-                        </TouchableOpacity>
-                      </View>
+                      <TouchableOpacity
+                        style={styles.tileActionButtonDanger}
+                        onPress={() => handleDeletePhoto(photo)}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={styles.tileActionText}>Remove</Text>
+                      </TouchableOpacity>
+                    </View>
                     </TouchableOpacity>
                   );
                 })}
@@ -1044,7 +1045,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 8,
     borderRadius: 999,
-    backgroundColor: "rgba(45, 124, 227, 0.6);",
+    backgroundColor: "rgba(45, 124, 227, 0.6)",
     alignItems: "center",
     justifyContent: "center",
   },
