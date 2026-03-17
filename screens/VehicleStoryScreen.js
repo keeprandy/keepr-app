@@ -972,9 +972,8 @@ const filteredTimelineItems = useMemo(() => {
             <QuickActionChip label="Timeline" icon="time-outline" onPress={scrollToTimeline} />
             <QuickActionChip label="Add record" icon="add-circle-outline" onPress={goToAddTimelineRecord} />
             <QuickActionChip label="Attachments" icon="attach-outline" onPress={goToAttachments} />
+             <QuickActionChip label="Showcase" icon="images-outline" onPress={goToShowcase} />
             <QuickActionChip label="QR Codes" icon="qr-code-outline" onPress={() => navigation.navigate("AssetQRCodes", { assetId: currentVehicle.id })}/>
-            <QuickActionChip label="Showcase" icon="images-outline" onPress={goToShowcase} />
-            <QuickActionChip label="Attachments" icon="attach-outline" onPress={goToAttachments} />
             <QuickActionChip label="Public view" icon="open-outline" onPress={goToPublicView} />
             <QuickActionChip label="Edit vehicle" icon="create-outline" onPress={goToEditVehicle} />
             <QuickActionChip label="Delete vehicle" icon="trash-outline" onPress={startRemoveVehicle} />
