@@ -1071,11 +1071,11 @@ const meta = {
             activeOpacity={0.9}
           >
             <Ionicons
-              name="chatbubble-ellipses-outline"
+              name="sparkles-outline"
               size={18}
               color={colors.textPrimary}
             />
-            <Text style={styles.emptySecondaryBtnText}>Add via chat</Text>
+            <Text style={styles.emptySecondaryBtnText}>Add Asset with Kai</Text>
           </TouchableOpacity>
         </View>
       
@@ -1466,7 +1466,7 @@ const meta = {
                   size={16}
                   color={colors.textPrimary}
                 />
-                <Text style={styles.modalMiniBtnText}>Chat</Text>
+                <Text style={styles.modalMiniBtnText}>Add Asset with Kai</Text>
               </TouchableOpacity>
 
               <TouchableOpacity

@@ -1,10 +1,12 @@
 // screens/AddAssetChatScreen.js
-// LEGACY - not part of V1 launch surface. Do not re-enable without review.
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,595 +17,898 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
+import * as DocumentPicker from "expo-document-picker";
 
 import { layoutStyles } from "../styles/layout";
-import { colors, spacing, radius, typography } from "../styles/theme";
+import { colors, spacing, radius, typography, shadows } from "../styles/theme";
 import { supabase } from "../lib/supabaseClient";
-import { useAuth } from "../context/AuthContext";
-import { uploadLocalImageToSupabase } from "../lib/imageUpload";
+import { createAssetWithDefaults } from "../lib/assetsService";
+import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 
+const IS_WEB = Platform.OS === "web";
+const HERO_BUCKET = "asset-files";
+const HERO_ROLE = "hero";
 const BOT = "bot";
 const USER = "user";
 
-const STEPS = [
-  "type",
-  "name",
-  "year",
-  "make",
-  "model",
-  "location",
-  "confirm",
-];
+
+function safeStr(v) {
+  return typeof v === "string" ? v : "";
+}
+
+function getPublicUrl(bucket, path) {
+  if (!bucket || !path) return null;
+  const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+  return data?.publicUrl || null;
+}
+
+function mediaTypesImagesCompat() {
+  if (ImagePicker?.MediaType?.Images) return [ImagePicker.MediaType.Images];
+  return ImagePicker.MediaTypeOptions.Images;
+}
+
+function KeeprAlertModal({ open, title, message, onClose }) {
+  if (!open) return null;
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalCard}>
+          <View style={styles.modalHeader}>
+            <View style={styles.modalIconWrap}>
+              <Ionicons
+                name="information-circle"
+                size={18}
+                color={colors.textPrimary}
+              />
+            </View>
+            <Text style={styles.modalTitle}>{title}</Text>
+          </View>
+
+          {!!message && <Text style={styles.modalMessage}>{message}</Text>}
+
+          <View style={styles.modalActions}>
+            <Pressable onPress={onClose} style={styles.modalBtnPrimary}>
+              <Text style={styles.modalBtnPrimaryText}>OK</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function chatConfigForAssetType(assetTypeRaw) {
+  const assetType = (assetTypeRaw || "vehicle").toLowerCase();
+
+  if (assetType === "home") {
+    return {
+      assetType: "home",
+      title: "Add Asset with Kai",
+      subtitle: "Kai will help you add a home in a few quick steps.",
+      intro: "Let’s add your home. I’ll keep this quick.",
+      questions: [
+        {
+          key: "street",
+          label: "Street Address",
+          prompt: "What’s the street address?",
+        },
+        {
+          key: "city",
+          label: "City",
+          prompt: "What city is it in?",
+        },
+        {
+          key: "state",
+          label: "State",
+          prompt: "What state is it in? Use the 2-letter code if you can.",
+        },
+        {
+          key: "postalCode",
+          label: "Postal Code",
+          prompt: "What’s the postal code?",
+        },
+      ],
+    };
+  }
+
+  if (assetType === "boat") {
+    return {
+      assetType: "boat",
+      title: "Add Asset with Kai",
+      subtitle: "Kai will help you add a boat in a few quick steps.",
+      intro: "Let’s add your boat.",
+      questions: [
+        {
+          key: "make",
+          label: "Make",
+          prompt: "What’s the make?",
+        },
+        {
+          key: "model",
+          label: "Model",
+          prompt: "What’s the model?",
+        },
+        {
+          key: "year",
+          label: "Year",
+          prompt: "What year is it?",
+        },
+        {
+          key: "lengthFeet",
+          label: "Length",
+          prompt: "How long is it in feet?",
+        },
+      ],
+    };
+  }
+
+  return {
+    assetType: "vehicle",
+    title: "Add Asset with Kai",
+    subtitle: "Kai will help you add a vehicle in a few quick steps.",
+    intro: "Let’s add your vehicle.",
+    questions: [
+      {
+        key: "make",
+        label: "Make",
+        prompt: "What’s the make?",
+      },
+      {
+        key: "model",
+        label: "Model",
+        prompt: "What’s the model?",
+      },
+      {
+        key: "year",
+        label: "Year",
+        prompt: "What year is it?",
+      },
+    ],
+  };
+}
+
+function validateAnswer(fieldKey, value) {
+  const v = safeStr(value).trim();
+
+  if (!v) return "Please enter a value before moving on.";
+
+  if (fieldKey === "year") {
+    if (!/^\d{4}$/.test(v)) {
+      return "Enter a 4-digit year, like 2020.";
+    }
+    const yearNum = parseInt(v, 10);
+    if (Number.isNaN(yearNum) || yearNum < 1600 || yearNum > 2100) {
+      return "Enter a valid year.";
+    }
+  }
+
+  if (fieldKey === "lengthFeet") {
+    const n = parseFloat(v);
+    if (Number.isNaN(n) || n <= 0) {
+      return "Enter length in feet, like 22.";
+    }
+  }
+
+  if (fieldKey === "state") {
+    if (!/^[A-Za-z]{2}$/.test(v)) {
+      return "Use a 2-letter state code, like MI.";
+    }
+  }
+
+  if (fieldKey === "postalCode") {
+    if (!/^\d{5}(-\d{4})?$/.test(v)) {
+      return "Enter a valid ZIP code, like 48116.";
+    }
+  }
+
+  return null;
+}
 
 export default function AddAssetChatScreen({ navigation, route }) {
-  const { user } = useAuth();
+    const initialType = route?.params?.assetType || null;
+  const [selectedAssetType, setSelectedAssetType] = useState(initialType);
+  const [step, setStep] = useState(initialType ? "collecting" : "choose_type");
+const config = useMemo(
+  () => (selectedAssetType ? chatConfigForAssetType(selectedAssetType) : null),
+  [selectedAssetType]
+);
 
-  // assetType comes from Home / Vehicle / Boat story screens
-  const initialAssetType = route?.params?.assetType || "vehicle"; // "home" | "vehicle" | "boat"
-  const [assetType] = useState(initialAssetType);
+  const assetType = config?.assetType || null;
+  const questions = config?.questions || [];
+  const title = config?.title || "Add Asset with Kai";
+  const subtitle =
+    config?.subtitle || "Kai will help you add this in a few quick steps.";
+  const intro = config?.intro || "What would you like to add?";
 
+  const [answers, setAnswers] = useState({});
   const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState("");
   const [stepIndex, setStepIndex] = useState(0);
+  const [input, setInput] = useState("");
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [photoLocal, setPhotoLocal] = useState(null);
+  const [modal, setModal] = useState({
+    open: false,
+    title: "",
+    message: "",
+  });
 
-  // Collected fields
-  const [name, setName] = useState("");
-  const [year, setYear] = useState("");
-  const [make, setMake] = useState("");
-  const [model, setModel] = useState("");
-  const [location, setLocation] = useState("");
+  const scrollRef = useRef(null);
 
-  // Attachments staged during chat (photos only for now)
-  const [attachments, setAttachments] = useState([]);
-  const [uploadingAttachment, setUploadingAttachment] = useState(false);
-
-  const friendlyLabel =
-    assetType === "home"
-      ? "home"
-      : assetType === "boat"
-      ? "boat"
-      : "vehicle";
+  const openModal = (titleText, message) =>
+    setModal({ open: true, title: titleText, message });
+  const closeModal = () =>
+    setModal({ open: false, title: "", message: "" });
 
   useEffect(() => {
-    setMessages([
-      {
-        id: "intro",
-        role: BOT,
-        text: `Let’s add a ${friendlyLabel} to Keepr. I’ll ask a few quick questions.`,
-      },
-      {
-        id: "q-type",
-        role: BOT,
-        text:
-          friendlyLabel === "vehicle"
-            ? "What kind of vehicle is this? (e.g., car, truck, motorcycle, golf cart)"
-            : friendlyLabel === "home"
-            ? "What kind of home is this? (e.g., primary home, lake house, condo)"
-            : "What kind of boat is this? (e.g., tri-toon, bowrider, cruiser)",
-      },
-    ]);
-  }, [friendlyLabel]);
-
-  const appendMessage = (msg) => {
-    setMessages((prev) => [
-      ...prev,
-      { id: String(prev.length) + Date.now(), ...msg },
-    ]);
-  };
-
-  /* ---------------------- Attachment helpers (+ Photo) --------------------- */
-
-  const handleAddPhoto = async () => {
-    if (!user) {
-      setError("You need to be signed in to attach photos.");
+    if (!selectedAssetType) {
+      setMessages([
+        {
+          id: "intro-choose-type",
+          role: BOT,
+          text: "What would you like to add?",
+        },
+      ]);
+      setAnswers({});
+      setInput("");
+      setStep("choose_type");
+      setPhotoLocal(null);
       return;
     }
 
+    setMessages([
+      {
+        id: `intro-${selectedAssetType}`,
+        role: BOT,
+        text: intro,
+      },
+      {
+        id: `q0-${selectedAssetType}`,
+        role: BOT,
+        text: questions[0]?.prompt || "Let’s get started.",
+      },
+    ]);
+    setAnswers({});
+    setInput("");
+    setStep("collecting");
+    setPhotoLocal(null);
+  }, [selectedAssetType, intro, questions]);
+
+  useEffect(() => {
+    setTimeout(() => {
+      scrollRef.current?.scrollToEnd?.({ animated: true });
+    }, 50);
+  }, [messages, photoLocal]);
+
+  const currentQuestion = questions[stepIndex] || null;
+  const allQuestionsAnswered = stepIndex >= questions.length;
+
+  const summaryLines = useMemo(() => {
+    if (!allQuestionsAnswered) return [];
+
+    if (assetType === "home") {
+      return [
+        answers.street ? `Street: ${answers.street}` : null,
+        answers.city ? `City: ${answers.city}` : null,
+        answers.state ? `State: ${answers.state}` : null,
+        answers.postalCode ? `Postal Code: ${answers.postalCode}` : null,
+      ].filter(Boolean);
+    }
+
+    if (assetType === "boat") {
+      return [
+        answers.make ? `Make: ${answers.make}` : null,
+        answers.model ? `Model: ${answers.model}` : null,
+        answers.year ? `Year: ${answers.year}` : null,
+        answers.lengthFeet ? `Length: ${answers.lengthFeet} ft` : null,
+      ].filter(Boolean);
+    }
+
+    return [
+      answers.make ? `Make: ${answers.make}` : null,
+      answers.model ? `Model: ${answers.model}` : null,
+      answers.year ? `Year: ${answers.year}` : null,
+    ].filter(Boolean);
+  }, [allQuestionsAnswered, answers, assetType]);
+
+  const appendMessage = (role, text) => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `${role}-${Date.now()}-${prev.length}`,
+        role,
+        text,
+      },
+    ]);
+  };
+
+  async function pickPhotoFromLibrary() {
     try {
-      setError(null);
-      setUploadingAttachment(true);
+      if (IS_WEB) {
+        const res = await DocumentPicker.getDocumentAsync({
+          type: "image/*",
+          multiple: false,
+          copyToCacheDirectory: true,
+        });
+
+        if (res.canceled) return;
+
+        const f = res.assets?.[0];
+        if (!f?.uri) return;
+
+        setPhotoLocal({
+          uri: f.uri,
+          fileName: f.name || f.uri.split("/").pop() || "asset.jpg",
+          mimeType: f.mimeType || "image/jpeg",
+          fileSize: f.size || null,
+        });
+        return;
+      }
 
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
-        setError("Permission required to access your photo library.");
-        setUploadingAttachment(false);
+        openModal(
+          "Permission needed",
+          "Please allow photo library access to choose a photo."
+        );
         return;
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: mediaTypesImagesCompat(),
         quality: 0.9,
       });
 
-      if (result.canceled) {
-        setUploadingAttachment(false);
-        return;
-      }
+      if (result.canceled) return;
 
-      const picked = result.assets?.[0];
-      if (!picked?.uri) {
-        setUploadingAttachment(false);
-        return;
-      }
+      const a = result.assets?.[0];
+      if (!a?.uri) return;
 
-      const ownerId = user.id;
-
-      const uploadResult = await uploadLocalImageToSupabase({
-        bucket: "asset-files",
-        assetId: ownerId ? `${ownerId}/chat-intake` : "chat-intake",
-        localUri: picked.uri,
-        contentType: "image/jpeg",
+      setPhotoLocal({
+        uri: a.uri,
+        fileName: a.fileName || a.uri.split("/").pop() || "asset.jpg",
+        mimeType: a.mimeType || "image/jpeg",
+        fileSize: a.fileSize || null,
       });
+    } catch (e) {
+      console.log("AddAssetChatScreen pickPhotoFromLibrary failed", e);
+      openModal("Couldn’t open photos", "Try again.");
+    }
+  }
 
-      if (!uploadResult || !uploadResult.publicUrl || !uploadResult.storagePath) {
-        throw new Error("Upload returned no publicUrl");
+  async function takePhoto() {
+    if (IS_WEB) return pickPhotoFromLibrary();
+
+    try {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
+        openModal(
+          "Permission needed",
+          "Please allow camera access to take a photo."
+        );
+        return;
       }
 
-      setAttachments((prev) => [
-        ...prev,
-        {
-          id: `${Date.now()}-${prev.length}`,
-          kind: "image",
-          localUri: picked.uri,
-          publicUrl: uploadResult.publicUrl,
-          storagePath: uploadResult.storagePath,
-          fileName: uploadResult.fileName || "Photo",
-        },
-      ]);
+      const result = await ImagePicker.launchCameraAsync({ quality: 0.9 });
+
+      if (result.canceled) return;
+
+      const a = result.assets?.[0];
+      if (!a?.uri) return;
+
+      setPhotoLocal({
+        uri: a.uri,
+        fileName: a.fileName || a.uri.split("/").pop() || "asset.jpg",
+        mimeType: a.mimeType || "image/jpeg",
+        fileSize: a.fileSize || null,
+      });
     } catch (e) {
-      console.error("Error uploading chat attachment", e);
-      setError("Could not upload that photo. Try again or pick a different one.");
-    } finally {
-      setUploadingAttachment(false);
+      console.log("AddAssetChatScreen takePhoto failed", e);
+      openModal("Couldn’t open camera", "Try again.");
     }
-  };
+  }
 
-  const handleRemoveAttachment = async (attachment) => {
-    setAttachments((prev) => prev.filter((a) => a.id !== attachment.id));
+  const handleSend = () => {
+    if (saving || uploadingPhoto) return;
+    if (!currentQuestion) return;
 
-    if (!attachment.storagePath) return;
-    try {
-      await supabase.storage
-        .from("asset-files")
-        .remove([attachment.storagePath]);
-    } catch (e) {
-      console.log("Failed to remove staged attachment", e);
-    }
-  };
-
-  /* ----------------------------- Chat flow ----------------------------- */
-
-  const handleUserInput = async () => {
-    const trimmed = input.trim();
+    const trimmed = safeStr(input).trim();
     if (!trimmed) return;
 
-    appendMessage({ role: USER, text: trimmed });
+    const validationMessage = validateAnswer(currentQuestion.key, trimmed);
+    if (validationMessage) {
+      appendMessage(BOT, validationMessage);
+      return;
+    }
+
+    appendMessage(USER, trimmed);
+
+    setAnswers((prev) => ({
+      ...prev,
+      [currentQuestion.key]:
+        currentQuestion.key === "state"
+          ? trimmed.toUpperCase()
+          : trimmed,
+    }));
+
     setInput("");
 
-    const currentStep = STEPS[stepIndex];
+    const nextIndex = stepIndex + 1;
+
+    if (nextIndex < questions.length) {
+      setStepIndex(nextIndex);
+      appendMessage(BOT, questions[nextIndex].prompt);
+      return;
+    }
+
+    setStepIndex(nextIndex);
+    appendMessage(
+      BOT,
+      "That’s everything I need. Review it below, add a photo if you want, then create the asset."
+    );
+  };
+
+  const buildDisplayName = () => {
+    if (assetType === "home") {
+      return [answers.street, answers.city, answers.state]
+        .filter(Boolean)
+        .join(", ");
+    }
+
+    return `${answers.year || ""} ${answers.make || ""} ${answers.model || ""}`.trim();
+  };
+
+  const buildLocationString = () => {
+    if (assetType === "home") {
+      return [
+        answers.street,
+        answers.city,
+        answers.state,
+        answers.postalCode,
+      ]
+        .filter(Boolean)
+        .join(", ");
+    }
+
+    return null;
+  };
+
+  const createAsset = async () => {
+    if (!allQuestionsAnswered || saving) return;
 
     try {
-      setError(null);
+      setSaving(true);
 
-      if (currentStep === "type") {
-        // We already know assetType from caller; treat this as descriptive only.
-        appendMessage({
-          role: BOT,
-          text:
-            friendlyLabel === "home"
-              ? "Great. What do you call this place? (e.g., “Home Sweet home”, “Lake house”)"
-              : friendlyLabel === "boat"
-              ? "Great. What do you call this boat? (e.g., “Formula 380”, “Bennington M Series”)"
-              : "Got it. What do you call this vehicle? (e.g., “Porsche Boxster S”, “Family SUV”)",
+      const { data: auth } = await supabase.auth.getUser();
+      const userId = auth?.user?.id;
+      if (!userId) {
+        openModal("Sign in required", "Please sign in to add an asset.");
+        return;
+      }
+
+      const displayName = buildDisplayName();
+      if (!displayName) {
+        openModal(
+          "Missing details",
+          "Please complete the required answers."
+        );
+        return;
+      }
+
+      let created = null;
+
+      if (assetType === "home") {
+        created = await createAssetWithDefaults({
+          ownerId: userId,
+          name: displayName,
+          type: "home",
+          make: null,
+          model: null,
+          year: null,
+          serialNumber: null,
+          engineHours: null,
+          primaryPhotoUrl: null,
         });
-        setStepIndex((i) => i + 1);
-        return;
-      }
-
-      if (currentStep === "name") {
-        setName(trimmed);
-        appendMessage({
-          role: BOT,
-          text:
-            friendlyLabel === "home"
-              ? "What year was it built? (If you’re not sure, just give your best guess.)"
-              : "What year is it?",
+      } else if (assetType === "boat") {
+        created = await createAssetWithDefaults({
+          ownerId: userId,
+          name: displayName,
+          type: "boat",
+          make: answers.make || null,
+          model: answers.model || null,
+          year: parseInt(answers.year, 10),
+          serialNumber: null,
+          engineHours: null,
+          primaryPhotoUrl: null,
         });
-        setStepIndex((i) => i + 1);
-        return;
-      }
-
-      if (currentStep === "year") {
-        setYear(trimmed);
-
-        if (friendlyLabel === "home") {
-          appendMessage({
-            role: BOT,
-            text:
-              "Who built it or what’s the neighborhood / subdivision? (You can keep this short.)",
-          });
-        } else {
-          appendMessage({
-            role: BOT,
-            text: "Who makes it? (e.g., Porsche, Toyota, Yamaha, Bennington)",
-          });
-        }
-
-        setStepIndex((i) => i + 1);
-        return;
-      }
-
-      if (currentStep === "make") {
-        setMake(trimmed);
-
-        appendMessage({
-          role: BOT,
-          text:
-            friendlyLabel === "home"
-              ? "Any model or style you want to remember? (e.g., ranch, colonial, M Series)"
-              : "What’s the model? (e.g., Boxster S, Highlander, Tracer 9 GT+)",
+      } else {
+        created = await createAssetWithDefaults({
+          ownerId: userId,
+          name: displayName,
+          type: "vehicle",
+          make: answers.make || null,
+          model: answers.model || null,
+          year: parseInt(answers.year, 10),
+          serialNumber: null,
+          engineHours: null,
+          primaryPhotoUrl: null,
         });
-
-        setStepIndex((i) => i + 1);
-        return;
       }
 
-      if (currentStep === "model") {
-        setModel(trimmed);
-
-        appendMessage({
-          role: BOT,
-          text:
-            friendlyLabel === "home"
-              ? "Where is it? (City, state or full address — whatever you’re comfortable sharing.)"
-              : "Where does it live most of the time? (City, state, marina, or “home garage”)",
-        });
-
-        setStepIndex((i) => i + 1);
-        return;
+      const assetId = created?.id;
+      if (!assetId) {
+        throw new Error("Asset create did not return an id.");
       }
 
-      if (currentStep === "location") {
-        setLocation(trimmed);
+      let heroUrl = null;
+      let heroPlacementId = null;
 
-        const summary = [
-          `Name: ${name || trimmed || "—"}`,
-          `Year: ${year || "—"}`,
-          `Make / builder: ${make || "—"}`,
-          `Model / style: ${model || "—"}`,
-          `Location: ${trimmed || "—"}`,
-        ].join("\n");
+      if (photoLocal?.uri) {
+        setUploadingPhoto(true);
 
-        const attachLine =
-          attachments.length > 0
-            ? `\n\nYou’ve attached ${attachments.length} photo${
-                attachments.length > 1 ? "s" : ""
-              }.`
-            : "";
-
-        appendMessage({
-          role: BOT,
-          text:
-            "Here’s what I have:\n\n" +
-            summary +
-            attachLine +
-            "\n\nSend anything else you want me to remember (nickname, trim, notes), or just type “save”.",
+        const receipt = await uploadAttachmentFromUri({
+          userId,
+          assetId,
+          kind: "photo",
+          fileUri: photoLocal.uri,
+          fileName: photoLocal.fileName || "asset.jpg",
+          mimeType: photoLocal.mimeType || "image/jpeg",
+          sizeBytes: photoLocal.fileSize || null,
+          title: "Hero photo",
+          notes: null,
+          sourceContext: "add_asset_with_kai",
+          bucket: HERO_BUCKET,
+          placements: [
+            {
+              target_type: "asset",
+              target_id: assetId,
+              role: HERO_ROLE,
+              label: "Hero",
+              sort_order: 0,
+              is_showcase: true,
+            },
+          ],
         });
 
-        setStepIndex((i) => i + 1);
-        return;
-      }
+        const uploadedAttachment = receipt?.attachment;
+        const uploadedPlacement = receipt?.placements?.[0];
 
-      if (currentStep === "confirm") {
-        const wantsSaveOnly = trimmed.toLowerCase() === "save";
-        const extraNotes = wantsSaveOnly ? null : trimmed;
+        heroPlacementId = uploadedPlacement?.id || null;
 
-        await saveAsset(extraNotes);
-      }
-    } catch (err) {
-      console.error("Error in chat flow:", err);
-      setError("Something went wrong while saving this asset.");
-    }
-  };
-
-  const saveAsset = async (extraNotes) => {
-    if (!user) {
-      setError("You need to be signed in to save this asset.");
-      return;
-    }
-
-    setSaving(true);
-
-    const defaultName =
-      friendlyLabel === "home"
-        ? "New home"
-        : friendlyLabel === "boat"
-        ? "New boat"
-        : "New vehicle";
-
-    const normalizedName = name || defaultName;
-
-    const payload = {
-      owner_id: user.id,
-      type: assetType, // "home" | "vehicle" | "boat"
-      name: normalizedName,
-      location: location || null,
-      year: year ? Number(year) : null,
-      make: make || null,
-      model: model || null,
-      notes: extraNotes || null,
-    };
-
-    const { data, error: insertErr } = await supabase
-      .from("assets")
-      .insert(payload)
-      .select()
-      .maybeSingle();
-
-    setSaving(false);
-
-    if (insertErr) {
-      console.error("Error saving asset from chat:", insertErr);
-      setError(insertErr.message);
-      appendMessage({
-        role: BOT,
-        text:
-          "I couldn’t save that asset to Keepr. You can try again or add it from the main screen.",
-      });
-      return;
-    }
-
-    // Link staged attachments into asset_photos and set hero
-    if (attachments.length) {
-      try {
-        const rows = attachments.map((att, index) => ({
-          asset_id: data.id,
-          storage_path: att.storagePath,
-          url: att.publicUrl,
-          is_hero: index === 0,
-        }));
-
-        const { error: photosErr } = await supabase
-          .from("asset_photos")
-          .insert(rows);
-
-        if (photosErr) {
-          console.error(
-            "Error saving chat attachments to asset_photos:",
-            photosErr
+        if (uploadedAttachment?.bucket && uploadedAttachment?.storage_path) {
+          heroUrl = getPublicUrl(
+            uploadedAttachment.bucket,
+            uploadedAttachment.storage_path
           );
-        } else {
-          const first = attachments[0];
-          if (first.publicUrl) {
-            const { error: heroErr } = await supabase
-              .from("assets")
-              .update({ hero_image_url: first.publicUrl })
-              .eq("id", data.id);
-
-            if (heroErr) {
-              console.error("Error setting hero_image_url from chat:", heroErr);
-            }
-          }
         }
-      } catch (e) {
-        console.error("Error linking chat attachments to asset:", e);
       }
-    }
 
-    appendMessage({
-      role: BOT,
-      text: `Saved “${data.name}” to your Keepr.`,
-    });
+      const updatePayload = {
+        hero_placement_id: heroPlacementId,
+        hero_image_url: heroUrl,
+      };
 
-    // 🔁 Navigation now respects assetType
-    if (assetType === "home") {
-      // Send them back to HomeStory with this home focused
-      navigation.navigate("HomeStory", { homeId: data.id });
-    } else {
-      // Existing behavior: go to Garage / vehicles
-      navigation.navigate("RootTabs", {
-        screen: "Garage",
-        params: { focusAssetId: data.id },
-      });
+      if (assetType === "home") {
+        updatePayload.location = buildLocationString() || null;
+      }
+
+      if (assetType === "boat") {
+        updatePayload.length_feet = parseFloat(answers.lengthFeet);
+      }
+
+      const { error: upErr } = await supabase
+        .from("assets")
+        .update(updatePayload)
+        .eq("id", assetId);
+
+      if (upErr) throw upErr;
+
+      if (assetType === "home") {
+        navigation.replace("HomeStory", { assetId });
+        return;
+      }
+
+      if (assetType === "boat") {
+        navigation.replace("BoatStory", { assetId });
+        return;
+      }
+
+      navigation.replace("VehicleStory", { assetId });
+    } catch (e) {
+      console.log("AddAssetChatScreen createAsset failed", e);
+      openModal("Couldn’t save", e?.message || "Please try again.");
+    } finally {
+      setUploadingPhoto(false);
+      setSaving(false);
     }
   };
 
-  const handleBack = () => {
-    navigation.goBack();
-  };
-
-  const currentStep = STEPS[stepIndex];
+  const photoLabel = photoLocal?.uri
+    ? "Photo selected"
+    : "Photo optional";
 
   return (
     <SafeAreaView style={layoutStyles.screen}>
+      <KeeprAlertModal
+        open={modal.open}
+        title={modal.title}
+        message={modal.message}
+        onClose={closeModal}
+      />
+
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={80}
+        behavior={IS_WEB ? undefined : "padding"}
       >
-        <View style={styles.container}>
-          {/* Header */}
-          <View style={styles.headerRow}>
-            <TouchableOpacity style={styles.headerBackBtn} onPress={handleBack}>
+        <View style={styles.headerRow}>
+          <TouchableOpacity
+            style={styles.backBtn}
+            activeOpacity={0.85}
+            onPress={() => navigation.goBack()}
+          >
+            <Ionicons
+              name="chevron-back"
+              size={22}
+              color={colors.textPrimary}
+            />
+          </TouchableOpacity>
+
+          <View style={{ flex: 1 }}>
+            <Text style={styles.title}>{title}</Text>
+            <Text style={styles.subtitle}>{subtitle}</Text>
+          </View>
+        </View>
+
+        <ScrollView
+          ref={scrollRef}
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.kaiBanner}>
+            <View style={styles.kaiOrb}>
               <Ionicons
-                name="chevron-back"
-                size={22}
+                name="sparkles-outline"
+                size={16}
                 color={colors.textPrimary}
               />
-            </TouchableOpacity>
+            </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.title}>Add a New Asset by Chat</Text>
-              <Text style={styles.subtitle}>
-                A guided way to add a {friendlyLabel} to Keepr.
+              <Text style={styles.kaiBannerTitle}>Kai</Text>
+              <Text style={styles.kaiBannerText}>
+                A guided way to add an asset.
               </Text>
             </View>
           </View>
+      {/* TYPE SELECTION */}
+{step === "choose_type" && (
+  <View style={styles.typeChooserWrap}>
+    <View style={[styles.bubbleRow, styles.bubbleRowBot]}>
+      <View style={[styles.bubble, styles.bubbleBot]}>
+        <Text style={[styles.bubbleText, styles.bubbleTextBot]}>
+          What would you like to add?
+        </Text>
+      </View>
+    </View>
 
-          {/* Messages */}
-          <ScrollView
-            style={styles.messages}
-            contentContainerStyle={{ paddingBottom: spacing.lg }}
-            keyboardShouldPersistTaps="handled"
-          >
+    <View style={styles.choiceList}>
+      {[
+        {
+          label: "Home",
+          value: "home",
+          icon: "home-outline",
+          hint: "Address, city, state, and ZIP",
+        },
+        {
+          label: "Vehicle",
+          value: "vehicle",
+          icon: "car-sport-outline",
+          hint: "Make, model, and year",
+        },
+        {
+          label: "Boat",
+          value: "boat",
+          icon: "boat-outline",
+          hint: "Make, model, year, and length",
+        },
+      ].map((option) => (
+        <TouchableOpacity
+          key={option.value}
+          style={styles.choiceButton}
+          activeOpacity={0.9}
+          onPress={() => {
+            setSelectedAssetType(option.value);
+          }}
+        >
+          <View style={styles.choiceIconWrap}>
+            <Ionicons
+              name={option.icon}
+              size={18}
+              color={colors.textPrimary}
+            />
+          </View>
+
+          <View style={{ flex: 1 }}>
+            <Text style={styles.choiceText}>{option.label}</Text>
+            <Text style={styles.choiceHint}>{option.hint}</Text>
+          </View>
+
+          <Ionicons
+            name="chevron-forward"
+            size={18}
+            color={colors.textMuted}
+          />
+        </TouchableOpacity>
+      ))}
+    </View>
+  </View>
+)}
+      {/* MAIN CHAT FLOW */}
+      {step === "collecting" && (
+        <>
+
             {messages.map((msg) => {
               const isBot = msg.role === BOT;
+
               return (
                 <View
                   key={msg.id}
                   style={[
-                    styles.messageBubble,
-                    isBot ? styles.messageBot : styles.messageUser,
+                    styles.bubbleRow,
+                    isBot ? styles.bubbleRowBot : styles.bubbleRowUser,
                   ]}
                 >
-                  {isBot && (
-                    <Ionicons
-                      name="sparkles-outline"
-                      size={14}
-                      color={colors.brandBlue}
-                      style={{ marginBottom: 2 }}
-                    />
-                  )}
-                  <Text
+                  <View
                     style={[
-                      styles.messageText,
-                      isBot ? styles.messageTextBot : styles.messageTextUser,
+                      styles.bubble,
+                      isBot ? styles.bubbleBot : styles.bubbleUser,
                     ]}
                   >
-                    {msg.text}
-                  </Text>
+                    <Text
+                      style={[
+                        styles.bubbleText,
+                        isBot ? styles.bubbleTextBot : styles.bubbleTextUser,
+                      ]}
+                    >
+                      {msg.text}
+                    </Text>
+                  </View>
                 </View>
               );
             })}
 
-            {error ? (
-              <View style={styles.errorCard}>
-                <Text style={styles.errorText}>{error}</Text>
-              </View>
-            ) : null}
-          </ScrollView>
+            {allQuestionsAnswered && (
+              <View style={styles.summaryCard}>
+                <Text style={styles.summaryTitle}>Ready to create</Text>
 
-          {/* Attachment pills */}
-          {attachments.length > 0 || uploadingAttachment ? (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.attachmentsScroll}
-              contentContainerStyle={styles.attachmentsContent}
-            >
-              {attachments.map((att) => (
-                <View key={att.id} style={styles.attachmentPill}>
-                  <Ionicons
-                    name="image-outline"
-                    size={14}
-                    color={colors.textSecondary}
-                    style={{ marginRight: 4 }}
-                  />
-                  <Text numberOfLines={1} style={styles.attachmentLabel}>
-                    {att.fileName || "Photo"}
+                {summaryLines.map((line) => (
+                  <Text key={line} style={styles.summaryLine}>
+                    {line}
                   </Text>
-                  <TouchableOpacity
-                    onPress={() => handleRemoveAttachment(att)}
-                    hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
-                  >
-                    <Ionicons
-                      name="close-circle"
-                      size={14}
-                      color={colors.textMuted}
-                      style={{ marginLeft: 4 }}
+                ))}
+
+                <View style={styles.photoSection}>
+                  <Text style={styles.photoSectionLabel}>{photoLabel}</Text>
+
+                  {!!photoLocal?.uri && (
+                    <Image
+                      source={{ uri: photoLocal.uri }}
+                      style={styles.photoPreview}
                     />
-                  </TouchableOpacity>
+                  )}
+
+                  <View style={styles.photoActions}>
+                    <TouchableOpacity
+                      style={styles.photoBtnPrimary}
+                      onPress={takePhoto}
+                      disabled={saving || uploadingPhoto}
+                    >
+                      <Ionicons name="camera-outline" size={16} color="#fff" />
+                      <Text style={styles.photoBtnPrimaryText}>Take photo</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.photoBtnSecondary}
+                      onPress={pickPhotoFromLibrary}
+                      disabled={saving || uploadingPhoto}
+                    >
+                      <Ionicons
+                        name="images-outline"
+                        size={16}
+                        color={colors.textPrimary}
+                      />
+                      <Text style={styles.photoBtnSecondaryText}>
+                        Choose photo
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
-              ))}
-              {uploadingAttachment && (
-                <View style={styles.attachmentPill}>
-                  <ActivityIndicator size="small" />
-                  <Text style={[styles.attachmentLabel, { marginLeft: 6 }]}>
-                    Uploading…
-                  </Text>
-                </View>
-              )}
-            </ScrollView>
-          ) : null}
 
-          {/* Input row */}
-          <View style={styles.inputRow}>
-            {/* ChatGPT-style + button */}
-            <TouchableOpacity
-              style={styles.attachButton}
-              onPress={handleAddPhoto}
-              disabled={uploadingAttachment || saving}
-            >
-              <Ionicons
-                name="image-outline"
-                size={18}
-                color={colors.textPrimary}
-              />
-            </TouchableOpacity>
-
-            <TextInput
-              style={styles.input}
-              value={input}
-              onChangeText={setInput}
-              placeholder={
-                saving
-                  ? "Saving…"
-                  : currentStep === "confirm"
-                  ? "Add optional notes, or type “save”…"
-                  : "Type your answer…"
-              }
-              editable={!saving}
-            />
-
-            {/* Explicit Save button on confirm step */}
-            {currentStep === "confirm" && !saving && (
-              <TouchableOpacity
-                style={styles.saveNowButton}
-                onPress={() => saveAsset(null)}
-              >
-                <Text style={styles.saveNowButtonText}>Save</Text>
-              </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.createBtn,
+                    (saving || uploadingPhoto) && styles.dim,
+                  ]}
+                  disabled={saving || uploadingPhoto}
+                  onPress={createAsset}
+                >
+                  {saving || uploadingPhoto ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <>
+                      <Ionicons name="sparkles-outline" size={18} color="#fff" />
+                      <Text style={styles.createBtnText}>
+                        Create with Kai
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
             )}
 
-            <TouchableOpacity
-              style={[
-                styles.sendButton,
-                (!input.trim() || saving) && { opacity: 0.6 },
-              ]}
-              onPress={handleUserInput}
-              disabled={!input.trim() || saving}
-            >
-              {saving ? (
-                <ActivityIndicator color={colors.brandWhite} />
-              ) : (
-                <Ionicons
-                  name="send-outline"
-                  size={18}
-                  color={colors.brandWhite}
-                />
+          {!allQuestionsAnswered && (
+            <View style={styles.inputWrap}>
+              {!!currentQuestion && (
+                <Text style={styles.promptLabel}>
+                  {currentQuestion.label}
+                </Text>
               )}
-            </TouchableOpacity>
-          </View>
-        </View>
+
+              <View style={styles.inputRow}>
+                <TextInput
+                  style={styles.input}
+                  value={input}
+                  onChangeText={setInput}
+                  placeholder="Type your answer"
+                  placeholderTextColor={colors.textMuted}
+                  autoCapitalize={
+                    currentQuestion?.key === "state"
+                      ? "characters"
+                      : "sentences"
+                  }
+                  autoCorrect={false}
+                  blurOnSubmit={false}
+                  returnKeyType="send"
+                  onSubmitEditing={handleSend}
+                  onKeyPress={(e) => {
+                    if (
+                      Platform.OS === "web" &&
+                      e?.nativeEvent?.key === "Enter" &&
+                      !e?.nativeEvent?.shiftKey
+                    ) {
+                      e.preventDefault?.();
+                      handleSend();
+                    }
+                  }}
+                />
+
+                <TouchableOpacity
+                  style={styles.sendBtn}
+                  onPress={handleSend}
+                >
+                  <Ionicons name="arrow-up" size={18} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+        </>
+      )}
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.sm,
-  },
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+    marginBottom: spacing.sm,
   },
-  headerBackBtn: {
+  backBtn: {
     width: 34,
     height: 34,
     borderRadius: 17,
@@ -612,127 +917,305 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginRight: spacing.sm,
   },
-  title: {
-    ...typography.title,
-  },
+  title: typography.title,
   subtitle: {
     ...typography.subtitle,
     marginTop: 2,
   },
-  messages: {
-    flex: 1,
-    marginTop: spacing.sm,
+  scroll: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.xl * 2,
   },
-  messageBubble: {
-    maxWidth: "85%",
-    borderRadius: radius.lg,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    marginBottom: spacing.xs,
-  },
-  messageBot: {
-    alignSelf: "flex-start",
-    backgroundColor: colors.surfaceSubtle,
-  },
-  messageUser: {
-    alignSelf: "flex-end",
-    backgroundColor: colors.brandBlue,
-  },
-  messageText: {
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  messageTextBot: {
-    color: colors.textPrimary,
-  },
-  messageTextUser: {
-    color: colors.brandWhite,
-  },
-  errorCard: {
-    marginTop: spacing.sm,
-    padding: spacing.sm,
-    borderRadius: radius.md,
-    backgroundColor: "#FEF2F2",
-    borderWidth: 1,
-    borderColor: "#FCA5A5",
-  },
-  errorText: {
-    fontSize: 12,
-    color: "#B91C1C",
-  },
-
-  attachmentsScroll: {
-    maxHeight: 46,
-    marginBottom: spacing.xs,
-  },
-  attachmentsContent: {
-    paddingHorizontal: 2,
-    alignItems: "center",
-  },
-  attachmentPill: {
+  kaiBanner: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surfaceSubtle,
+    padding: spacing.md,
+    borderRadius: radius.xl,
+    backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
-    marginRight: 6,
+    ...shadows.subtle,
+    marginBottom: spacing.md,
   },
-  attachmentLabel: {
-    fontSize: 11,
-    color: colors.textSecondary,
-  },
-
-  inputRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: spacing.sm,
-  },
-  attachButton: {
+  kaiOrb: {
     width: 34,
     height: 34,
     borderRadius: 17,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    backgroundColor: colors.surface,
     alignItems: "center",
     justifyContent: "center",
-    marginRight: spacing.xs,
+    backgroundColor: colors.surfaceSubtle,
+    marginRight: spacing.sm,
+  },
+  kaiBannerTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: colors.textPrimary,
+  },
+  kaiBannerText: {
+    marginTop: 2,
+    fontSize: 12,
+    color: colors.textSecondary,
+  },
+  bubbleRow: {
+    flexDirection: "row",
+    marginBottom: spacing.sm,
+  },
+  bubbleRowBot: {
+    justifyContent: "flex-start",
+  },
+  bubbleRowUser: {
+    justifyContent: "flex-end",
+  },
+  bubble: {
+    maxWidth: "84%",
+    borderRadius: radius.xl,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  bubbleBot: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+  },
+  bubbleUser: {
+    backgroundColor: colors.brandBlue,
+  },
+  bubbleText: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  bubbleTextBot: {
+    color: colors.textPrimary,
+  },
+  bubbleTextUser: {
+    color: "#fff",
+  },
+  typeChooserWrap: {
+  marginTop: spacing.sm,
+},
+
+choiceList: {
+  marginTop: spacing.sm,
+  gap: spacing.sm,
+},
+
+choiceButton: {
+  flexDirection: "row",
+  alignItems: "center",
+  paddingHorizontal: spacing.md,
+  paddingVertical: spacing.md,
+  borderRadius: radius.xl,
+  backgroundColor: colors.surface,
+  borderWidth: 1,
+  borderColor: colors.borderSubtle,
+  ...shadows.subtle,
+},
+
+choiceIconWrap: {
+  width: 36,
+  height: 36,
+  borderRadius: 18,
+  alignItems: "center",
+  justifyContent: "center",
+  backgroundColor: colors.surfaceSubtle,
+  marginRight: spacing.sm,
+},
+
+choiceText: {
+  fontSize: 14,
+  fontWeight: "800",
+  color: colors.textPrimary,
+},
+
+choiceHint: {
+  marginTop: 2,
+  fontSize: 12,
+  color: colors.textSecondary,
+  lineHeight: 16,
+},
+  summaryCard: {
+    marginTop: spacing.sm,
+    padding: spacing.lg,
+    borderRadius: radius.xl,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    ...shadows.subtle,
+  },
+  summaryTitle: {
+    fontSize: 16,
+    fontWeight: "900",
+    color: colors.textPrimary,
+    marginBottom: spacing.sm,
+  },
+  summaryLine: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    lineHeight: 20,
+  },
+  photoSection: {
+    marginTop: spacing.md,
+  },
+  photoSectionLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
+  },
+  photoPreview: {
+    width: "100%",
+    aspectRatio: 4 / 3,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surfaceSubtle,
+    marginBottom: spacing.sm,
+  },
+  photoActions: {
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  photoBtnPrimary: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: radius.lg,
+    backgroundColor: colors.brandBlue,
+  },
+  photoBtnPrimaryText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  photoBtnSecondary: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    backgroundColor: colors.surfaceSubtle,
+  },
+  photoBtnSecondaryText: {
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  createBtn: {
+    marginTop: spacing.lg,
+    borderRadius: radius.lg,
+    backgroundColor: colors.brandBlue,
+    paddingVertical: spacing.md,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 8,
+  },
+  createBtnText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  inputWrap: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.lg,
+    backgroundColor: colors.background,
+  },
+  promptLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.textSecondary,
+    marginBottom: spacing.xs,
+  },
+  inputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
   },
   input: {
     flex: 1,
-    borderRadius: radius.lg,
+    height: 48,
+    borderRadius: radius.pill,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
     backgroundColor: colors.surface,
+    paddingHorizontal: spacing.md,
     fontSize: 14,
     color: colors.textPrimary,
   },
-  saveNowButton: {
-    marginLeft: spacing.xs,
+  sendBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.brandBlue,
+    ...shadows.subtle,
+  },
+  dim: {
+    opacity: 0.65,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: spacing.lg,
+  },
+  modalCard: {
+    width: "100%",
+    maxWidth: 520,
+    backgroundColor: colors.surface,
     borderRadius: radius.lg,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    ...(IS_WEB ? { boxShadow: "0 8px 24px rgba(0,0,0,0.18)" } : {}),
+  },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  modalIconWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
     backgroundColor: colors.surfaceSubtle,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
   },
-  saveNowButtonText: {
-    fontSize: 13,
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: "700",
     color: colors.textPrimary,
-    fontWeight: "600",
+    flex: 1,
   },
-  sendButton: {
-    marginLeft: spacing.xs,
-    borderRadius: radius.lg,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+  modalMessage: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    lineHeight: 18,
+    marginBottom: spacing.md,
+  },
+  modalActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+  },
+  modalBtnPrimary: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: radius.pill,
     backgroundColor: colors.brandBlue,
-    alignItems: "center",
-    justifyContent: "center",
+  },
+  modalBtnPrimaryText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 13,
   },
 });

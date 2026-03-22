@@ -387,6 +387,14 @@ const deleteNote = async (id) => {
     }, 180);
     };
 
+    const onAddAssetWithKai = () => {
+      closeKai();
+
+      setTimeout(() => {
+        navigationRef?.navigate?.("AddAssetChat", {});
+      }, 180);
+    };
+
   const onLooseNote = () => {
     console.log("Kai → Add Loose Note");
     closeKai();
@@ -499,6 +507,20 @@ const deleteNote = async (id) => {
               </View>
 
               <Text style={styles.sectionLabel}>QUICK CAPTURE</Text>
+              <TouchableOpacity
+                style={styles.primaryAction}
+                onPress={onAddAssetWithKai}
+              >
+                <Ionicons
+                  name="sparkles-outline"
+                  size={18}
+                  color={colors.textPrimary}
+                />
+                <Text style={styles.actionTitle}>Add Asset with Kai</Text>
+                <Text style={styles.actionHint}>
+                  A guided way to add a home, vehicle, or boat.
+                </Text>
+              </TouchableOpacity>
               <View style={styles.actionGrid}>
                 <TouchableOpacity
                   style={styles.primaryAction}
