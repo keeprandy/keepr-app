@@ -43,7 +43,6 @@ function mediaTypesImagesCompat() {
   return ImagePicker.MediaTypeOptions.Images;
 }
 
-/** Keepr-styled modal (web + native) */
 function KeeprAlertModal({ open, title, message, onClose }) {
   if (!open) return null;
 
@@ -53,7 +52,11 @@ function KeeprAlertModal({ open, title, message, onClose }) {
         <View style={styles.modalCard}>
           <View style={styles.modalHeader}>
             <View style={styles.modalIconWrap}>
-              <Ionicons name="information-circle" size={18} color={colors.textPrimary} />
+              <Ionicons
+                name="information-circle"
+                size={18}
+                color={colors.textPrimary}
+              />
             </View>
             <Text style={styles.modalTitle}>{title}</Text>
           </View>
@@ -71,7 +74,7 @@ function KeeprAlertModal({ open, title, message, onClose }) {
   );
 }
 
-export default function AddMarineAssetScreen({ navigation, route }) {
+export default function AddMarineAssetScreen({ navigation }) {
   const [photoLocal, setPhotoLocal] = useState(null); // { uri, fileName, mimeType, fileSize }
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
@@ -91,24 +94,27 @@ export default function AddMarineAssetScreen({ navigation, route }) {
   const [error, setError] = useState(null);
 
   const [modal, setModal] = useState({ open: false, title: "", message: "" });
-  const openModal = (title, message) => setModal({ open: true, title, message });
-  const closeModal = () => setModal({ open: false, title: "", message: "" });
+  const openModal = (title, message) =>
+    setModal({ open: true, title, message });
+  const closeModal = () =>
+    setModal({ open: false, title: "", message: "" });
 
   const heroLabel = useMemo(() => {
-    if (!photoLocal?.uri) return "No boat photo yet";
+    if (!photoLocal?.uri) return "No boat photo selected";
     return "Selected · this will be your hero photo";
   }, [photoLocal]);
 
   async function pickPhotoFromLibrary() {
     setError(null);
+
     try {
-      // ✅ Web: DocumentPicker (real file, avoids HTML/code artifacts)
       if (IS_WEB) {
         const res = await DocumentPicker.getDocumentAsync({
           type: "image/*",
           multiple: false,
           copyToCacheDirectory: true,
         });
+
         if (res.canceled) return;
 
         const f = res.assets?.[0];
@@ -123,10 +129,12 @@ export default function AddMarineAssetScreen({ navigation, route }) {
         return;
       }
 
-      // ✅ Native: ImagePicker
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
-        openModal("Permission needed", "Please allow photo library access to choose a hero photo.");
+        openModal(
+          "Permission needed",
+          "Please allow photo library access to choose a hero photo."
+        );
         return;
       }
 
@@ -153,18 +161,24 @@ export default function AddMarineAssetScreen({ navigation, route }) {
 
   async function takePhoto() {
     setError(null);
-    if (IS_WEB) return pickPhotoFromLibrary();
+
+    if (IS_WEB) {
+      return pickPhotoFromLibrary();
+    }
 
     try {
       const perm = await ImagePicker.requestCameraPermissionsAsync();
       if (!perm.granted) {
-        openModal("Permission needed", "Please allow camera access to take a hero photo.");
+        openModal(
+          "Permission needed",
+          "Please allow camera access to take a hero photo."
+        );
         return;
       }
 
       const result = await ImagePicker.launchCameraAsync({ quality: 0.9 });
-
       if (result.canceled) return;
+
       const a = result.assets?.[0];
       if (!a?.uri) return;
 
@@ -176,7 +190,10 @@ export default function AddMarineAssetScreen({ navigation, route }) {
       });
     } catch (e) {
       console.log("takePhoto failed", e);
-      openModal("Couldn’t open camera", "Try again, or choose a photo from your library.");
+      openModal(
+        "Couldn’t open camera",
+        "Try again, or choose a photo from your library."
+      );
     }
   }
 
@@ -190,98 +207,107 @@ export default function AddMarineAssetScreen({ navigation, route }) {
       return {
         ok: false,
         title: "Missing details",
-        message: "Add Year, Make, Model, and Length so Keepr can organize maintenance and resale value.",
+        message:
+          "Add Year, Make, Model, and Length so Keepr can organize maintenance and resale value.",
       };
     }
 
     const yearNumber = parseInt(trimmedYear, 10);
     if (Number.isNaN(yearNumber) || yearNumber < 1900 || yearNumber > 2100) {
-      return { ok: false, title: "Check the year", message: "Enter a valid year (example: 2020)." };
+      return {
+        ok: false,
+        title: "Check the year",
+        message: "Enter a valid year (example: 2020).",
+      };
     }
 
     const lengthNumber = parseFloat(trimmedLength);
     if (Number.isNaN(lengthNumber) || lengthNumber <= 0) {
-      return { ok: false, title: "Check length", message: "Length must be a number in feet (example: 22)." };
+      return {
+        ok: false,
+        title: "Check length",
+        message: "Length must be a number in feet (example: 22).",
+      };
     }
 
     const trimmedHours = safeStr(engineHours).trim();
     if (trimmedHours) {
       const hoursNumber = parseFloat(trimmedHours);
       if (Number.isNaN(hoursNumber)) {
-        return { ok: false, title: "Check engine hours", message: "Engine hours must be a number." };
+        return {
+          ok: false,
+          title: "Check engine hours",
+          message: "Engine hours must be a number.",
+        };
       }
-    }
-
-    if (!photoLocal?.uri) {
-      return {
-        ok: false,
-        title: "Add a hero photo",
-        message: "Choose or take 1 photo — this becomes your hero image and shows up in Attachments.",
-      };
     }
 
     return { ok: true };
   }
 
-  async function handleSaveBoat() {
-    setError(null);
+async function handleSaveBoat() {
+  setError(null);
 
-    const v = validate();
-    if (!v.ok) {
-      openModal(v.title, v.message);
-      setError(v.message);
+  const v = validate();
+  if (!v.ok) {
+    openModal(v.title, v.message);
+    setError(v.message);
+    return;
+  }
+
+  const trimmedYear = year.trim();
+  const trimmedMake = make.trim();
+  const trimmedModel = model.trim();
+  const trimmedLength = lengthFeet.trim();
+  const trimmedName = name.trim();
+  const trimmedSerial = serialNumber.trim();
+  const trimmedLocation = location.trim();
+  const trimmedNotes = notes.trim();
+  const trimmedHours = engineHours.trim();
+
+  const yearNumber = parseInt(trimmedYear, 10);
+  const lengthNumber = parseFloat(trimmedLength);
+  const hoursNumber = trimmedHours ? parseFloat(trimmedHours) : null;
+
+  const displayName =
+    trimmedName ||
+    `${trimmedYear} ${trimmedMake} ${trimmedModel} (${trimmedLength}ft)`;
+
+  try {
+    setSaving(true);
+
+    const { data: auth } = await supabase.auth.getUser();
+    const userId = auth?.user?.id;
+
+    if (!userId) {
+      openModal("Sign in required", "Please sign in to add a boat.");
       return;
     }
 
-    const trimmedYear = year.trim();
-    const trimmedMake = make.trim();
-    const trimmedModel = model.trim();
-    const trimmedLength = lengthFeet.trim();
-    const trimmedName = name.trim();
-    const trimmedSerial = serialNumber.trim();
-    const trimmedLocation = location.trim();
-    const trimmedNotes = notes.trim();
-    const trimmedHours = engineHours.trim();
+    const created = await createAssetWithDefaults({
+      ownerId: userId,
+      name: displayName,
+      type: "boat",
+      make: trimmedMake || null,
+      model: trimmedModel || null,
+      year: yearNumber,
+      serialNumber: trimmedSerial || null,
+      engineHours: hoursNumber,
+      primaryPhotoUrl: null,
+      assetMode,
+      commercialEntity:
+        assetMode === "commercial"
+          ? commercialEntity?.trim() || null
+          : null,
+    });
 
-    const yearNumber = parseInt(trimmedYear, 10);
-    const lengthNumber = parseFloat(trimmedLength);
-    const hoursNumber = trimmedHours ? parseFloat(trimmedHours) : null;
+    const assetId = created?.id;
+    if (!assetId) throw new Error("Asset create did not return an id.");
 
-    const displayName =
-      trimmedName || `${trimmedYear} ${trimmedMake} ${trimmedModel} (${trimmedLength}ft)`;
+    let heroUrl = null;
+    let heroPlacementId = null;
 
-    try {
-      setSaving(true);
-
-      // 1) must be signed in
-      const { data: auth } = await supabase.auth.getUser();
-      const userId = auth?.user?.id;
-      if (!userId) {
-        openModal("Sign in required", "Please sign in to add a boat.");
-        return;
-      }
-
-      // 2) Create asset first
-      const created = await createAssetWithDefaults({
-        ownerId: userId,
-        name: displayName,
-        type: "boat",
-        make: trimmedMake || null,
-        model: trimmedModel || null,
-        year: yearNumber,
-        serialNumber: trimmedSerial || null,
-        engineHours: hoursNumber,
-        primaryPhotoUrl: null,
-          assetMode,
-        commercialEntity: assetMode === "commercial"
-    ? commercialEntity?.trim() || null
-    : null,
-      });
-
-      const assetId = created?.id;
-      if (!assetId) throw new Error("Asset create did not return an id.");
-
-      // 3) Upload hero photo (DB-backed)
+    if (photoLocal?.uri) {
       setUploadingPhoto(true);
 
       const receipt = await uploadAttachmentFromUri({
@@ -314,109 +340,144 @@ export default function AddMarineAssetScreen({ navigation, route }) {
       if (!uploadedAttachment?.bucket || !uploadedAttachment?.storage_path) {
         throw new Error("Upload completed but no storage path returned.");
       }
-      if (!uploadedPlacement?.id) {
-        throw new Error("Upload completed but no placement id returned.");
-      }
 
-      const heroUrl = getPublicUrl(uploadedAttachment.bucket, uploadedAttachment.storage_path);
-
-      // 4) Update asset fields
-      const updatePayload = {
-        hero_placement_id: uploadedPlacement.id,
-        hero_image_url: heroUrl,
-        length_feet: lengthNumber,
-        location: trimmedLocation || null,
-        notes: trimmedNotes || null,
-      };
-
-      const { error: upErr } = await supabase.from("assets").update(updatePayload).eq("id", assetId);
-      if (upErr) throw upErr;
-
-      // 5) Navigate
-      navigation.replace("BoatStory", { assetId });
-    } catch (e) {
-      console.log("AddMarineAssetScreen save failed", e);
-      const msg = e?.message || "Could not save boat. Please try again.";
-      setError(msg);
-      openModal("Couldn’t save", msg);
-    } finally {
-      setUploadingPhoto(false);
-      setSaving(false);
+      heroUrl = getPublicUrl(
+        uploadedAttachment.bucket,
+        uploadedAttachment.storage_path
+      );
+      heroPlacementId = uploadedPlacement?.id || null;
     }
+
+    const updatePayload = {
+    hero_placement_id: heroPlacementId,
+    hero_image_url: heroUrl,
+    length_feet: lengthNumber,
+    location: trimmedLocation || null,
+    notes: trimmedNotes || null,
+    };
+
+    if (trimmedSerial) {
+      updatePayload.serial_number = trimmedSerial;
+    }
+    if (hoursNumber != null) {
+    updatePayload.engine_hours = hoursNumber;
+    }
+
+    const { error: upErr } = await supabase
+      .from("assets")
+      .update(updatePayload)
+      .eq("id", assetId);
+
+    if (upErr) throw upErr;
+
+    navigation.replace("BoatStory", { assetId });
+  } catch (e) {
+    console.log("AddMarineAssetScreen save failed", e);
+    const msg = e?.message || "Could not save boat. Please try again.";
+    setError(msg);
+    openModal("Couldn’t save", msg);
+  } finally {
+    setUploadingPhoto(false);
+    setSaving(false);
   }
+}
 
   return (
     <SafeAreaView style={layoutStyles.screen}>
-      <KeeprAlertModal open={modal.open} title={modal.title} message={modal.message} onClose={closeModal} />
+      <KeeprAlertModal
+        open={modal.open}
+        title={modal.title}
+        message={modal.message}
+        onClose={closeModal}
+      />
 
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.headerRow}>
-          <TouchableOpacity style={styles.headerBackBtn} onPress={() => navigation.goBack()}>
+          <TouchableOpacity
+            style={styles.headerBackBtn}
+            onPress={() => navigation.goBack()}
+          >
             <Ionicons name="chevron-back" size={22} />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
             <Text style={styles.title}>Add marine asset</Text>
-            <Text style={styles.subtitle}>Add a hero photo + Year / Make / Model / Length.</Text>
+            <Text style={styles.subtitle}>
+              Add Year, Make, Model, and Length. Photo is optional.
+            </Text>
           </View>
         </View>
 
-
-
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Boat details</Text>
-          <View style={styles.section}>
-  <Text style={styles.sectionLabel}>Asset use</Text>
 
-  <View style={styles.modeRow}>
-    <TouchableOpacity
-      style={[
-        styles.modeButton,
-        assetMode === "personal" && styles.modeButtonActive,
-      ]}
-      onPress={() => setAssetMode("personal")}
-    >
-      <Text
-        style={[
-          styles.modeText,
-          assetMode === "personal" && styles.modeTextActive,
-        ]}
-      >
-        Personal
-      </Text>
-    </TouchableOpacity>
+          <Text style={styles.fieldLabel}>Asset use</Text>
+          <View style={styles.modeRow}>
+            <TouchableOpacity
+              style={[
+                styles.modeButton,
+                assetMode === "personal" && styles.modeButtonActive,
+              ]}
+              onPress={() => setAssetMode("personal")}
+            >
+              <Text
+                style={[
+                  styles.modeText,
+                  assetMode === "personal" && styles.modeTextActive,
+                ]}
+              >
+                Personal
+              </Text>
+            </TouchableOpacity>
 
-    <TouchableOpacity
-      style={[
-        styles.modeButton,
-        assetMode === "commercial" && styles.modeButtonActive,
-      ]}
-      onPress={() => setAssetMode("commercial")}
-    >
-      <Text
-        style={[
-          styles.modeText,
-          assetMode === "commercial" && styles.modeTextActive,
-        ]}
-      >
-        Commercial
-      </Text>
-    </TouchableOpacity>
-  </View>
+            <TouchableOpacity
+              style={[
+                styles.modeButton,
+                assetMode === "commercial" && styles.modeButtonActive,
+              ]}
+              onPress={() => setAssetMode("commercial")}
+            >
+              <Text
+                style={[
+                  styles.modeText,
+                  assetMode === "commercial" && styles.modeTextActive,
+                ]}
+              >
+                Commercial
+              </Text>
+            </TouchableOpacity>
+          </View>
 
-  {assetMode === "commercial" && (
-    <TextInput
-      style={styles.input}
-      placeholder="Commercial entity (LLC, charter company, etc.)"
-      value={commercialEntity}
-      onChangeText={setCommercialEntity}
-    />
-  )}
-</View>
- <Text style={styles.modeHelp}>Used for reporting and future business features.</Text>
+          <Text style={styles.modeHelp}>
+            Used for reporting and future business features.
+          </Text>
 
-          <TextInput style={styles.input} placeholder="Boat name (optional)" value={name} onChangeText={setName} />
-          <TextInput style={styles.input} placeholder="Make (required)" value={make} onChangeText={setMake} />
-          <TextInput style={styles.input} placeholder="Model (required)" value={model} onChangeText={setModel} />
+          {assetMode === "commercial" && (
+            <TextInput
+              style={styles.input}
+              placeholder="Commercial entity (LLC, charter company, etc.)"
+              value={commercialEntity}
+              onChangeText={setCommercialEntity}
+            />
+          )}
+
+          <TextInput
+            style={styles.input}
+            placeholder="Boat name (optional)"
+            value={name}
+            onChangeText={setName}
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Make (required)"
+            value={make}
+            onChangeText={setMake}
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Model (required)"
+            value={model}
+            onChangeText={setModel}
+          />
 
           <View style={styles.inlineInputsRow}>
             <TextInput
@@ -435,8 +496,18 @@ export default function AddMarineAssetScreen({ navigation, route }) {
             />
           </View>
 
-          <TextInput style={styles.input} placeholder="Primary location (optional)" value={location} onChangeText={setLocation} />
-          <TextInput style={styles.input} placeholder="Serial / HIN (optional)" value={serialNumber} onChangeText={setSerialNumber} />
+          <TextInput
+            style={styles.input}
+            placeholder="Primary location (optional)"
+            value={location}
+            onChangeText={setLocation}
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Serial / HIN (optional)"
+            value={serialNumber}
+            onChangeText={setSerialNumber}
+          />
           <TextInput
             style={styles.input}
             placeholder="Engine hours (optional)"
@@ -444,26 +515,53 @@ export default function AddMarineAssetScreen({ navigation, route }) {
             value={engineHours}
             onChangeText={setEngineHours}
           />
-          <TextInput style={[styles.input, styles.notesInput]} placeholder="Notes (optional)" multiline value={notes} onChangeText={setNotes} />
+          <TextInput
+            style={[styles.input, styles.notesInput]}
+            placeholder="Notes (optional)"
+            multiline
+            value={notes}
+            onChangeText={setNotes}
+          />
         </View>
+
         <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Hero photo (required)</Text>
+          <Text style={styles.sectionLabel}>Hero photo (optional)</Text>
 
           <View style={styles.photoRow}>
-            <TouchableOpacity style={styles.photoButton} onPress={takePhoto} disabled={saving || uploadingPhoto}>
+            <TouchableOpacity
+              style={styles.photoButton}
+              onPress={takePhoto}
+              disabled={saving || uploadingPhoto}
+            >
               {uploadingPhoto ? (
                 <ActivityIndicator color="white" size="small" />
               ) : (
                 <>
-                  <Ionicons name="camera-outline" size={18} color="white" style={{ marginRight: 6 }} />
+                  <Ionicons
+                    name="camera-outline"
+                    size={18}
+                    color="white"
+                    style={{ marginRight: 6 }}
+                  />
                   <Text style={styles.photoButtonText}>Take photo</Text>
                 </>
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.photoButtonSecondary} onPress={pickPhotoFromLibrary} disabled={saving || uploadingPhoto}>
-              <Ionicons name="images-outline" size={18} color={colors.textPrimary} style={{ marginRight: 6 }} />
-              <Text style={styles.photoButtonSecondaryText}>Choose from library</Text>
+            <TouchableOpacity
+              style={styles.photoButtonSecondary}
+              onPress={pickPhotoFromLibrary}
+              disabled={saving || uploadingPhoto}
+            >
+              <Ionicons
+                name="images-outline"
+                size={18}
+                color={colors.textPrimary}
+                style={{ marginRight: 6 }}
+              />
+              <Text style={styles.photoButtonSecondaryText}>
+                Choose from library
+              </Text>
             </TouchableOpacity>
           </View>
 
@@ -474,9 +572,11 @@ export default function AddMarineAssetScreen({ navigation, route }) {
             </View>
           )}
         </View>
+
         <View style={styles.section}>
           <Text style={styles.helperText}>
-            After saving, add docs in Attachments (manuals, winterization, insurance, receipts, parts).
+            Add a photo now or later from the Story screen. Use Attachments for
+            manuals, winterization, insurance, receipts, and parts.
           </Text>
         </View>
 
@@ -488,7 +588,7 @@ export default function AddMarineAssetScreen({ navigation, route }) {
 
         <View style={[styles.section, { marginBottom: spacing.xl }]}>
           <TouchableOpacity
-            style={[styles.saveButton, (saving || uploadingPhoto) && { opacity: 0.65 }]}
+            style={[styles.saveButton, (saving || uploadingPhoto) && styles.dim]}
             onPress={handleSaveBoat}
             disabled={saving || uploadingPhoto}
           >
@@ -496,7 +596,12 @@ export default function AddMarineAssetScreen({ navigation, route }) {
               <ActivityIndicator color="white" />
             ) : (
               <>
-                <Ionicons name="save-outline" size={18} color="white" style={{ marginRight: 6 }} />
+                <Ionicons
+                  name="save-outline"
+                  size={18}
+                  color="white"
+                  style={{ marginRight: 6 }}
+                />
                 <Text style={styles.saveText}>Save boat</Text>
               </>
             )}
@@ -508,7 +613,10 @@ export default function AddMarineAssetScreen({ navigation, route }) {
 }
 
 const styles = StyleSheet.create({
-  scroll: { paddingBottom: spacing.xl },
+  scroll: {
+    paddingBottom: spacing.xl,
+  },
+
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -526,12 +634,84 @@ const styles = StyleSheet.create({
     marginRight: spacing.sm,
   },
   title: typography.title,
-  subtitle: { ...typography.subtitle, marginTop: 2 },
+  subtitle: {
+    ...typography.subtitle,
+    marginTop: 2,
+  },
 
-  section: { paddingHorizontal: spacing.lg, marginTop: spacing.md },
+  section: {
+    paddingHorizontal: spacing.lg,
+    marginTop: spacing.md,
+  },
   sectionLabel: typography.sectionLabel,
+  fieldLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.textPrimary,
+    marginTop: spacing.sm,
+  },
 
-  photoRow: { flexDirection: "row", alignItems: "center", marginTop: spacing.sm },
+  input: {
+    height: 44,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.sm,
+    fontSize: 13,
+    backgroundColor: colors.surface,
+  },
+  inlineInputsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+  },
+  inputHalf: {
+    flex: 1,
+    marginRight: spacing.sm,
+  },
+  notesInput: {
+    height: 90,
+    textAlignVertical: "top",
+  },
+
+  modeRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 6,
+  },
+  modeButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    backgroundColor: colors.surface,
+  },
+  modeButtonActive: {
+    backgroundColor: colors.brandBlue,
+    borderColor: colors.brandBlue,
+  },
+  modeText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    fontWeight: "600",
+  },
+  modeTextActive: {
+    color: "#fff",
+  },
+  modeHelp: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginTop: 6,
+    lineHeight: 16,
+  },
+
+  photoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: spacing.sm,
+  },
   photoButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -541,7 +721,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brandBlue,
     marginRight: spacing.sm,
   },
-  photoButtonText: { color: "white", fontSize: 13, fontWeight: "600" },
+  photoButtonText: {
+    color: "white",
+    fontSize: 13,
+    fontWeight: "600",
+  },
   photoButtonSecondary: {
     flexDirection: "row",
     alignItems: "center",
@@ -552,7 +736,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.borderSubtle,
   },
-  photoButtonSecondaryText: { color: colors.textPrimary, fontSize: 13, fontWeight: "500" },
+  photoButtonSecondaryText: {
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: "500",
+  },
 
   photoPreviewCard: {
     marginTop: spacing.sm,
@@ -569,24 +757,22 @@ const styles = StyleSheet.create({
     resizeMode: "contain",
     backgroundColor: colors.surfaceSubtle,
   },
-  photoCaption: { fontSize: 11, color: colors.textSecondary, paddingHorizontal: spacing.md, paddingVertical: spacing.xs },
-
-  input: {
-    height: 44,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
+  photoCaption: {
+    fontSize: 11,
+    color: colors.textSecondary,
     paddingHorizontal: spacing.md,
-    marginTop: spacing.sm,
-    fontSize: 13,
-    backgroundColor: colors.surface,
+    paddingVertical: spacing.xs,
   },
-  inlineInputsRow: { flexDirection: "row", justifyContent: "space-between", gap: spacing.sm },
-  inputHalf: { flex: 1, marginRight: spacing.sm },
-  notesInput: { height: 90, textAlignVertical: "top" },
 
-  helperText: { fontSize: 11, color: colors.textSecondary, lineHeight: 16 },
-  error: { color: "red", fontSize: 12 },
+  helperText: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    lineHeight: 16,
+  },
+  error: {
+    color: "red",
+    fontSize: 12,
+  },
 
   saveButton: {
     marginTop: spacing.md,
@@ -597,7 +783,14 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "center",
   },
-  saveText: { color: "white", fontSize: 14, fontWeight: "600" },
+  saveText: {
+    color: "white",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  dim: {
+    opacity: 0.65,
+  },
 
   modalOverlay: {
     flex: 1,
@@ -616,7 +809,12 @@ const styles = StyleSheet.create({
     borderColor: colors.borderSubtle,
     ...(IS_WEB ? { boxShadow: "0 8px 24px rgba(0,0,0,0.18)" } : {}),
   },
-  modalHeader: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
   modalIconWrap: {
     width: 30,
     height: 30,
@@ -627,44 +825,31 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.borderSubtle,
   },
-  modalTitle: { fontSize: 16, fontWeight: "700", color: colors.textPrimary, flex: 1 },
-  modalMessage: { fontSize: 13, color: colors.textSecondary, lineHeight: 18, marginBottom: spacing.md },
-  modalActions: { flexDirection: "row", justifyContent: "flex-end" },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: colors.textPrimary,
+    flex: 1,
+  },
+  modalMessage: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    lineHeight: 18,
+    marginBottom: spacing.md,
+  },
+  modalActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+  },
   modalBtnPrimary: {
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: radius.pill,
     backgroundColor: colors.brandBlue,
   },
-  modalBtnPrimaryText: { color: "white", fontWeight: "700", fontSize: 13 },
-
-modeRow: {
-  flexDirection: "row",
-  gap: 8,
-  marginTop: 6,
-},
-
-modeButton: {
-  paddingVertical: 8,
-  paddingHorizontal: 14,
-  borderRadius: 10,
-  borderWidth: 1,
-  borderColor: colors.border,
-  backgroundColor: colors.surface,
-},
-
-modeButtonActive: {
-  backgroundColor: colors.primary,
-  borderColor: colors.primary,
-},
-
-modeText: {
-  fontSize: 13,
-  color: colors.textSecondary,
-  fontWeight: "600",
-},
-modeHelp: { fontSize: 11, color: colors.textSecondary, marginTop: 6, lineHeight: 16 },
-modeTextActive: {
-  color: "#fff",
-},
+  modalBtnPrimaryText: {
+    color: "white",
+    fontWeight: "700",
+    fontSize: 13,
+  },
 });

@@ -100,17 +100,53 @@ async function loadSystemsForAsset(assetId) {
   return [];
 }
 
+async function loadRecordAttachments(recordId) {
+  if (!recordId) return;
+
+  setLoadingAttachments(true);
+
+  try {
+    const { data, error } = await supabase
+      .from("attachment_placements")
+      .select(`
+        id,
+        attachment:attachments (
+          id,
+          file_name,
+          mime_type,
+          file_url
+        )
+      `)
+      .eq("target_type", "timeline_record")
+      .eq("target_id", recordId);
+
+    if (error) throw error;
+
+    setRecordAttachments(data || []);
+  } catch (e) {
+    console.error("Load attachments failed", e);
+  } finally {
+    setLoadingAttachments(false);
+  }
+}
+
 /* ---------------- screen ---------------- */
 
 export default function AddTimelineRecordScreen({ route, navigation }) {
-  const {
-    assetId,
-    assetName,
-    systemId: initialSystemId,
-    systemName,
-    backTo,
-    origin,
-  } = route?.params || {};
+const {
+  assetId,
+  assetName,
+  systemId: initialSystemId,
+  systemName,
+  backTo,
+  origin,
+
+  // PB handoff
+  prefillTitle,
+  prefillNotes,
+  pendingAttachmentId,
+  pendingAttachmentTitle,
+} = route?.params || {};
 
   // Origin-aware navigation: callers can pass { backTo: {name, params} } or { origin: {name, params} }
   const resolvedBackTo = useMemo(() => {
@@ -121,11 +157,11 @@ export default function AddTimelineRecordScreen({ route, navigation }) {
 
   const [serviceType, setServiceType] = useState("moment"); // moment | diy | pro
   const [date, setDate] = useState(() => getTodayISO());
-  const [title, setTitle] = useState("");
+  const [title, setTitle] = useState(() => prefillTitle || "");
   const [provider, setProvider] = useState("");
   const [location, setLocation] = useState("");
   const [cost, setCost] = useState("");
-  const [notes, setNotes] = useState("");
+  const [notes, setNotes] = useState(() => prefillNotes || "");
 
   const [systems, setSystems] = useState([]);
   const [pros, setPros] = useState([]);
@@ -148,6 +184,9 @@ export default function AddTimelineRecordScreen({ route, navigation }) {
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState(null);
   const [loadingLookups, setLoadingLookups] = useState(true);
+
+  const [recordAttachments, setRecordAttachments] = useState([]);
+  const [loadingAttachments, setLoadingAttachments] = useState(false);
 
   // Web-only: persist in-progress draft so tab switches / refresh don't lose work
   const draftKey = useMemo(() => {
@@ -175,11 +214,11 @@ export default function AddTimelineRecordScreen({ route, navigation }) {
 
       if (d.serviceType != null) setServiceType(d.serviceType);
       if (d.date != null) setDate(d.date);
-      if (d.title != null) setTitle(d.title);
+      if (!prefillTitle && d.title != null) setTitle(d.title);
       if (d.provider != null) setProvider(d.provider);
       if (d.location != null) setLocation(d.location);
       if (d.cost != null) setCost(d.cost);
-      if (d.notes != null) setNotes(d.notes);
+      if (!prefillNotes && d.notes != null) setNotes(d.notes);
 
       if (d.selectedSystemId !== undefined) setSelectedSystemId(d.selectedSystemId || null);
       if (d.selectedKeeprProId !== undefined) setSelectedKeeprProId(d.selectedKeeprProId || null);
@@ -220,6 +259,14 @@ export default function AddTimelineRecordScreen({ route, navigation }) {
     selectedKeeprProLabel,
   ]);
 
+  useEffect(() => {
+    if (!draftKey) return;
+    if (!pendingAttachmentId) return;
+
+    try {
+      window?.sessionStorage?.removeItem(draftKey);
+    } catch {}
+  }, [draftKey, pendingAttachmentId]);
 
   const contextLabel = useMemo(() => {
     if (assetName && systemName) return `${assetName} · ${systemName}`;
@@ -440,7 +487,20 @@ const notesHasUrls = useMemo(() => {
       setCreatingQuickPro(false);
     }
   };
+    const removeAttachment = async (placementId) => {
+  try {
+    await supabase
+      .from("attachment_placements")
+      .delete()
+      .eq("id", placementId);
 
+    setRecordAttachments((prev) =>
+      prev.filter((p) => p.id !== placementId)
+    );
+  } catch (e) {
+    Alert.alert("Error", "Could not remove attachment.");
+  }
+};
 
   const handleSave = async () => {
     Keyboard.dismiss();
@@ -461,6 +521,7 @@ const notesHasUrls = useMemo(() => {
       setSubmitError("Please select a date.");
       return;
     }
+
 
     const payload = {
       asset_id: assetId,
@@ -501,6 +562,32 @@ const notesHasUrls = useMemo(() => {
 
       if (error) throw error;
       recordId = data?.id;
+
+      if (recordId && pendingAttachmentId) {
+  try {
+    const { error: placementError } = await supabase
+      .from("attachment_placements")
+      .insert({
+        attachment_id: pendingAttachmentId,
+        target_type: "service_record",
+        target_id: recordId,
+        role: "proof",
+      });
+
+    if (
+      placementError &&
+      placementError.code !== "23505" &&
+      !String(placementError.message || "").toLowerCase().includes("duplicate key")
+    ) {
+      throw placementError;
+    }
+  } catch (e) {
+    console.error("Attach pending proof error:", e);
+    setSubmitError(e?.message || "Record created, but the document could not be attached.");
+    setSaving(false);
+    return;
+  }
+}
     } catch (e) {
       console.error("Create timeline record error:", e);
       setSubmitError(e?.message || "Could not save this record.");
@@ -522,8 +609,6 @@ const notesHasUrls = useMemo(() => {
           serviceRecordId: recordId,
           // Start in "proof mode" after create
           mode: "add_proof",
-          // Ensure Back returns to where the user started
-          backTo: resolvedBackTo || undefined,
         });
         return;
       } catch {}
@@ -673,7 +758,34 @@ const notesHasUrls = useMemo(() => {
                 </View>
               </View>
             </View>
-
+            <View style={styles.card}>
+                  <Text style={styles.cardTitle}>Context</Text>
+                  <Text style={styles.helper}>
+                    Write it like you’re explaining it to a future buyer (or future you).
+                  </Text>
+              <TextInput
+                style={[styles.input, styles.multiline]}
+                placeholder="Tell the story… products used, prep notes, part numbers, where things are stored…"
+                value={notes}
+                onChangeText={setNotes}
+                placeholderTextColor={colors.textMuted}
+                multiline
+                numberOfLines={6}
+                textAlignVertical="top"
+              />
+            
+              {notesHasUrls ? (
+                <View style={{ marginTop: spacing.sm }}>
+                  <Text style={styles.linkPreviewLabel}>Links detected in notes</Text>
+                  <LinkifiedText
+                    text={notes}
+                    style={styles.linkPreviewText}
+                    linkStyle={styles.linkPreviewLink}
+                    selectable
+                  />
+                </View>
+              ) : null}
+              </View>
             {/* Associations */}
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Associations</Text>
@@ -725,55 +837,38 @@ const notesHasUrls = useMemo(() => {
               )}
 
               <View style={{ height: spacing.md }} />
-
-              <Text style={styles.label}>Provider / Who</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="MSM Painting / Samir"
-                value={provider}
-                onChangeText={setProvider}
-                placeholderTextColor={colors.textMuted}
-              />
             </View>
 
-            {/* Context */}
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>Context</Text>
-              <Text style={styles.helper}>
-                Write it like you’re explaining it to a future buyer (or future you).
-              </Text>
-              <TextInput
-                style={[styles.input, styles.multiline]}
-                placeholder="Tell the story… products used, prep notes, part numbers, where things are stored…"
-                value={notes}
-                onChangeText={setNotes}
-                placeholderTextColor={colors.textMuted}
-                multiline
-                numberOfLines={6}
-                textAlignVertical="top"
-              />
-            
-              {notesHasUrls ? (
-                <View style={{ marginTop: spacing.sm }}>
-                  <Text style={styles.linkPreviewLabel}>Links detected in notes</Text>
-                  <LinkifiedText
-                    text={notes}
-                    style={styles.linkPreviewText}
-                    linkStyle={styles.linkPreviewLink}
-                    selectable
-                  />
+            {pendingAttachmentId ? (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Attached Proof</Text>
+                <Text style={styles.helper}>
+                  This document will be attached to the timeline record when you create it.
+                </Text>
+
+                <View style={styles.pendingAttachmentRow}>
+                  <Ionicons name="document-text-outline" size={18} color={colors.textSecondary} />
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <Text style={styles.pendingAttachmentTitle} numberOfLines={1}>
+                      {pendingAttachmentTitle || "Document"}
+                    </Text>
+                    <Text style={styles.pendingAttachmentMeta} numberOfLines={1}>
+                      Ready to attach on save
+                    </Text>
+                  </View>
                 </View>
-              ) : null}
-</View>
-
+              </View>
+            ) : null}
+           
             {/* Proof helper */}
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>Proof</Text>
-              <Text style={styles.helper}>
-                Once you save this story moment, you can attach photos, files, and links as proof from the story view.
-              </Text>
-            </View>
-
+                <View style={styles.card}>
+                  <Text style={styles.cardTitle}>Proof</Text>
+                  <Text style={styles.helper}>
+                    {pendingAttachmentId
+                      ? "This record will be created with the attached document already linked as proof."
+                      : "Once you save this story moment, you can attach photos, files, and links as proof from the story view."}
+                  </Text>
+                </View>
             {submitError ? <Text style={styles.errorText}>{submitError}</Text> : null}
           </ScrollView>
 
@@ -1235,5 +1330,26 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "900",
   },
+  pendingAttachmentRow: {
+  marginTop: spacing.sm,
+  flexDirection: "row",
+  alignItems: "center",
+  paddingHorizontal: 12,
+  paddingVertical: 12,
+  borderRadius: radius.lg,
+  borderWidth: 1,
+  borderColor: colors.border,
+  backgroundColor: colors.card,
+},
+pendingAttachmentTitle: {
+  fontSize: 14,
+  fontWeight: "800",
+  color: colors.textPrimary,
+},
+pendingAttachmentMeta: {
+  marginTop: 2,
+  fontSize: 12,
+  color: colors.textMuted,
+},
 
 });

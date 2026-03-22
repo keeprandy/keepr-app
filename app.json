@@ -24,6 +24,9 @@
     },
     "web": {
       "favicon": "./assets/favicon-48.png"
-    }
+    },
+    "plugins": [
+      "react-native-document-scanner-plugin"
+    ]
   }
 }

@@ -1,47 +1,53 @@
 // screens/BoatStoryScreen.js
-import React, {
-  useMemo,
-  useState,
-  useCallback,
-  useRef,
-  useEffect,
-} from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Pressable,
-  Image,
-  ActivityIndicator,
-  Modal,
-  LayoutAnimation,
-  Platform,
-  UIManager,
-  Alert,
-  useWindowDimensions,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  LayoutAnimation,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  UIManager,
+  useWindowDimensions,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { layoutStyles } from "../styles/layout";
-import { colors, spacing, radius, typography, shadows } from "../styles/theme";
+import { colors, radius, shadows, spacing, typography } from "../styles/theme";
 
 import { useAssets } from "../hooks/useAssets";
 import { supabase } from "../lib/supabaseClient";
 import { formatKeeprDate } from "../lib/dateFormat";
+import * as ImagePicker from "expo-image-picker";
+import KeeprProgressCard, {
+  buildKeeprProgressModel,
+} from "../components/KeeprProgressCard";
 
-import EventPill from "../components/EventPill";
+// ✅ low-level upload helper (NOT a hook)
+import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
+
+// ✅ attachments helpers (for hero placement resolution)
 import { getSignedUrl } from "../lib/attachmentsApi";
+
+// Context-aware Add Event pill
+import EventPill from "../components/EventPill";
+import ReportsModal from "../components/ReportsModal";
 
 const HERO_ASPECT = 4 / 3;
 const IS_WEB = Platform.OS === "web";
-const WIDE_BREAKPOINT = 980;
 
 // Enable LayoutAnimation on Android
-if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
+if (
+  Platform.OS === "android" &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
@@ -80,252 +86,242 @@ function TimelineFilterChip({ label, active, onPress }) {
       style={[styles.filterChip, active && styles.filterChipActive]}
     >
       <Text
-        style={[
-          styles.filterChipLabel,
-          active && styles.filterChipLabelActive,
-        ]}
+        style={[styles.filterChipLabel, active && styles.filterChipLabelActive]}
       >
         {label}
       </Text>
     </TouchableOpacity>
   );
 }
+// TEMP: Public QR test token (replace later with per-asset QR management)
+const PUBLIC_QR_TEST_TOKEN = "xMgfiowNQ6g0ovLjheBnnufFwsRwXS2YdW3_YXAuRU4";
 
-/* --------------------------- METADATA HELPERS --------------------------- */
+// TEMP: Status of Completion for an Asset)
 
-// Supports both metadata.standard (preferred) and legacy flat metadata shapes.
-function getStandardMetaFromMetadata(metadata) {
-  const meta = metadata && typeof metadata === "object" ? metadata : {};
-  const standard =
-    meta.standard && typeof meta.standard === "object" ? meta.standard : null;
 
-  if (standard) {
-    return {
-      identity: standard.identity || {},
-      warranty: standard.warranty || {},
-      value: standard.value || {},
-      risk: standard.risk || {},
-      story: standard.story || {},
-      relationships: standard.relationships || {},
-    };
-  }
+/* --------------------------- TIMELINE ROW --------------------------- */
 
-  return {
-    identity: meta.identity || {},
-    warranty: meta.warranty || {},
-    value: meta.value || {},
-    risk: meta.risk || {},
-    story: meta.story || {},
-    relationships: meta.relationships || {},
-  };
+function TimelineRow({ item, onPress, hasAttachment }) {
+  const isService = item.kind === "service";
+
+  const iconName = isService
+    ? item.serviceType === "pro"
+      ? "briefcase-outline"
+      : item.serviceType === "diy"
+      ? "construct-outline"
+      : "construct-outline"
+    : "sparkles-outline";
+
+  const subtitleBits = [];
+  if (isService && item.systemName) subtitleBits.push(item.systemName);
+  if (isService && item.provider) subtitleBits.push(item.provider);
+  if (!isService && item.description) subtitleBits.push(item.description);
+
+  const subtitle = subtitleBits.filter(Boolean).join(" · ");
+
+  return (
+    <TouchableOpacity
+      activeOpacity={0.85}
+      onPress={() => onPress?.(item)}
+      style={styles.timelineRow}
+    >
+      <View style={styles.timelineIcon}>
+        <Ionicons name={iconName} size={16} color={colors.textPrimary} />
+      </View>
+
+      <View style={{ flex: 1 }}>
+        <View style={styles.timelineTopRow}>
+          <Text style={styles.timelineTitle} numberOfLines={1}>
+            {item.title || (isService ? "Service visit" : "Story update")}
+          </Text>
+          <Text style={styles.timelineDate}>
+            {item.date ? formatKeeprDate(item.date) : ""}
+          </Text>
+        </View>
+
+        {!!subtitle && (
+          <Text style={styles.timelineSubtitle} numberOfLines={2}>
+            {subtitle}
+          </Text>
+        )}
+
+        <View style={styles.timelineMetaRow}>
+          {isService ? (
+            <>
+              {!!item.cost && (
+                <View style={styles.metaPill}>
+                  <Ionicons
+                    name="cash-outline"
+                    size={14}
+                    color={colors.textSecondary}
+                  />
+                  <Text style={styles.metaPillText}>
+                    {typeof item.cost === "number"
+                      ? `$${item.cost.toLocaleString()}`
+                      : String(item.cost)}
+                  </Text>
+                </View>
+              )}
+              {!!hasAttachment && (
+                <View style={styles.metaPill}>
+                  <Ionicons
+                    name="images-outline"
+                    size={14}
+                    color={colors.textSecondary}
+                  />
+                  <Text style={styles.metaPillText}>Photos</Text>
+                </View>
+              )}
+            </>
+          ) : (
+            <View style={styles.metaPill}>
+              <Ionicons
+                name="book-outline"
+                size={14}
+                color={colors.textSecondary}
+              />
+              <Text style={styles.metaPillText}>Story</Text>
+            </View>
+          )}
+        </View>
+      </View>
+
+      <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+    </TouchableOpacity>
+  );
 }
 
-function upsertStandardRelationships(metadata, relationshipsPatch) {
-  const meta = metadata && typeof metadata === "object" ? { ...metadata } : {};
-  const standard =
-    meta.standard && typeof meta.standard === "object" ? { ...meta.standard } : {};
-  const relationships =
-    standard.relationships && typeof standard.relationships === "object"
-      ? { ...standard.relationships }
-      : {};
-
-  Object.assign(relationships, relationshipsPatch || {});
-  standard.relationships = relationships;
-  meta.standard = standard;
-  return meta;
-}
-
-
+/* --------------------------- SCREEN --------------------------- */
 
 export default function BoatStoryScreen({ navigation, route }) {
+  // Responsive layout (web-first): use a two-column "listing" header on wide screens.
   const { width } = useWindowDimensions();
-  const isWide = IS_WEB && width >= WIDE_BREAKPOINT;
-
-  const initialBoatId =
+  const isWide = IS_WEB && width >= 980;
+ const initialBoatId =
   route?.params?.assetId ??
   route?.params?.boatId ??
   null;
+  
+const loadAssetProgress = useCallback(async (assetId) => {
+  if (!assetId) {
+    setAssetProgress(null);
+    return;
+  }
+
+  try {
+    const { data, error } = await supabase.rpc("get_asset_keepr_progress", {
+      p_asset_id: assetId,
+    });
+
+    if (error) {
+      console.log("Asset progress load failed", error);
+      setAssetProgress(null);
+      return;
+    }
+
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row) {
+      setAssetProgress(null);
+      return;
+    }
+
+    const normalized = buildKeeprProgressModel({
+      mode: "asset",
+      assetCount: 1,
+      systemCount: row.system ? 1 : 0,
+      recordCount: row.record ? 1 : 0,
+      proofCount: row.proof ? 1 : 0,
+    });
+
+    setAssetProgress(normalized);
+  } catch (err) {
+    console.warn("Asset progress load failed", err);
+    setAssetProgress(null);
+  }
+}, []);
 
   const { assets: boats = [], loading, error } = useAssets("boat");
 
   const currentBoat = useMemo(() => {
     if (!boats || boats.length === 0) return null;
     if (!initialBoatId) return boats[0];
-    return boats.find((v) => v.id === initialBoatId) || boats[0] || null;
+    return boats.find((h) => h.id === initialBoatId) || boats[0] || null;
   }, [boats, initialBoatId]);
 
-  const boatDisplayName = useMemo(() => {
-    return (
-      currentBoat?.name ||
-      [currentBoat?.year, currentBoat?.make, currentBoat?.model]
-        .filter(Boolean)
-        .join(" ") ||
-      "Boat"
-    );
-  }, [currentBoat?.name, currentBoat?.year, currentBoat?.make, currentBoat?.model]);
+  // Local snapshot so big updates (hero photo, delete, edits) reflect immediately
+  const [boatSnapshot, setBoatSnapshot] = useState(null);
+  const boat = boatSnapshot || currentBoat;
 
-  /* --------------------------- KEEPR PRO (asset-level) --------------------------- */
+  // Keep snapshot in sync when user switches boats
+    useEffect(() => {
+      setBoatSnapshot(currentBoat || null);
+    }, [currentBoat?.id]);
 
-  // Keep a local metadata copy so we can update the UI immediately after assignment.
-  // NOTE: assets table uses `extra_metadata` (not `metadata`).
-  const [assetMetadata, setAssetMetadata] = useState(() =>
-    currentBoat?.extra_metadata || currentBoat?.metadata || {}
-  );
 
-  useEffect(() => {
-    setAssetMetadata(currentBoat?.extra_metadata || currentBoat?.metadata || {});
-  }, [currentBoat?.id, currentBoat?.updated_at]);
+  const refreshBoat = useCallback(async () => {
+    if (!boat?.id) return;
+    const { data, error } = await supabase
+      .from("assets")
+      .select("*")
+      .eq("id", boat.id)
+      .maybeSingle();
 
-  const { relationships: assetRelationships } = useMemo(
-    () => getStandardMetaFromMetadata(assetMetadata),
-    [assetMetadata]
-  );
+    if (!error && data) setBoatSnapshot(data);
+  }, [boat?.id]);
 
-  const assetKeeprProIds = useMemo(() => {
-    const rel = assetRelationships || {};
-    const raw =
-      rel.keepr_pro_ids ||
-      rel.keeprProIds ||
-      rel.keepr_pros ||
-      rel.keeprPros ||
-      [];
-    return Array.isArray(raw) ? raw.filter(Boolean) : [];
-  }, [assetRelationships]);
+  const [reportsOpen, setReportsOpen] = useState(false);
+ const [assetProgress, setAssetProgress] = useState(null);
 
-  const [assignedPros, setAssignedPros] = useState([]);
-  const [prosLoading, setProsLoading] = useState(false);
-  const [prosError, setProsError] = useState(null);
+useEffect(() => {
+  if (boat?.id) {
+    loadAssetProgress(boat.id);
+  }
+}, [boat?.id]);
 
-  const [proPickerVisible, setProPickerVisible] = useState(false);
-  const [allPros, setAllPros] = useState([]);
-  const [allProsLoading, setAllProsLoading] = useState(false);
-  const [selectedProIds, setSelectedProIds] = useState([]);
 
-  const openKeeprPro = useCallback(
-    (pro) => {
-      if (!pro?.id) return;
-      navigation.navigate("KeeprProDetail", { pro });
-    },
-    [navigation]
-  );
-
-  const loadAssignedPros = useCallback(async () => {
-    const ids = assetKeeprProIds || [];
-    if (!ids.length) {
-      setAssignedPros([]);
-      setProsLoading(false);
-      setProsError(null);
-      return;
-    }
-
-    setProsLoading(true);
-    setProsError(null);
-
-    try {
-      const { data, error: pErr } = await supabase
-        .from("keepr_pros")
-        .select("id, name, category, phone, email, website, is_favorite")
-        .in("id", ids);
-
-      if (pErr) throw pErr;
-
-      const byId = new Map((data || []).map((p) => [p.id, p]));
-      const ordered = ids.map((id) => byId.get(id)).filter(Boolean);
-
-      setAssignedPros(ordered);
-      setProsLoading(false);
-    } catch (e) {
-      console.log("BoatStory loadAssignedPros error", e?.message || e);
-      setAssignedPros([]);
-      setProsLoading(false);
-      setProsError(e?.message || "Failed to load Keepr Pros.");
-    }
-  }, [assetKeeprProIds]);
-
-  useEffect(() => {
-    loadAssignedPros();
-  }, [loadAssignedPros]);
-
-  const loadAllPros = useCallback(async () => {
-    if (allProsLoading) return;
-    setAllProsLoading(true);
-
-    try {
-      const { data, error: pErr } = await supabase
-        .from("keepr_pros")
-        .select("id, name, category, phone, email, website, is_favorite")
-        .order("is_favorite", { ascending: false })
-        .order("name", { ascending: true });
-
-      if (pErr) throw pErr;
-
-      setAllPros(data || []);
-      setAllProsLoading(false);
-    } catch (e) {
-      console.log("BoatStory loadAllPros error", e?.message || e);
-      setAllPros([]);
-      setAllProsLoading(false);
-    }
-  }, [allProsLoading]);
-
-  const openProPicker = useCallback(() => {
-    setSelectedProIds(assetKeeprProIds || []);
-    setProPickerVisible(true);
-    if (!allPros || allPros.length === 0) {
-      loadAllPros();
-    }
-  }, [assetKeeprProIds, allPros, loadAllPros]);
-
-  const togglePro = useCallback((id) => {
-    if (!id) return;
-    setSelectedProIds((prev) => {
-      const next = Array.isArray(prev) ? [...prev] : [];
-      const idx = next.indexOf(id);
-      if (idx >= 0) next.splice(idx, 1);
-      else next.push(id);
-      return next;
-    });
-  }, []);
-
-  const saveAssetKeeprPros = useCallback(async () => {
-    if (!currentBoat?.id) return;
-
-    const nextIds = Array.isArray(selectedProIds) ? selectedProIds.filter(Boolean) : [];
-    const nextMeta = upsertStandardRelationships(assetMetadata, { keepr_pro_ids: nextIds });
-
-    try {
-      const { error: upErr } = await supabase
-        .from("assets")
-        .update({ extra_metadata: nextMeta })
-        .eq("id", currentBoat.id);
-
-      if (upErr) throw upErr;
-
-      setAssetMetadata(nextMeta);
-      setProPickerVisible(false);
-      setProsError(null);
-    } catch (e) {
-      console.log("BoatStory saveAssetKeeprPros error", e?.message || e);
-      Alert.alert("Could not save", e?.message || "Please try again.");
-    }
-  }, [currentBoat?.id, selectedProIds, assetMetadata]);
-
-  /* --------------------------- HERO RESOLUTION (placement-based) --------------------------- */
-
+  // ✅ Persistent hero resolved from hero_placement_id
   const [heroUri, setHeroUri] = useState(null);
   const [heroResolving, setHeroResolving] = useState(false);
 
+  // Service records + attachments
+  const [serviceRecords, setServiceRecords] = useState([]);
+  const [serviceAttachments, setServiceAttachments] = useState({});
+  const [svcLoading, setSvcLoading] = useState(false);
+  const [svcError, setSvcError] = useState(null);
+
+  // Story events
+  const [storyEvents, setStoryEvents] = useState([]);
+  const [storyLoading, setStoryLoading] = useState(false);
+  const [storyError, setStoryError] = useState(null);
+
+  // Systems for this boat
+  const [systems, setSystems] = useState([]);
+
+  // Boat picker & timeline scroll
+  const [boatPickerVisible, setBoatPickerVisible] = useState(false);
+  const scrollRef = useRef(null);
+  const [timelineY, setTimelineY] = useState(null);
+
+  // Timeline filter
+  const [timelineFilter, setTimelineFilter] = useState("all"); // all | service | moment| pro | diy
+
+  // Delete state
+  const [removeModalVisible, setRemoveModalVisible] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
+
+  /* --------------------------- HERO RESOLUTION --------------------------- */
+
   const resolveHeroFromPlacement = useCallback(async () => {
-    if (!currentBoat?.id) {
+    if (!boat?.id) {
       setHeroUri(null);
       return;
     }
 
-    const placementId = currentBoat?.hero_placement_id || null;
+    const placementId = boat?.hero_placement_id || null;
 
-    // No placement hero yet → fallback legacy field
+    // No placement hero yet → fallback to legacy URL field
     if (!placementId) {
-      setHeroUri(currentBoat?.hero_image_url || null);
+      setHeroUri(boat?.hero_image_url || null);
       return;
     }
 
@@ -351,71 +347,67 @@ export default function BoatStoryScreen({ navigation, route }) {
 
       if (pErr) {
         console.log("BoatStory hero placement lookup error", pErr);
-        setHeroUri(currentBoat?.hero_image_url || null);
+        // fallback so we never show blank due to lookup problems
+        setHeroUri(boat?.hero_image_url || null);
         return;
       }
 
       const a = data?.attachment || null;
       if (!a || a.deleted_at) {
-        setHeroUri(currentBoat?.hero_image_url || null);
+        // placement points to missing/deleted attachment
+        setHeroUri(boat?.hero_image_url || null);
         return;
       }
 
+      // Prefer direct url (for external links or already public)
       if (a.url) {
         setHeroUri(a.url);
         return;
       }
 
+      // Otherwise signed URL for storage file
       if (a.bucket && a.storage_path) {
         const signed = await getSignedUrl({
           bucket: a.bucket,
           path: a.storage_path,
         });
-        setHeroUri(signed || currentBoat?.hero_image_url || null);
+        setHeroUri(signed || boat?.hero_image_url || null);
         return;
       }
 
-      setHeroUri(currentBoat?.hero_image_url || null);
+      setHeroUri(boat?.hero_image_url || null);
     } catch (e) {
       console.log("BoatStory resolveHeroFromPlacement error", e);
-      setHeroUri(currentBoat?.hero_image_url || null);
+      setHeroUri(boat?.hero_image_url || null);
     } finally {
       setHeroResolving(false);
     }
-  }, [currentBoat?.id, currentBoat?.hero_placement_id, currentBoat?.hero_image_url]);
+  }, [boat?.id, boat?.hero_placement_id, boat?.hero_image_url]);
 
   useFocusEffect(
     useCallback(() => {
+      refreshBoat();
       resolveHeroFromPlacement();
-    }, [resolveHeroFromPlacement])
+    }, [refreshBoat, resolveHeroFromPlacement])
   );
 
+  // Also re-resolve if asset changes in-place
   useEffect(() => {
+    refreshBoat();
     resolveHeroFromPlacement();
-  }, [resolveHeroFromPlacement]);
+  }, [refreshBoat, resolveHeroFromPlacement]);
 
-  /* --------------------------- DATA: service + story + systems --------------------------- */
-
-  const [serviceRecords, setServiceRecords] = useState([]);
-  const [serviceAttachments, setServiceAttachments] = useState({});
-  const [svcLoading, setSvcLoading] = useState(false);
-  const [svcError, setSvcError] = useState(null);
-
-  const [storyEvents, setStoryEvents] = useState([]);
-  const [storyLoading, setStoryLoading] = useState(false);
-  const [storyError, setStoryError] = useState(null);
-
-  const [systems, setSystems] = useState([]);
+  /* --------------------------- LOAD DATA ON FOCUS --------------------------- */
 
   const loadBoatData = useCallback(async () => {
-    if (!currentBoat?.id) return;
+    if (!boat?.id) return;
 
     setSvcLoading(true);
     setStoryLoading(true);
     setSvcError(null);
     setStoryError(null);
 
-    const boatId = currentBoat.id;
+    const boatId = boat.id;
 
     try {
       // 1) Service records
@@ -442,7 +434,10 @@ export default function BoatStoryScreen({ navigation, route }) {
             .in("service_record_id", ids);
 
           if (photosErr) {
-            console.error("Error loading attachments for service records", photosErr);
+            console.error(
+              "Error loading attachments for service records",
+              photosErr
+            );
             setServiceAttachments({});
           } else {
             const attachmentMap = {};
@@ -489,24 +484,13 @@ export default function BoatStoryScreen({ navigation, route }) {
       setSvcLoading(false);
       setStoryLoading(false);
     }
-  }, [currentBoat?.id]);
+  }, [boat?.id]);
 
   useFocusEffect(
     useCallback(() => {
-      if (currentBoat?.id) loadBoatData();
-    }, [currentBoat?.id, loadBoatData])
+      if (boat?.id) loadBoatData();
+    }, [boat?.id, loadBoatData])
   );
-
-  /* --------------------------- UI STATE --------------------------- */
-
-  const [boatPickerVisible, setBoatPickerVisible] = useState(false);
-  const scrollRef = useRef(null);
-  const [timelineY, setTimelineY] = useState(null);
-
-  const [timelineFilter, setTimelineFilter] = useState("all"); // all | service | story | pro | diy
-
-  const [removeModalVisible, setRemoveModalVisible] = useState(false);
-  const [actionLoading, setActionLoading] = useState(false);
 
   /* --------------------------- NAV + ACTIONS --------------------------- */
 
@@ -516,86 +500,246 @@ export default function BoatStoryScreen({ navigation, route }) {
   };
 
   const goToShowcase = () => {
-    if (!currentBoat) return;
-    navigation.navigate("BoatShowcase", { boatId: currentBoat.id });
+    if (!boat) return;
+    navigation.navigate("BoatShowcase", { boatId: boat.id });
   };
 
   const goToAttachments = () => {
-    if (!currentBoat?.id) return;
+    if (!boat?.id) return;
     navigation.navigate("AssetAttachments", {
-      assetId: currentBoat.id,
-      assetName: boatDisplayName,
+      assetId: boat.id,
+      assetName: boat.name || "Boat",
       sourceType: "boat",
       initialTab: "file",
     });
   };
+  const goToAttachmentsMobile = () => {
+  navigation.navigate("AssetAttachmentsMobile", {
+    assetId: currentBoat?.id,
+    assetName: currentBoat?.name,
+  });
+};
+
+  const ensureMediaPermission = useCallback(async () => {
+    if (Platform.OS === "web") return true;
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permission needed", "Please allow photo library access to upload a hero image.");
+      return false;
+    }
+    return true;
+  }, []);
+
+  const uploadHeroPhoto = useCallback(async () => {
+    try {
+      if (!boat?.id) return;
+
+      const ok = await ensureMediaPermission();
+      if (!ok) return;
+
+      const { data: userRes } = await supabase.auth.getUser();
+      const userId = userRes?.user?.id;
+      if (!userId) {
+        Alert.alert("Not signed in", "Please sign in again.");
+        return;
+      }
+
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.9,
+      });
+
+      if (res.canceled) return;
+      const a = res.assets?.[0];
+      if (!a?.uri) return;
+
+      // Optimistic preview
+      setHeroUri(a.uri);
+
+      setHeroResolving(true);
+
+      await uploadAttachmentFromUri({
+        userId,
+        assetId: boat.id,
+        kind: "photo",
+        fileUri: a.uri,
+        fileName: a.fileName || a.uri.split("/").pop() || "hero.jpg",
+        mimeType: a.mimeType || "image/jpeg",
+        sizeBytes: a.fileSize || null,
+        placements: [
+        {
+          target_type: "asset",
+          target_id: boat.id,
+          role: "hero",
+          label: "Hero",
+          sort_order: 0,
+          is_showcase: true,
+        },
+      ],
+      });
+
+      // Find newest image placement for this asset and set as hero
+      const { data: placements, error: pErr } = await supabase
+        .from("attachment_placements")
+        .select("id, created_at, attachments!inner(kind, mime_type)")
+        .eq("target_type", "asset")
+        .eq("target_id", boat.id)
+        .order("created_at", { ascending: false })
+        .limit(20);
+
+      if (pErr) throw pErr;
+
+      const newestImagePlacement =
+        (placements || []).find(
+          (p) =>
+            p?.attachments?.kind === "photo" ||
+            (p?.attachments?.mime_type || "").startsWith("image/")
+        ) || null;
+
+      if (newestImagePlacement?.id) {
+        const { error: uErr } = await supabase
+          .from("assets")
+          .update({ hero_placement_id: newestImagePlacement.id })
+          .eq("id", boat.id);
+
+        if (uErr) throw uErr;
+      }
+
+      await refreshBoat();
+      await resolveHeroFromPlacement();
+    } catch (e) {
+      console.log("uploadHeroPhoto failed", e);
+      Alert.alert("Upload failed", e?.message || "Could not set hero photo.");
+      // fall back to whatever DB resolves
+      try {
+        await resolveHeroFromPlacement();
+      } catch {}
+    } finally {
+      setHeroResolving(false);
+    }
+  }, [boat?.id, ensureMediaPermission, refreshBoat, resolveHeroFromPlacement]);
+
 
   const goToEditBoat = () => {
-    if (!currentBoat) return;
-    navigation.navigate("EditAsset", { assetId: currentBoat.id });
+    if (!boat) return;
+    navigation.navigate("EditAsset", { assetId: boat.id });
   };
 
-  const goToLogPro = () =>
+  const goToLogPro = () => {
+    if (!boat) return;
     navigation.navigate("AddServiceRecord", {
       source: "boat",
-      assetId: currentBoat.id,
-      boatId: currentBoat.id,
-      assetName: boatDisplayName,
+      assetId: boat.id,
+      boatId: boat.id,
+      assetName: boat.name,
       serviceType: "pro",
     });
+  };
 
-  const goToLogDIY = () =>
+  const goToLogDIY = () => {
+    if (!boat) return;
     navigation.navigate("AddServiceRecord", {
       source: "boat",
-      assetId: currentBoat.id,
-      boatId: currentBoat.id,
-      assetName: boatDisplayName,
+      assetId: boat.id,
+      boatId: boat.id,
+      assetName: boat.name,
       serviceType: "diy",
     });
+  };
 
   const goToAddTimelineRecord = () => {
-    if (!currentBoat?.id) return;
+    if (!boat) return;
     navigation.navigate("AddTimelineRecord", {
       scope: "asset",
-      assetId: currentBoat.id,
-      assetName: boatDisplayName,
+      assetId: boat.id,
+      assetName: boat.name || "Boat",
       assetType: "boat",
     });
   };
 
-  const goToTimelineRecord = (serviceRecordId) => {
-    navigation.navigate("TimelineRecord", {
-      sourceType: "service_record",
-      serviceRecordId,
+  const goToBoatSystems = () => {
+    if (!boat) return;
+    navigation.navigate("BoatSystems", {
+      boatId: boat.id,
+      boatName: boat.name || "Boat",
     });
   };
-  const goToPublicView = () => {
-    if (!currentBoat?.kac_id) {
-      Alert.alert("Missing KAC", "This asset is not linked to a KAC yet.");
+
+      const handleKeeprProgressPress = useCallback(
+  (step) => {
+    if (!boat?.id) return;
+
+    if (step === "asset") {
       return;
     }
-    navigation.navigate("PublicAction", {
-      kac: currentBoat.kac_id,
-      assetId: currentBoat.id,
-      assetName: boatDisplayName,
-      assetType: "boat",
-    });
-  };
-  const goToBoatSystems = () => {
-    if (!currentBoat) return;
-    navigation.navigate("BoatSystems", {
-      boatId: currentBoat.id,
-      boatName: boatDisplayName,
-    });
-  };
 
-  const handleAddBoat = () => navigation.navigate("AddMarineAsset", { assetType: "boat" });
+    if (step === "system") {
+      goToBoatSystems();
+      return;
+    }
 
-  const handleAddBoatChat = () =>
-    navigation.navigate("AddAssetChat", {
-      assetType: "boat",
-      flow: "asset-intake",
-    });
+    if (step === "record") {
+      goToAddTimelineRecord();
+      return;
+    }
+
+    if (step === "proof") {
+      goToAttachments();
+      return;
+    }
+  },
+  [boat?.id, goToBoatSystems, goToAddTimelineRecord, goToAttachments]
+);
+
+const handleAddBoat = () => {
+  setBoatPickerVisible(false);
+  navigation.navigate("AddMarineAsset");
+};
+
+const handleAddBoatChat = () => {
+  setBoatPickerVisible(false);
+  navigation.navigate("AddAssetChat", {
+    assetType: "boat",
+    flow: "asset-intake",
+    source: "boat-picker-chat",
+  });
+};
+
+const goToPublicView = () => {
+  if (!boat?.id) return;
+
+  const kacFromRoute =
+    route?.params?.kac ||
+    route?.params?.kacId ||
+    route?.params?.kac_id ||
+    null;
+
+  const kacFromAsset =
+    boat?.kac ||
+    boat?.kac_code ||
+    boat?.kac_id ||
+    boat?.kacId ||
+    null;
+
+  const kac = (kacFromRoute || kacFromAsset || "").toString().trim();
+
+  if (kac) {
+    navigation.navigate("PublicAction", { kac });
+    return;
+  }
+
+  // Fallback for now (until per-asset public link tokens are stored/generated)
+  if (PUBLIC_QR_TEST_TOKEN) {
+    navigation.navigate("PublicAction", { token: PUBLIC_QR_TEST_TOKEN });
+    return;
+  }
+
+  Alert.alert(
+    "Public view not ready",
+    "No KAC or public token was found for this boat yet."
+  );
+};
+
 
   const handleSelectBoat = (boat) => {
     setBoatPickerVisible(false);
@@ -609,61 +753,53 @@ export default function BoatStoryScreen({ navigation, route }) {
     scrollRef.current.scrollTo({ y: timelineY - 24, animated: true });
   };
 
-  const startRemoveBoat = () => {
-    if (!currentBoat?.id) return;
-    setRemoveModalVisible(true);
-  };
+// Delete flow
+const startRemove = () => {
+  if (!boat?.id) return;
+  setRemoveModalVisible(true);
+};
 
-  const handleConfirmRemoveBoat = async () => {
-    if (!currentBoat?.id) return;
+const handleConfirmRemove = async () => {
+  if (!boat?.id) return;
 
-    const boatId = currentBoat.id;
-    setActionLoading(true);
+  setActionLoading(true);
+  try {
+    const { error: updErr } = await supabase
+      .from("assets")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", boat.id);
 
-    try {
-      // best-effort legacy cleanup (kept because your current file expects it)
-      const { data: photoRows } = await supabase
-        .from("asset_photos")
-        .select("id, storage_path")
-        .eq("asset_id", boatId);
-
-      if (photoRows && photoRows.length) {
-        const paths = photoRows
-          .map((p) => p.storage_path)
-          .filter((p) => typeof p === "string" && p.length > 0);
-
-        if (paths.length) {
-          try {
-            await supabase.storage.from("asset-photos").remove(paths);
-          } catch (e) {
-            console.error("Unexpected storage remove error", e);
-          }
-        }
-
-        await supabase.from("asset_photos").delete().eq("asset_id", boatId);
-      }
-
-      const { error: assetErr } = await supabase
-        .from("assets")
-        .update({ deleted_at: new Date().toISOString() })
-        .eq("id", boatId);
-
-      if (assetErr) {
-        console.error("Error soft-deleting boat asset", assetErr);
-        Alert.alert("Couldn’t delete", assetErr.message || "Nothing was deleted.");
-        return;
-      }
-
-      setRemoveModalVisible(false);
-      Alert.alert("Deleted", "This boat was deleted from your Keepr.");
-      navigation.navigate("Garage");
-    } catch (e) {
-      console.error("handleConfirmRemoveBoat error", e);
-      Alert.alert("Couldn’t delete", e?.message || "Nothing was deleted.");
-    } finally {
-      setActionLoading(false);
+    if (updErr) {
+      console.error("soft delete boat error", updErr);
+      Alert.alert(
+        "Couldn’t delete",
+        updErr?.message || "Nothing was deleted."
+      );
+      return;
     }
-  };
+
+    setRemoveModalVisible(false);
+    Alert.alert("Deleted", "This boat was removed from your account.");
+
+    navigation.reset({
+      index: 0,
+      routes: [
+        {
+          name: "RootTabs",
+          state: {
+            index: 0,
+            routes: [{ name: "Dashboard" }],
+          },
+        },
+      ],
+    });
+  } catch (e) {
+    console.log("handleConfirmRemove boat error:", e);
+    Alert.alert("Couldn’t delete", e?.message || "Nothing was deleted.");
+  } finally {
+    setActionLoading(false);
+  }
+};
 
   /* --------------------------- TIMELINE MODEL --------------------------- */
 
@@ -677,6 +813,7 @@ export default function BoatStoryScreen({ navigation, route }) {
 
     (storyEvents || []).forEach((ev) => {
       const type = ev.event_type || "";
+
       if (
         type === "service_event" ||
         type === "service_record_created" ||
@@ -709,7 +846,9 @@ export default function BoatStoryScreen({ navigation, route }) {
         new Date().toISOString();
 
       const systemName =
-        rec.system_id && systemMap[rec.system_id] ? systemMap[rec.system_id] : null;
+        rec.system_id && systemMap[rec.system_id]
+          ? systemMap[rec.system_id]
+          : null;
 
       items.push({
         id: rec.id,
@@ -722,13 +861,14 @@ export default function BoatStoryScreen({ navigation, route }) {
         systemName,
         cost: rec.cost,
         date,
-        hasAttachment: !!serviceAttachments?.[rec.id],
       });
     });
 
-    items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    items.sort(
+      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+    );
     return items;
-  }, [storyEvents, serviceRecords, systems, serviceAttachments]);
+  }, [storyEvents, serviceRecords, systems]);
 
 const filteredTimelineItems = useMemo(() => {
   if (!timelineItems || timelineItems.length === 0) return [];
@@ -764,6 +904,13 @@ const filteredTimelineItems = useMemo(() => {
   });
 }, [timelineItems, timelineFilter]);
 
+  const goToTimelineRecord = (serviceRecordId) => {
+    navigation.navigate("TimelineRecord", {
+      sourceType: "service_record",
+      serviceRecordId,
+    });
+  };
+
   const onTimelineItemPress = (item) => {
     if (item.kind === "service" && item.serviceRecordId) {
       goToTimelineRecord(item.serviceRecordId);
@@ -775,8 +922,76 @@ const filteredTimelineItems = useMemo(() => {
         sourceType: "story_event",
         storyEventId: item.id,
       });
+      return;
     }
   };
+
+  /* --------------------------- PRINT STORY SHEET --------------------------- */
+
+  const heroImage = heroUri ? { uri: heroUri } : null;
+
+const meta = {
+  boatType: boat?.boat_type || boat?.type || null,
+  year: boat?.year || null,
+  make: boat?.make || null,
+  model: boat?.model || null,
+  lengthFeet: boat?.length_feet || null,
+  hullMaterial: boat?.hull_material || null,
+  engineType: boat?.engine_type || null,
+  engineHours: boat?.engine_hours || null,
+  registrationNumber: boat?.registration_number || null,
+  serialNumber: boat?.serial_number || null,
+  estValue: boat?.estimated_value || null,
+  purchasePrice: boat?.purchase_price || null,
+  purchaseDate: boat?.purchase_date || null,
+  location: boat?.location || null,
+};
+
+  const hasMeta = Object.values(meta).some((v) => v);
+
+  const formatMoney = (v) => {
+    if (!v && v !== 0) return null;
+    if (typeof v === "number") return `$${v.toLocaleString()}`;
+    const s = String(v);
+    return s.startsWith("$") ? s : `$${s}`;
+  };
+
+  const boatLocation = meta.location || null;
+  const boatName = boat?.name || "My boat";
+
+  const boatDisplayName =
+  `${boat?.year || ""} ${boat?.make || ""} ${boat?.model || ""}`.trim() || "Boat";
+
+
+  const goToStoryPrint = () => {
+  if (!currentBoat?.id) return;
+
+  const story = {
+    assetId: currentBoat.id,
+    assetType: "boat",
+    title: boatDisplayName,
+    subtitle: "Boat overview",
+    heroUri,
+    purchaseDate: currentBoat.purchase_date || null,
+    purchasePrice: currentBoat.purchase_price || null,
+    estimatedValue: currentBoat.estimated_value || null,
+    location: currentBoat.location || null,
+    context: currentBoat.notes || "",
+    timeline: (timelineItems || []).map((item) => ({
+      id: item.id,
+      kind: item.kind,
+      title: item.title,
+      description: item.description,
+      date: item.date,
+      provider: item.provider || null,
+      serviceType: item.serviceType || null,
+      systemName: item.systemName || null,
+      cost: item.cost ?? null,
+    })),
+  };
+
+  navigation.navigate("StoryPrint", { story });
+};
 
   /* --------------------------- GUARDS --------------------------- */
 
@@ -787,7 +1002,16 @@ const filteredTimelineItems = useMemo(() => {
           <ActivityIndicator />
           <Text style={{ marginTop: spacing.sm }}>Loading boat…</Text>
         </View>
-      </SafeAreaView>
+      
+
+  <ReportsModal
+    visible={reportsOpen}
+    onClose={() => setReportsOpen(false)}
+    asset={boat}
+    navigation={navigation}
+    onOpenStorySheet={goToStoryPrint}
+  />
+</SafeAreaView>
     );
   }
 
@@ -797,89 +1021,85 @@ const filteredTimelineItems = useMemo(() => {
         <View style={styles.centered}>
           <Text style={{ color: "red" }}>{error}</Text>
         </View>
-      </SafeAreaView>
+      
+
+  <ReportsModal
+    visible={reportsOpen}
+    onClose={() => setReportsOpen(false)}
+    asset={boat}
+    navigation={navigation}
+    onOpenStorySheet={goToStoryPrint}
+  />
+</SafeAreaView>
     );
   }
 
-  if (!currentBoat) {
+  if (!boat) {
     return (
       <SafeAreaView style={layoutStyles.screen}>
         <View style={styles.centered}>
-          <Text style={styles.appTitle}>Keepr – A home for everything you own.</Text>
+          <Text style={styles.appTitle}>
+            Keepr – Add your Boat to Keepr.
+          </Text>
           <Text style={styles.appSubtitle}>
-            Track homes, garage, and boats in one place.
+           This is where the living record of your boat will grow over time.
+          </Text>
+          <Text style={styles.appSubtitle}>
+           Your center console, cruiser, sailboat, or runabout — add them all.
           </Text>
           <View style={{ height: 10 }} />
-          <Text>Add your Boats - Car, Motorcycle, Bike, Golf Cart</Text>
-          <View style={{ height: 10 }} />
-          <TouchableOpacity style={styles.emptyPrimaryBtn} onPress={handleAddBoat} activeOpacity={0.9}>
+          <Text style={{ color: colors.textSecondary }}>
+            You don’t have a boat added yet.
+          </Text>
+
+          <View style={{ height: 14 }} />
+
+          <TouchableOpacity
+            style={styles.emptyPrimaryBtn}
+            onPress={handleAddBoat}
+            activeOpacity={0.9}
+          >
             <Ionicons name="add" size={18} color="white" />
             <Text style={styles.emptyPrimaryBtnText}>Add a boat</Text>
           </TouchableOpacity>
+
           <View style={{ height: 8 }} />
-          <TouchableOpacity style={styles.emptySecondaryBtn} onPress={handleAddBoatChat} activeOpacity={0.9}>
-            <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.textPrimary} />
+
+          <TouchableOpacity
+            style={styles.emptySecondaryBtn}
+            onPress={handleAddBoatChat}
+            activeOpacity={0.9}
+          >
+            <Ionicons
+              name="chatbubble-ellipses-outline"
+              size={18}
+              color={colors.textPrimary}
+            />
             <Text style={styles.emptySecondaryBtnText}>Add via chat</Text>
           </TouchableOpacity>
         </View>
-      </SafeAreaView>
+      
+
+  <ReportsModal
+    visible={reportsOpen}
+    onClose={() => setReportsOpen(false)}
+    asset={boat}
+    navigation={navigation}
+    onOpenStorySheet={goToStoryPrint}
+  />
+</SafeAreaView>
     );
   }
-
-  /* --------------------------- HERO + META --------------------------- */
-
-
-  // Display names (derived from assets table)
-  // - boatDisplayName is a safe fallback used across the screen
-  // - boatName / boatSubtitle are used only for header rendering
-  const boatName = boatDisplayName;
-  const boatSubtitle = [currentBoat?.trim, currentBoat?.location]
-    .filter(Boolean)
-    .join(" · ") || null;
-
-  const heroImage = heroUri ? { uri: heroUri } : null;
-
-  const meta = {
-    year: currentBoat.year,
-    make: currentBoat.make,
-    model: currentBoat.model,
-    trim: currentBoat.trim,
-    mileage: currentBoat.mileage,
-    vin: currentBoat.vin,
-    plate: currentBoat.plate,
-    estValue: currentBoat.estimated_value,
-    purchasePrice: currentBoat.purchase_price,
-    purchaseDate: currentBoat.purchase_date,
-    location: currentBoat.location,
-  };
-
-  const hasMeta = Object.values(meta).some((v) => v);
-
-  const formatMoney = (v) => {
-    if (!v && v !== 0) return null;
-    if (typeof v === "number") return `$${v.toLocaleString()}`;
-    const str = v.toString();
-    return str.startsWith("$") ? str : `$${str}`;
-  };
-
-  const formatMileage = (v) => {
-    if (v === null || v === undefined || v === "") return null;
-    const num = typeof v === "number" ? v : Number(v);
-    if (!Number.isFinite(num)) return v;
-    return `${num.toLocaleString()} mi`;
-  };
-
-  const boatLocation = meta.location || null;
 
   /* --------------------------- RENDER --------------------------- */
 
   return (
     <SafeAreaView style={layoutStyles.screen}>
-      <ScrollView
-        ref={scrollRef}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
+    <ScrollView
+      ref={scrollRef}
+      contentContainerStyle={styles.scrollContent}
+      showsVerticalScrollIndicator={false}
+    >
         {/* Header row */}
         <View style={styles.headerRow}>
           <TouchableOpacity
@@ -891,8 +1111,10 @@ const filteredTimelineItems = useMemo(() => {
           </TouchableOpacity>
 
           <View style={styles.headerTitleCol}>
-            <Text style={styles.headerTitle}>{boatDisplayName} Story</Text>
-            <Text style={styles.headerSubtitle}>A home for everything you own.</Text>
+            <Text style={styles.headerTitle}>{boatName} Story</Text>
+            <Text style={styles.headerSubtitle}>
+              A home for everything you own.
+            </Text>
           </View>
         </View>
 
@@ -901,60 +1123,37 @@ const filteredTimelineItems = useMemo(() => {
           <View style={{ flex: 1 }}>
             <Text style={styles.boatPickerLabel}>Boat</Text>
             <Text style={styles.boatPickerSubtitle} numberOfLines={1}>
-              {boatDisplayName}
+              {boatName}
               {boatLocation ? ` · ${boatLocation}` : ""}
             </Text>
           </View>
-          {IS_WEB && currentBoat?.id && (
-            <TouchableOpacity
-              onPress={() => {
-                const story = {
-                  assetId: currentBoat.id,
-                  assetType: "boat",
-                  title: boatDisplayName,
-                  subtitle: "Boat overview",
-                  heroUri, // already resolved earlier
-                  // high-level meta you might want on the sheet
-                  purchaseDate: currentBoat.purchase_date || null,
-                  purchasePrice: currentBoat.purchase_price || null,
-                  estimatedValue: currentBoat.estimated_value || null,
-                  location: currentBoat.location || null,
-                  // story context (the “Story & notes” box)
-                  context: currentBoat.notes || "",
-                  // full timeline for printing
-                  timeline: (timelineItems || []).map((item) => ({
-                    id: item.id,
-                    kind: item.kind, // "service" | "story"
-                    title: item.title,
-                    description: item.description,
-                    date: item.date,
-                    provider: item.provider || null,
-                    serviceType: item.serviceType || null, // "pro" | "diy" | etc
-                    systemName: item.systemName || null,
-                    cost: item.cost ?? null,
-                  })),
-                };
-                navigation.navigate("StoryPrint", { story });
-              }}
-              style={{ marginLeft: 8 }}
-            >
-              <Ionicons name="print-outline" size={24} color={colors.textPrimary} />
-            </TouchableOpacity>
-          )}
 
-          <TouchableOpacity style={styles.addBoatCircle} activeOpacity={0.9} onPress={handleAddBoat}>
-            <Ionicons name="add" size={18} color="white" />
+          <TouchableOpacity
+            style={styles.reportsButton}
+            activeOpacity={0.9}
+            onPress={() => setReportsOpen(true)}
+          >
+            <Ionicons name="documents-outline" size={14} color={colors.textPrimary} />
+            <Text style={styles.reportsButtonText}>Reports</Text>
           </TouchableOpacity>
-          
+
+
+          <TouchableOpacity
+            style={styles.addBoatCircle}
+            activeOpacity={0.9}
+            onPress={handleAddBoat}
+          >
+            <Ionicons name="add-circle" size={35} color="white" />
+          </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.boatPickerButton}
             activeOpacity={0.9}
             onPress={() => setBoatPickerVisible(true)}
           >
-            <Ionicons name="car-sport-outline" size={14} color={colors.textPrimary} />
+            <Ionicons name="boat-outline" size={14} color={colors.textPrimary} />
             <Text style={styles.boatPickerButtonText} numberOfLines={1}>
-              {boatDisplayName}
+              {boatName}
             </Text>
             <Ionicons name="chevron-down" size={14} color={colors.textSecondary} />
           </TouchableOpacity>
@@ -967,289 +1166,281 @@ const filteredTimelineItems = useMemo(() => {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.quickActionsScroll}
           >
-            <QuickActionChip label="Story" icon="book-outline" isPrimary onPress={() => {}} />
-            <QuickActionChip label="Systems" icon="grid-outline" onPress={goToBoatSystems} />
-            <QuickActionChip label="Timeline" icon="time-outline" onPress={scrollToTimeline} />
-            <QuickActionChip label="Add record" icon="add-circle-outline" onPress={goToAddTimelineRecord} />
-            <QuickActionChip label="Attachments" icon="attach-outline" onPress={goToAttachments} />
-            <QuickActionChip label="Showcase" icon="images-outline" onPress={goToShowcase} />
-            <QuickActionChip label="QR Codes" icon="qr-code-outline" onPress={() => navigation.navigate("AssetQRCodes", { assetId: currentBoat.id })}/>
-            <QuickActionChip label="Public view" icon="open-outline" onPress={goToPublicView} />
-            <QuickActionChip label="Edit boat" icon="create-outline" onPress={goToEditBoat} />
-            <QuickActionChip label="Delete boat" icon="trash-outline" onPress={startRemoveBoat} />
+            <QuickActionChip
+              label="Timeline"
+              icon="time-outline"
+              onPress={scrollToTimeline}
+            />
+            <QuickActionChip
+              label="Systems"
+              icon="grid-outline"
+              onPress={goToBoatSystems}
+            />
+            <QuickActionChip
+              label="Attachments"
+              icon="attach-outline"
+              onPress={goToAttachments}
+            />
+            <QuickActionChip
+              label="Add to Timeline"
+              icon="add-circle-outline"
+              onPress={goToAddTimelineRecord}
+            />
+            <QuickActionChip
+              label="Edit boat"
+              icon="create-outline"
+              onPress={goToEditBoat}
+            />
+
+            {/* Additional Buttons Not needed 
+            <QuickActionChip
+              label="Log pro"
+              icon="briefcase-outline"
+              onPress={goToLogPro}
+            />
+            <QuickActionChip
+              label="Log DIY"
+              icon="construct-outline"
+              onPress={goToLogDIY}
+            />
+            <QuickActionChip
+              label="Add via chat"
+              icon="chatbubble-ellipses-outline"
+              onPress={handleAddBoatChat}
+            />
+            */}
+            <QuickActionChip
+              label="Delete boat"
+              icon="trash-outline"
+              onPress={startRemove}
+            />
           </ScrollView>
         </View>
 
-        {/* HERO + META (CarGurus-style on web wide) */}
+        {/* Hero */}
         <View style={[styles.heroCard, isWide && styles.heroCardWide]}>
-          <View style={[styles.heroTopRow, isWide && styles.heroTopRowWide]}>
-            {/* Left: hero image */}
-            <View style={[styles.heroLeft, isWide && styles.heroLeftWide]}>
-              <View
-                style={[
-                  styles.heroImageWrap,
-                  isWide ? styles.heroImageWrapWide : styles.heroImageWrapMobile,
-                ]}
-              >
-                {heroImage ? (
-                  <Image source={heroImage} style={styles.heroImage} resizeMode="contain" />
-                ) : (
-                  <View style={styles.heroPlaceholder}>
-                    <Ionicons name="car-sport-outline" size={34} color={colors.textMuted} />
-                    <Text style={styles.heroPlaceholderText}>Add a hero photo in Showcase.</Text>
-                  </View>
-                )}
+          <View style={[styles.heroImageWrap, isWide && styles.heroImageWrapWide]}>
+          {heroImage ? (
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={goToShowcase}
+              style={styles.heroTouchable}
+            >
+              <Image
+                source={heroImage}
+                style={[styles.heroImage, isWide && styles.heroImageWide]}
+                resizeMode="cover"
+              />
 
-                {heroResolving && (
-                  <View style={styles.heroSpinner}>
-                    <ActivityIndicator size="small" color="white" />
-                  </View>
-                )}
+              <View style={styles.heroOverlayIcon}>
+                <Ionicons name="images-outline" size={18} color="white" />
               </View>
-            </View>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={styles.heroPlaceholder}
+              activeOpacity={0.85}
+              onPress={uploadHeroPhoto}
+            >
+              <Ionicons name="image-outline" size={28} color={colors.textMuted} />
+              <Text style={styles.heroPlaceholderText}>Add Hero Photo</Text>
+            </TouchableOpacity>
+          )}
 
-            {/* Right: title + specs (keep existing metadata fields/labels) */}
-            <View style={[styles.heroRight, isWide && styles.heroRightWide]}>
-              
-              <View style={styles.heroMeta}>
-                <Text style={styles.heroTitle} numberOfLines={1}>
-                  {boatName}
-                </Text>
-
-                {/* Subtitle line mirrors current behavior (location / trim / misc) */}
-                {!!boatSubtitle && (
-                  <Text style={styles.heroSubtitle} numberOfLines={2}>
-                    {boatSubtitle}
-                  </Text>
-                )}
-
-                {hasMeta && (
-                  <View style={styles.metaCardWide}>
-                    {meta.year && <Text style={styles.metaLine}>Year: {meta.year}</Text>}
-                    {meta.make && <Text style={styles.metaLine}>Make: {meta.make}</Text>}
-                    {meta.model && <Text style={styles.metaLine}>Model: {meta.model}</Text>}
-                    {meta.trim && <Text style={styles.metaLine}>Trim: {meta.trim}</Text>}
-                    {meta.mileage && (
-                      <Text style={styles.metaLine}>Mileage: {formatMileage(meta.mileage)}</Text>
-                    )}
-                    {meta.vin && <Text style={styles.metaLine}>VIN: {meta.vin}</Text>}
-                    {meta.plate && <Text style={styles.metaLine}>Plate: {meta.plate}</Text>}
-                    {meta.purchasePrice && (
-                      <Text style={styles.metaLine}>
-                        Purchase price: {formatMoney(meta.purchasePrice)}
-                      </Text>
-                    )}
-                    {meta.estimatedValue && (
-                      <Text style={styles.metaLine}>
-                        Estimated value: {formatMoney(meta.estimatedValue)}
-                      </Text>
-                    )}
-                    {meta.purchased && (
-                      <Text style={styles.metaLine}>Purchased: {formatKeeprDate(meta.purchased)}</Text>
-                    )}
-                  </View>
-                )}
-                {/* KEEPR PRO (asset-level) */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Keepr Pro</Text>
-
-            <QuickActionChip
-              icon="people-outline"
-              label={assignedPros?.length ? "Edit assignment" : "Assign"}
-              onPress={openProPicker}
-            />
-          </View>
-
-          <View style={styles.proCard}>
-            {prosLoading ? (
-              <View style={{ paddingVertical: spacing.sm }}>
-                <ActivityIndicator size="small" />
-              </View>
-            ) : assignedPros?.length ? (
-              <View>
-                {assignedPros.slice(0, 3).map((pro) => (
-                  <TouchableOpacity
-                    key={pro.id}
-                    style={styles.proRow}
-                    onPress={() => openKeeprPro(pro)}
-                    activeOpacity={0.85}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.proName} numberOfLines={1}>
-                        {pro.name || "Keepr Pro"}
-                      </Text>
-                      <Text style={styles.proMeta} numberOfLines={1}>
-                        {[pro.category, pro.phone || pro.email]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </Text>
-                    </View>
-                    <Ionicons
-                      name="chevron-forward-outline"
-                      size={18}
-                      color={colors.textSecondary}
-                    />
-                  </TouchableOpacity>
-                ))}
-
-                {assignedPros.length > 3 ? (
-                  <TouchableOpacity
-                    style={styles.proMoreRow}
-                    onPress={openProPicker}
-                    activeOpacity={0.85}
-                  >
-                    <Text style={styles.proMoreText}>
-                      + {assignedPros.length - 3} more
-                    </Text>
-                  </TouchableOpacity>
-                ) : null}
-              </View>
-            ) : (
-              <View style={styles.emptyInline}>
-                <Text style={styles.emptyInlineText}>
-                  No Keepr Pro assigned yet. Add your go-to contact so “Create action” is one click away.
-                </Text>
+            {/* Tiny spinner while resolving placement */}
+            {heroResolving && (
+              <View style={styles.heroSpinner}>
+                <ActivityIndicator size="small" color="white" />
               </View>
             )}
-
-            {!!prosError && (
-              <Text style={styles.warnText}>{prosError}</Text>
-            )}
           </View>
-        </View>
-              </View>
-            </View>
-          </View>
-        </View>
 
-{/* STORY & NOTES */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Story & notes</Text>
-          <View style={styles.storyCard}>
-            {currentBoat.notes ? (
-              <Text style={styles.storyText}>{currentBoat.notes}</Text>
-            ) : (
-              <Text style={styles.storyText}>
-                Capture the story of this boat — trips, seasons, upgrades, and major service moments.
+          {/* Hero Meta Including Asset Completion Status */}
+          <View style={[styles.heroMeta, isWide && styles.heroMetaWide]}>
+            <Text style={styles.heroTitle} numberOfLines={1}>
+              {boatName}
+            </Text>
+            {!!boatLocation && (
+              <Text style={styles.heroSubtitle} numberOfLines={1}>
+                {boatLocation}
               </Text>
             )}
+
+            {!!hasMeta && (
+              <View style={styles.metaGrid}>
+                {!!meta.year && (
+              <View style={styles.metaTile}>
+                <Text style={styles.metaLabel}>Year</Text>
+                <Text style={styles.metaValue}>{meta.year}</Text>
+              </View>
+            )}
+
+            {!!meta.make && (
+              <View style={styles.metaTile}>
+                <Text style={styles.metaLabel}>Make</Text>
+                <Text style={styles.metaValue}>{meta.make}</Text>
+              </View>
+            )}
+
+            {!!meta.model && (
+              <View style={styles.metaTile}>
+                <Text style={styles.metaLabel}>Model</Text>
+                <Text style={styles.metaValue}>{meta.model}</Text>
+              </View>
+            )}
+
+            {!!meta.lengthFeet && (
+              <View style={styles.metaTile}>
+                <Text style={styles.metaLabel}>Length</Text>
+                <Text style={styles.metaValue}>{meta.lengthFeet} ft</Text>
+              </View>
+            )}
+
+            {!!meta.engineHours && (
+              <View style={styles.metaTile}>
+                <Text style={styles.metaLabel}>Engine Hours</Text>
+                <Text style={styles.metaValue}>{Number(meta.engineHours).toLocaleString()}</Text>
+              </View>
+            )}
+
+            {!!meta.engineType && (
+              <View style={styles.metaTile}>
+                <Text style={styles.metaLabel}>Engine</Text>
+                <Text style={styles.metaValue}>{meta.engineType}</Text>
+              </View>
+            )}
+
+            {!!meta.registrationNumber && (
+              <View style={styles.metaTile}>
+                <Text style={styles.metaLabel}>Registration</Text>
+                <Text style={styles.metaValue}>{meta.registrationNumber}</Text>
+              </View>
+            )}
+
+            {!!meta.serialNumber && (
+              <View style={styles.metaTile}>
+                <Text style={styles.metaLabel}>Serial</Text>
+                <Text style={styles.metaValue}>{meta.serialNumber}</Text>
+              </View>
+            )}
+              </View>
+            )}
+            {!!assetProgress && (
+            <View style={{ marginTop: spacing.md }}>
+              <KeeprProgressCard
+                mode="asset"
+                progress={assetProgress}
+                loading={false}
+                onPress={handleKeeprProgressPress}
+                onStepPress={(step) => {
+                  if (step === "system") goToBoatSystems();
+                  if (step === "record") goToAddTimelineRecord();
+                  if (step === "proof") goToAttachments();
+                }}
+              />
+            </View>
+            )}
+            <TouchableOpacity
+            style={styles.primaryAddBtn}
+            onPress={goToAttachments}
+          >
+            <Ionicons name="attach-outline" size={18} color="#fff" />
+            <Text style={styles.primaryAddBtnText}>
+              Add receipts, warranties, docs
+            </Text>
+          </TouchableOpacity>
           </View>
+
         </View>
 
-        {/* TIMELINE */}
+        {/* Timeline */}
         <View
-          style={[styles.section, { marginTop: spacing.lg }]}
           onLayout={(e) => setTimelineY(e.nativeEvent.layout.y)}
+          style={styles.sectionCard}
         >
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Timeline</Text>
             <View style={{ flex: 1 }} />
             {(svcLoading || storyLoading) && <ActivityIndicator size="small" />}
-            <QuickActionChip
-              label="Add record"
+             <QuickActionChip
+              label="Add To Timeline"
               icon="add-circle-outline"
               onPress={goToAddTimelineRecord}
             />
           </View>
 
+          {(!!svcError || !!storyError) && (
+            <Text style={styles.sectionError}>
+              {svcError || storyError || "Could not load timeline."}
+            </Text>
+          )}
+
           <View style={styles.filterRow}>
-            {[
-              ["all", "All"],
-              ["service", "Service"],
-              ["moment", "Moments"],
-              ["pro", "Pro"],
-              ["diy", "DIY"],
-            ].map(([key, label]) => (
-              <TimelineFilterChip
-                key={key}
-                label={label}
-                active={timelineFilter === key}
-                onPress={() => {
-                  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                  setTimelineFilter(key);
-                }}
-              />
-            ))}
+            <TimelineFilterChip
+              label="All"
+              active={timelineFilter === "all"}
+              onPress={() => setTimelineFilter("all")}
+            />
+            <TimelineFilterChip
+              label="Service"
+              active={timelineFilter === "service"}
+              onPress={() => setTimelineFilter("service")}
+            />
+            <TimelineFilterChip
+              label="Moments"
+              active={timelineFilter === "moment"}
+              onPress={() => setTimelineFilter("moment")}
+            />
+            <TimelineFilterChip
+              label="Pro"
+              active={timelineFilter === "pro"}
+              onPress={() => setTimelineFilter("pro")}
+            />
+            <TimelineFilterChip
+              label="DIY"
+              active={timelineFilter === "diy"}
+              onPress={() => setTimelineFilter("diy")}
+            />
           </View>
 
-          {(storyLoading || svcLoading) && (
-            <View style={styles.historyLoadingRow}>
-              <ActivityIndicator size="small" />
-              <Text style={styles.historyLoadingText}>Loading…</Text>
-            </View>
-          )}
-
-          {(storyError || svcError) && (
-            <Text style={styles.historyErrorText}>{storyError || svcError}</Text>
-          )}
-
-          {!storyLoading && !svcLoading && !filteredTimelineItems.length && (
-            <View style={styles.emptyHistoryCard}>
-              <Ionicons name="time-outline" size={20} color={colors.textMuted} />
-              <Text style={styles.emptyHistoryTitle}>Nothing here yet</Text>
-              <Text style={styles.emptyHistoryText}>
-                As you add service and systems data, it will appear here as a timeline of this boat’s story.
+          {filteredTimelineItems.length === 0 ? (
+            <View style={{ paddingVertical: spacing.md }}>
+              <Text style={styles.emptyTimelineText}>
+                No timeline items yet. Log your first service record or add a story
+                event.
               </Text>
             </View>
-          )}
-
-          {!!filteredTimelineItems.length && (
-            <View style={styles.timelineList}>
-              {filteredTimelineItems.map((item) => {
-                const dateLabel = item.date ? formatKeeprDate(item.date) : "Date unknown";
-                const isService = item.kind === "service";
-
-                return (
-                  <TouchableOpacity
-                    key={`${item.kind}-${item.id}`}
-                    style={styles.timelineCard}
-                    activeOpacity={0.85}
-                    onPress={() => onTimelineItemPress(item)}
-                  >
-                    <View style={styles.timelineIconCircle}>
-                      <Ionicons
-                        name={isService ? "construct-outline" : "sparkles-outline"}
-                        size={16}
-                        color={colors.textSecondary}
-                      />
-                    </View>
-
-                    <View style={{ flex: 1 }}>
-                      <View style={{ flexDirection: "row", alignItems: "center" }}>
-                        <Text style={styles.timelineTitle} numberOfLines={1}>
-                          {item.title || (isService ? "Service visit" : "Story")}
-                        </Text>
-                        <Text style={styles.timelineDate}>{dateLabel}</Text>
-                      </View>
-
-                      {isService &&
-                        (item.serviceType ||
-                          item.systemName ||
-                          item.cost != null ||
-                          item.hasAttachment) && (
-                          <Text style={styles.timelineMetaRow} numberOfLines={1}>
-                            {item.serviceType &&
-                              `[${String(item.serviceType).toUpperCase()}] `}
-                            {item.systemName && `${item.systemName} `}
-                            {item.cost != null && `· $${Number(item.cost).toLocaleString()} `}
-                            {item.hasAttachment ? "· 📎" : ""}
-                          </Text>
-                        )}
-
-                      {!!item.description && (
-                        <Text style={styles.timelineDescription} numberOfLines={3}>
-                          {item.description}
-                        </Text>
-                      )}
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
+          ) : (
+            <View style={{ marginTop: spacing.sm }}>
+              {filteredTimelineItems.map((item) => (
+                <TimelineRow
+                  key={`${item.kind}-${item.id}`}
+                  item={item}
+                  onPress={onTimelineItemPress}
+                  hasAttachment={
+                    item.kind === "service" &&
+                    !!serviceAttachments?.[item.serviceRecordId]
+                  }
+                />
+              ))}
             </View>
           )}
         </View>
       </ScrollView>
+
+      {/* Add event pill (context: boat) */}
+      {!!boat?.id && (
+        <EventPill
+          label="Add a quick event"
+          onPress={() =>
+            navigation.navigate("CreateEvent", {
+              assetId: boat.id,
+              assetType: "boat",
+              assetName: boat.name || "Boat",
+            })
+          }
+        />
+      )}
 
       {/* Boat picker modal */}
       <Modal
@@ -1261,9 +1452,32 @@ const filteredTimelineItems = useMemo(() => {
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeaderRow}>
-              <Text style={styles.modalTitle}>Select boat</Text>
-              <TouchableOpacity onPress={() => setBoatPickerVisible(false)}>
-                <Ionicons name="close-outline" size={22} color={colors.textMuted} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.modalTitle}>Select boat</Text>
+              </View>
+
+              <TouchableOpacity
+                onPress={handleAddBoatChat}
+                style={styles.modalMiniBtn}
+                activeOpacity={0.85}
+              >
+                <Ionicons
+                  name="chatbubble-ellipses-outline"
+                  size={16}
+                  color={colors.textPrimary}
+                />
+                <Text style={styles.modalMiniBtnText}>Chat</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => setBoatPickerVisible(false)}
+                style={{ marginLeft: 6 }}
+              >
+                <Ionicons
+                  name="close-outline"
+                  size={22}
+                  color={colors.textMuted}
+                />
               </TouchableOpacity>
             </View>
 
@@ -1271,39 +1485,40 @@ const filteredTimelineItems = useMemo(() => {
               showsVerticalScrollIndicator={false}
               contentContainerStyle={{ paddingVertical: spacing.sm }}
             >
-              {boats.map((boat) => {
-                const isActive = boat.id === currentBoat.id;
-                const displayName =
-                  boat.name ||
-                  [boat.year, boat.make, boat.model]
-                    .filter(Boolean)
-                    .join(" ") ||
-                  "Untitled boat";
+              {boats.map((h) => {
+                const isActive = h.id === boat?.id;
 
                 return (
                   <TouchableOpacity
-                    key={boat.id}
-                    style={[styles.modalBoatRow, isActive && styles.modalBoatRowActive]}
-                    onPress={() => handleSelectBoat(boat)}
+                    key={h.id}
+                    style={[
+                      styles.modalBoatRow,
+                      isActive && styles.modalBoatRowActive,
+                    ]}
+                    onPress={() => handleSelectBoat(h)}
                     activeOpacity={0.85}
                   >
                     <Ionicons
-                      name="car-sport-outline"
+                      name="boat-outline"
                       size={18}
                       color={isActive ? colors.textPrimary : colors.textMuted}
                     />
                     <View style={{ marginLeft: spacing.sm, flex: 1 }}>
                       <Text style={styles.modalBoatName} numberOfLines={1}>
-                        {displayName}
+                        {h.name || "Untitled boat"}
                       </Text>
-                      {!!boat.location && (
+                      {!!h.location && (
                         <Text style={styles.modalBoatMeta} numberOfLines={1}>
-                          {boat.location}
+                          {h.location}
                         </Text>
                       )}
                     </View>
                     {isActive && (
-                      <Ionicons name="checkmark" size={18} color={colors.accentGreen} />
+                      <Ionicons
+                        name="checkmark"
+                        size={18}
+                        color={colors.accentGreen}
+                      />
                     )}
                   </TouchableOpacity>
                 );
@@ -1313,7 +1528,7 @@ const filteredTimelineItems = useMemo(() => {
         </View>
       </Modal>
 
-      {/* Delete boat modal */}
+      {/* Delete modal */}
       <Modal
         visible={removeModalVisible}
         transparent
@@ -1323,28 +1538,41 @@ const filteredTimelineItems = useMemo(() => {
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeaderRow}>
-              <Text style={styles.modalTitle}>Remove from my Keepr</Text>
-              <TouchableOpacity onPress={() => setRemoveModalVisible(false)}>
-                <Ionicons name="close-outline" size={22} color={colors.textMuted} />
+              <Text style={styles.modalTitle}>Delete boat?</Text>
+              <TouchableOpacity
+                onPress={() => setRemoveModalVisible(false)}
+                style={{ marginLeft: 6 }}
+              >
+                <Ionicons
+                  name="close-outline"
+                  size={22}
+                  color={colors.textMuted}
+                />
               </TouchableOpacity>
             </View>
 
             <Text style={styles.modalBodyText}>
-              This deletes the boat from your Keepr and removes its photos.
+              This will soft-delete the boat (sets deleted_at). You can restore it
+              later from admin tooling if needed.
             </Text>
 
             <View style={styles.modalButtonRow}>
               <TouchableOpacity
                 style={[styles.modalButton, styles.modalButtonGhost]}
                 onPress={() => setRemoveModalVisible(false)}
+                activeOpacity={0.85}
                 disabled={actionLoading}
               >
                 <Text style={styles.modalButtonGhostText}>Cancel</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.modalButton, { backgroundColor: colors.danger || "#DC2626" }]}
-                onPress={handleConfirmRemoveBoat}
+                style={[
+                  styles.modalButton,
+                  { backgroundColor: colors.danger || "#DC2626" },
+                ]}
+                onPress={handleConfirmRemove}
+                activeOpacity={0.9}
                 disabled={actionLoading}
               >
                 {actionLoading ? (
@@ -1357,96 +1585,15 @@ const filteredTimelineItems = useMemo(() => {
           </View>
         </View>
       </Modal>
+    
 
-      {/* Event pill */}
-      {currentBoat?.id ? <EventPill contextAssetId={currentBoat.id} /> : null}
-          {/* Keepr Pro assignment modal */}
-      <Modal
-        visible={proPickerVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setProPickerVisible(false)}
-      >
-        <Pressable
-          style={styles.modalBackdrop}
-          onPress={() => setProPickerVisible(false)}
-        >
-          <Pressable
-            style={styles.modalCard}
-            onPress={() => {}}
-          >
-            <Text style={styles.modalTitle}>Assign Keepr Pro</Text>
-            <Text style={styles.modalSubtitle}>
-              Pick one or more providers to show as the “1-click action” for this asset.
-            </Text>
-
-            {allProsLoading ? (
-              <View style={{ paddingVertical: spacing.md }}>
-                <ActivityIndicator />
-              </View>
-            ) : (
-              <ScrollView style={{ maxHeight: 360 }}>
-                {(allPros || []).map((p) => {
-                  const selected = (selectedProIds || []).includes(p.id);
-                  return (
-                    <TouchableOpacity
-                      key={p.id}
-                      style={styles.proPickRow}
-                      onPress={() => togglePro(p.id)}
-                      activeOpacity={0.85}
-                    >
-                      <Ionicons
-                        name={selected ? "checkbox" : "square-outline"}
-                        size={20}
-                        color={selected ? colors.brandBlue : colors.textSecondary}
-                        style={{ marginRight: 10 }}
-                      />
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.proPickName} numberOfLines={1}>
-                          {p.name || "Keepr Pro"}
-                        </Text>
-                        <Text style={styles.proPickMeta} numberOfLines={1}>
-                          {[p.category, p.phone || p.email]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </Text>
-                      </View>
-                      <TouchableOpacity
-                        style={styles.proPickViewBtn}
-                        onPress={(e) => {
-                          if (e?.stopPropagation) e.stopPropagation();
-                          openKeeprPro(p);
-                        }}
-                        activeOpacity={0.85}
-                      >
-                        <Text style={styles.proPickViewBtnText}>View</Text>
-                      </TouchableOpacity>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            )}
-
-            <View style={styles.modalActionsRow}>
-              <TouchableOpacity
-                style={[styles.modalBtn, styles.modalBtnGhost]}
-                onPress={() => setProPickerVisible(false)}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.modalBtnGhostText}>Cancel</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.modalBtn, styles.modalBtnPrimary]}
-                onPress={saveAssetKeeprPros}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.modalBtnPrimaryText}>Save</Text>
-              </TouchableOpacity>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+  <ReportsModal
+    visible={reportsOpen}
+    onClose={() => setReportsOpen(false)}
+    asset={boat}
+    navigation={navigation}
+    onOpenStorySheet={goToStoryPrint}
+  />
 </SafeAreaView>
   );
 }
@@ -1458,8 +1605,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.xl * 2,
   },
-  appTitle: { ...typography.title },
-  appSubtitle: { ...typography.subtitle, marginTop: 2 },
+
+  // Web-only: keep content comfortably readable on large monitors.
 
   centered: {
     flex: 1,
@@ -1468,122 +1615,89 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
 
-  emptyPrimaryBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: radius.pill,
-    backgroundColor: colors.brandBlue,
-    ...shadows.subtle,
-  },
-  emptyPrimaryBtnText: { color: "white", fontWeight: "700" },
-  emptySecondaryBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    backgroundColor: colors.surface,
-    ...shadows.subtle,
-  },
-  emptySecondaryBtnText: { color: colors.textPrimary, fontWeight: "700" },
+  appTitle: { ...typography.title },
+  appSubtitle: { ...typography.subtitle, marginTop: 2 },
 
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: spacing.lg,
+    paddingTop: spacing.lg,
     marginBottom: spacing.sm,
   },
   backButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    alignItems: "center",
-    justifyContent: "center",
     marginRight: spacing.sm,
-    backgroundColor: colors.surface,
-    ...shadows.subtle,
+    paddingRight: spacing.sm,
+    paddingVertical: 4,
   },
   headerTitleCol: { flex: 1 },
-  headerTitle: { fontSize: 20, fontWeight: "700", color: colors.textPrimary },
-  headerSubtitle: { marginTop: 2, fontSize: 12, color: colors.textSecondary },
+  headerTitle: { fontSize: 18, fontWeight: "800", color: colors.textPrimary },
+  headerSubtitle: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
 
   boatPickerRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
+    gap: spacing.sm,
   },
-  boatPickerLabel: { ...typography.sectionLabel },
-  boatPickerSubtitle: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
-
+  boatPickerLabel: { fontSize: 12, color: colors.textMuted, fontWeight: "700" },
+  boatPickerSubtitle: {
+    fontSize: 13,
+    color: colors.textPrimary,
+    fontWeight: "700",
+    marginTop: 2,
+  },
   addBoatCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: colors.brandBlue,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: colors.brandBlue,
-    marginRight: spacing.sm,
-    marginLeft: spacing.sm,
     ...shadows.subtle,
   },
-
   boatPickerButton: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
     borderRadius: radius.pill,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 1,
     backgroundColor: colors.surface,
-    ...shadows.subtle,
+    maxWidth: 200,
   },
-  boatPickerButtonText: { fontSize: 12, color: colors.textPrimary, marginHorizontal: spacing.xs },
+  boatPickerButtonText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.textPrimary,
+    maxWidth: 140,
+  },
 
   quickActionsRow: { marginBottom: spacing.md },
-  quickActionsScroll: { paddingVertical: 2 },
+  quickActionsScroll: { paddingRight: spacing.lg },
+
   chip: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surfaceSubtle,
-    marginRight: 6,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
-  },
-  chipPrimary: { backgroundColor: colors.brandBlue, borderColor: colors.brandBlue },
-  chipLabel: { fontSize: 11, color: colors.textSecondary, fontWeight: "500" },
-  chipLabelPrimary: { color: "white" },
-
-  filterRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    marginTop: spacing.xs,
-    marginBottom: spacing.sm,
-  },
-  filterChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
     borderRadius: radius.pill,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
     backgroundColor: colors.surface,
-    marginRight: 6,
-    marginBottom: 6,
+    marginRight: 8,
   },
-  filterChipActive: { backgroundColor: colors.brandBlue, borderColor: colors.brandBlue },
-  filterChipLabel: { fontSize: 11, color: colors.textSecondary },
-  filterChipLabelActive: { color: "white", fontWeight: "600" },
+  chipPrimary: {
+    backgroundColor: colors.brandBlue,
+    borderColor: colors.brandBlue,
+  },
+  chipLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.textPrimary,
+  },
+  chipLabelPrimary: { color: "white" },
 
   heroCard: {
     borderRadius: radius.xl,
@@ -1591,41 +1705,62 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.borderSubtle,
     overflow: "hidden",
-    marginBottom: spacing.lg,
     ...shadows.subtle,
+    marginBottom: spacing.lg,
   },
+  heroImageWrap: {
+    width: "100%",
+    aspectRatio: HERO_ASPECT,
+    backgroundColor: colors.surfaceSubtle,
+     borderRadius: radius.lg,
+  },
+  heroImage: { width: "100%", height: "100%" },
 
-  // Web-wide: split header (hero left, specs right). Mobile stays stacked.
+  heroTouchable: {
+  width: "100%",
+  height: "100%",
+},
+
+heroOverlayIcon: {
+  position: "absolute",
+  right: 10,
+  top: 10,
+  backgroundColor: "rgba(15,23,42,0.6)",
+  borderRadius: 999,
+  padding: 6,
+},
+
+primaryAddBtn: {
+  marginTop: 12,
+  backgroundColor: colors.primary, // Keepr blue
+  paddingVertical: 12,
+  paddingHorizontal: 16,
+  borderRadius: 10,
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 8,
+},
+
+primaryAddBtnText: {
+  color: "#fff",
+  fontWeight: "600",
+},
+
+  // Web-only: Redfin-style two-column header (hero left, details right).
   heroCardWide: {
-    flexDirection: "column",
-  },
-  heroTopRow: {
-    flexDirection: "column",
-  },
-  heroTopRowWide: {
     flexDirection: "row",
     alignItems: "stretch",
   },
-  heroLeft: { width: "100%" },
-  heroLeftWide: {
-    width: "46%",
-    borderRightWidth: 1,
-    borderRightColor: colors.borderSubtle,
-  },
-  heroRight: { width: "100%" },
-  heroRightWide: { width: "54%" },
-
-  heroImageWrap: {
-    width: "100%",
-    backgroundColor: colors.surfaceSubtle,
-  },
-  heroImageWrapMobile: {
-    aspectRatio: 4 / 3,
-  },
   heroImageWrapWide: {
-    height: 300,
+    // width: 0 enables flex sizing in a row layout
+    width: 0,
+    flex: 1.35,
+    minHeight: 280,
   },
-  heroImage: { width: "100%", height: "100%" },
+  heroMetaWide: {
+    flex: 1,
+  },
   heroPlaceholder: {
     width: "100%",
     height: "100%",
@@ -1634,6 +1769,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   heroPlaceholderText: { color: colors.textMuted, fontWeight: "700" },
+
   heroSpinner: {
     position: "absolute",
     right: 10,
@@ -1648,133 +1784,164 @@ const styles = StyleSheet.create({
   heroTitle: { fontSize: 18, fontWeight: "900", color: colors.textPrimary },
   heroSubtitle: { fontSize: 12, color: colors.textSecondary, marginTop: 3 },
 
-  // Keeps the existing field/label metadata framework, but presented as a tidy card.
-  metaCardWide: {
+  metaGrid: {
     marginTop: spacing.md,
-    padding: spacing.md,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  metaTile: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
     borderRadius: radius.lg,
     backgroundColor: colors.surfaceSubtle,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
+    minWidth: 110,
   },
-  heroImageWrapper: {
-    width: "100%",
-    aspectRatio: HERO_ASPECT,
-    backgroundColor: colors.surfaceSubtle,
-  },
-  heroImage: { width: "100%", height: "100%" },
-  heroPlaceholder: { flex: 1, alignItems: "center", justifyContent: "center" },
-  heroPlaceholderText: { marginTop: spacing.sm, fontSize: 12, color: colors.textSecondary },
-
-  heroSpinner: {
-    position: "absolute",
-    right: 10,
-    bottom: 10,
-    backgroundColor: "rgba(15,23,42,0.65)",
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-
-  heroMeta: { padding: spacing.md },
-  heroTitle: { fontSize: 18, fontWeight: "700", color: colors.textPrimary },
-  heroSubtitle: { marginTop: 2, fontSize: 13, color: colors.textSecondary },
-  heroMetaRow: { flexDirection: "row", flexWrap: "wrap", marginTop: spacing.sm },
-  heroMetaPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surfaceSubtle,
-    marginRight: 6,
-    marginBottom: 6,
-  },
-  heroMetaPillText: { fontSize: 11, color: colors.textSecondary },
-
-  section: { marginTop: spacing.md },
-  sectionLabel: {
+  metaLabel: { fontSize: 11, color: colors.textMuted, fontWeight: "800" },
+  metaValue: {
     fontSize: 13,
-    fontWeight: "600",
-    color: colors.textSecondary,
-    textTransform: "uppercase",
-    letterSpacing: 0.6,
-    marginBottom: spacing.sm,
+    color: colors.textPrimary,
+    fontWeight: "800",
+    marginTop: 3,
   },
-  // HomeStory-style timeline header row
+
+  sectionCard: {
+    borderRadius: radius.xl,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    padding: spacing.lg,
+    ...shadows.subtle,
+    marginBottom: spacing.xl,
+  },
   sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
     marginBottom: spacing.sm,
   },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: "900",
-    color: colors.textPrimary,
-  },
+  sectionTitle: { fontSize: 16, fontWeight: "900", color: colors.textPrimary },
+  sectionError: { color: "#ef4444", marginBottom: spacing.sm },
 
-  metaCard: {
-    padding: spacing.md,
-    borderRadius: radius.lg,
-    backgroundColor: colors.surface,
+  filterRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: spacing.sm,
+  },
+  filterChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: radius.pill,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
-    ...shadows.subtle,
-  },
-  metaLine: { fontSize: 12, color: colors.textPrimary, marginBottom: 2 },
-
-  storyCard: {
-    padding: spacing.md,
-    borderRadius: radius.lg,
     backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    ...shadows.subtle,
   },
-  storyText: { fontSize: 13, color: colors.textSecondary, lineHeight: 20 },
+  filterChipActive: {
+    borderColor: colors.brandBlue,
+    backgroundColor: colors.surfaceSubtle,
+  },
+  filterChipLabel: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: colors.textSecondary,
+  },
+  filterChipLabelActive: { color: colors.textPrimary },
 
-  timelineList: { marginTop: spacing.sm },
-  timelineCard: {
+  emptyTimelineText: { color: colors.textSecondary, lineHeight: 18 },
+
+  timelineRow: {
     flexDirection: "row",
     alignItems: "flex-start",
-    padding: spacing.md,
-    borderRadius: radius.lg,
-    backgroundColor: colors.surface,
+    gap: 10,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderSubtle,
+  },
+  timelineIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    backgroundColor: colors.surfaceSubtle,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
-    marginBottom: spacing.sm,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 2,
+  },
+  timelineTopRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  timelineTitle: {
+    fontSize: 13,
+    fontWeight: "900",
+    color: colors.textPrimary,
+    flex: 1,
+  },
+  timelineDate: {
+    fontSize: 11,
+    color: colors.textMuted,
+    fontWeight: "700",
+  },
+  timelineSubtitle: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 4,
+    lineHeight: 16,
+  },
+
+  timelineMetaRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 8,
+  },
+  metaPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    backgroundColor: colors.surfaceSubtle,
+  },
+  metaPillText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: colors.textSecondary,
+  },
+
+  emptyPrimaryBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: radius.pill,
+    backgroundColor: colors.brandBlue,
     ...shadows.subtle,
   },
-  timelineIconCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.surfaceSubtle,
-    justifyContent: "center",
+  emptyPrimaryBtnText: { color: "white", fontWeight: "800" },
+
+  emptySecondaryBtn: {
+    flexDirection: "row",
     alignItems: "center",
-    marginRight: spacing.sm,
-  },
-  timelineTitle: { fontSize: 13, fontWeight: "600", color: colors.textPrimary },
-  timelineMetaRow: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
-  timelineDescription: { fontSize: 12, color: colors.textSecondary, marginTop: 4, lineHeight: 18 },
-  timelineDate: { fontSize: 11, color: colors.textMuted, marginLeft: spacing.sm },
-
-  historyLoadingRow: { flexDirection: "row", alignItems: "center", marginTop: spacing.sm },
-  historyLoadingText: { marginLeft: spacing.xs, fontSize: 12, color: colors.textSecondary },
-  historyErrorText: { marginTop: spacing.sm, fontSize: 12, color: colors.danger },
-
-  emptyHistoryCard: {
-    marginTop: spacing.sm,
-    padding: spacing.md,
-    borderRadius: radius.lg,
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: radius.pill,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
-    backgroundColor: colors.surfaceSubtle,
-    alignItems: "center",
+    backgroundColor: colors.surface,
+    ...shadows.subtle,
   },
-  emptyHistoryTitle: { marginTop: spacing.sm, fontSize: 14, fontWeight: "600", color: colors.textPrimary },
-  emptyHistoryText: { marginTop: spacing.xs, fontSize: 12, color: colors.textSecondary, textAlign: "center", lineHeight: 18 },
+  emptySecondaryBtnText: { color: colors.textPrimary, fontWeight: "800" },
 
   modalBackdrop: {
     flex: 1,
@@ -1798,8 +1965,30 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
     alignItems: "center",
   },
-  modalTitle: { fontSize: 16, fontWeight: "700", color: colors.textPrimary },
-  modalBodyText: { fontSize: 12, color: colors.textSecondary, lineHeight: 18, marginTop: spacing.sm },
+  modalTitle: { fontSize: 16, fontWeight: "900", color: colors.textPrimary },
+  modalBodyText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    lineHeight: 18,
+    marginTop: spacing.sm,
+  },
+
+  modalMiniBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    backgroundColor: colors.surfaceSubtle,
+  },
+  modalMiniBtnText: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: colors.textPrimary,
+  },
 
   modalBoatRow: {
     flexDirection: "row",
@@ -1809,160 +1998,43 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.borderSubtle,
   },
   modalBoatRowActive: { backgroundColor: colors.surfaceSubtle },
-  modalBoatName: { fontSize: 14, fontWeight: "600", color: colors.textPrimary },
+  modalBoatName: { fontSize: 14, fontWeight: "800", color: colors.textPrimary },
   modalBoatMeta: { fontSize: 12, color: colors.textMuted },
 
-  modalButtonRow: { flexDirection: "row", justifyContent: "flex-end", marginTop: spacing.lg, gap: spacing.sm },
-  modalButton: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: radius.lg, alignItems: "center", justifyContent: "center", minWidth: 100 },
-  modalButtonGhost: { borderWidth: 1, borderColor: colors.borderSubtle, backgroundColor: colors.surface },
-  modalButtonGhostText: { color: colors.textPrimary, fontWeight: "600" },
-  modalButtonPrimaryText: { color: "white", fontWeight: "700" },
-  /* --------------------------- KEEPR PRO --------------------------- */
-  proCard: {
-    marginTop: spacing.sm,
-    backgroundColor: colors.surface,
+  modalButtonRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    marginTop: spacing.lg,
+    gap: spacing.sm,
+  },
+  modalButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
     borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    padding: spacing.md,
-    ...shadows.subtle,
-  },
-  proRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 10,
-    paddingHorizontal: 10,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    backgroundColor: colors.surfaceSubtle,
-    marginTop: spacing.xs,
-  },
-  proName: {
-    fontSize: 13,
-    fontWeight: "800",
-    color: colors.textPrimary,
-  },
-  proMeta: {
-    marginTop: 2,
-    fontSize: 12,
-    color: colors.textSecondary,
-  },
-  proMoreRow: {
-    marginTop: spacing.sm,
-    alignSelf: "flex-start",
-    paddingHorizontal: spacing.md,
-    paddingVertical: 8,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surfaceSubtle,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
-  },
-  proMoreText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: colors.textPrimary,
-  },
-  assignBtn: {
-    marginTop: spacing.sm,
-    flexDirection: "row",
-    alignItems: "center",
-    alignSelf: "flex-start",
-    backgroundColor: colors.brandBlue,
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 10,
-  },
-  assignBtnText: {
-    fontSize: 12,
-    fontWeight: "800",
-    color: colors.brandWhite,
-  },
-  emptyInline: {
-    marginTop: 2,
-  },
-  emptyInlineText: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    lineHeight: 16,
-  },
-  warnText: {
-    marginTop: spacing.sm,
-    fontSize: 12,
-    color: colors.textSecondary,
-  },
-
-  /* --------------------------- PRO PICKER MODAL --------------------------- */
-  modalSubtitle: {
-    marginTop: spacing.xs,
-    fontSize: 12,
-    color: colors.textSecondary,
-    lineHeight: 16,
-  },
-  proPickRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    backgroundColor: colors.surface,
-    marginTop: spacing.xs,
-  },
-  proPickName: {
-    fontSize: 13,
-    fontWeight: "800",
-    color: colors.textPrimary,
-  },
-  proPickMeta: {
-    marginTop: 2,
-    fontSize: 12,
-    color: colors.textSecondary,
-  },
-  proPickViewBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surfaceSubtle,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    marginLeft: spacing.sm,
-  },
-  proPickViewBtnText: {
-    fontSize: 12,
-    fontWeight: "800",
-    color: colors.textPrimary,
-  },
-  modalActionsRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: spacing.md,
-  },
-  modalBtn: {
-    flex: 1,
-    borderRadius: radius.pill,
-    paddingVertical: 12,
     alignItems: "center",
     justifyContent: "center",
+    minWidth: 100,
   },
-  modalBtnGhost: {
-    backgroundColor: colors.surfaceSubtle,
+  modalButtonGhost: {
     borderWidth: 1,
     borderColor: colors.borderSubtle,
-    marginRight: spacing.sm,
+    backgroundColor: colors.surface,
+},
+  reportsButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadows.sm,
   },
-  modalBtnGhostText: {
-    fontSize: 12,
+  reportsButtonText: {
+    fontSize: 13,
     fontWeight: "800",
     color: colors.textPrimary,
-  },
-  modalBtnPrimary: {
-    backgroundColor: colors.brandBlue,
-  },
-  modalBtnPrimaryText: {
-    fontSize: 12,
-    fontWeight: "800",
-    color: colors.brandWhite,
   },
 });

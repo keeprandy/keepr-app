@@ -522,6 +522,361 @@ function RecordPickerModal({ visible, assetId, onCancel, onSelect }) {
   );
 }
 
+function AttachmentDetailsPanel({
+  selected,
+  navigation,
+  assetId,
+  loading,
+  showcaseBusy,
+  canToggleShowcase,
+  handleToggleShowcase,
+  draftTitle,
+  setDraftTitle,
+  draftUrl,
+  setDraftUrl,
+  draftNotes,
+  setDraftNotes,
+  saveMeta,
+  removeFromThisAsset,
+  associationsForSelected,
+  openAssociation,
+  canOpenAssociation,
+  removeAssociation,
+  assocDisplayName,
+  systemSelectionLabel,
+  recordSelectionLabel,
+  setSystemPickerOpen,
+  setRecordPickerOpen,
+  assocSummaryText,
+  addAssociation,
+  assocBusy,
+  targetType,
+  targetId,
+  safeStr,
+  roleEditOpen,
+  setRoleEditOpen,
+  roleLabel,
+  selectedRoleText,
+  styles,
+  colors,
+  spacing,
+}) {
+  if (!selected) {
+    return (
+      <View style={styles.noSelection}>
+        <Ionicons
+          name="information-circle-outline"
+          size={22}
+          color={colors.textSecondary}
+        />
+        <Text style={styles.noSelectionTitle}>Select an attachment</Text>
+        <Text style={styles.noSelectionSub}>
+          Pick an item to add Keepr context.
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <>
+      <View style={styles.sectionBlock}>
+        <TouchableOpacity
+          style={styles.primaryActionBtn}
+          onPress={() =>
+            navigation.navigate("ProofBuilder", {
+              assetId,
+              attachmentId: selected?.attachment_id || selected?.id,
+              role: selected?.role,
+            })
+          }
+        >
+          <Ionicons
+            name="document-text-outline"
+            size={18}
+            color="#fff"
+            style={{ marginRight: 8 }}
+          />
+          <Text style={styles.primaryActionBtnText}>
+            Add Context to the Attachment
+          </Text>
+        </TouchableOpacity>
+
+        <Text style={styles.helperText}>
+          Attachments should have context for proof and clarity
+        </Text>
+
+        <Text style={styles.sectionTitle}>Details for Attachment</Text>
+
+        <Text style={styles.label}>Title</Text>
+        <TextInput
+          value={draftTitle}
+          onChangeText={setDraftTitle}
+          placeholder="Title"
+          style={styles.input}
+        />
+
+        {selected.kind === "link" ? (
+          <>
+            <Text style={styles.label}>URL</Text>
+            <TextInput
+              value={draftUrl}
+              onChangeText={setDraftUrl}
+              placeholder="https://…"
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={styles.input}
+            />
+          </>
+        ) : null}
+
+        <Text style={styles.label}>Notes</Text>
+        <TextInput
+          value={draftNotes}
+          onChangeText={setDraftNotes}
+          placeholder="Notes (optional, but searchable)"
+          style={[styles.input, styles.textarea]}
+          multiline
+          textAlignVertical="top"
+        />
+
+        <Text style={styles.textSecondary}>
+          Clarity for a searchable title and notes.
+        </Text>
+      </View>
+
+      <View style={styles.actionRow}>
+        <TouchableOpacity
+          onPress={saveMeta}
+          disabled={loading}
+          style={[styles.saveBtn, loading && { opacity: 0.6 }]}
+        >
+          {loading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <>
+              <Ionicons
+                name="save-outline"
+                size={18}
+                color="#fff"
+                style={{ marginRight: 8 }}
+              />
+              <Text style={styles.saveBtnText}>Save</Text>
+            </>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      {canToggleShowcase && (
+        <View style={styles.showcaseRow}>
+          <Text style={styles.label}>Showcase</Text>
+          <TouchableOpacity
+            onPress={handleToggleShowcase}
+            disabled={showcaseBusy}
+            style={[
+              styles.showcaseToggle,
+              selected.is_showcase && styles.showcaseToggleActive,
+              showcaseBusy && { opacity: 0.6 },
+            ]}
+          >
+            <Ionicons
+              name={selected.is_showcase ? "star" : "star-outline"}
+              size={16}
+              color={selected.is_showcase ? "#FACC15" : colors.textSecondary}
+              style={{ marginRight: 8 }}
+            />
+            <Text
+              style={[
+                styles.showcaseToggleText,
+                selected.is_showcase && styles.showcaseToggleTextActive,
+              ]}
+            >
+              {selected.target_type === "system"
+                ? "Showcase Photo for this system"
+                : "Showcase Photo for this asset"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      <View style={styles.sectionDivider} />
+
+      <View style={styles.sectionBlock}>
+        <Text style={styles.label}>
+          “What role does this play in your ownership story?”
+        </Text>
+        <Text style={styles.textSecondary}>
+          The more context, the more you'll know.
+        </Text>
+
+        <TouchableOpacity
+          onPress={() => setRoleEditOpen(true)}
+          disabled={!selected?.asset_placement_id}
+          style={[
+            styles.roleEditBtn,
+            !selected?.asset_placement_id && { opacity: 0.5 },
+          ]}
+        >
+          <Text style={styles.label} numberOfLines={1}>
+            Role: {selectedRoleText}
+          </Text>
+          <Ionicons
+            name="git-compare-outline"
+            size={24}
+            color={colors.textSecondary}
+            style={{ marginLeft: 8 }}
+          />
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.sectionDivider} />
+
+      <View style={styles.sectionBlock}>
+        <Text style={styles.sectionTitle}>Current Associations</Text>
+        <Text style={styles.textSecondary}>
+          This attachment belongs to this asset and can also be linked to
+          systems or records.
+        </Text>
+
+        <View style={{ marginTop: spacing.md }}>
+          {associationsForSelected.map((p) => (
+            <View key={p.id} style={styles.assocRow}>
+              <TouchableOpacity
+                style={{ flex: 1, flexDirection: "row", alignItems: "center" }}
+                onPress={() => openAssociation(p)}
+                disabled={!canOpenAssociation(p)}
+              >
+                <View style={styles.assocChipGroup}>
+                  <View style={styles.assocChip}>
+                    <Text style={styles.assocChipText}>
+                      {p.target_type === "service_record"
+                        ? "record"
+                        : p.target_type}
+                    </Text>
+                  </View>
+                  {p.role && (
+                    <View style={[styles.assocChip, styles.assocChipMuted]}>
+                      <Text style={styles.assocChipText}>{p.role}</Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={styles.assocIdText} numberOfLines={1}>
+                  {assocDisplayName(p) || p.target_id}
+                </Text>
+              </TouchableOpacity>
+
+              {p.target_type !== "asset" && (
+                <TouchableOpacity
+                  style={styles.assocRemoveBtn}
+                  onPress={() => removeAssociation(p.id)}
+                >
+                  <Ionicons
+                    name="close-circle-outline"
+                    size={16}
+                    color={colors.textSecondary}
+                  />
+                </TouchableOpacity>
+              )}
+            </View>
+          ))}
+        </View>
+      <View style={styles.sectionDivider} />
+
+      <View style={styles.sectionBlock}>
+        <Text style={styles.sectionTitle}>Add Association</Text>
+        <Text style={styles.textSecondary}>
+          Link this attachment to a system or record.
+        </Text>
+
+        <TouchableOpacity
+          style={styles.selectorRow}
+          onPress={() => setSystemPickerOpen(true)}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={styles.selectorLabel}>System</Text>
+            <Text style={styles.selectorValue} numberOfLines={1}>
+              {systemSelectionLabel}
+            </Text>
+          </View>
+          <Ionicons
+            name="chevron-forward"
+            size={16}
+            color={colors.textSecondary}
+          />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.selectorRow}
+          onPress={() => setRecordPickerOpen(true)}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={styles.selectorLabel}>Record</Text>
+            <Text style={styles.selectorValue} numberOfLines={1}>
+              {recordSelectionLabel}
+            </Text>
+          </View>
+          <Ionicons
+            name="chevron-forward"
+            size={16}
+            color={colors.textSecondary}
+          />
+        </TouchableOpacity>
+
+        <View style={styles.assocSummary}>
+          <Text style={styles.assocSummaryText}>{assocSummaryText}</Text>
+        </View>
+
+        <TouchableOpacity
+          onPress={addAssociation}
+          disabled={assocBusy || !targetType || !safeStr(targetId).trim()}
+          style={[
+            styles.saveBtn,
+            (assocBusy || !targetType || !safeStr(targetId).trim()) && {
+              opacity: 0.6,
+            },
+            { marginTop: spacing.sm },
+          ]}
+        >
+          {assocBusy ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <>
+              <Ionicons
+                name="link-outline"
+                size={18}
+                color="#fff"
+                style={{ marginRight: 8 }}
+              />
+              <Text style={styles.saveBtnText}>
+                {targetType && safeStr(targetId).trim()
+                  ? "Attach"
+                  : "Choose a system or record"}
+              </Text>
+            </>
+          )}
+        </TouchableOpacity>
+      </View>
+        <TouchableOpacity
+          onPress={() => removeFromThisAsset(selected)}
+          disabled={loading}
+          style={[
+            styles.deleteBtnTop,
+            loading && { opacity: 0.5 },
+            { marginTop: spacing.md },
+          ]}
+        >
+          <Ionicons
+            name="remove-circle-outline"
+            size={16}
+            color="#fff"
+            style={{ marginRight: 8 }}
+          />
+          <Text style={styles.deleteBtnTopText}>Remove from Asset</Text>
+        </TouchableOpacity>
+      </View>
+    </>
+  );
+}
+
 export default function AssetAttachmentsScreen({ route, navigation }) {
   // Be defensive: different navigators/screens have passed different param names over time.
   // This screen MUST have an assetId to load anything.
@@ -545,6 +900,7 @@ export default function AssetAttachmentsScreen({ route, navigation }) {
   const scopeTargetId = route?.params?.scopeTargetId || null;
   const fromTargetId = route?.params?.targetId || null;
   const fromTargetRole = route?.params?.targetRole || null;
+ 
 
   // Scope override: null = use route scope, "none" = show all
   const [scopeOverride, setScopeOverride] = useState(null);
@@ -595,6 +951,7 @@ const isWide = IS_WEB && width >= 980;
 
   const [busy, setBusy] = useState(false); // reserved if we need global busy
   const [selected, setSelected] = useState(null);
+   
 
   // Hero preview state (web-only PDF/doc viewer)
   const [heroUrl, setHeroUrl] = useState(null);
@@ -1809,6 +2166,8 @@ const openAdd = () => {
     }
   }, [assetId, refresh, selected?.attachment_id]);
 
+  const selectedRoleText = selected?.role ? roleLabel(selected.role) : "Pick One Here";
+
   const canToggleShowcase =
     !!selected &&
     selected._isPhoto &&
@@ -2246,6 +2605,8 @@ return (
             </TouchableOpacity>
             
           ))}
+                    {/* Preview toggle (web-only) */}
+          {IS_WEB && (
               <TouchableOpacity
               onPress={() => setShowPreview((v) => !v)}
               style={[
@@ -2263,6 +2624,7 @@ return (
                 {showPreview ? "Hide Preview" : "Show Preview"}
               </Text>
             </TouchableOpacity>
+            )}
         </View>
           {/* 2-column */}
           {isWide ? (
@@ -2514,25 +2876,132 @@ return (
             <View style={styles.rightCol}>
               <View style={styles.card}>
                 {!selected ? (
-                  <View style={styles.noSelection}>
-                    <Ionicons
-                      name="information-circle-outline"
-                      size={22}
-                      color={colors.textSecondary}
-                    />
-                    <Text style={styles.noSelectionTitle}>
-                      Select an attachment
-                    </Text>
-                    <Text style={styles.noSelectionSub}>
-                      Pick an item to add Keepr context.
-                    </Text>
-                  </View>
+                  <AttachmentDetailsPanel
+                    selected={selected}
+                    navigation={navigation}
+                    assetId={assetId}
+                    loading={loading}
+                    showcaseBusy={showcaseBusy}
+                    canToggleShowcase={canToggleShowcase}
+                    handleToggleShowcase={handleToggleShowcase}
+                    draftTitle={draftTitle}
+                    setDraftTitle={setDraftTitle}
+                    draftUrl={draftUrl}
+                    setDraftUrl={setDraftUrl}
+                    draftNotes={draftNotes}
+                    setDraftNotes={setDraftNotes}
+                    saveMeta={saveMeta}
+                    systemSelectionLabel={systemSelectionLabel}
+                    recordSelectionLabel={recordSelectionLabel}
+                    setSystemPickerOpen={setSystemPickerOpen}
+                    setRecordPickerOpen={setRecordPickerOpen}
+                    assocSummaryText={assocSummaryText}
+                    addAssociation={addAssociation}
+                    assocBusy={assocBusy}
+                    targetType={targetType}
+                    targetId={targetId}
+                    safeStr={safeStr}
+                    removeFromThisAsset={removeFromThisAsset}
+                    associationsForSelected={associationsForSelected}
+                    openAssociation={openAssociation}
+                    canOpenAssociation={canOpenAssociation}
+                    removeAssociation={removeAssociation}
+                    assocDisplayName={assocDisplayName}
+                    roleEditOpen={roleEditOpen}
+                    setRoleEditOpen={setRoleEditOpen}
+                    roleLabel={roleLabel}
+                    selectedRoleText={selectedRoleText}
+                    styles={styles}
+                    colors={colors}
+                    spacing={spacing}
+                  />
                 ) : (
                   <>
+                    {/* Block A – Attachment Metadata and Link to Context */}
+                    <View style={styles.sectionBlock}>      
+                      <TouchableOpacity
+                      style={styles.primaryActionBtn}
+                      onPress={() =>
+                        navigation.navigate("ProofBuilder", {
+                          assetId,
+                          attachmentId: selected?.attachment_id || selected?.id,
+                        })
+                      }
+                    >
+                      <Ionicons name="document-text-outline" size={18} color="#fff" />
+                      <Text style={styles.primaryActionBtnText}>
+                        Add Context to the Attachment
+                      </Text>
+                      
+                    </TouchableOpacity>
+                   
+                    <Text style={styles.helperText}>
+                    Attachments should have context for proof and clarity
+                  </Text>
+                     <Text style={styles.sectionTitle}>Details for Attachment</Text>
+                     <Text style={styles.label}>Title</Text>
 
-                    {/* Showcase toggle */}
+                    <TextInput
+                      value={draftTitle}
+                      onChangeText={setDraftTitle}
+                      placeholder="Title"
+                      style={styles.input}
+                    />
+
+                    {selected.kind === "link" ? (
+                      <>
+                        <Text style={styles.label}>URL</Text>
+                        <TextInput
+                          value={draftUrl}
+                          onChangeText={setDraftUrl}
+                          placeholder="https://…"
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          style={styles.input}
+                        />
+                      </>
+                    ) : null}
+
+                    <Text style={styles.label}>Notes</Text>
+                    <TextInput
+                      value={draftNotes}
+                      onChangeText={setDraftNotes}
+                      placeholder="Notes (optional, but searchable)"
+                      style={[styles.input, styles.textarea]}
+                      multiline
+                      textAlignVertical="top"
+                    />
+                    <Text style={styles.textSecondary}>
+                      Clarity for a searchable title and notes.
+                    </Text>
+                    </View>
+                    <View style={styles.actionRow}>
+                      <TouchableOpacity
+                        onPress={saveMeta}
+                        disabled={loading}
+                        style={[
+                          styles.saveBtn,
+                          loading && { opacity: 0.6 },
+                        ]}
+                      >
+                        {loading ? (
+                          <ActivityIndicator color="#fff" />
+                        ) : (
+                          <>
+                            <Ionicons
+                              name="save-outline"
+                              size={18}
+                              color="#fff"
+                            />
+                            <Text style={styles.saveBtnText}>Save</Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                                       {/* Showcase toggle */}
                     {canToggleShowcase && (
                       <View style={styles.showcaseRow}>
+                        
                         <Text style={styles.label}>Showcase</Text>
                         <TouchableOpacity
                           onPress={handleToggleShowcase}
@@ -2568,67 +3037,6 @@ return (
                         </TouchableOpacity>
                       </View>
                     )}
-                    {/* Block A – Attachment Metadata */}
-                    <View style={styles.sectionBlock}>
-                    <Text style={styles.sectionTitle}>Details</Text>
-                    <Text style={styles.textSecondary}>
-                      Rename this file and add searchable notes.
-                    </Text>
-                    <TextInput
-                      value={draftTitle}
-                      onChangeText={setDraftTitle}
-                      placeholder="Title"
-                      style={styles.input}
-                    />
-
-                    {selected.kind === "link" ? (
-                      <>
-                        <Text style={styles.label}>URL</Text>
-                        <TextInput
-                          value={draftUrl}
-                          onChangeText={setDraftUrl}
-                          placeholder="https://…"
-                          autoCapitalize="none"
-                          autoCorrect={false}
-                          style={styles.input}
-                        />
-                      </>
-                    ) : null}
-
-                    <Text style={styles.label}>Notes</Text>
-                    <TextInput
-                      value={draftNotes}
-                      onChangeText={setDraftNotes}
-                      placeholder="Notes (optional, but searchable)"
-                      style={[styles.input, styles.textarea]}
-                      multiline
-                      textAlignVertical="top"
-                    />
-                    </View>
-                    <View style={styles.actionRow}>
-                      <TouchableOpacity
-                        onPress={saveMeta}
-                        disabled={loading}
-                        style={[
-                          styles.saveBtn,
-                          loading && { opacity: 0.6 },
-                        ]}
-                      >
-                        {loading ? (
-                          <ActivityIndicator color="#fff" />
-                        ) : (
-                          <>
-                            <Ionicons
-                              name="save-outline"
-                              size={18}
-                              color="#fff"
-                            />
-                            <Text style={styles.saveBtnText}>Save</Text>
-                          </>
-                        )}
-                      </TouchableOpacity>
-                    </View>
-                   
                     <View style={styles.sectionBlock}>
                     <Text style={styles.label}>“What role does this play in your ownership story?”</Text>
                         <Text style={styles.textSecondary}>
@@ -3013,387 +3421,53 @@ return (
 
               <View style={{ height: mobilePaneHeight, marginTop: spacing.md }}>
               <View style={styles.sectionBlock}></View>
-              <View style={[styles.card, { flex: 1 }]}>
-                <View style={styles.cardHeaderRow}>
-                  <Text style={styles.cardTitle}>Attachments Role and Association</Text>
+                <View style={[styles.card, { flex: 1 }]}>
+                  <ScrollView
+                    style={styles.contextScroll}
+                    contentContainerStyle={styles.contextScrollContent}
+                    keyboardShouldPersistTaps="handled"
+                  >
+                    <AttachmentDetailsPanel
+                      selected={selected}
+                      navigation={navigation}
+                      assetId={assetId}
+                      loading={loading}
+                      showcaseBusy={showcaseBusy}
+                      canToggleShowcase={canToggleShowcase}
+                      handleToggleShowcase={handleToggleShowcase}
+                      draftTitle={draftTitle}
+                      setDraftTitle={setDraftTitle}
+                      draftUrl={draftUrl}
+                      setDraftUrl={setDraftUrl}
+                      draftNotes={draftNotes}
+                      setDraftNotes={setDraftNotes}
+                      saveMeta={saveMeta}
+                      systemSelectionLabel={systemSelectionLabel}
+                      recordSelectionLabel={recordSelectionLabel}
+                      setSystemPickerOpen={setSystemPickerOpen}
+                      setRecordPickerOpen={setRecordPickerOpen}
+                      assocSummaryText={assocSummaryText}
+                      addAssociation={addAssociation}
+                      assocBusy={assocBusy}
+                      targetType={targetType}
+                      targetId={targetId}
+                      safeStr={safeStr}
+                      removeFromThisAsset={removeFromThisAsset}
+                      associationsForSelected={associationsForSelected}
+                      openAssociation={openAssociation}
+                      canOpenAssociation={canOpenAssociation}
+                      removeAssociation={removeAssociation}
+                      assocDisplayName={assocDisplayName}
+                      roleEditOpen={roleEditOpen}
+                      setRoleEditOpen={setRoleEditOpen}
+                      roleLabel={roleLabel}
+                      selectedRoleText={selectedRoleText}
+                      styles={styles}
+                      colors={colors}
+                      spacing={spacing}
+                    />
+                  </ScrollView>
                 </View>
-
-                {/* Remove given its own line on mobile and web */}
-                <TouchableOpacity
-                  onPress={removeFromThisAsset}
-                  disabled={loading || !selected}
-                  style={[
-                    styles.deleteBtnTop,
-                    (loading || !selected) && { opacity: 0.5 },
-                    { marginTop: 10, marginBottom: 10, marginHorizontal: 12 },
-                  ]}
-                >
-                  <Ionicons
-                    name="remove-circle-outline"
-                    size={16}
-                    color="#fff"
-                  />
-                  <Text style={styles.deleteBtnTopText}>Remove from Asset</Text>
-                </TouchableOpacity>
-
-                <ScrollView
-                  style={styles.contextScroll}
-                  contentContainerStyle={styles.contextScrollContent}
-                  keyboardShouldPersistTaps="handled"
-                >
-                  {!selected ? (
-                    <View style={styles.noSelection}>
-                      <Ionicons
-                        name="information-circle-outline"
-                        size={22}
-                        color={colors.textSecondary}
-                      />
-                      <Text style={styles.noSelectionTitle}>
-                        Select an attachment
-                      </Text>
-                      <Text style={styles.noSelectionSub}>
-                        Pick an item to add Keepr context.
-                      </Text>
-                    </View>
-                  ) : (
-                    <>
-
-                    {/* Role editor for this asset placement */}
-                    <Text style={styles.label}>"What story role does this play in ownership?"</Text>
-                    <Text style={styles.textSecondary}>
-                          More context, the more you'll know, and easier to find.
-                        </Text>
-                    <TouchableOpacity
-                      onPress={() => setRoleEditOpen(true)}
-                      disabled={!selected?.asset_placement_id}
-                      style={[
-                        styles.roleEditBtn,
-                        !selected?.asset_placement_id && { opacity: 0.5 },
-                      ]}
-                    >
-                      <Text style={styles.label} numberOfLines={1}>
-                        Role: {selected?.role ? roleLabel(selected.role) : "Pick One Here"}
-                      </Text>
-                      <Ionicons
-                        name="git-compare-outline"
-                        size={30}
-                        color={colors.textSecondary}
-                        style={{ marginLeft: 8 }}
-                      />
-                    </TouchableOpacity>
-                    {/* Showcase toggle */}
-                    {canToggleShowcase && (
-                      <View style={styles.showcaseRow}>
-                        <Text style={styles.label}>Showcase</Text>
-                        <TouchableOpacity
-                          onPress={handleToggleShowcase}
-                          disabled={showcaseBusy}
-                          style={[
-                            styles.showcaseToggle,
-                            selected.is_showcase && styles.showcaseToggleActive,
-                            showcaseBusy && { opacity: 0.6 },
-                          ]}
-                        >
-                          <Ionicons
-                            name={
-                              selected.is_showcase ? "star" : "star-outline"
-                            }
-                            size={16}
-                            color={
-                              selected.is_showcase
-                                ? "#FACC15"
-                                : colors.textSecondary
-                            }
-                          />
-                          <Text
-                            style={[
-                              styles.showcaseToggleText,
-                              selected.is_showcase &&
-                                styles.showcaseToggleTextActive,
-                            ]}
-                          >
-                            {selected.target_type === "system"
-                              ? "Showcase Photo for this system"
-                              : "Showcase Photo for this asset"}
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-                    )}
-                    <View style={styles.sectionBlock}>
-                    <Text style={styles.label}>Title</Text>
-                    <Text style={styles.textSecondary}>
-                          Change the file name to something meaningful.
-                        </Text>
-                    <TextInput
-                      value={draftTitle}
-                      onChangeText={setDraftTitle}
-                      placeholder="Title"
-                      style={styles.input}
-                    />
-
-                    {selected.kind === "link" ? (
-                      <>
-                        <Text style={styles.label}>URL</Text>
-                        <TextInput
-                          value={draftUrl}
-                          onChangeText={setDraftUrl}
-                          placeholder="https://…"
-                          autoCapitalize="none"
-                          autoCorrect={false}
-                          style={styles.input}
-                        />
-                      </>
-                    ) : null}
-
-                    <Text style={styles.label}>Notes</Text>
-                    <TextInput
-                      value={draftNotes}
-                      onChangeText={setDraftNotes}
-                      placeholder="Notes (optional)"
-                      style={[styles.input, styles.textarea]}
-                      multiline
-                      textAlignVertical="top"
-                    />
-                    </View>
-                    <View style={styles.actionRow}>
-                      <TouchableOpacity
-                        onPress={saveMeta}
-                        disabled={loading}
-                        style={[
-                          styles.saveBtn,
-                          loading && { opacity: 0.6 },
-                        ]}
-                      >
-                        {loading ? (
-                          <ActivityIndicator color="#fff" />
-                        ) : (
-                          <>
-                            <Ionicons
-                              name="save-outline"
-                              size={18}
-                              color="#fff"
-                            />
-                            <Text style={styles.saveBtnText}>Save</Text>
-                          </>
-                        )}
-                      </TouchableOpacity>
-                    </View>
-                    <View style={{ height:1, backgroundColor:"#E5E7EB", marginVertical:16 }} />
-                   
-                    {/* Existing associations list */}
-                    {associationsForSelected.length > 0 && (
-                      <View style={{ marginTop: spacing.lg }}>
-                        <Text style={styles.sectionTitle}>
-                          Where should this be attached?
-                        </Text>
-                          <Text style={styles.textSecondary}>
-                          Every attachment belongs to an Asset. You can also link it to multiple Systems or Records.
-                        </Text>
-                        {associationsForSelected.map((p) => (
-                          <View key={p.id} style={styles.assocRow}>
-                            <TouchableOpacity
-                              style={{ flex: 1, flexDirection: "row", alignItems: "center" }}
-                              onPress={() => openAssociation(p)}
-                              disabled={!canOpenAssociation(p)}
-                            >
-                              <View style={styles.assocChipGroup}>
-                                <View style={styles.assocChip}>
-                                  <Text style={styles.assocChipText}>
-                                    {p.target_type === "service_record"
-                                      ? "record"
-                                      : p.target_type}
-                                  </Text>
-                                </View>
-                                {p.role && (
-                                  <View
-                                    style={[styles.assocChip, styles.assocChipMuted]}
-                                  >
-                                    <Text style={styles.assocChipText}>
-                                      {p.role}
-                                    </Text>
-                                  </View>
-                                )}
-                              </View>
-                              <Text style={styles.assocIdText} numberOfLines={1}>
-                                {assocDisplayName(p) || p.target_id}
-                              </Text>
-                            </TouchableOpacity>
-                            {p.target_type !== "asset" && (
-                              <TouchableOpacity
-                                style={styles.assocRemoveBtn}
-                                onPress={() => removeAssociation(p.id)}
-                              >
-                                <Ionicons
-                                  name="close-circle-outline"
-                                  size={16}
-                                  color={colors.textSecondary}
-                                />
-                              </TouchableOpacity>
-                            )}
-                          </View>
-                        ))}
-                      </View>
-                    )}
-
-                    {/* Context-aware quick attach */}
-                    {hasContextRoute && (
-                      <View style={{ marginTop: spacing.sm }}>
-                        <Text style={styles.assocHint}>
-                          Current context:{" "}
-                          {fromTargetType === "service_record"
-                            ? "record"
-                            : fromTargetType}{" "}
-                          ({safeStr(fromTargetId).slice(0, 8)}…)
-                        </Text>
-                        <TouchableOpacity
-                          onPress={attachToContext}
-                          disabled={assocBusy || contextPlacementExists}
-                          style={[
-                            styles.saveBtn,
-                            { marginTop: spacing.xs },
-                            (assocBusy || contextPlacementExists) && {
-                              opacity: 0.6,
-                            },
-                          ]}
-                        >
-                          {assocBusy ? (
-                            <ActivityIndicator color="#fff" />
-                          ) : (
-                            <>
-                              <Ionicons
-                                name="link-outline"
-                                size={18}
-                                color="#fff"
-                              />
-                              <Text style={styles.saveBtnText}>
-                                {contextPlacementExists
-                                  ? "Already attached"
-                                  : "Attach to this context"}
-                              </Text>
-                            </>
-                          )}
-                        </TouchableOpacity>
-                      </View>
-                    )}
-
-                    {/* Associations editor – now picker-first, UUID as advanced */}
-                    <View style={{ marginTop: spacing.lg }}>
-                      <Text style={styles.sectionTitle}>Add or Edit how this is attached.</Text>
-                      <Text style={styles.textSecondary}>
-                          Asset, Systems, or Records - Always an Asset, then optional.
-                        </Text>
-
-                      {/* Role pills 
-
-                      <View style={styles.assocPills}>
-                        {["proof", "manual", "receipt", "invoice", "quote", "warranty", "photo album", "support page", "other"].map((r) => (
-                          <TouchableOpacity
-                            key={r}
-                            onPress={() => setTargetRole(r)}
-                            style={[
-                              styles.pill,
-                              targetRole === r && styles.pillActive,
-                              {
-                                marginRight: 8,
-                                marginBottom: 8,
-                              },
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.pillText,
-                                targetRole === r && styles.pillTextActive,
-                              ]}
-                            >
-                              {r}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>*/}
-
-                      {/* Picker rows */}
-                      <TouchableOpacity
-                        style={styles.selectorRow}
-                        onPress={() => setSystemPickerOpen(true)}
-                      >
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.selectorLabel}>System</Text>
-                          <Text style={styles.selectorValue} numberOfLines={1}>
-                            {systemSelectionLabel}
-                          </Text>
-                        </View>
-                        <Ionicons
-                          name="chevron-forward"
-                          size={16}
-                          color={colors.textSecondary}
-                        />
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        style={styles.selectorRow}
-                        onPress={() => setRecordPickerOpen(true)}
-                      >
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.selectorLabel}>
-                            What record is this associated?
-                          </Text>
-                          <Text style={styles.selectorValue} numberOfLines={1}>
-                            {recordSelectionLabel}
-                          </Text>
-                        </View>
-                        <Ionicons
-                          name="chevron-forward"
-                          size={16}
-                          color={colors.textSecondary}
-                        />
-                      </TouchableOpacity>
-
-                      {/* Summary */}
-                      <View style={styles.assocSummary}>
-                        <Text style={styles.assocSummaryText}>
-                          {assocSummaryText}
-                        </Text>
-                      </View>
-
-                      {/* Attach button */}
-                      <TouchableOpacity
-                        onPress={addAssociation}
-                        disabled={
-                          assocBusy || !targetType || !safeStr(targetId).trim()
-                        }
-                        style={[
-                          styles.saveBtn,
-                          (assocBusy ||
-                            !targetType ||
-                            !safeStr(targetId).trim()) && {
-                            opacity: 0.6,
-                          },
-                          { marginTop: spacing.sm },
-                        ]}
-                      >
-                        {assocBusy ? (
-                          <ActivityIndicator color="#fff" />
-                        ) : (
-                          <>
-                            <Ionicons
-                              name="link-outline"
-                              size={18}
-                              color="#fff"
-                            />
-                            <Text style={styles.saveBtnText}>
-                              {targetType && safeStr(targetId).trim()
-                                ? "Attach"
-                                : "Choose a system or record"}
-                            </Text>
-                          </>
-                        )}
-                      </TouchableOpacity>
-                      
-                    </View>
-                  </>
-                )}
-                              </ScrollView>
-              </View>
             </View>
           </View>
           )}
@@ -3627,6 +3701,22 @@ cardHeaderActions: {
   gap: 10,
   flexShrink: 0,
 },
+primaryActionBtn: {
+  marginTop: 18,
+  backgroundColor: colors.brandBlue,
+  paddingVertical: 18,
+  paddingHorizontal: 18,
+  borderRadius: 10,
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "center",
+   gap: 8,  
+},
+
+primaryActionBtnText: {
+  color: "#fff",
+  fontWeight: "700",
+},
   backButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -3667,6 +3757,12 @@ rowRight: {
 rowAction: {
   padding: 6,
   borderRadius: 6,
+},
+
+helperText: {
+  fontSize: 12,
+  color: colors.textSecondary,
+  marginTop: 6,
 },
 
 sectionBlockTitle: {
@@ -4163,8 +4259,13 @@ deleteBtnTopText: {
     color: colors.textPrimary,
   },
 
-  sectionTitle: { fontWeight: "900", color: colors.textPrimary },
-   sectionNote: { fontWeight: "200", color: colors.textPrimary },
+  sectionTitle: { 
+    fontWeight: "900", 
+    color: colors.textPrimary,
+    margin: 8,
+  },
+
+   sectionNote: { fontWeight: "200", color: colors.textPrimary, margin: 8, },
 
   assocPills: {
     flexDirection: "row",
@@ -4172,7 +4273,7 @@ deleteBtnTopText: {
     marginTop: spacing.sm,
   },
   assocHint: {
-    marginTop: spacing.sm,
+    margin: spacing.md,
     color: colors.textSecondary,
     fontSize: 12,
   },

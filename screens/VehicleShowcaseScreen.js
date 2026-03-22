@@ -108,9 +108,9 @@ export default function VehicleShowcaseScreen({ navigation, route }) {
     });
   };
 
-  const goToAddServiceRecord = () => {
+  const goToAddTimelineRecord = () => {
     if (!currentVehicle?.id) return;
-    navigation.navigate("AddServiceRecord", {
+    navigation.navigate("AddTimelineRecord", {
       source: "vehicle",
       assetId: currentVehicle.id,
       vehicleId: currentVehicle.id,
@@ -703,7 +703,7 @@ export default function VehicleShowcaseScreen({ navigation, route }) {
             <QuickActionChip icon="images-outline" label="Showcase" isPrimary onPress={() => {}} />
             <QuickActionChip icon="book-outline" label="Story" onPress={goToVehicleStory} />
             <QuickActionChip icon="grid-outline" label="Systems" onPress={goToVehicleSystems} />
-            <QuickActionChip icon="hammer-outline" label="Add service" onPress={goToAddServiceRecord} />
+            <QuickActionChip icon="hammer-outline" label="Add to Timeline" onPress={goToAddTimelineRecord} />
             <QuickActionChip icon="create-outline" label="Edit vehicle" onPress={goToEditVehicle} />
           </ScrollView>
         </View>

@@ -18,6 +18,7 @@ import { colors } from "../../styles/theme";
 import KaiOrb from "../../components/KaiOrb";
 import { navigationRef } from "../../navigationRoot";
 import { supabase } from "../../lib/supabaseClient";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 function getKaiContext(currentRouteName) {
   const route = String(currentRouteName || "").toLowerCase();
@@ -112,6 +113,12 @@ export default function GlobalKaiFab({ currentRouteName, role, kaiContext }) {
   const [loadingNotes, setLoadingNotes] = useState(false);
   const { width } = useWindowDimensions();
 const isMobile = width < 768;
+const insets = useSafeAreaInsets();
+const topOffset =
+  Platform.OS === "web"
+    ? 8
+    : insets.top + 8;
+    
 
   const context = useMemo(
     () => getKaiContext(currentRouteName),
@@ -396,7 +403,16 @@ const deleteNote = async (id) => {
   return (
     <>
      {!open ? (
-  <View style={styles.fabWrap} pointerEvents="box-none">
+<View
+  style={[
+    styles.fabWrap,
+    {
+      top: Platform.OS === "web" ? 12 : topOffset,
+      right: Platform.OS === "web" ? 96 : 16,
+    },
+  ]}
+  pointerEvents="box-none"
+>
     <Animated.View
       style={[
         styles.orbAnimatedWrap,
@@ -685,16 +701,14 @@ const deleteNote = async (id) => {
 const styles = StyleSheet.create({
 fabWrap: {
   position: "absolute",
-  top: 96,
-  right: 14,
   zIndex: 10002,
   elevation: 40,
 },
 
 modalOrbWrap: {
   position: "absolute",
-  top: 96,
-  right: 14,
+  top: 70,
+  right: 20,
   zIndex: 10002,
   elevation: 40,
   width: 74,

@@ -316,7 +316,7 @@ export default function AuthScreen() {
               activeOpacity={0.9}
             >
               <Text style={[styles.modePillText, mode === "signup" && styles.modePillTextActive]}>
-                Create your Keepr account
+                Create your Account
               </Text>
             </TouchableOpacity>
           </View>

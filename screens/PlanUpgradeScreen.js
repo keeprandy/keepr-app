@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../lib/supabaseClient";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 /**
  * V1: keep plan rules centralized here so we can tune limits without touching UI code.
@@ -364,7 +365,7 @@ export default function PlanUpgradeScreen({ navigation }) {
   };
 
   return (
-    <View style={styles.screen}>
+  <SafeAreaView style={styles.screen} edges={["top"]}>
       <View style={styles.header}>
         <Pressable
           onPress={() => navigation.goBack()}
@@ -600,7 +601,8 @@ export default function PlanUpgradeScreen({ navigation }) {
           </View>
         </View>
       )}
-    </View>
+    </SafeAreaView>
+    
   );
 }
 
@@ -610,7 +612,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 20,
-    paddingTop: 18,
+    paddingTop: 8,
     paddingBottom: 14,
   },
   backBtn: {

@@ -26,7 +26,7 @@ export default function ReportsModal({ visible, onClose, asset, navigation, onOp
       {
         key: "story_sheet",
         section: "Story",
-        title: "Story sheet",
+        title: "Story Sheet",
         subtitle: "Printable snapshot of story + hero",
         icon: "print-outline",
         actionLabel: "Open",
@@ -40,6 +40,47 @@ export default function ReportsModal({ visible, onClose, asset, navigation, onOp
           // Fallback: may render empty if StoryPrint requires params.
           onClose?.();
           navigation.navigate("StoryPrint");
+        },
+      },
+            {
+        key: "qr_codes",
+        section: "Sharing",
+        title: "QR Codes",
+        subtitle: "Open QR tools for this asset",
+        icon: "qr-code-outline",
+        actionLabel: "Open",
+        run: async () => {
+          if (!assetId) return;
+          onClose?.();
+          navigation.navigate("AssetQRCodes", { assetId });
+        },
+      },
+      {
+        key: "public_view",
+        section: "Sharing",
+        title: "Public View",
+        subtitle: "Open the public page for this asset",
+        icon: "open-outline",
+        actionLabel: "Open",
+        run: async () => {
+          if (!assetId) return;
+          onClose?.();
+
+          const kac =
+            asset?.kac ||
+            asset?.kac_code ||
+            asset?.kac_id ||
+            asset?.kacId ||
+            null;
+
+          if (kac) {
+            navigation.navigate("PublicAction", { kac });
+            return;
+          }
+
+          navigation.navigate("PublicAction", {
+            token: "xMgfiowNQ6g0ovLjheBnnufFwsRwXS2YdW3_YXAuRU4",
+          });
         },
       },
       {
@@ -87,7 +128,7 @@ export default function ReportsModal({ visible, onClose, asset, navigation, onOp
         },
       },
     ],
-    [assetId, navigation, onClose, onOpenStorySheet]
+    [asset, assetId, navigation, onClose, onOpenStorySheet]
   );
 
   const grouped = useMemo(() => {
@@ -152,9 +193,9 @@ export default function ReportsModal({ visible, onClose, asset, navigation, onOp
                 ))}
               </View>
             ))}
-
             {error ? <Text style={styles.error}>{error}</Text> : null}
           </ScrollView>
+          
         </View>
       </View>
     </Modal>

@@ -106,7 +106,7 @@ async function loadSystemsForAsset(assetId) {
 }
 
 async function loadProof(recordId) {
-  const rows = await listAttachmentsForTarget("timeline_record", recordId);
+  const rows = await listAttachmentsForTarget("service_record", recordId);
   return {
     photoRows: (rows || []).filter((r) => r.kind === "photo"),
     docRows: (rows || []).filter((r) => r.kind === "file"),
@@ -159,6 +159,8 @@ export default function EditTimelineRecordScreen({ route, navigation }) {
   const [photoRows, setPhotoRows] = useState([]);
   const [docRows, setDocRows] = useState([]);
   const [linkRows, setLinkRows] = useState([]);
+  const [recordAttachments, setRecordAttachments] = useState([]);
+  const [loadingAttachments, setLoadingAttachments] = useState(false);
 
   const [addLinkModal, setAddLinkModal] = useState(false);
   const [newLinkTitle, setNewLinkTitle] = useState("");
@@ -202,6 +204,23 @@ const notesHasUrls = useMemo(() => {
     setDocRows(proof.docRows);
     setLinkRows(proof.linkRows);
   }, [recordId]);
+
+const loadRecordAttachments = useCallback(async () => {
+  if (!recordId) return;
+
+  setLoadingAttachments(true);
+  try {
+    const rows = await listAttachmentsForTarget("service_record", recordId);
+    setRecordAttachments(rows || []);
+  } catch (e) {
+    console.error("Load attachments failed", e);
+    setRecordAttachments([]);
+  } finally {
+    setLoadingAttachments(false);
+  }
+}, [recordId]);
+
+
   const openAttachmentsHub = () => {
     if (!assetId) {
       Alert.alert("Missing asset", "This record isn’t linked to an asset.");
@@ -225,7 +244,7 @@ const notesHasUrls = useMemo(() => {
   const openAttachment = useCallback(async (row) => {
     if (!row) return;
     if (row.kind === "link") {
-      return openUrl(row.url);
+      return openExternalUrl(row.url);
     }
     const path = row.storage_path;
     if (!path) {
@@ -235,7 +254,7 @@ const notesHasUrls = useMemo(() => {
     try {
       const signed = await getSignedUrl({ bucket: row.bucket || "asset-files", path });
       if (!signed) throw new Error("Could not create signed URL");
-      openUrl(signed);
+      openExternalUrl(signed);
     } catch (e) {
       console.error(e);
       Alert.alert("Open failed", e?.message || "Could not open this attachment.");
@@ -306,6 +325,11 @@ const notesHasUrls = useMemo(() => {
         setPhotoRows(proof.photoRows);
         setDocRows(proof.docRows);
         setLinkRows(proof.linkRows);
+      }
+
+      await loadRecordAttachments();
+
+      if (isActive) {
         setLoading(false);
       }
     })();
@@ -313,7 +337,7 @@ const notesHasUrls = useMemo(() => {
     return () => {
       isActive = false;
     };
-  }, [recordId]);
+  }, [recordId, loadRecordAttachments]);
 
   const handleSelectSystem = (id) => {
     setSelectedSystemId(id === selectedSystemId ? null : id);
@@ -324,6 +348,21 @@ const notesHasUrls = useMemo(() => {
     setQuickSystemError(null);
     setShowQuickSystemModal(true);
   };
+
+const removeAttachment = useCallback(async (placementId) => {
+  if (!placementId) {
+    Alert.alert("Error", "Missing placement id.");
+    return;
+  }
+
+  try {
+    await removePlacementById(placementId);
+    await loadRecordAttachments();
+    await refreshProof();
+  } catch (e) {
+    Alert.alert("Error", "Could not remove attachment.");
+  }
+}, [loadRecordAttachments, refreshProof]);
 
   const handleCreateQuickSystem = async () => {
     const name = (quickSystemName || "").trim();
@@ -489,7 +528,7 @@ const notesHasUrls = useMemo(() => {
     }
 
     const placements = [
-      { target_type: "timeline_record", target_id: recordId, role: "proof" },
+      { target_type: "service_record", target_id: recordId, role: "proof" },
       { target_type: "asset", target_id: assetId, role: "proof" },
       ...(selectedSystemId
         ? [{ target_type: "system", target_id: selectedSystemId, role: "proof" }]
@@ -498,7 +537,7 @@ const notesHasUrls = useMemo(() => {
 
     const sourceContext = {
       screen: "EditTimelineRecordScreen",
-      source_type: "timeline_record",
+      source_type: "service_record",
       source_id: recordId,
       asset_id: assetId,
       system_id: selectedSystemId || null,
@@ -787,7 +826,35 @@ const notesHasUrls = useMemo(() => {
                 </View>
               </View>
             </View>
-
+            {/* Context */}
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Context</Text>
+              <Text style={styles.helper}>
+                Write it like you’re explaining it to a future buyer (or future you).
+              </Text>
+              <TextInput
+                style={[styles.input, styles.multiline]}
+                placeholder="Tell the story… paint colors, products, prep notes, leftover buckets, where they’re stored…"
+                value={notes}
+                onChangeText={setNotes}
+                placeholderTextColor={colors.textMuted}
+                multiline
+                numberOfLines={6}
+                textAlignVertical="top"
+              />
+            
+            {notesHasUrls ? (
+              <View style={{ marginTop: spacing.sm }}>
+                <Text style={styles.linkPreviewLabel}>Links detected in notes</Text>
+                <LinkifiedText
+                  text={notes}
+                  style={styles.linkPreviewText}
+                  linkStyle={styles.linkPreviewLink}
+                  selectable
+                />
+              </View>
+            ) : null}
+              </View>
             {/* Associations */}
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Associations</Text>
@@ -821,47 +888,54 @@ const notesHasUrls = useMemo(() => {
               </TouchableOpacity>
 
               <View style={{ height: spacing.md }} />
-
-              <Text style={styles.label}>Provider / Who</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="MSM Painting / Samir"
-                value={provider}
-                onChangeText={setProvider}
-                placeholderTextColor={colors.textMuted}
-              />
             </View>
 
-            {/* Context */}
+            {/* Current Proof Card */}
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Context</Text>
-              <Text style={styles.helper}>
-                Write it like you’re explaining it to a future buyer (or future you).
-              </Text>
-              <TextInput
-                style={[styles.input, styles.multiline]}
-                placeholder="Tell the story… paint colors, products, prep notes, leftover buckets, where they’re stored…"
-                value={notes}
-                onChangeText={setNotes}
-                placeholderTextColor={colors.textMuted}
-                multiline
-                numberOfLines={6}
-                textAlignVertical="top"
-              />
-            
-            {notesHasUrls ? (
-              <View style={{ marginTop: spacing.sm }}>
-                <Text style={styles.linkPreviewLabel}>Links detected in notes</Text>
-                <LinkifiedText
-                  text={notes}
-                  style={styles.linkPreviewText}
-                  linkStyle={styles.linkPreviewLink}
-                  selectable
-                />
-              </View>
-            ) : null}
-</View>
+              <Text style={styles.cardTitle}>Current Proof</Text>
 
+              {loadingAttachments ? (
+                <View style={styles.inlineLoading}>
+                  <ActivityIndicator size="small" />
+                  <Text style={styles.inlineLoadingText}>Loading proof…</Text>
+                </View>
+              ) : recordAttachments.length === 0 ? (
+                <Text style={styles.helper}>No proof attached yet.</Text>
+              ) : (
+                recordAttachments.map((row) => (
+                  <View key={row.id || row.placement_id} style={styles.pendingAttachmentRow}>
+                    <TouchableOpacity
+                      style={{ flexDirection: "row", alignItems: "center", flex: 1 }}
+                      onPress={() => openAttachment(row)}
+                    >
+                      <Ionicons name="document-outline" size={18} color={colors.textSecondary} />
+                      <View style={{ flex: 1, marginLeft: 10 }}>
+                        <Text style={styles.pendingAttachmentTitle} numberOfLines={1}>
+                          {row.title || row.file_name || "Document"}
+                        </Text>
+                        <Text style={styles.pendingAttachmentMeta} numberOfLines={1}>
+                          {row.mime_type || row.kind || "Attachment"}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity onPress={() => removeAttachment(row.placement_id || row.id)}>
+                      <Ionicons name="close-circle-outline" size={18} color={colors.textMuted} />
+                    </TouchableOpacity>
+                  </View>
+                ))
+              )}
+
+              <TouchableOpacity
+                style={[styles.quickAddRow, { marginTop: spacing.sm, marginBottom: 0 }]}
+                onPress={openAttachmentsHub}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="add-circle-outline" size={16} color={colors.brandBlue} />
+                <Text style={styles.quickAddText}>Add proof</Text>
+              </TouchableOpacity>
+            </View>
+          
             {/* Proof */}
           </ScrollView>
         </View>
@@ -1370,6 +1444,43 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     fontWeight: "700",
   },
+  inlineLoading: {
+  flexDirection: "row",
+  alignItems: "center",
+  paddingVertical: 8,
+},
+
+inlineLoadingText: {
+  marginLeft: 8,
+  fontSize: 12,
+  color: colors.textMuted,
+  fontWeight: "700",
+},
+
+pendingAttachmentRow: {
+  marginTop: spacing.sm,
+  flexDirection: "row",
+  alignItems: "center",
+  paddingHorizontal: 12,
+  paddingVertical: 12,
+  borderRadius: radius.lg,
+  borderWidth: 1,
+  borderColor: colors.borderSubtle,
+  backgroundColor: colors.surfaceSubtle,
+},
+
+pendingAttachmentTitle: {
+  fontSize: 14,
+  fontWeight: "800",
+  color: colors.textPrimary,
+},
+
+pendingAttachmentMeta: {
+  marginTop: 2,
+  fontSize: 12,
+  color: colors.textMuted,
+  fontWeight: "700",
+},
   quickAddButtonsRow: {
     flexDirection: "row",
     justifyContent: "flex-end",

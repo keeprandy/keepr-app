@@ -71,7 +71,7 @@ function KeeprAlertModal({ open, title, message, onClose }) {
   );
 }
 
-export default function AddVehicleAssetScreen({ navigation, route }) {
+export default function AddVehicleAssetScreen({ navigation }) {
   const [photoLocal, setPhotoLocal] = useState(null); // { uri, fileName, mimeType, fileSize }
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
@@ -206,13 +206,6 @@ async function pickPhotoFromLibrary() {
       };
     }
 
-    if (!photoLocal?.uri) {
-      return {
-        ok: false,
-        title: "Add a hero photo",
-        message: "Choose or take 1 photo — this becomes your hero image and shows up in Attachments.",
-      };
-    }
 
     // mileage optional
     const trimmedMileage = safeStr(mileage).trim();
@@ -273,7 +266,7 @@ async function pickPhotoFromLibrary() {
         make: trimmedMake || null,
         model: trimmedModel || null,
         year: yearNumber,
-        serialNumber: trimmedVin || null,
+        vin: trimmedVin || null,
         engineHours: null,
         primaryPhotoUrl: null,
       });
@@ -282,56 +275,75 @@ async function pickPhotoFromLibrary() {
       if (!assetId) throw new Error("Asset create did not return an id.");
 
       // 3) Upload hero photo using the SAME standard as AssetAttachmentsScreen (DB-backed upload)
-      setUploadingPhoto(true);
+let heroUrl = null;
+let heroPlacementId = null;
 
-      const receipt = await uploadAttachmentFromUri({
-        userId,
-        assetId,
-        kind: "photo",
-        fileUri: photoLocal.uri,
-        fileName: photoLocal.fileName || "vehicle.jpg",
-        mimeType: photoLocal.mimeType || "image/jpeg",
-        sizeBytes: photoLocal.fileSize || null,
-        title: "Hero photo",
-        notes: null,
-        sourceContext: "add_vehicle_asset",
-        bucket: HERO_BUCKET,
-        placements: [
-          {
-            target_type: "asset",
-            target_id: assetId,
-            role: HERO_ROLE,
-            label: "Hero",
-            sort_order: 0,
-            is_showcase: true,
-          },
-        ],
-      });
+if (photoLocal?.uri) {
+  setUploadingPhoto(true);
 
-      const uploadedAttachment = receipt?.attachment;
-      const uploadedPlacement = receipt?.placements?.[0];
+  const receipt = await uploadAttachmentFromUri({
+    userId,
+    assetId,
+    kind: "photo",
+    fileUri: photoLocal.uri,
+    fileName: photoLocal.fileName || "vehicle.jpg",
+    mimeType: photoLocal.mimeType || "image/jpeg",
+    sizeBytes: photoLocal.fileSize || null,
+    title: "Hero photo",
+    notes: null,
+    sourceContext: "add_vehicle_asset",
+    bucket: HERO_BUCKET,
+    placements: [
+      {
+        target_type: "asset",
+        target_id: assetId,
+        role: HERO_ROLE,
+        label: "Hero",
+        sort_order: 0,
+        is_showcase: true,
+      },
+    ],
+  });
 
-      if (!uploadedAttachment?.bucket || !uploadedAttachment?.storage_path) {
-        throw new Error("Upload completed but no storage path returned.");
-      }
-      if (!uploadedPlacement?.id) {
-        throw new Error("Upload completed but no placement id returned.");
-      }
+  const uploadedAttachment = receipt?.attachment;
+  const uploadedPlacement = receipt?.placements?.[0];
 
-      const heroUrl = getPublicUrl(uploadedAttachment.bucket, uploadedAttachment.storage_path);
+  if (uploadedAttachment?.bucket && uploadedAttachment?.storage_path) {
+    heroUrl = getPublicUrl(
+      uploadedAttachment.bucket,
+      uploadedAttachment.storage_path
+    );
+  }
 
-      // 4) Update the asset to point at the hero placement + hero URL
-      const updatePayload = {
-        hero_placement_id: uploadedPlacement.id,
-        hero_image_url: heroUrl,
-        location: trimmedLocation || null,
-        notes: trimmedNotes || null,
-        asset_mode: assetMode,
-        commercial_entity:
-          assetMode === "commercial"
-            ? (commercialEntity || "").trim() || null
-            : null,
-      };
+  heroPlacementId = uploadedPlacement?.id || null;
+
+    heroPlacementId = uploadedPlacement?.id;
+  }
+  const updatePayload = {
+    hero_placement_id: heroPlacementId,
+    hero_image_url: heroUrl,
+    location: trimmedLocation || null,
+    notes: trimmedNotes || null,
+    asset_mode: assetMode,
+    commercial_entity:
+      assetMode === "commercial"
+        ? (commercialEntity || "").trim() || null
+        : null,
+  };
+
+  // Identifier (VIN / Serial)
+  if (vin?.trim()) {
+    const clean = vin.trim();
+
+    const isLikelyVin =
+      clean.length === 17 && /^[A-HJ-NPR-Z0-9]+$/i.test(clean);
+
+    if (isLikelyVin) {
+      updatePayload.vin = clean;
+    } else {
+      updatePayload.serial_number = clean;
+    }
+  }
 
       // Optional: if you have a field like current_odometer, set it here
       if (mileageNumber != null) updatePayload.current_odometer = mileageNumber;
@@ -371,7 +383,7 @@ async function pickPhotoFromLibrary() {
           <View style={{ flex: 1 }}>
             <Text style={styles.title}>Add vehicle</Text>
             <Text style={styles.subtitle}>
-              Add a hero photo + Year / Make / Model. After that, add docs in Attachments.
+              Add Year / Make / Model. Hero and Showcase Photos are optional.
             </Text>
           </View>
         </View>
@@ -445,7 +457,7 @@ async function pickPhotoFromLibrary() {
 
           <TextInput
             style={styles.input}
-            placeholder="VIN (optional)"
+            placeholder="VIN / Serial number (optional)"
             value={vin}
             onChangeText={setVin}
           />
@@ -465,7 +477,7 @@ async function pickPhotoFromLibrary() {
         </View>
         {/* Photo */}
         <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Hero photo (required)</Text>
+          <Text style={styles.sectionLabel}>Hero photo (optional)</Text>
 
           <View style={styles.photoRow}>
             <TouchableOpacity

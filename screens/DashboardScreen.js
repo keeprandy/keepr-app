@@ -26,6 +26,7 @@ import { cardStyles } from "../styles/cards";
 import { layoutStyles } from "../styles/layout";
 import { colors, radius, spacing, typography } from "../styles/theme";
 import KeeprProgressCard, { buildKeeprProgressModel } from "../components/KeeprProgressCard";
+import { useFocusEffect } from "@react-navigation/native";
 
 /**
  * Sort helper: prefers explicit sort_rank, then "primary", then created_at, then name.
@@ -380,6 +381,7 @@ return (
   const vehicles = reorderMode ? vehicleOrder : vehiclesSorted;
   const boats = reorderMode ? boatOrder : boatsSorted;
 
+  
   // Hero resolution
   const refreshHeroUris = useCallback(async () => {
     if (!allAssets.length) {
@@ -540,7 +542,30 @@ return (
   loadSystemModeSummary();
 }, [loadSystemModeSummary]);
 
-
+const reloadDashboard = useCallback(async () => {
+  try {
+    await Promise.all([
+      refetchHomes?.(),
+      refetchVehicles?.(),
+      refetchBoats?.(),
+      loadIdentityAndAchievements?.(),
+      loadSystemModeSummary?.(),
+    ]);
+  } catch (e) {
+    console.log("Dashboard refresh on focus failed", e);
+  }
+}, [
+  refetchHomes,
+  refetchVehicles,
+  refetchBoats,
+  loadIdentityAndAchievements,
+  loadSystemModeSummary,
+]);
+useFocusEffect(
+  React.useCallback(() => {
+    reloadDashboard();
+  }, [reloadDashboard])
+);
 
   const goProfile = useCallback(() => {
     tryNavigateFirst(navigation, ["Profile", "ProfileScreen", "UserProfile", "AccountProfile"], {});
@@ -914,16 +939,7 @@ return (
                       )}
                     </TouchableOpacity>
 
-                    <TouchableOpacity
-                      style={[styles.iconBtn, { marginLeft: "auto" }]}
-                      onPress={goNotifications}
-                      activeOpacity={0.9}
-                      accessibilityRole="button"
-                      accessibilityLabel="Notifications"
-                    >
-                      <Ionicons name="notifications-outline" size={26} color={colors.textPrimary} />
-                      <View style={styles.dot} />
-                    </TouchableOpacity>
+ 
                   </View>
 
                   <Text style={styles.title}>My Keepr™ Home Dashboard</Text>
@@ -1539,7 +1555,7 @@ root: {
 },
   scroll: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
+    paddingTop: spacing.sm,
   },
   centered: {
     flex: 1,

@@ -24,6 +24,8 @@ import { supabase } from "../lib/supabaseClient";
 import { colors, radius, spacing } from "../styles/theme";
 import KeeprDateField from "../components/KeeprDateField";
 import { isoToMDY, mdyToISO } from "../lib/dateFormat";
+import { WebView } from "react-native-webview";
+import { useFocusEffect } from "@react-navigation/native";
 
 const IS_WEB = Platform.OS === "web";
 const PREVIEW_BUCKET_FALLBACK = "asset-files";
@@ -139,6 +141,74 @@ function extractWarrantyDates(text = "") {
 
   return result;
 }
+async function apiDeletePlacementById(placementId) {
+  const { error } = await supabase
+    .from("attachment_placements")
+    .delete()
+    .eq("id", placementId);
+  if (error) throw error;
+}
+
+async function apiUpsertPlacement({ attachment_id, target_type, target_id, role }) {
+  const payload = {
+    attachment_id,
+    target_type,
+    target_id,
+    role: role ?? null,
+  };
+
+  const { error } = await supabase.from("attachment_placements").insert(payload);
+
+  if (!error) return { existed: false };
+
+  const msg = String(error.message || "");
+  if (error.code === "23505" || msg.toLowerCase().includes("duplicate key")) {
+    return { existed: true };
+  }
+
+  throw error;
+}
+
+async function apiSetPlacementShowcase({ attachment_id, target_type, target_id, is_showcase }) {
+  const { error } = await supabase
+    .from("attachment_placements")
+    .update({ is_showcase })
+    .eq("attachment_id", attachment_id)
+    .eq("target_type", target_type)
+    .eq("target_id", target_id);
+  if (error) throw error;
+}
+
+function assocDisplayName(p, systemsIndex = {}, recordsIndex = {}, assetName) {
+  // 1. direct values (best case)
+  const direct = p?.target_name || p?.target_title || p?.display_name;
+  if (direct) return direct;
+
+  // 2. system lookup
+  if (p?.target_type === "system" && p?.target_id && systemsIndex?.[p.target_id]?.name) {
+    return systemsIndex[p.target_id].name;
+  }
+
+  // 3. record lookup
+  if (
+    p?.target_type === "service_record" &&
+    p?.target_id &&
+    recordsIndex?.[p.target_id]?.title
+  ) {
+    return recordsIndex[p.target_id].title;
+  }
+
+  // 4. asset label
+  if (p?.target_type === "asset") {
+    return assetName || "This asset";
+  }
+
+  // 5. fallback (short ID only)
+  const id = p?.target_id;
+  if (!id) return null;
+
+  return `${id.slice(0, 6)}...${id.slice(-4)}`;
+}
 
 export default function ProofBuilderScreen({ route, navigation }) {
   const { width } = useWindowDimensions();
@@ -160,6 +230,7 @@ export default function ProofBuilderScreen({ route, navigation }) {
   const [systemsLoading, setSystemsLoading] = useState(false);
 
   // Attachment meta
+  const [assetName, setAssetName] = useState(route?.params?.assetName || "");
   const [roleValue, setRoleValue] = useState("");
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
@@ -187,6 +258,19 @@ export default function ProofBuilderScreen({ route, navigation }) {
   const [newSystemName, setNewSystemName] = useState("");
 
   const [roleModalOpen, setRoleModalOpen] = useState(false);
+
+  const [recordsIndex, setRecordsIndex] = useState({});
+  const [systemsIndex, setSystemsIndex] = useState({});
+  const [assocBusy, setAssocBusy] = useState(false);
+  const [showcaseBusy, setShowcaseBusy] = useState(false);
+
+  const [recordPickerOpen, setRecordPickerOpen] = useState(false);
+  const [systemSelection, setSystemSelection] = useState(null);
+  const [recordSelection, setRecordSelection] = useState(null);
+
+  const [targetType, setTargetType] = useState("system");
+  const [targetId, setTargetId] = useState("");
+  const [targetRole, setTargetRole] = useState("other");
 
   const isWarranty = useMemo(() => String(roleValue || "").toLowerCase() === "warranty", [roleValue]);
 
@@ -298,14 +382,17 @@ const resolveOrgId = useCallback(async () => {
 
   if (personalErr) throw new Error(personalErr.message || "Could not resolve personal org");
 
-  if (personalOrg?.id) {
+if (personalOrg?.id) {
+  if (__DEV__) {
     console.log("[ProofBuilder] resolveOrgId", {
       userId,
       orgId: personalOrg.id,
       orgType: personalOrg.org_type,
     });
-    return personalOrg.id;
   }
+
+  return personalOrg.id;
+}
 
   // Fallback to any owned org (team, etc.)
   const { data: fallbackOrg, error: fallbackErr } = await supabase
@@ -318,11 +405,13 @@ const resolveOrgId = useCallback(async () => {
 
   if (fallbackErr) throw new Error(fallbackErr.message || "Could not resolve fallback org");
 
+if (__DEV__) {
   console.log("[ProofBuilder] resolveOrgId", {
     userId,
     orgId: fallbackOrg?.id || null,
     orgType: fallbackOrg?.org_type || null,
   });
+}
 
   return fallbackOrg?.id || null;
 }, []);
@@ -404,6 +493,39 @@ const resolveOrgId = useCallback(async () => {
         inferRoleFromPlacements(pls) ||
         "proof";
 
+      // Resolve asset name from the best available source:
+      // 1. route param
+      // 2. attachment row
+      // 3. asset placement target_id
+      const effectiveAssetId =
+        assetId ||
+        att?.asset_id ||
+        (pls || []).find((p) => p?.target_type === "asset")?.target_id ||
+        null;
+
+      const routeAssetName = safeStr(route?.params?.assetName).trim();
+      const attachmentAssetName =
+        safeStr(att?.asset_name).trim() ||
+        safeStr(att?.asset_title).trim();
+
+      if (routeAssetName) {
+        setAssetName(routeAssetName);
+      } else if (attachmentAssetName) {
+        setAssetName(attachmentAssetName);
+      } else if (effectiveAssetId) {
+        try {
+          const { data: assetRow, error: assetErr } = await supabase
+            .from("assets")
+            .select("id,name,title")
+            .eq("id", effectiveAssetId)
+            .maybeSingle();
+
+          if (!assetErr && assetRow) {
+            setAssetName(assetRow.name || assetRow.title || "");
+          }
+        } catch {}
+      }
+
       const normalizedRole = savedRoleRaw.trim().toLowerCase() === "warranty" ? "Warranty" : savedRoleRaw;
       setRoleValue(normalizedRole);
 
@@ -458,7 +580,16 @@ setWExpires(isoToMDY(safeStr(d.end_date || d.expiration_date)));
     } finally {
       setLoading(false);
     }
-  }, [attachmentId, fetchPlacements, fetchSystems, inferRoleFromPlacements, loadWarrantyObject, resolveOrgId]);
+  }, [
+  attachmentId,
+  assetId,
+  route?.params?.assetName,
+  fetchPlacements,
+  fetchSystems,
+  inferRoleFromPlacements,
+  loadWarrantyObject,
+  resolveOrgId,
+]);
 
   useEffect(() => {
     hydrateFromDb();
@@ -471,6 +602,73 @@ setWExpires(isoToMDY(safeStr(d.end_date || d.expiration_date)));
     });
     return unsub;
   }, [navigation, hydrateFromDb]);
+
+  useEffect(() => {
+  let cancelled = false;
+  if (!assetId) {
+    setSystemsIndex({});
+    setRecordsIndex({});
+    return;
+  }
+
+  (async () => {
+    try {
+      const { data: sys, error: sysErr } = await supabase
+        .from("systems")
+        .select("id,name,metadata")
+        .eq("asset_id", assetId)
+        .order("name", { ascending: true });
+
+      if (!cancelled) {
+        if (sysErr) {
+          setSystemsIndex({});
+        } else {
+          const map = {};
+          (sys || []).forEach((s) => {
+            const dn =
+              typeof s?.metadata?.display_name === "string"
+                ? s.metadata.display_name.trim()
+                : "";
+            map[s.id] = { id: s.id, name: dn || s.name || "System" };
+          });
+          setSystemsIndex(map);
+        }
+      }
+    } catch {
+      if (!cancelled) setSystemsIndex({});
+    }
+
+    try {
+      const { data: recs, error: recErr } = await supabase
+        .from("service_records")
+        .select("id,title,performed_at,created_at")
+        .eq("asset_id", assetId)
+        .order("performed_at", { ascending: false })
+        .order("created_at", { ascending: false });
+
+      if (!cancelled) {
+        if (recErr) {
+          setRecordsIndex({});
+        } else {
+          const map = {};
+          (recs || []).forEach((r) => {
+            map[r.id] = {
+              id: r.id,
+              title: (r.title || "").trim() || "Record",
+            };
+          });
+          setRecordsIndex(map);
+        }
+      }
+    } catch {
+      if (!cancelled) setRecordsIndex({});
+    }
+  })();
+
+  return () => {
+    cancelled = true;
+  };
+}, [assetId]);
 
   const toggleSystem = useCallback((systemId) => {
     setSelectedSystemIds((prev) => {
@@ -674,16 +872,179 @@ setWExpires(isoToMDY(safeStr(d.end_date || d.expiration_date)));
     [assetId, selectedSystemIds]
   );
 
+  const associationsForSelected = useMemo(() => {
+  return Array.isArray(placements) ? placements : [];
+}, [placements]);
+
+const assetPlacement = useMemo(() => {
+  return (
+    associationsForSelected.find(
+      (p) => p?.target_type === "asset" && p?.target_id === assetId
+    ) || null
+  );
+}, [associationsForSelected, assetId]);
+
+const canToggleShowcase = useMemo(() => {
+  return !!attachment && isImageLike(attachment) && !!assetPlacement;
+}, [attachment, assetPlacement]);
+
+const linkedRecordPlacement = useMemo(() => {
+  return (
+    (placements || []).find((p) => p?.target_type === "service_record" && p?.target_id) || null
+  );
+}, [placements]);
+
+const linkedRecordLabel = useMemo(() => {
+  if (!linkedRecordPlacement) return "";
+  
+  return assocDisplayName(linkedRecordPlacement, systemsIndex, recordsIndex) || linkedRecordPlacement.target_id;
+}, [linkedRecordPlacement, systemsIndex, recordsIndex]);
+
+const assocSummaryText = useMemo(() => {
+  if (!targetType || !targetId) return "Choose a system or record below";
+
+  if (targetType === "system") {
+    return `Will attach to system: ${systemSelection?.label || targetId}`;
+  }
+
+  if (targetType === "service_record") {
+    return `Will attach to record: ${recordSelection?.label || targetId}`;
+  }
+
+  return "Choose a system or record below";
+}, [recordSelection, systemSelection, targetId, targetType]);
+
+const removeFromAsset = useCallback(async () => {
+  if (!assetPlacement?.id) return;
+
+  Alert.alert(
+    "Remove from asset",
+    "Remove this attachment from this asset?",
+    [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            setAssocBusy(true);
+            await apiDeletePlacementById(assetPlacement.id);
+            navigation.goBack();
+          } catch (e) {
+            Alert.alert("Remove failed", e?.message || "Could not remove from asset.");
+          } finally {
+            setAssocBusy(false);
+          }
+        },
+      },
+    ]
+  );
+}, [assetPlacement?.id, navigation]);
+
+const removeAssociation = useCallback(
+  async (placementId) => {
+    try {
+      setAssocBusy(true);
+      await apiDeletePlacementById(placementId);
+      await hydrateFromDb();
+    } catch (e) {
+      Alert.alert("Remove failed", e?.message || "Could not remove association.");
+    } finally {
+      setAssocBusy(false);
+    }
+  },
+  [hydrateFromDb]
+);
+
+const addAssociation = useCallback(async () => {
+  if (!attachmentId || targetType !== "service_record" || !targetId) {
+    Alert.alert("Missing info", "Choose a record.");
+    return;
+  }
+
+  try {
+    setAssocBusy(true);
+
+    await apiUpsertPlacement({
+      attachment_id: attachmentId,
+      target_type: "service_record",
+      target_id: targetId,
+      role: roleValue || "other",
+    });
+
+    setTargetId("");
+    setRecordSelection(null);
+
+    await hydrateFromDb();
+  } catch (e) {
+    Alert.alert("Associate failed", e?.message || "Could not add record.");
+  } finally {
+    setAssocBusy(false);
+  }
+}, [attachmentId, hydrateFromDb, roleValue, targetId, targetType]);
+
+const toggleShowcase = useCallback(async () => {
+  if (!assetPlacement?.id || !attachmentId || !assetId) return;
+
+  try {
+    setShowcaseBusy(true);
+    await apiSetPlacementShowcase({
+      attachment_id: attachmentId,
+      target_type: "asset",
+      target_id: assetId,
+      is_showcase: !assetPlacement.is_showcase,
+    });
+    await hydrateFromDb();
+  } catch (e) {
+    Alert.alert("Showcase update failed", e?.message || "Could not update showcase flag.");
+  } finally {
+    setShowcaseBusy(false);
+  }
+}, [assetId, assetPlacement, attachmentId, hydrateFromDb]);
+
+const goToCreateRecord = useCallback(() => {
+  const selectedSystemId = selectedSystemIds?.[0] || null;
+  const selectedSystem =
+    selectedSystemId && systemsIndex?.[selectedSystemId]
+      ? systemsIndex[selectedSystemId]
+      : null;
+
+  navigation.replace("AddTimelineRecord", {
+    assetId,
+    assetName: route?.params?.assetName || null,
+    systemId: selectedSystemId || null,
+    systemName: selectedSystem?.name || null,
+
+    // PB → AddTimelineRecord handoff
+    prefillTitle: title?.trim() || inferName(attachment),
+    prefillNotes: notes?.trim() || "",
+    pendingAttachmentId: attachmentId,
+    pendingAttachmentTitle: title?.trim() || inferName(attachment),
+  });
+}, [
+  navigation,
+  assetId,
+  attachmentId,
+  attachment,
+  notes,
+  route?.params?.assetName,
+  selectedSystemIds,
+  systemsIndex,
+  title,
+]);
+
   const saveAll = useCallback(async () => {
     if (!attachment) return;
     const effectiveOrgId = orgId;
-    console.log("[ProofBuilder] saveAll org check", {
-  orgId,
-  assetId,
-  attachmentId,
-  roleValue,
-  isWarranty,
-});
+    if (__DEV__) {
+      console.log("[ProofBuilder] saveAll org check", {
+        orgId,
+        assetId,
+        attachmentId,
+        roleValue,
+        isWarranty,
+      });
+    }
     if (!effectiveOrgId && isWarranty) {
       Alert.alert("Save", "Your account does not have a personal org record yet. Warranty objects require one.");
       return;
@@ -726,6 +1087,37 @@ setWExpires(isoToMDY(safeStr(d.end_date || d.expiration_date)));
     upsertAttachmentMeta,
     upsertWarrantyObject,
   ]);
+const RecordPickerModal = ({ visible, onCancel, onSelect }) => (
+  <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
+    <Pressable style={styles.modalBackdrop} onPress={onCancel}>
+      <Pressable style={styles.modalCard} onPress={() => {}}>
+        <View style={styles.modalHeader}>
+          <Text style={styles.modalTitle}>Select record</Text>
+          <TouchableOpacity onPress={onCancel}>
+            <Ionicons name="close" size={20} color={colors.textPrimary} />
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView style={{ maxHeight: 320 }}>
+          {Object.values(recordsIndex).length === 0 ? (
+            <Text style={styles.mutedText}>No records found for this asset.</Text>
+          ) : (
+            Object.values(recordsIndex).map((r) => (
+              <TouchableOpacity
+                key={r.id}
+                style={styles.roleRow}
+                onPress={() => onSelect(r)}
+              >
+                <Text style={styles.roleRowText}>{r.title}</Text>
+                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
+            ))
+          )}
+        </ScrollView>
+      </Pressable>
+    </Pressable>
+  </Modal>
+);
 
   const evidenceTitle = title || inferName(attachment);
 
@@ -754,32 +1146,33 @@ setWExpires(isoToMDY(safeStr(d.end_date || d.expiration_date)));
   }
 
   return (
+    
     <SafeAreaView style={styles.screen}>
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="chevron-back" size={20} color={colors.textPrimary} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <Text style={styles.title}>Proof Builder</Text>
+          <Text style={styles.title}>Add/Edit Context</Text>
+                      <Text style={styles.badgeValue} numberOfLines={1}>
+              {assetName || "Asset"}
+            </Text>
+            <Text style={styles.badgeValue} numberOfLines={1}>
+            {title || inferName(attachment)}
+          </Text>
         </View>
 
-        <View style={styles.badgeRow}>
-          <View style={styles.badge}>
-            <Text style={styles.badgeLabel}>ASSET</Text>
-            <Text style={styles.badgeValue}>{shortId(assetId)}</Text>
-          </View>
-          <View style={styles.badge}>
-            <Text style={styles.badgeLabel}>ATTACHMENT</Text>
-            <Text style={styles.badgeValue}>{shortId(attachmentId)}</Text>
-          </View>
-        </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+      <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingBottom: 120 }}
+          keyboardShouldPersistTaps="handled"
+        >
         {/* Evidence */}
         <View style={styles.card}>
           <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Evidence</Text>
+            <Text style={styles.sectionTitle}>Attachment</Text>
             <TouchableOpacity style={styles.iconBtn} onPress={openEvidence}>
               <Ionicons name="open-outline" size={18} color={colors.textPrimary} />
             </TouchableOpacity>
@@ -798,10 +1191,19 @@ setWExpires(isoToMDY(safeStr(d.end_date || d.expiration_date)));
                 <ActivityIndicator />
               </View>
             ) : isImageLike(attachment) && pdfUrl ? (
-              <Image source={{ uri: pdfUrl }} style={styles.previewImage} resizeMode="cover" />
-            ) : isPdfLike(attachment) && pdfUrl && IS_WEB ? (
-              // eslint-disable-next-line react/no-unknown-property
-              <iframe title="pdf" src={pdfUrl} style={styles.webIframe} />
+              <Image source={{ uri: pdfUrl }} style={styles.previewImage} resizeMode="contain" />
+            ) : isPdfLike(attachment) && pdfUrl ? (
+              IS_WEB ? (
+                // eslint-disable-next-line react/no-unknown-property
+                <iframe title="pdf" src={pdfUrl} style={styles.webIframe} />
+              ) : (
+                <WebView
+                  source={{ uri: pdfUrl }}
+                  style={{ flex: 1 }}
+                  originWhitelist={["*"]}
+                  startInLoadingState
+                />
+              )
             ) : (
               <TouchableOpacity style={styles.previewFallback} onPress={openEvidence}>
                 <Ionicons name="document-text-outline" size={22} color={colors.textMuted} />
@@ -810,12 +1212,48 @@ setWExpires(isoToMDY(safeStr(d.end_date || d.expiration_date)));
             )}
           </View>
         </View>
+              {attachment ? (
+  <View style={styles.card}>
+    <Text style={styles.sectionTitle}>Attachment Status</Text>
 
+    {canToggleShowcase ? (
+      <TouchableOpacity
+        onPress={toggleShowcase}
+        disabled={showcaseBusy}
+        style={[
+          styles.selectBtn,
+          assetPlacement?.is_showcase ? styles.privacyBtnActive : null,
+          showcaseBusy && { opacity: 0.6 },
+        ]}
+      >
+        <Ionicons
+          name={assetPlacement?.is_showcase ? "star" : "star-outline"}
+          size={16}
+          color={colors.textPrimary}
+        />
+        <Text style={styles.selectBtnText}>
+          {assetPlacement?.is_showcase
+            ? "Showcase Photo for this asset"
+            : "Set as Showcase Photo"}
+        </Text>
+      </TouchableOpacity>
+    ) : null}
+
+  </View>
+) : null}
+    <TouchableOpacity
+      onPress={removeFromAsset}
+      disabled={assocBusy || !assetPlacement?.id}
+      style={[styles.smallBtn, { marginTop: 12 }]}
+    >
+      <Ionicons name="remove-circle-outline" size={16} color={colors.textPrimary} />
+      <Text style={styles.smallBtnText}>Remove from Asset</Text>
+    </TouchableOpacity>
         {/* Meta */}
         <View style={styles.card}>
           <Text style={styles.metaTopLabel}>Attached to</Text>
           <Text style={styles.metaTopValue}>
-            Asset • Systems ({selectedSystemIds.length}) • Records ({(placements || []).filter((p) => p.target_type === "record").length})
+            Asset • Systems ({selectedSystemIds.length}) • Records ({(placements || []).filter((p) => p.target_type === "service_record").length})
           </Text>
 
           <Text style={styles.fieldLabel}>Role</Text>
@@ -930,6 +1368,69 @@ setWExpires(isoToMDY(safeStr(d.end_date || d.expiration_date)));
             />
           </View>
         ) : null}
+<View style={styles.card}>
+  <Text style={styles.sectionTitle}>Current Associations</Text>
+  <Text style={styles.helperText}>
+    This attachment belongs to this asset and can also be linked to systems or records.
+  </Text>
+
+  {associationsForSelected.length === 0 ? (
+    <Text style={styles.mutedText}>No associations found.</Text>
+  ) : (
+    <View style={styles.systemList}>
+      {associationsForSelected.map((p) => (
+        <View key={p.id} style={styles.systemRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.systemName} numberOfLines={1}>
+              {assocDisplayName(
+                  p,
+                  systemsIndex,
+                  recordsIndex,
+                  assetName
+                )}
+            </Text>
+            <Text style={styles.systemMeta} numberOfLines={1}>
+              {p.target_type === "service_record" ? "record" : p.target_type}
+              {p.role ? ` • ${p.role}` : ""}
+            </Text>
+          </View>
+
+          {p.target_type !== "asset" ? (
+            <TouchableOpacity onPress={() => removeAssociation(p.id)}>
+              <Ionicons name="close-circle-outline" size={18} color={colors.textMuted} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      ))}
+    </View>
+  )}
+</View>
+
+<View style={styles.card}>
+  <Text style={styles.sectionTitle}>Record</Text>
+  <Text style={styles.helperText}>
+    Link this document to an existing timeline record, or create a new record from it.
+  </Text>
+
+  <TouchableOpacity
+    style={styles.selectBtn}
+    onPress={() => setRecordPickerOpen(true)}
+  >
+    <Ionicons name="document-text-outline" size={16} color={colors.textPrimary} />
+    <Text style={styles.selectBtnText}>
+      {linkedRecordLabel || "Choose existing record"}
+    </Text>
+    <Ionicons name="chevron-down" size={16} color={colors.textMuted} />
+  </TouchableOpacity>
+
+  <TouchableOpacity
+    style={[styles.primaryBtn, { marginTop: 12 }]}
+    onPress={goToCreateRecord}
+  >
+    <Ionicons name="add-circle-outline" size={18} color="#fff" />
+    <Text style={styles.primaryBtnText}>Create timeline record</Text>
+  </TouchableOpacity>
+</View>
 
         {/* Systems association */}
         <View style={styles.card}>
@@ -981,8 +1482,8 @@ setWExpires(isoToMDY(safeStr(d.end_date || d.expiration_date)));
         </View>
 
         <View style={{ height: 90 }} />
-      </ScrollView>
 
+</ScrollView>
       {/* Sticky Save Bar */}
       <View style={styles.stickyBar}>
         <TouchableOpacity style={[styles.primaryBtn, saving ? { opacity: 0.75 } : null]} onPress={saveAll} disabled={saving}>
@@ -1046,7 +1547,6 @@ setWExpires(isoToMDY(safeStr(d.end_date || d.expiration_date)));
                 <Ionicons name="close" size={20} color={colors.textPrimary} />
               </TouchableOpacity>
             </View>
-
             <ScrollView style={{ maxHeight: 520 }} contentContainerStyle={{ paddingBottom: 10 }}>
               {ROLE_GROUPS.map((g) => (
                 <View key={g.group} style={{ marginBottom: 12 }}>
@@ -1074,12 +1574,35 @@ setWExpires(isoToMDY(safeStr(d.end_date || d.expiration_date)));
           </Pressable>
         </Pressable>
       </Modal>
+      <RecordPickerModal
+        visible={recordPickerOpen}
+        onCancel={() => setRecordPickerOpen(false)}
+        onSelect={async (r) => {
+          try {
+            setAssocBusy(true);
+            setRecordPickerOpen(false);
+
+            await apiUpsertPlacement({
+              attachment_id: attachmentId,
+              target_type: "service_record",
+              target_id: r.id,
+              role: roleValue || "other",
+            });
+
+            await hydrateFromDb();
+          } catch (e) {
+            Alert.alert("Associate failed", e?.message || "Could not link record.");
+          } finally {
+            setAssocBusy(false);
+          }
+        }}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.bg },
+  screen: { flex: 1, backgroundColor: "#F3F4F6" },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -1115,10 +1638,14 @@ const styles = StyleSheet.create({
   badgeLabel: { fontSize: 10, fontWeight: "900", color: colors.textMuted, lineHeight: 12 },
   badgeValue: { fontSize: 12, fontWeight: "800", color: colors.textPrimary, lineHeight: 14 },
 
-  scrollContent: { padding: spacing.md, paddingBottom: 140, gap: spacing.md },
+  scrollContent: {
+  padding: spacing.md,
+  paddingBottom: 140,
+  gap: spacing.lg,
+  },
 
   card: {
-    backgroundColor: colors.card,
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.lg,
@@ -1126,7 +1653,11 @@ const styles = StyleSheet.create({
   },
 
   sectionHeaderRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  sectionTitle: { fontSize: 14, fontWeight: "900", color: colors.textPrimary },
+  sectionTitle: {
+  fontSize: 15,
+  fontWeight: "900",
+  color: colors.textPrimary,
+},
   sectionCounter: { fontSize: 12, fontWeight: "900", color: colors.textMuted },
   iconBtn: {
     width: 34,
@@ -1203,16 +1734,23 @@ const styles = StyleSheet.create({
   privacyBtnText: { fontSize: 13, fontWeight: "800", color: colors.textPrimary },
   privacyBtnTextActive: { color: colors.primary },
 
-  systemList: { marginTop: spacing.sm, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, overflow: "hidden" },
-  systemRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    backgroundColor: colors.card,
-  },
+systemList: {
+  marginTop: spacing.sm,
+  borderWidth: 1,
+  borderColor: "#E5E7EB",
+  borderRadius: radius.lg,
+  overflow: "hidden",
+  backgroundColor: "#F9FAFB",
+},
+systemRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  paddingVertical: 12,
+  paddingHorizontal: 12,
+  borderBottomWidth: 1,
+  borderBottomColor: "#E5E7EB",
+  backgroundColor: "#F9FAFB",
+},
   systemName: { fontSize: 14, fontWeight: "800", color: colors.textPrimary },
   systemMeta: { marginTop: 2, fontSize: 12, color: colors.textMuted },
 

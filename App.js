@@ -1,13 +1,27 @@
 // App.js
-
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { DefaultTheme, NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import * as Notifications from "expo-notifications";
 import React from "react";
-import { Linking, Platform, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
+import {
+  Linking,
+  Platform,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  useWindowDimensions,
+  View,
+  ScrollView,
+  ActivityIndicator,
+} from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import GlassFooter from "./components/navigation/GlassFooter";
+import MoreScreen from "./screens/MoreScreen";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
 
 import ManageTeamScreen from "./screens/ManageTeamScreen";
 import PrivacyTrustScreen from "./screens/PrivacyTrustScreen";
@@ -87,6 +101,9 @@ import KeeprProsScreen from "./screens/KeeprProsScreen";
 
 // Upload Lab
 import AssetAttachmentsScreen from "./screens/AssetAttachmentsScreen";
+import AssetAttachmentsMobileScreen from "./screens/AssetAttachmentsMobileScreen";
+import AssetAttachmentDetailMobileScreen from "./screens/AssetAttachmentDetailMobileScreen";
+import ScanDocumentMobileScreen from "./screens/ScanDocumentMobileScreen";
 import UploadLabScreen from "./screens/UploadLabScreen";
 
 // Proof Builder
@@ -253,72 +270,522 @@ function MainTabs() {
   const isWeb = Platform.OS === "web";
   const { width } = useWindowDimensions();
   const hideTabsOnWeb = isWeb && width >= 1024;
+  const [showQuickCapture, setShowQuickCapture] = React.useState(false);
+  const [showAssetPicker, setShowAssetPicker] = React.useState(false);
+  const [pendingCaptureType, setPendingCaptureType] = React.useState(null);
+  const [selectedCaptureAsset, setSelectedCaptureAsset] = React.useState(null);
+  React.useEffect(() => {
+  const loadLast = async () => {
+    try {
+      const stored = await AsyncStorage.getItem("lastCaptureAsset");
+      if (stored) {
+        setSelectedCaptureAsset(JSON.parse(stored));
+      }
+    } catch (e) {
+      console.log("Failed to load last asset", e);
+    }
+  };
+
+  loadLast();
+}, []);
+  const [pickerAssets, setPickerAssets] = React.useState([]);
+  const [pickerAssetsLoading, setPickerAssetsLoading] = React.useState(false);
+
+  const handleQuickCaptureDocument = () => {
+    setShowQuickCapture(false);
+    setPendingCaptureType("scan");
+    setShowAssetPicker(true);
+  };
+  const handleQuickCaptureLibrary = () => {
+  setShowQuickCapture(false);
+  setPendingCaptureType("library");
+  setShowAssetPicker(true);
+};
+
+const handleQuickCaptureFile = () => {
+  setShowQuickCapture(false);
+  setPendingCaptureType("file");
+  setShowAssetPicker(true);
+};
+
+const handleSelectCaptureAsset = async (asset) => {
+  setSelectedCaptureAsset(asset);
+  setShowAssetPicker(false);
+
+  try {
+    await AsyncStorage.setItem("lastCaptureAsset", JSON.stringify(asset));
+  } catch (e) {
+    console.log("Failed to save last asset", e);
+  }
+
+  navigationRef.current?.navigate("AssetAttachmentsMobile", {
+    assetId: asset.id,
+    assetName: asset.name,
+    autoOpen: pendingCaptureType,
+  });
+};
+  
+const handleQuickCapturePhoto = () => {
+  setShowQuickCapture(false);
+  setPendingCaptureType("camera");
+  setShowAssetPicker(true);
+};
+React.useEffect(() => {
+  let isActive = true;
+
+  const loadPickerAssets = async () => {
+    try {
+      setPickerAssetsLoading(true);
+
+  const user = (await supabase.auth.getUser()).data?.user;
+
+  const { data, error } = await supabase
+    .from("assets")
+    .select("id, name, status, deleted_at")
+    .eq("owner_id", user?.id)
+    .is("deleted_at", null)
+    .eq("status", "active")
+    .order("name", { ascending: true });
+
+      if (error) throw error;
+
+      if (!isActive) return;
+
+      const cleaned = (data || [])
+        .filter((a) => a?.id && a?.name)
+        .filter((a) => {
+          // defensive client-side filter for obvious deleted placeholders
+          const n = String(a.name || "").trim().toLowerCase();
+          return n && n !== "deleted";
+        });
+
+      setPickerAssets(cleaned);
+    } catch (e) {
+      console.log("Quick Capture asset picker load failed:", e?.message || e);
+      if (isActive) setPickerAssets([]);
+    } finally {
+      if (isActive) setPickerAssetsLoading(false);
+    }
+  };
+
+  loadPickerAssets();
+
+  return () => {
+    isActive = false;
+  };
+  
+}, []);
 
   return (
-    <Tab.Navigator
-      screenOptions={({ route }) => ({
-        headerShown: false,
-        tabBarStyle: hideTabsOnWeb
-          ? { display: "none" }
-          : {
-              backgroundColor: colors.surface,
-              borderTopColor: "#11182722",
-              height: 60,
-              paddingBottom: 8,
-              paddingTop: 6,
-            },
-        tabBarActiveTintColor: colors.tabActive || colors.textPrimary,
-        tabBarInactiveTintColor: colors.tabInactive || colors.textMuted,
-        tabBarIcon: ({ focused, color, size }) => {
-          const icons = {
-            Dashboard: focused ? "grid" : "grid-outline",
-            MyHome: focused ? "home" : "home-outline",
-            Garage: focused ? "car" : "car-outline",
-            Boats: focused ? "boat" : "boat-outline",
-            Notifications: focused ? "mail" : "mail-outline",
-            KeeprPros: focused
-              ? "shield-checkmark"
-              : "shield-checkmark-outline",
-            Settings: focused ? "settings" : "settings-outline",
-          };
-          const iconName = icons[route.name];
-          if (!iconName) return null;
-          return <Ionicons name={iconName} size={size} color={color} />;
-        },
-      })}
-    >
-      <Tab.Screen
-        name="Dashboard"
-        component={DashboardScreen}
-        options={{ title: "Home" }}
-      />
-      <Tab.Screen
-        name="MyHome"
-        component={HomeStoryScreen}
-        options={{ title: "My Home" }}
-      />
-      <Tab.Screen
-        name="Garage"
-        component={VehicleStoryScreen}
-        options={{ title: "Garage" }}
-      />
-      <Tab.Screen
-        name="Boats"
-        component={BoatStoryScreen}
-        options={{ title: "Boats" }}
-      />
-      <Tab.Screen
-        name="Notifications"
-        component={NotificationsStack}
-        options={{ title: "Inbox" }}
-      />
-      <Tab.Screen
-        name="KeeprPros"
-        component={KeeprProsScreen}
-        options={{ title: "Keepr Pros" }}
-      />
-      <Tab.Screen name="Settings" component={SettingsScreen} />
+    <>
+<Tab.Navigator
+  tabBar={(props) => (
+  <GlassFooter
+    {...props}
+    onQuickCapture={() => setShowQuickCapture(true)}
+  />
+)}
+  screenOptions={{
+    headerShown: false,
+  }}
+>
+    <Tab.Screen
+      name="Dashboard"
+      component={DashboardScreen}
+      options={{ title: "Home" }}
+    />
+
+    <Tab.Screen
+      name="Notifications"
+      component={NotificationsStack}
+      options={{ title: "Inbox" }}
+    />
+
+    <Tab.Screen
+      name="Create"
+      component={DashboardScreen} // temporary
+      options={{ title: "" }}
+    />
+
+    <Tab.Screen
+      name="KeeprPros"
+      component={KeeprProsScreen}
+      options={{ title: "Pros" }}
+    />
+
+    <Tab.Screen
+      name="More"
+      component={MoreScreen} // we’ll create this next
+      options={{ title: "More" }}
+    />
+          <Tab.Screen
+            name="MyHome"
+            component={HomeStoryScreen}
+            options={{ title: "My Home" }}
+          />
+          <Tab.Screen
+            name="Garage"
+            component={VehicleStoryScreen}
+            options={{ title: "Garage" }}
+          />
+          <Tab.Screen
+            name="Boats"
+            component={BoatStoryScreen}
+            options={{ title: "Boats" }}
+          />
+          <Tab.Screen 
+          name="Settings" 
+          component={SettingsScreen} />
     </Tab.Navigator>
+        {showQuickCapture ? (
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={() => setShowQuickCapture(false)}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: "rgba(0,0,0,0.18)",
+              justifyContent: "flex-end",
+            }}
+          >
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={() => {}}
+              style={{
+                backgroundColor: "#fff",
+                borderTopLeftRadius: 28,
+                borderTopRightRadius: 28,
+                paddingTop: 14,
+                paddingHorizontal: 18,
+                paddingBottom: 28,
+              }}
+            >
+              <View
+                style={{
+                  alignSelf: "center",
+                  width: 38,
+                  height: 4,
+                  borderRadius: 2,
+                  backgroundColor: "#D1D5DB",
+                  marginBottom: 16,
+                }}
+              />
+
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  marginBottom: 18,
+                }}
+              >
+                <TouchableOpacity
+                  onPress={() => setShowQuickCapture(false)}
+                  style={{
+                    width: 42,
+                    height: 42,
+                    borderRadius: 21,
+                    backgroundColor: "#F3F4F6",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Ionicons name="close" size={22} color="#111827" />
+                </TouchableOpacity>
+
+                <Text style={{ fontSize: 18, fontWeight: "800", color: "#111827" }}>
+                  Add to Keepr
+                </Text>
+
+                <View style={{ width: 42, height: 42 }} />
+              </View>
+              <Text style={{ fontSize: 12, color: "#6B7280", marginTop: 4 }}>
+                Adding to {selectedCaptureAsset?.name}
+              </Text>
+              <Text
+                style={{
+                  fontSize: 13,
+                  color: "#6B7280",
+                  marginBottom: 14,
+                }}
+              >
+                Quick capture for an asset. Choose what you want to add.
+              </Text>
+
+              <TouchableOpacity
+                onPress={handleQuickCaptureDocument}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  paddingVertical: 16,
+                  borderBottomWidth: 1,
+                  borderBottomColor: "#E5E7EB",
+                }}
+              >
+                <View
+                  style={{
+                    width: 42,
+                    height: 42,
+                    borderRadius: 12,
+                    backgroundColor: "#EFF6FF",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    marginRight: 14,
+                  }}
+                >
+                  <Ionicons name="document-text-outline" size={22} color="#2563EB" />
+                </View>
+
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 16, fontWeight: "700", color: "#111827" }}>
+                    Scan Document
+                  </Text>
+                  <Text style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>
+                    Receipt, invoice, registration, warranty
+                  </Text>
+                </View>
+
+                <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={handleQuickCaptureLibrary}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  paddingVertical: 16,
+                  borderBottomWidth: 1,
+                  borderBottomColor: "#E5E7EB",
+                }}
+              >
+                <View
+                  style={{
+                    width: 42,
+                    height: 42,
+                    borderRadius: 12,
+                    backgroundColor: "#F3F4F6",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    marginRight: 14,
+                  }}
+                >
+                  <Ionicons name="images-outline" size={22} color="#374151" />
+                </View>
+
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 16, fontWeight: "700", color: "#111827" }}>
+                    Photo Library
+                  </Text>
+                  <Text style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>
+                    Choose an image already on your phone
+                  </Text>
+                </View>
+
+                <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={handleQuickCaptureFile}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  paddingVertical: 16,
+                }}
+              >
+                <View
+                  style={{
+                    width: 42,
+                    height: 42,
+                    borderRadius: 12,
+                    backgroundColor: "#F3F4F6",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    marginRight: 14,
+                  }}
+                >
+                  <Ionicons name="document-outline" size={22} color="#374151" />
+                </View>
+
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 16, fontWeight: "700", color: "#111827" }}>
+                    Upload File
+                  </Text>
+                  <Text style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>
+                    Add a PDF or saved document
+                  </Text>
+                </View>
+
+                <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+              </TouchableOpacity>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        ) : null}
+
+       {showAssetPicker ? (
+  <TouchableOpacity
+    activeOpacity={1}
+    onPress={() => setShowAssetPicker(false)}
+    style={{
+      position: "absolute",
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: "rgba(0,0,0,0.18)",
+      justifyContent: "flex-end",
+    }}
+  >
+    <TouchableOpacity
+      activeOpacity={1}
+      onPress={() => {}}
+      style={{
+        backgroundColor: "#fff",
+        borderTopLeftRadius: 28,
+        borderTopRightRadius: 28,
+        paddingTop: 14,
+        paddingHorizontal: 18,
+        paddingBottom: 28,
+      }}
+    >
+      <View
+        style={{
+          alignSelf: "center",
+          width: 38,
+          height: 4,
+          borderRadius: 2,
+          backgroundColor: "#D1D5DB",
+          marginBottom: 16,
+        }}
+      />
+
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 18,
+        }}
+      >
+        <TouchableOpacity
+          onPress={() => setShowAssetPicker(false)}
+          style={{
+            width: 42,
+            height: 42,
+            borderRadius: 21,
+            backgroundColor: "#F3F4F6",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Ionicons name="close" size={22} color="#111827" />
+        </TouchableOpacity>
+
+        <Text style={{ fontSize: 18, fontWeight: "800", color: "#111827" }}>
+          Select Asset
+        </Text>
+
+        <View style={{ width: 42, height: 42 }} />
+      </View>
+
+      <View style={{ maxHeight: 420 }}>
+        <ScrollView
+          showsVerticalScrollIndicator={true}
+          keyboardShouldPersistTaps="handled"
+        >
+          {selectedCaptureAsset ? (
+            <TouchableOpacity
+              onPress={() => handleSelectCaptureAsset(selectedCaptureAsset)}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                paddingVertical: 16,
+                borderBottomWidth: 1,
+                borderBottomColor: "#E5E7EB",
+              }}
+            >
+              <View
+                style={{
+                  width: 42,
+                  height: 42,
+                  borderRadius: 12,
+                  backgroundColor: "#EFF6FF",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  marginRight: 14,
+                }}
+              >
+                <Ionicons name="time-outline" size={20} color="#2563EB" />
+              </View>
+
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 16, fontWeight: "700", color: "#111827" }}>
+                  {selectedCaptureAsset.name}
+                </Text>
+                <Text style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>
+                  Last used
+                </Text>
+              </View>
+
+              <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+            </TouchableOpacity>
+          ) : null}
+
+          {pickerAssetsLoading ? (
+            <View style={{ paddingVertical: 20, alignItems: "center" }}>
+              <ActivityIndicator />
+              <Text style={{ marginTop: 8, color: "#6B7280" }}>Loading assets…</Text>
+            </View>
+          ) : pickerAssets.length === 0 ? (
+            <View style={{ paddingVertical: 20, alignItems: "center" }}>
+              <Text style={{ color: "#6B7280" }}>No assets found.</Text>
+            </View>
+          ) : (
+            pickerAssets.map((asset) => (
+              <TouchableOpacity
+                key={asset.id}
+                onPress={() => handleSelectCaptureAsset(asset)}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  paddingVertical: 16,
+                  borderBottomWidth: 1,
+                  borderBottomColor: "#E5E7EB",
+                }}
+              >
+                <View
+                  style={{
+                    width: 42,
+                    height: 42,
+                    borderRadius: 12,
+                    backgroundColor: "#F3F4F6",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    marginRight: 14,
+                  }}
+                >
+                  <Ionicons name="home-outline" size={20} color="#374151" />
+                </View>
+
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 16, fontWeight: "700", color: "#111827" }}>
+                    {asset.name}
+                  </Text>
+                </View>
+
+                <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+              </TouchableOpacity>
+            ))
+          )}
+        </ScrollView>
+      </View>
+    </TouchableOpacity>
+  </TouchableOpacity>
+) : null}
+
+</>
   );
 }
 
@@ -406,6 +873,17 @@ function GlobalEventFab({ currentRouteName, role }) {
     "Login",
     "Signup",
     "Auth",
+  "AssetAttachments",
+  "AssetAttachmentsMobile",
+  "AssetAttachmentDetailMobile",
+  "ProofBuilder",
+  "ScanDocumentMobile",
+  "Scan",
+  "QRScan",
+  "QRAssetRouter",
+  "AddTimelineRecord",
+  "TimelineRecord",
+  "EditTimelineRecord"
   ];
 
   if (hiddenRoutes.includes(route)) {
@@ -882,6 +1360,21 @@ const initialRouteName =
             component={AssetAttachmentsScreen}
           />
           <RootStack.Screen
+            name="AssetAttachmentsMobile"
+            component={AssetAttachmentsMobileScreen}
+            options={{ headerShown: false }}
+          />
+          <RootStack.Screen
+            name="AssetAttachmentDetailMobile"
+            component={AssetAttachmentDetailMobileScreen}
+            options={{ headerShown: false }}
+          />
+          <RootStack.Screen
+          name="ScanDocumentMobile"
+          component={ScanDocumentMobileScreen}
+          options={{ headerShown: false }}
+        />
+          <RootStack.Screen
             name="AssetGroupDashboard"
             component={AssetGroupDashboardScreen}
           />
@@ -1119,13 +1612,14 @@ export default function App() {
                         </View>
                       </View>
                     </View>
-                  ) : (
-                    <Root
-                      onRouteChange={setCurrentRouteName}
-                      setCurrentRouteName={setCurrentRouteName}
-                      currentRouteName={currentRouteName}
-                    />
-                  )}
+                    ) : (
+                      <Root
+                        onRouteChange={setCurrentRouteName}
+                        setCurrentRouteName={setCurrentRouteName}
+                        currentRouteName={currentRouteName}
+                      />
+                    )
+                    }
                 </EnhanceProvider>
               </BoatsProvider>
             </WorkspaceProvider>

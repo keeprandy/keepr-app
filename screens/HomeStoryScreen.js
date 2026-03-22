@@ -503,7 +503,7 @@ useEffect(() => {
 
   const handleBack = () => {
     if (navigation.canGoBack()) navigation.goBack();
-    else navigation.navigate("MyHome");
+    else navigation.navigate("Home");
   };
 
   const goToShowcase = () => {
@@ -520,6 +520,12 @@ useEffect(() => {
       initialTab: "file",
     });
   };
+  const goToAttachmentsMobile = () => {
+  navigation.navigate("AssetAttachmentsMobile", {
+    assetId: currentHome?.id,
+    assetName: currentHome?.name,
+  });
+};
 
   const ensureMediaPermission = useCallback(async () => {
     if (Platform.OS === "web") return true;
@@ -754,41 +760,53 @@ const goToPublicView = () => {
     scrollRef.current.scrollTo({ y: timelineY - 24, animated: true });
   };
 
-  // Delete flow
-  const startRemove = () => {
-    if (!home?.id) return;
-    setRemoveModalVisible(true);
-  };
+// Delete flow
+const startRemove = () => {
+  if (!home?.id) return;
+  setRemoveModalVisible(true);
+};
 
-  const handleConfirmRemove = async () => {
-    if (!home?.id) return;
+const handleConfirmRemove = async () => {
+  if (!home?.id) return;
 
-    setActionLoading(true);
-    try {
-      const { error: updErr } = await supabase
-        .from("assets")
-        .update({ deleted_at: new Date().toISOString() })
-        .eq("id", home.id);
+  setActionLoading(true);
+  try {
+    const { error: updErr } = await supabase
+      .from("assets")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", home.id);
 
-      if (updErr) {
-        console.error("soft delete home error", updErr);
-        Alert.alert(
-          "Couldn’t delete",
-          updErr?.message || "Nothing was deleted."
-        );
-        return;
-      }
-
-      setRemoveModalVisible(false);
-      Alert.alert("Deleted", "This home was deleted from your Keepr.");
-      navigation.navigate("MyHome");
-    } catch (e) {
-      console.log("handleConfirmRemove home error:", e);
-      Alert.alert("Couldn’t delete", e?.message || "Nothing was deleted.");
-    } finally {
-      setActionLoading(false);
+    if (updErr) {
+      console.error("soft delete home error", updErr);
+      Alert.alert(
+        "Couldn’t delete",
+        updErr?.message || "Nothing was deleted."
+      );
+      return;
     }
-  };
+
+    setRemoveModalVisible(false);
+    Alert.alert("Deleted", "This home was removed from your account.");
+
+    navigation.reset({
+      index: 0,
+      routes: [
+        {
+          name: "RootTabs",
+          state: {
+            index: 0,
+            routes: [{ name: "Dashboard" }],
+          },
+        },
+      ],
+    });
+  } catch (e) {
+    console.log("handleConfirmRemove home error:", e);
+    Alert.alert("Couldn’t delete", e?.message || "Nothing was deleted.");
+  } finally {
+    setActionLoading(false);
+  }
+};
 
   /* --------------------------- TIMELINE MODEL --------------------------- */
 
@@ -1017,7 +1035,7 @@ const filteredTimelineItems = useMemo(() => {
           <Text style={styles.appSubtitle}>
            This is where the living record of your home will grow over time.
           </Text>
-<Text style={styles.appSubtitle}>
+          <Text style={styles.appSubtitle}>
            Your personal residence, rental properties, or Up North Cabin - Add them All.
           </Text>
           <View style={{ height: 10 }} />
@@ -1140,10 +1158,9 @@ const filteredTimelineItems = useMemo(() => {
             contentContainerStyle={styles.quickActionsScroll}
           >
             <QuickActionChip
-              label="Story"
-              icon="book-outline"
-              isPrimary
-              onPress={() => {}}
+              label="Timeline"
+              icon="time-outline"
+              onPress={scrollToTimeline}
             />
             <QuickActionChip
               label="Systems"
@@ -1151,35 +1168,14 @@ const filteredTimelineItems = useMemo(() => {
               onPress={goToHomeSystems}
             />
             <QuickActionChip
-              label="Timeline"
-              icon="time-outline"
-              onPress={scrollToTimeline}
-            />
-            <QuickActionChip
-              label="Add record"
-              icon="add-circle-outline"
-              onPress={goToAddTimelineRecord}
-            />
-              <QuickActionChip
               label="Attachments"
               icon="attach-outline"
               onPress={goToAttachments}
             />
-
             <QuickActionChip
-              label="QR Codes"
-              icon="qr-code-outline"
-              onPress={() => navigation.navigate("AssetQRCodes", { assetId: home.id })}
-            />
-            <QuickActionChip
-              label="Showcase"
-              icon="images-outline"
-              onPress={goToShowcase}
-            />
-            <QuickActionChip
-              label="Public view"
-              icon="open-outline"
-              onPress={goToPublicView}
+              label="Add to Timeline"
+              icon="add-circle-outline"
+              onPress={goToAddTimelineRecord}
             />
             <QuickActionChip
               label="Edit home"
@@ -1215,21 +1211,32 @@ const filteredTimelineItems = useMemo(() => {
         {/* Hero */}
         <View style={[styles.heroCard, isWide && styles.heroCardWide]}>
           <View style={[styles.heroImageWrap, isWide && styles.heroImageWrapWide]}>
-            {heroImage ? (
+          {heroImage ? (
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={goToShowcase}
+              style={styles.heroTouchable}
+            >
               <Image
                 source={heroImage}
                 style={[styles.heroImage, isWide && styles.heroImageWide]}
+                resizeMode="cover"
               />
-            ) : (
-              <TouchableOpacity
-                style={styles.heroPlaceholder}
-                activeOpacity={0.85}
-                onPress={uploadHeroPhoto}
-              >
-                <Ionicons name="image-outline" size={28} color={colors.textMuted} />
-                <Text style={styles.heroPlaceholderText}>Upload a photo</Text>
-              </TouchableOpacity>
-            )}
+
+              <View style={styles.heroOverlayIcon}>
+                <Ionicons name="images-outline" size={18} color="white" />
+              </View>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={styles.heroPlaceholder}
+              activeOpacity={0.85}
+              onPress={uploadHeroPhoto}
+            >
+              <Ionicons name="image-outline" size={28} color={colors.textMuted} />
+              <Text style={styles.heroPlaceholderText}>Add Hero Photo</Text>
+            </TouchableOpacity>
+          )}
 
             {/* Tiny spinner while resolving placement */}
             {heroResolving && (
@@ -1317,7 +1324,17 @@ const filteredTimelineItems = useMemo(() => {
               />
             </View>
             )}
+            <TouchableOpacity
+            style={styles.primaryAddBtn}
+            onPress={goToAttachments}
+          >
+            <Ionicons name="attach-outline" size={18} color="#fff" />
+            <Text style={styles.primaryAddBtnText}>
+              Add receipts, warranties, docs
+            </Text>
+          </TouchableOpacity>
           </View>
+
         </View>
 
         {/* Timeline */}
@@ -1330,7 +1347,7 @@ const filteredTimelineItems = useMemo(() => {
             <View style={{ flex: 1 }} />
             {(svcLoading || storyLoading) && <ActivityIndicator size="small" />}
              <QuickActionChip
-              label="Add record"
+              label="Add To Timeline"
               icon="add-circle-outline"
               onPress={goToAddTimelineRecord}
             />
@@ -1682,6 +1699,45 @@ const styles = StyleSheet.create({
      borderRadius: radius.lg,
   },
   heroImage: { width: "100%", height: "100%" },
+
+  heroTouchable: {
+  width: "100%",
+  height: "100%",
+},
+
+heroOverlayIcon: {
+  position: "absolute",
+  right: 10,
+  top: 10,
+  backgroundColor: "rgba(15,23,42,0.6)",
+  borderRadius: 999,
+  padding: 6,
+},
+
+  heroOverlayIcon: {
+  position: "absolute",
+  right: 10,
+  top: 10,
+  backgroundColor: "rgba(15,23,42,0.6)",
+  borderRadius: 999,
+  padding: 6,
+},
+primaryAddBtn: {
+  marginTop: 12,
+  backgroundColor: colors.primary, // Keepr blue
+  paddingVertical: 12,
+  paddingHorizontal: 16,
+  borderRadius: 10,
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 8,
+},
+
+primaryAddBtnText: {
+  color: "#fff",
+  fontWeight: "600",
+},
 
   // Web-only: Redfin-style two-column header (hero left, details right).
   heroCardWide: {
