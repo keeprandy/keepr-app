@@ -1153,7 +1153,7 @@ useFocusEffect(
             <Text style={styles.cardTitle}>Homes</Text>
             <AssetSection
               label="Properties"
-              hint="Primary Home, Second Homes, and Rental Properties"
+              hint="Homes and Rental Properties"
               icon="home-outline"
               onViewAll={() => goGroup("home")}
               items={topHomes}

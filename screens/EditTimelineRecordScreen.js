@@ -32,6 +32,8 @@ import { useOperationFeedback } from "../context/OperationFeedbackContext";
 import { getSignedUrl, listAttachmentsForTarget, removePlacementById } from "../lib/attachmentsApi";
 import { createLinkAttachment, uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import KeeprDateField from "../components/KeeprDateField";
+import AttachmentViewerModal from "../components/AttachmentViewerModal";
+
 /* ---------------- helpers ---------------- */
 
 
@@ -43,6 +45,29 @@ function safeMoney(raw) {
   const n = Number(normalized);
   if (Number.isNaN(n)) return null;
   return n;
+}
+
+const COST_CATEGORIES = [
+  "Electricity",
+  "Gas",
+  "Water",
+  "Insurance",
+  "Taxes",
+  "Mortgage Interest",
+  "HOA",
+  "Maintenance",
+  "Repairs",
+  "Cleaning",
+  "Supplies",
+  "Other",
+];
+
+function getYearFromIsoDate(value) {
+  if (!value) return new Date().getFullYear();
+  const m = String(value).match(/^(\d{4})-/);
+  if (m?.[1]) return Number(m[1]);
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? new Date().getFullYear() : d.getFullYear();
 }
 
 function buildKeeprProLabel(row) {
@@ -128,13 +153,24 @@ export default function EditTimelineRecordScreen({ route, navigation }) {
   const { runMutation, showError } = useOperationFeedback();
   // record fields
   const [assetId, setAssetId] = useState(null);
-  const [serviceType, setServiceType] = useState("moment"); // moment | diy | pro
+  const [serviceType, setServiceType] = useState("moment"); // moment | diy | pro | cost
   const [date, setDate] = useState("");
   const [title, setTitle] = useState("");
   const [provider, setProvider] = useState("");
   const [location, setLocation] = useState("");
   const [cost, setCost] = useState("");
   const [notes, setNotes] = useState("");
+
+  const [costCategory, setCostCategory] = useState(null);
+  const [costMode, setCostMode] = useState("single");
+  const [costYear, setCostYear] = useState(() => getYearFromIsoDate(date));
+  const [costBreakdown, setCostBreakdown] = useState("");
+
+  useEffect(() => {
+  if (serviceType === "cost" && costMode === "annual") {
+    setCostYear(getYearFromIsoDate(date));
+  }
+}, [date, serviceType, costMode]);
 
   // system + pro
   const [systems, setSystems] = useState([]);
@@ -160,11 +196,50 @@ export default function EditTimelineRecordScreen({ route, navigation }) {
   const [docRows, setDocRows] = useState([]);
   const [linkRows, setLinkRows] = useState([]);
   const [recordAttachments, setRecordAttachments] = useState([]);
+
+const attachmentCollection = useMemo(() => {
+  return (recordAttachments || []).map((r) => {
+    let resolvedUrl = r.url || null;
+
+    // 🔥 KEY FIX: build URL if missing
+    if (!resolvedUrl && r.storage_path && r.bucket) {
+      try {
+        const { data } = supabase.storage
+          .from(r.bucket)
+          .getPublicUrl(r.storage_path);
+
+        resolvedUrl = data?.publicUrl || null;
+      } catch (e) {
+        console.log("EditTimelineRecord URL resolve error", e);
+      }
+    }
+
+    return {
+      id: r.id,
+      title: r.title || r.file_name || "Attachment",
+      url: resolvedUrl,
+      contentType: r.mime_type || "",
+      kind: r.kind,
+      placement_id: r.placement_id,
+      storage_path: r.storage_path,
+      bucket: r.bucket,
+    };
+  });
+}, [recordAttachments]);
+
+const openViewer = (index) => {
+  setViewer({ index });
+};
+
+const closeViewer = () => setViewer(null);
+
   const [loadingAttachments, setLoadingAttachments] = useState(false);
 
   const [addLinkModal, setAddLinkModal] = useState(false);
   const [newLinkTitle, setNewLinkTitle] = useState("");
   const [newLinkUrl, setNewLinkUrl] = useState("");
+  const [viewer, setViewer] = useState(null);
+
 
   const selectedSystem = useMemo(
     () => (selectedSystemId ? systems.find((s) => s.id === selectedSystemId) : null),
@@ -293,7 +368,12 @@ const loadRecordAttachments = useCallback(async () => {
       setAssetId(rec.asset_id || null);
 
       const st = rec.service_type || "moment";
-      setServiceType(st === "diy" ? "diy" : st === "pro" ? "pro" : "moment");
+      setServiceType(
+        st === "diy" ? "diy" :
+        st === "pro" ? "pro" :
+        st === "cost" ? "cost" :
+        "moment"
+      );
       setDate(rec.performed_at || "");
       setTitle(rec.title || "");
       setProvider(rec.provider || rec.vendor || rec.keepr_pro_name || ""); // FIX: don’t set provider from location
@@ -302,6 +382,17 @@ const loadRecordAttachments = useCallback(async () => {
       setNotes(rec.notes || "");
       setSelectedSystemId(rec.system_id || null);
       setSelectedKeeprProId(rec.keepr_pro_id || null);
+
+      const meta = rec.extra_metadata || {};
+
+        if (st === "cost") {
+          setServiceType("cost");
+          setCostCategory(meta.category || null);
+          setCostMode(meta.mode || "single");
+          setCostYear(meta.year || getYearFromIsoDate(rec.performed_at));
+          setCostBreakdown(meta.breakdown || "");
+        }
+
 
       // systems for asset (best-effort)
       const sys = await loadSystemsForAsset(rec.asset_id);
@@ -318,6 +409,7 @@ const loadRecordAttachments = useCallback(async () => {
           if (match) setSelectedKeeprProLabel(buildKeeprProLabel(match));
         }
       }
+
 
       // proof
       const proof = await loadProof(recordId);
@@ -376,8 +468,28 @@ const removeAttachment = useCallback(async (placementId) => {
       if (creatingQuickSystem) return;
       setCreatingQuickSystem(true);
 
+      function normalizeAttachments(rows) {
+      return (rows || []).map((r) => ({
+        id: r.id,
+        title: r.title || r.file_name || "Attachment",
+        url: r.url || null,
+        contentType: r.mime_type || "",
+        kind: r.kind,
+        placement_id: r.placement_id,
+        storage_path: r.storage_path,
+        bucket: r.bucket,
+      }));
+    }
+
+    const openViewer = (index) => {
+      setViewer({ index });
+    };
+
+    const closeViewer = () => setViewer(null);
+
       // Prefer the canonical systems table; use a safe placeholder KSC code
-      const payload = {
+
+const payload = {
         asset_id: assetId,
         name,
         ksc_code: "custom",
@@ -393,6 +505,8 @@ const removeAttachment = useCallback(async (placementId) => {
         .single();
 
       if (error) throw error;
+
+      
 
       // Refresh system list and select the new one
       const sys = await loadSystemsForAsset(assetId);
@@ -613,16 +727,43 @@ const removeAttachment = useCallback(async (placementId) => {
       return;
     }
 
+let finalDate = dateIso;
+let finalTitle = title?.trim();
+
+if (serviceType === "cost") {
+  finalDate =
+    costMode === "annual"
+      ? `${costYear}-12-31`
+      : dateIso;
+
+  finalTitle =
+    finalTitle ||
+    (costMode === "annual"
+      ? `${costCategory} — Annual Rollup`
+      : `${costCategory}`);
+}
+
     const payload = {
-      title: title?.trim() || null,
+      title: finalTitle || null,
       notes: notes?.trim() || null,
       service_type: serviceType === "moment" ? "moment" : serviceType,
-      performed_at: dateIso,
+      performed_at: finalDate,
       location: location?.trim() || null,
       provider: provider?.trim?.() || null,
       cost: safeMoney(cost),
       system_id: selectedSystemId || null,
       keepr_pro_id: selectedKeeprProId || null,
+
+      // 🔥 THIS is what you were missing
+      extra_metadata:
+        serviceType === "cost"
+          ? {
+              category: costCategory,
+              mode: costMode,
+              year: costYear,
+              breakdown: costBreakdown || null,
+            }
+          : {},
     };
 
     setSaving(true);
@@ -780,6 +921,20 @@ const removeAttachment = useCallback(async (placementId) => {
                     Pro
                   </Text>
                 </TouchableOpacity>
+                <TouchableOpacity
+                style={[styles.togglePill, serviceType === "cost" && styles.toggleActivePrimary]}
+                onPress={() => setServiceType("cost")}
+              >
+                <Ionicons
+                  name={serviceType === "cost" ? "cash" : "cash-outline"}
+                  size={14}
+                  color={serviceType === "cost" ? colors.brandWhite : colors.textMuted}
+                  style={{ marginRight: 6 }}
+                />
+                <Text style={[styles.toggleText, serviceType === "cost" && styles.toggleTextActive]}>
+                  Expense
+                </Text>
+              </TouchableOpacity>
               </View>
 
               <View style={styles.row}>
@@ -793,15 +948,90 @@ const removeAttachment = useCallback(async (placementId) => {
                     placeholderTextColor={colors.textMuted}
                   />
                 </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.label}>Date</Text>
-                <KeeprDateField
-                  value={date}
-                  onChange={setDate}
-                />
+                  {!(serviceType === "cost" && costMode === "annual") ? (
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.label}>Date</Text>
+                      <KeeprDateField
+                        value={date}
+                        onChange={setDate}
+                      />
+                    </View>
+                  ) : (
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.label}>Recorded Date</Text>
+                      <View style={styles.input}>
+                        <Text style={{ fontSize: 13, color: colors.textPrimary, fontWeight: "700" }}>
+                          {`${costYear}-12-31`}
+                        </Text>
+                      </View>
+                    </View>
+                  )}
               </View>
-              </View>
+             {serviceType === "cost" && (
+              <>
+                <Text style={styles.label}>Category</Text>
 
+                <View style={styles.chipWrap}>
+                  {COST_CATEGORIES.map((c) => {
+                    const selected = costCategory === c;
+                    return (
+                      <TouchableOpacity
+                        key={c}
+                        onPress={() => setCostCategory(c)}
+                        style={[styles.chip, selected && styles.chipActive]}
+                      >
+                        <Text style={[styles.chipText, selected && styles.chipTextActive]}>
+                          {c}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {/* Mode toggle */}
+                <View style={styles.row}>
+                  <TouchableOpacity
+                    style={[styles.togglePill, costMode === "single" && styles.toggleActiveSoft]}
+                    onPress={() => setCostMode("single")}
+                  >
+                    <Text style={[styles.toggleText, costMode === "single" && styles.toggleTextSoftActive]}>
+                      Single
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.togglePill, costMode === "annual" && styles.toggleActivePrimary]}
+                    onPress={() => {
+                      setCostMode("annual");
+                      setCostYear(getYearFromIsoDate(date));
+                    }}
+                  >
+                    <Text style={[styles.toggleText, costMode === "annual" && styles.toggleTextActive]}>
+                      Annual
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {costMode === "annual" && (
+                  <>
+                    <Text style={styles.label}>Year</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={String(costYear)}
+                      onChangeText={(t) => setCostYear(Number(t))}
+                    />
+
+                    <Text style={styles.label}>Breakdown</Text>
+                    <TextInput
+                      style={[styles.input, { minHeight: 100 }]}
+                      value={costBreakdown}
+                      onChangeText={setCostBreakdown}
+                      multiline
+                    />
+                  </>
+                )}
+              </>
+            )}
               <View style={styles.row}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.label}>Cost</Text>
@@ -904,9 +1134,18 @@ const removeAttachment = useCallback(async (placementId) => {
               ) : (
                 recordAttachments.map((row) => (
                   <View key={row.id || row.placement_id} style={styles.pendingAttachmentRow}>
+                    
                     <TouchableOpacity
                       style={{ flexDirection: "row", alignItems: "center", flex: 1 }}
-                      onPress={() => openAttachment(row)}
+                      onPress={() => {
+                      const index = attachmentCollection.findIndex(
+                        (a) =>
+                          (a.placement_id && row.placement_id && a.placement_id === row.placement_id) ||
+                          (a.id && row.attachment_id && a.id === row.attachment_id) ||
+                          (a.id && row.id && a.id === row.id)
+                      );
+                      if (index >= 0) openViewer(index);
+                    }}
                     >
                       <Ionicons name="document-outline" size={18} color={colors.textSecondary} />
                       <View style={{ flex: 1, marginLeft: 10 }}>
@@ -1158,9 +1397,6 @@ const removeAttachment = useCallback(async (placementId) => {
             </View>
           </Modal>
 
-
-
-
       {/* Add link modal */}
       <Modal visible={addLinkModal} animationType="slide" transparent onRequestClose={() => setAddLinkModal(false)}>
         <View style={styles.modalBackdrop}>
@@ -1204,6 +1440,29 @@ const removeAttachment = useCallback(async (placementId) => {
           </View>
         </View>
       </Modal>
+      <AttachmentViewerModal
+        visible={!!viewer}
+        attachment={attachmentCollection[viewer?.index || 0]}
+        collection={attachmentCollection}
+        index={viewer?.index || 0}
+        onIndexChange={(next) =>
+          setViewer((v) => (v ? { ...v, index: next } : v))
+        }
+        onClose={closeViewer}
+        onDelete={async () => {
+          const current = attachmentCollection[viewer?.index || 0];
+          if (!current?.placement_id) return;
+
+          await removePlacementById(current.placement_id);
+          await loadRecordAttachments();
+          await refreshProof();
+          closeViewer();
+        }}
+        assetId={assetId}
+        systemId={selectedSystemId}
+        recordId={recordId}
+      />
+
     </SafeAreaView>
   );
 }
@@ -1253,6 +1512,37 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accentBlue,
   },
   backBtnText: { color: "#fff", fontWeight: "900" },
+
+  chipWrap: {
+  flexDirection: "row",
+  flexWrap: "wrap",
+  gap: spacing.xs,
+  marginTop: spacing.sm,
+},
+
+chip: {
+  borderRadius: radius.pill,
+  borderWidth: 1,
+  borderColor: colors.chipBorder,
+  backgroundColor: colors.surfaceSubtle,
+  paddingHorizontal: spacing.md,
+  paddingVertical: 7,
+},
+
+chipActive: {
+  backgroundColor: colors.accentBlue,
+  borderColor: colors.accentBlue,
+},
+
+chipText: {
+  fontSize: 12,
+  color: colors.textSecondary,
+  fontWeight: "800",
+},
+
+chipTextActive: {
+  color: colors.brandWhite,
+},
 
   card: {
     borderRadius: radius.xl,

@@ -1095,6 +1095,68 @@ export default function CreateEventScreen({ navigation, route }) {
                 <Text style={styles.secondaryText}>Save draft</Text>
               )}
             </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.primaryBtn,
+                saving && { opacity: 0.7 },
+                !assetId && { opacity: 0.4 },
+              ]}
+              onPress={async () => {
+                if (saving || !assetId) return;
+
+                try {
+                  setSaving(true);
+
+                  let evId = eventId;
+
+                  // Ensure the draft exists before handing off
+                  if (!evId) {
+                    const row = await upsertEventRow({ nextStatus: "draft" });
+                    evId = row?.id;
+                    if (!evId) throw new Error("Could not create event draft.");
+                    setEventId(evId);
+                  }
+
+                  // Upload any pending attachments first so AddTimelineRecord gets a clean payload
+                  if (newAttachments.length > 0) {
+                    await uploadPendingAttachments(evId);
+                  }
+
+                  navigation.navigate("AddTimelineRecord", {
+                    eventId: evId,
+
+                    // full prefill
+                    prefillTitle: title,
+                    prefillNotes: notes,
+                    prefillDate: occurredAtISO,
+                    prefillAmount: amountDollars,
+                    prefillAssetId: assetId,
+                    prefillSystemId: systemId,
+
+                    // pass uploaded attachments, not pending locals
+                    existingAttachments,
+                    source: "event",
+                  });
+                } catch (e) {
+                  console.log("CreateEvent -> AddTimelineRecord handoff error:", e);
+                  Alert.alert(
+                    "Couldn’t continue",
+                    e?.message || "Please try again."
+                  );
+                } finally {
+                  setSaving(false);
+                }
+              }}
+              disabled={saving || !assetId}
+              activeOpacity={0.9}
+            >
+              <Ionicons
+                name="checkmark-circle-outline"
+                size={16}
+                color="white"
+              />
+              <Text style={styles.primaryText}>Add to Timeline</Text>
+            </TouchableOpacity>
           </View>
 
           <Text style={styles.statusHint}>

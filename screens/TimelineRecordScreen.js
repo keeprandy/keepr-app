@@ -30,6 +30,7 @@ import { supabase } from "../lib/supabaseClient";
 import AttachmentViewerModal from "../components/AttachmentViewerModal";
 import { confirmDestructive } from "../lib/confirm";
 import { formatKeeprDateWithWeekday } from "../lib/dateFormat";
+import { WebView } from "react-native-webview";
 
 import {
   listAttachmentsForTarget,
@@ -199,6 +200,68 @@ export default function TimelineRecordScreen({ route, navigation }) {
     [photos, files, links]
   );
 
+  function isPdfLike(file) {
+  if (!file) return false;
+  const type = String(file.contentType || "").toLowerCase();
+  const title = String(file.title || "").toLowerCase();
+  return type.includes("pdf") || title.endsWith(".pdf");
+}
+
+const firstPdf = useMemo(() => {
+  return files.find((f) => isPdfLike(f)) || null;
+}, [files]);
+
+const [pdfHeroUrl, setPdfHeroUrl] = useState(null);
+const [pdfHeroLoading, setPdfHeroLoading] = useState(false);
+
+useEffect(() => {
+  let cancelled = false;
+
+  const run = async () => {
+    // photo always wins
+    if (photos.length > 0 || !firstPdf) {
+      setPdfHeroUrl(null);
+      setPdfHeroLoading(false);
+      return;
+    }
+
+    // if url already exists, use it
+    if (firstPdf.url) {
+      setPdfHeroUrl(firstPdf.url);
+      setPdfHeroLoading(false);
+      return;
+    }
+
+    // otherwise try signed url
+    if (!firstPdf.id) {
+      setPdfHeroUrl(null);
+      setPdfHeroLoading(false);
+      return;
+    }
+
+    try {
+      setPdfHeroLoading(true);
+
+      // if your normalized file row already includes signed/public url, this may not be needed
+      const resolved = firstPdf.url || null;
+
+      if (!cancelled) {
+        setPdfHeroUrl(resolved);
+      }
+    } catch (e) {
+      console.log("TimelineRecordScreen pdf hero url error", e);
+      if (!cancelled) setPdfHeroUrl(null);
+    } finally {
+      if (!cancelled) setPdfHeroLoading(false);
+    }
+  };
+
+  run();
+  return () => {
+    cancelled = true;
+  };
+}, [photos, firstPdf]);
+
   const heroUrl = useMemo(() => {
     if (photos.length) return photos[0].url;
     return record?.hero_url || record?.cover_url || null;
@@ -208,11 +271,14 @@ export default function TimelineRecordScreen({ route, navigation }) {
   // (This keeps the hero from rendering as a blank/black box.)
   const effectiveHeroUrl = heroUrl || null;
 
-  const heroTitle = record?.title || "Timeline record";
+  const heroTitle =
+  record?.title ||
+  (files.length === 1 ? files[0].title : "Timeline record");
   const heroSubtitle = formatDate(
     record?.performed_at || record?.occurred_at || record?.created_at
   );
-  const confidenceLabel = record?.verification_status || "verified";
+  const hasProof = (photos.length + files.length + linkAttachments.length) > 0;
+  const confidenceLabel = hasProof ? "Documented" : "Unverified";
 
   const openViewer = (collectionKey, index) =>
     setViewer({ collectionKey, index: index || 0 });
@@ -933,12 +999,62 @@ useFocusEffect(
 
         {/* HERO */}
         <View style={styles.heroCard}>
-          {effectiveHeroUrl ? (
-            <Image
-              source={{ uri: effectiveHeroUrl }}
-              style={styles.heroImage}
-              resizeMode="contain"
-            />
+          {photos.length > 0 && effectiveHeroUrl ? (
+            <TouchableOpacity activeOpacity={0.95} onPress={() => openViewer("photo", 0)}>
+            <View style={styles.heroImageStage}>
+              <Image
+                source={{ uri: effectiveHeroUrl }}
+                style={styles.heroImage}
+                resizeMode="contain"
+              />
+            </View>
+          </TouchableOpacity>
+          ) : firstPdf ? (
+            <TouchableOpacity
+              activeOpacity={0.95}
+              onPress={() => openViewer("file", files.findIndex((f) => f.id === firstPdf.id))}
+              style={styles.heroPdfWrap}
+            >
+              {pdfHeroLoading ? (
+                <View style={styles.heroPdfLoading}>
+                  <ActivityIndicator />
+                  <Text style={styles.heroPdfLoadingText}>Loading PDF preview…</Text>
+                </View>
+              ) : pdfHeroUrl ? (
+                IS_WEB ? (
+                  <iframe
+                    title="PDF preview"
+                    src={pdfHeroUrl}
+                    style={styles.heroPdfFrame}
+                  />
+                ) : (
+                  <WebView
+                    source={{ uri: pdfHeroUrl }}
+                    style={styles.heroPdfWebView}
+                    originWhitelist={["*"]}
+                    scrollEnabled
+                    nestedScrollEnabled
+                  />
+                )
+              ) : (
+                <View style={styles.heroFallback}>
+                  <Ionicons
+                    name="document-text-outline"
+                    size={30}
+                    color="rgba(148,163,184,0.9)"
+                  />
+                  <Text style={styles.heroFallbackText}>
+                    {firstPdf.title || "PDF document"}
+                  </Text>
+                  <Text style={styles.heroFallbackSub}>Tap to open PDF</Text>
+                </View>
+              )}
+
+              <View style={styles.heroPdfOverlayHint}>
+                <Ionicons name="document-text-outline" size={14} color="#fff" />
+                <Text style={styles.heroPdfOverlayHintText}>PDF Preview</Text>
+              </View>
+            </TouchableOpacity>
           ) : (
             <View style={styles.heroFallback}>
               <Ionicons
@@ -947,9 +1063,11 @@ useFocusEffect(
                 color="rgba(148,163,184,0.9)"
               />
               <Text style={styles.heroFallbackText}>
-                {heroTitle || "Keepr record"}
+                {files.length > 0 ? files[0].title : "No preview available"}
               </Text>
-              <Text style={styles.heroFallbackSub}>{summaryLine}</Text>
+              <Text style={styles.heroFallbackSub}>
+                {files.length > 0 ? "Tap to open file" : summaryLine}
+              </Text>
             </View>
           )}
 
@@ -959,17 +1077,9 @@ useFocusEffect(
               icon="layers-outline"
             />
             <VerificationChip
-              label={
-                String(confidenceLabel).toLowerCase() === "verified"
-                  ? "Verified"
-                  : confidenceLabel
-              }
-              icon="shield-checkmark-outline"
-              tone={
-                String(confidenceLabel).toLowerCase() === "verified"
-                  ? "success"
-                  : "warning"
-              }
+              label={confidenceLabel}
+              icon={hasProof ? "shield-checkmark-outline" : "alert-circle-outline"}
+              tone={hasProof ? "success" : "warning"}
             />
             <VerificationChip label="Owner" icon="person-circle-outline" />
           </View>
@@ -1264,7 +1374,6 @@ useFocusEffect(
 <View style={{ marginTop: 10 }}>
   <DetectedLinkChips text={record?.notes || ""} />
 </View>
-
         </View>
 
         {/* DETAILS */}
@@ -1276,6 +1385,37 @@ useFocusEffect(
                 <Text style={styles.detailLabel}>Cost: </Text>
                 <Text style={styles.detailValue}>{money(record?.cost)}</Text>
               </Text>
+            ) : null}
+            {record?.extra_metadata?.category ? (
+              <Text style={styles.detailLine}>
+                <Text style={styles.detailLabel}>Category: </Text>
+                <Text style={styles.detailValue}>{record.extra_metadata.category}</Text>
+              </Text>
+            ) : null}
+
+            {record?.extra_metadata?.mode ? (
+              <Text style={styles.detailLine}>
+                <Text style={styles.detailLabel}>Mode: </Text>
+                <Text style={styles.detailValue}>
+                  {record.extra_metadata.mode === "annual" ? "Annual Rollup" : "Single Entry"}
+                </Text>
+              </Text>
+            ) : null}
+
+            {record?.extra_metadata?.year ? (
+              <Text style={styles.detailLine}>
+                <Text style={styles.detailLabel}>Year: </Text>
+                <Text style={styles.detailValue}>{record.extra_metadata.year}</Text>
+              </Text>
+            ) : null}
+
+            {record?.extra_metadata?.breakdown ? (
+              <View style={{ marginTop: 10 }}>
+                <Text style={styles.detailLabel}>Cost Breakdown</Text>
+                <View style={[styles.textCard, { marginTop: 6 }]}>
+                  <Text style={styles.textBody}>{record.extra_metadata.breakdown}</Text>
+                </View>
+              </View>
             ) : null}
 
             {(record?.odometer !== null && record?.odometer !== undefined) ||
@@ -1365,31 +1505,20 @@ useFocusEffect(
       </ScrollView>
 
       {/* Viewer */}
-      <AttachmentViewerModal
-        visible={!!viewer}
-        attachment={currentViewerAttachment}
-        collection={currentViewerCollection}
-        index={viewer?.index || 0}
-        onIndexChange={(next) =>
-          setViewer((v) => (v ? { ...v, index: next } : v))
-        }
-        onClose={closeViewer}
-        onDelete={handleDeleteCurrentAttachment}
-        assetId={assetId}
-        systemId={systemId}
-        recordId={recordId}
-        onSendToKI={({ attachmentId }) => {
-          // Close the viewer first so navigation feels clean
-          closeViewer();
-          if (!attachmentId) return;
-          navigation.navigate("KeeprIntelligence", {
-            assetId,
-            systemId,
-            recordId,
-            attachmentId,
-          });
-        }}
-      />
+        <AttachmentViewerModal
+          visible={!!viewer}
+          attachment={currentViewerAttachment}
+          collection={currentViewerCollection}
+          index={viewer?.index || 0}
+          onIndexChange={(next) =>
+            setViewer((v) => (v ? { ...v, index: next } : v))
+          }
+          onClose={closeViewer}
+          onDelete={handleDeleteCurrentAttachment}
+          assetId={assetId}
+          systemId={systemId}
+          recordId={recordId}
+        />
 
       {/* Add proof sheet */}
       <Modal
@@ -1612,18 +1741,27 @@ const styles = StyleSheet.create({
     maxWidth: SCREEN_W * 0.26,
   },
 
-  heroCard: {
-    margin: spacing.lg,
-    marginBottom: spacing.md,
-    borderRadius: radius.xl,
-    overflow: "hidden",
-    backgroundColor: UI.cardBg,
-    ...shadows.lg,
-  },
-  heroImage: {
-    width: "100%",
-    height: SCREEN_W > 900 ? 360 : 260,
-  },
+    heroCard: {
+      margin: spacing.lg,
+      marginBottom: spacing.md,
+      borderRadius: radius.xl,
+      overflow: "hidden",
+      backgroundColor: UI.cardBg,
+      ...shadows.lg,
+    },
+    heroImage: {
+      width: "100%",
+      height: SCREEN_W > 900 ? 360 : 260,
+      alignSelf: "center",
+      backgroundColor: UI.cardBg,
+    },
+    heroImageStage: {
+  width: "100%",
+  height: SCREEN_W > 900 ? 360 : 260,
+  alignItems: "center",
+  justifyContent: "center",
+  backgroundColor: UI.cardBg,
+},
   heroFallback: {
     width: "100%",
     height: SCREEN_W > 900 ? 360 : 260,
@@ -1652,6 +1790,56 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: spacing.xs,
   },
+  heroPdfWrap: {
+  width: "100%",
+  height: SCREEN_W > 900 ? 360 : 260,
+  backgroundColor: "#fff",
+  position: "relative",
+},
+
+heroPdfLoading: {
+  flex: 1,
+  alignItems: "center",
+  justifyContent: "center",
+  backgroundColor: UI.surface,
+},
+
+heroPdfLoadingText: {
+  marginTop: 8,
+  ...typography.caption,
+  color: UI.text2,
+},
+
+heroPdfFrame: {
+  width: "100%",
+  height: "100%",
+  border: "none",
+},
+
+heroPdfWebView: {
+  width: "100%",
+  height: "100%",
+  backgroundColor: "#fff",
+},
+
+heroPdfOverlayHint: {
+  position: "absolute",
+  top: 12,
+  right: 12,
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 6,
+  backgroundColor: "rgba(15,23,42,0.75)",
+  paddingHorizontal: 10,
+  paddingVertical: 6,
+  borderRadius: 999,
+},
+
+heroPdfOverlayHintText: {
+  color: "#fff",
+  fontSize: 12,
+  fontWeight: "700",
+},
 
   headerBlock: {
     marginHorizontal: spacing.lg,
@@ -1691,7 +1879,7 @@ const styles = StyleSheet.create({
 
   section: {
     marginHorizontal: spacing.lg,
-    marginBottom: spacing.lg,
+    marginBottom: spacing.md,
   },
   sectionHeaderRow: {
     flexDirection: "row",
@@ -1783,23 +1971,22 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: UI.border,
   },
-  proofRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: UI.border,
-  },
-  proofRowTitle: {
-    ...typography.body,
-    color: colors.textPrimary,
-  },
-  proofRowSub: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
+proofRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  paddingHorizontal: spacing.md,
+  paddingVertical: spacing.md,
+  borderBottomWidth: StyleSheet.hairlineWidth,
+  borderBottomColor: UI.border,
+},
+proofRowTitle: {
+  fontSize: 14,
+  fontWeight: "700",
+},
+proofRowSub: {
+  fontSize: 12,
+  opacity: 0.7,
+},
 
   emptyCard: {
     marginTop: spacing.sm,

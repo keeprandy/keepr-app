@@ -12,6 +12,24 @@ import {
 } from "react-native";
 import { supabase } from "../lib/supabaseClient";
 import { exportToXlsx } from "../utils/exportPackageToXlsx";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { KeyboardAvoidingView } from "react-native";
+
+function MobileField({ label, value, editable = false, render = null }) {
+  return (
+    <View style={styles.mobileField}>
+      <Text style={styles.mobileFieldLabel}>{label}</Text>
+      {editable && typeof render === "function" ? (
+        render()
+      ) : (
+        <Text style={styles.mobileFieldValue} numberOfLines={2}>
+          {value || "—"}
+        </Text>
+      )}
+    </View>
+  );
+}
 
 /**
  * Owner Systems Inventory (Package Print + Editable)
@@ -40,6 +58,9 @@ export default function OwnerSystemsPackagePrintScreen({ route, navigation }) {
   // KeeprPros picker (for assignment)
   const [keeprPros, setKeeprPros] = useState([]);
   const [pickForSystemId, setPickForSystemId] = useState(null);
+  const insets = useSafeAreaInsets();
+  const [query, setQuery] = useState("");
+
 
   // ---------------------------
   // Date helpers (MM-DD-YYYY UI)
@@ -206,33 +227,11 @@ const formatDDMMYYYY = (value) => {
       (x) => isPresent(x.manufacturer) && isPresent(x.model) && isPresent(x.serial_number)
     ).length;
 
-    // Sort: warranty expiring soon first, then unassigned, then system name
-    const parseDateLoose = (s) => {
-      const iso = toIsoDateOrEmpty(s);
-      if (iso && isIsoDate(iso)) return new Date(iso);
-      const dt = new Date(String(s || ""));
-      return Number.isNaN(dt.getTime()) ? null : dt;
-    };
-
-    const now = new Date();
-    const daysBetween = (a, b) => Math.floor((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
-
-    const sorted = [...items].sort((a, b) => {
-      const ad = parseDateLoose(a.warranty_expires);
-      const bd = parseDateLoose(b.warranty_expires);
-      const aDays = ad ? daysBetween(now, ad) : null;
-      const bDays = bd ? daysBetween(now, bd) : null;
-
-      const aSoon = aDays != null && aDays >= 0 && aDays <= 90;
-      const bSoon = bDays != null && bDays >= 0 && bDays <= 90;
-      if (aSoon !== bSoon) return aSoon ? -1 : 1;
-
-      const aUnassigned = !isPresent(a.assigned_keepr_pro);
-      const bUnassigned = !isPresent(b.assigned_keepr_pro);
-      if (aUnassigned !== bUnassigned) return aUnassigned ? -1 : 1;
-
-      return safeStr(a.system_name).toLowerCase().localeCompare(safeStr(b.system_name).toLowerCase());
-    });
+const sorted = [...items].sort((a, b) =>
+  safeStr(a.system_name).toLowerCase().localeCompare(
+    safeStr(b.system_name).toLowerCase()
+  )
+);
 
     return {
       items: sorted,
@@ -249,6 +248,12 @@ const formatDDMMYYYY = (value) => {
       },
     };
   }, [pkg, rows]);
+
+const filteredItems = computed.items.filter((r) =>
+  safeStr(r.system_name)
+    .toLowerCase()
+    .includes(query.toLowerCase())
+);
 
   const enterEditMode = () => {
     const items = rows.map((r) => r.row || {});
@@ -482,7 +487,8 @@ const formatDDMMYYYY = (value) => {
   }
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+  <SafeAreaView style={styles.screen} edges={["top", "bottom"]}>
+
       {isWeb ? (
         <style>{`
           @media print {
@@ -504,13 +510,37 @@ const formatDDMMYYYY = (value) => {
       ) : null}
 
       {/* Header */}
+      <View style={styles.topChrome}>
+
       <View style={styles.header}>
         <Text style={styles.title}>{pkg?.title || "Owner Systems Inventory"}</Text>
         <Text style={styles.metaText}>
           {computed.header.assetName}
           {computed.header.generatedLabel ? ` • Generated ${computed.header.generatedLabel}` : ""}
         </Text>
+        <View style={{ position: "relative" }}>
+          <TextInput
+            placeholder="Search systems…"
+            value={query}
+            onChangeText={setQuery}
+            style={styles.searchInput}
+            placeholderTextColor="#9CA3AF"
+            returnKeyType="search"
+          />
 
+          {query.length > 0 && (
+            <Pressable
+              onPress={() => setQuery("")}
+              style={{
+                position: "absolute",
+                right: 10,
+                top: 10,
+              }}
+            >
+              <Text style={{ fontSize: 16, color: "#6B7280" }}>✕</Text>
+            </Pressable>
+          )}
+        </View>
         <View style={styles.actionsRow} className="no-print">
           <Pressable onPress={() => navigation.goBack?.()} style={[styles.btn, styles.btnSecondary]}>
             <Text style={[styles.btnText, styles.btnSecondaryText]}>Back</Text>
@@ -559,8 +589,23 @@ const formatDDMMYYYY = (value) => {
 
         {editMode && err ? <Text style={styles.errorText}>{err}</Text> : null}
       </View>
-
+      </View>
       {/* Summary */}
+
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: 120 }
+        ]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+
       <View style={styles.summaryCard}>
         <Text style={styles.summaryTitle}>Inventory summary</Text>
         <View style={styles.summaryGrid}>
@@ -591,160 +636,341 @@ const formatDDMMYYYY = (value) => {
         </Text>
       </View>
 
-      {/* Table */}
-      <View style={styles.table}>
-        <View style={[styles.tr, styles.trHead]}>
-          <Text style={[styles.th, styles.colSystem]}>System</Text>
-          <Text style={[styles.th, styles.colType]}>Type</Text>
-          <Text style={[styles.th, styles.colLocation]}>Location</Text>
-          <Text style={[styles.th, styles.colBrand]}>Brand</Text>
-          <Text style={[styles.th, styles.colModel]}>Model</Text>
-          <Text style={[styles.th, styles.colSerial]}>Serial</Text>
-          <Text style={[styles.th, styles.colWarranty]}>Warranty</Text>
-          <Text style={[styles.th, styles.colAssigned]}>Assigned</Text>
-          <Text style={[styles.th, styles.colLast]}>Last Service</Text>
-          <Text style={[styles.th, styles.colNum]}>Services</Text>
-          <Text style={[styles.th, styles.colNum]}>Proofs</Text>
+      {/* Report body */}
+{isWeb ? (
+  <View style={styles.table}>
+    <View style={[styles.tr, styles.trHead]}>
+      <Text style={[styles.th, styles.colSystem]}>System</Text>
+      <Text style={[styles.th, styles.colType]}>Type</Text>
+      <Text style={[styles.th, styles.colLocation]}>Location</Text>
+      <Text style={[styles.th, styles.colBrand]}>Brand</Text>
+      <Text style={[styles.th, styles.colModel]}>Model</Text>
+      <Text style={[styles.th, styles.colSerial]}>Serial</Text>
+      <Text style={[styles.th, styles.colWarranty]}>Warranty</Text>
+      <Text style={[styles.th, styles.colAssigned]}>Assigned</Text>
+      <Text style={[styles.th, styles.colLast]}>Last Service</Text>
+      <Text style={[styles.th, styles.colNum]}>Services</Text>
+      <Text style={[styles.th, styles.colNum]}>Proofs</Text>
+    </View>
+
+    {filteredItems.map((r, idx) => {
+      const systemId = r.system_id || null;
+      const canEditRow = editMode && !!systemId;
+      const dirty = canEditRow ? isRowDirty(r) : false;
+
+      return (
+        <View
+          key={`${safeStr(r.system_name)}-${idx}`}
+          style={[styles.tr, dirty && styles.trDirty]}
+        >
+          <View style={[styles.colSystem, styles.rowCell]}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Text style={styles.td} numberOfLines={2}>
+                {safeStr(r.system_name)}
+              </Text>
+              {dirty ? <Text style={styles.pill}>Edited</Text> : null}
+            </View>
+          </View>
+
+          <Text style={[styles.td, styles.colType]} numberOfLines={2}>
+            {safeStr(r.system_type)}
+          </Text>
+
+          <View style={[styles.cell, styles.colLocation]}>
+            {canEditRow ? (
+              renderInput(systemId, "location", "Add location…")
+            ) : (
+              <Text style={styles.td} numberOfLines={2}>
+                {safeStr(r.location)}
+              </Text>
+            )}
+          </View>
+
+          <View style={[styles.cell, styles.colBrand]}>
+            {canEditRow ? (
+              renderInput(systemId, "manufacturer", "Add brand…")
+            ) : (
+              <Text style={styles.td} numberOfLines={2}>
+                {safeStr(r.manufacturer)}
+              </Text>
+            )}
+          </View>
+
+          <View style={[styles.cell, styles.colModel]}>
+            {canEditRow ? (
+              renderInput(systemId, "model", "Add model…")
+            ) : (
+              <Text style={styles.td} numberOfLines={2}>
+                {safeStr(r.model)}
+              </Text>
+            )}
+          </View>
+
+          <View style={[styles.cell, styles.colSerial]}>
+            {canEditRow ? (
+              renderInput(systemId, "serial_number", "Add serial…")
+            ) : (
+              <Text style={styles.td} numberOfLines={2}>
+                {safeStr(r.serial_number)}
+              </Text>
+            )}
+          </View>
+
+          <View style={[styles.cell, styles.colWarranty]}>
+            {canEditRow ? (
+              <View style={{ gap: 6 }}>
+                {renderInput(systemId, "warranty_provider", "Provider…")}
+                {renderInput(
+                  systemId,
+                  "warranty_expires",
+                  "Expires (MM/DD/YYYY)…",
+                  { kind: "date" }
+                )}
+              </View>
+            ) : (
+              <Text style={styles.td} numberOfLines={2}>
+                {formatDDMMYYYY(r.warranty_expires) || safeStr(r.warranty_provider)}
+              </Text>
+            )}
+          </View>
+
+          <View style={[styles.cell, styles.colAssigned]}>
+            {canEditRow ? (
+              <Pressable
+                onPress={() => setPickForSystemId(systemId)}
+                style={[
+                  styles.assignBtn,
+                  draft?.[systemId]?.assigned_keepr_pro ? null : styles.assignBtnEmpty,
+                ]}
+              >
+                <Text style={styles.assignText}>
+                  {draft?.[systemId]?.assigned_keepr_pro || "Assign KeeprPro…"}
+                </Text>
+              </Pressable>
+            ) : (
+              <Text style={styles.td} numberOfLines={2}>
+                {safeStr(r.assigned_keepr_pro)}
+              </Text>
+            )}
+          </View>
+
+          <Text style={[styles.td, styles.colLast]} numberOfLines={1}>
+            {formatDDMMYYYY(r.last_service_date)}
+          </Text>
+
+          <Text style={[styles.td, styles.colNum]} numberOfLines={1}>
+            {r.service_count ?? 0}
+          </Text>
+
+          <Text style={[styles.td, styles.colNum]} numberOfLines={1}>
+            {r.proof_count ?? 0}
+          </Text>
+        </View>
+      );
+    })}
+  </View>
+) : (
+  
+<View style={styles.mobileList}>
+  {filteredItems.map((r, idx) => {
+    const systemId = r.system_id || null;
+    const canEditRow = editMode && !!systemId;
+    
+    return (
+      <View
+        key={`${safeStr(r.system_name)}-${idx}`}
+        style={styles.mobileCard}
+      >
+        <View style={styles.mobileCardHeader}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.mobileSystemName}>
+              {safeStr(r.system_name) || "System"}
+            </Text>
+            <Text style={styles.mobileSystemType}>
+              {safeStr(r.system_type) || "—"}
+            </Text>
+          </View>
+
+          <View style={styles.mobileBadge}>
+            <Text style={styles.mobileBadgeText}>
+              {formatDDMMYYYY(r.warranty_expires) || "No warranty date"}
+            </Text>
+          </View>
         </View>
 
-        {computed.items.map((r, idx) => {
-          const systemId = r.system_id || null;
-          const canEditRow = editMode && !!systemId;
-          const dirty = canEditRow ? isRowDirty(r) : false;
+        <View style={styles.mobileMetaGrid}>
+          <MobileField
+            label="Location"
+            value={safeStr(r.location)}
+            editable={canEditRow}
+            render={() => renderInput(systemId, "location", "Add location…")}
+          />
 
-          return (
-            <View key={`${safeStr(r.system_name)}-${idx}`} style={[styles.tr, dirty && styles.trDirty]}>
-              {/* Locked */}
-              <View style={[styles.colSystem, styles.rowCell]}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                  <Text style={styles.td} numberOfLines={2}>
-                    {safeStr(r.system_name)}
-                  </Text>
-                  {dirty ? <Text style={styles.pill}>Edited</Text> : null}
-                </View>
-              </View>
+          <MobileField
+            label="Brand"
+            value={safeStr(r.manufacturer)}
+            editable={canEditRow}
+            render={() => renderInput(systemId, "manufacturer", "Add brand…")}
+          />
 
-              <Text style={[styles.td, styles.colType]} numberOfLines={2}>
-                {safeStr(r.system_type)}
-              </Text>
+          <MobileField
+            label="Model"
+            value={safeStr(r.model)}
+            editable={canEditRow}
+            render={() => renderInput(systemId, "model", "Add model…")}
+          />
 
-              {/* Editable */}
-              <View style={[styles.cell, styles.colLocation]}>
-                {canEditRow ? renderInput(systemId, "location", "Add location…") : (
-                  <Text style={styles.td} numberOfLines={2}>{safeStr(r.location)}</Text>
-                )}
-              </View>
+          <MobileField
+            label="Serial"
+            value={safeStr(r.serial_number)}
+            editable={canEditRow}
+            render={() => renderInput(systemId, "serial_number", "Add serial…")}
+          />
+          <MobileField
+            label="Assigned"
+            value={safeStr(r.assigned_keepr_pro || "Unassigned")}
+            editable={canEditRow}
+            render={() => (
+              <Pressable
+                onPress={() => setPickForSystemId(systemId)}
+                style={[
+                  styles.assignBtn,
+                  draft?.[systemId]?.assigned_keepr_pro
+                    ? null
+                    : styles.assignBtnEmpty,
+                ]}
+              >
+                <Text style={styles.assignText}>
+                  {draft?.[systemId]?.assigned_keepr_pro || "Assign KeeprPro…"}
+                </Text>
+              </Pressable>
+            )}
+          />
+          <MobileField
+            label="Last service"
+            value={formatDDMMYYYY(r.last_service_date)}
+          />
+        </View>
 
-              <View style={[styles.cell, styles.colBrand]}>
-                {canEditRow ? renderInput(systemId, "manufacturer", "Add brand…") : (
-                  <Text style={styles.td} numberOfLines={2}>{safeStr(r.manufacturer)}</Text>
-                )}
-              </View>
+        <View style={styles.mobileFooterRow}>
+          <View style={styles.countPill}>
+            <Text style={styles.countPillText}>
+              {safeStr(r.service_count ?? 0)} services
+            </Text>
+          </View>
 
-              <View style={[styles.cell, styles.colModel]}>
-                {canEditRow ? renderInput(systemId, "model", "Add model…") : (
-                  <Text style={styles.td} numberOfLines={2}>{safeStr(r.model)}</Text>
-                )}
-              </View>
-
-              <View style={[styles.cell, styles.colSerial]}>
-                {canEditRow ? renderInput(systemId, "serial_number", "Add serial…") : (
-                  <Text style={styles.td} numberOfLines={2}>{safeStr(r.serial_number)}</Text>
-                )}
-              </View>
-
-              <View style={[styles.cell, styles.colWarranty]}>
-                {canEditRow ? (
-                  <View style={{ gap: 6 }}>
-                    {renderInput(systemId, "warranty_provider", "Provider…")}
-                    {renderInput(systemId, "warranty_expires", "Expires (DD-MM-YYYY)…", { kind: "date" })}
-                  </View>
-                ) : (
-                  <Text style={styles.td} numberOfLines={2}>
-                    {formatDDMMYYYY(r.warranty_expires) || safeStr(r.warranty_provider)}
-                  </Text>
-                )}
-              </View>
-
-              <View style={[styles.cell, styles.colAssigned]}>
-                {canEditRow ? (
-                  <Pressable
-                    onPress={() => setPickForSystemId(systemId)}
-                    style={[styles.assignBtn, draft?.[systemId]?.assigned_keepr_pro ? null : styles.assignBtnEmpty]}
-                  >
-                    <Text style={styles.assignText}>
-                      {draft?.[systemId]?.assigned_keepr_pro || "Assign KeeprPro…"}
-                    </Text>
-                  </Pressable>
-                ) : (
-                  <Text style={styles.td} numberOfLines={2}>{safeStr(r.assigned_keepr_pro)}</Text>
-                )}
-              </View>
-
-              {/* Derived */}
-              <Text style={[styles.td, styles.colLast]} numberOfLines={1}>
-                {formatDDMMYYYY(r.last_service_date)}
-              </Text>
-              <Text style={[styles.td, styles.colNum]} numberOfLines={1}>
-                {r.service_count ?? 0}
-              </Text>
-              <Text style={[styles.td, styles.colNum]} numberOfLines={1}>
-                {r.proof_count ?? 0}
-              </Text>
-            </View>
-          );
-        })}
+          <View style={styles.countPill}>
+            <Text style={styles.countPillText}>
+              {safeStr(r.proof_count ?? 0)} proofs
+            </Text>
+          </View>
+        </View>
       </View>
+    );
+  })}
+</View>
+)}
+    <View style={styles.footer}>
+      <Text style={styles.footerText}>Generated from Keepr™</Text>
+    </View>
+    </ScrollView>
+    </KeyboardAvoidingView>
+          <Modal
+        visible={!!pickForSystemId}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPickForSystemId(null)}
+      >
+        <View style={styles.pickerRoot}>
+          {/* Backdrop */}
+          <Pressable
+            style={styles.pickerBackdrop}
+            onPress={() => setPickForSystemId(null)}
+          />
 
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>Generated from Keepr™</Text>
-      </View>
+          {/* Bottom Sheet */}
+          <View style={styles.pickerSheet}>
+            <View style={styles.pickerHandle} />
 
-      {/* KeeprPro picker */}
-      <Modal visible={!!pickForSystemId} transparent animationType="fade" onRequestClose={() => setPickForSystemId(null)}>
-        <View style={styles.pickerBackdrop}>
-          <View style={styles.pickerCard}>
             <View style={styles.pickerHeader}>
               <Text style={styles.pickerTitle}>Assign KeeprPro</Text>
-              <Pressable onPress={() => setPickForSystemId(null)} hitSlop={8}>
-                <Text style={styles.pickerClose}>×</Text>
+              <Pressable onPress={() => setPickForSystemId(null)}>
+                <Text style={styles.pickerClose}>Close</Text>
               </Pressable>
             </View>
 
-            <ScrollView style={{ maxHeight: 420 }}>
-              <Pressable onPress={() => clearKeeprPro(pickForSystemId)} style={styles.pickerRow}>
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ paddingBottom: 20 }}
+                style={{ maxHeight: "100%" }}   // ensure it doesn't expand parent
+              >
+              <Pressable
+                style={styles.pickerRow}
+                onPress={() => clearKeeprPro(pickForSystemId)}
+              >
                 <Text style={styles.pickerRowTitle}>Unassigned</Text>
               </Pressable>
 
-              {keeprPros.map((p) => (
-                <Pressable key={p.id} onPress={() => selectKeeprPro(pickForSystemId, p.id)} style={styles.pickerRow}>
-                  <Text style={styles.pickerRowTitle}>{p.name}</Text>
+              {keeprPros.map((pro) => (
+                <Pressable
+                  key={pro.id}
+                  style={styles.pickerRow}
+                  onPress={() => selectKeeprPro(pickForSystemId, pro.id)}
+                >
+                  <Text style={styles.pickerRowTitle}>{pro.name}</Text>
                 </Pressable>
               ))}
-
-              {!keeprPros.length ? (
-                <Text style={styles.pickerEmpty}>
-                  No KeeprPros found yet. Add one under Keepr™ Pros, then come back here.
-                </Text>
-              ) : null}
             </ScrollView>
           </View>
         </View>
       </Modal>
-    </ScrollView>
+    </SafeAreaView>
   );
 }
 
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#fff" },
-  content: { padding: 16, paddingBottom: 40 },
+content: {
+  padding: 16,
+  flexGrow: 1,
+},
 
-  header: { marginBottom: 14 },
-  title: { fontSize: 22, fontWeight: "700" },
-  metaText: { marginTop: 6, fontSize: 12, opacity: 0.75 },
+topChrome: {
+  backgroundColor: "#fff",
+  zIndex: 10,
+  paddingTop: 8,
+  paddingHorizontal: 16,
+  paddingBottom: 10,
+  borderBottomWidth: 1,
+  borderBottomColor: "#eee",
+},
 
-  actionsRow: { marginTop: 12, flexDirection: "row", gap: 10, flexWrap: "wrap" },
-  btn: { backgroundColor: "#111", paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10 },
+  header: { marginBottom: 10 },
+  title: {
+  fontSize: 20,
+  fontWeight: "800",
+  color: "#111827",
+},
+
+metaText: {
+  marginTop: 4,
+  fontSize: 12,
+  color: "#6B7280",
+},
+
+  actionsRow: {
+  marginTop: 10,
+  flexDirection: "row",
+  flexWrap: "wrap",
+  gap: 8,
+},
+  btn: {
+  backgroundColor: "#111",
+  paddingHorizontal: 12,
+  paddingVertical: 9,
+  borderRadius: 12,
+},
   btnSecondary: { backgroundColor: "#eee" },
   btnPrimaryAlt: { backgroundColor: "#0b5fff" },
   btnDisabled: { opacity: 0.6 },
@@ -799,6 +1025,69 @@ const styles = StyleSheet.create({
     color: "#0b5fff",
     fontWeight: "700",
   },
+  pickerRoot: {
+  flex: 1,
+  justifyContent: "flex-end",
+},
+
+pickerBackdrop: {
+  ...StyleSheet.absoluteFillObject,
+  backgroundColor: "rgba(0,0,0,0.4)",
+},
+
+pickerSheet: {
+  backgroundColor: "#FFFFFF",
+  borderTopLeftRadius: 20,
+  borderTopRightRadius: 20,
+  paddingTop: 10,
+  paddingHorizontal: 16,
+  paddingBottom: 40,
+  maxHeight: "75%",
+  shadowColor: "#000",
+shadowOpacity: 0.08,
+shadowRadius: 10,
+elevation: 6,
+},
+
+pickerHandle: {
+  alignSelf: "center",
+  width: 36,
+  height: 4,
+  borderRadius: 2,
+  backgroundColor: "#D1D5DB",
+  marginBottom: 10,
+},
+
+pickerHeader: {
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "space-between",
+  marginBottom: 12,
+},
+
+pickerTitle: {
+  fontSize: 16,
+  fontWeight: "800",
+  color: "#111827",
+},
+
+pickerClose: {
+  fontSize: 13,
+  fontWeight: "600",
+  color: "#6B7280",
+},
+
+pickerRow: {
+  paddingVertical: 14,
+  borderBottomWidth: StyleSheet.hairlineWidth,
+  borderBottomColor: "#E5E7EB",
+},
+
+pickerRowTitle: {
+  fontSize: 15,
+  fontWeight: "600",
+  color: "#111827",
+},
 
   // Column widths
   colSystem: { flex: 1.5, paddingRight: 10 },
@@ -845,18 +1134,125 @@ const styles = StyleSheet.create({
   footer: { marginTop: 18 },
   footerText: { fontSize: 11, opacity: 0.6 },
 
-  pickerBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.35)", justifyContent: "center", alignItems: "center" },
   pickerCard: {
     width: Platform.OS === "web" ? 520 : "92%",
     backgroundColor: "#fff",
     borderRadius: 14,
     padding: 14,
   },
-  pickerHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
-  pickerTitle: { fontSize: 16, fontWeight: "700" },
-  pickerClose: { fontSize: 22, lineHeight: 22, opacity: 0.7 },
 
-  pickerRow: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#f0f0f0" },
-  pickerRowTitle: { fontSize: 14 },
-  pickerEmpty: { paddingVertical: 12, fontSize: 12, opacity: 0.7 },
+mobileCard: {
+  borderWidth: 1,
+  borderColor: "#E5E7EB",
+  borderRadius: 16,
+  backgroundColor: "#FFFFFF",
+  padding: 14,
+  marginBottom: 12,
+},
+
+mobileCardHeader: {
+  flexDirection: "row",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+  marginBottom: 12,
+  gap: 10,
+},
+
+mobileSystemName: {
+  fontSize: 16,
+  fontWeight: "800",
+  color: "#111827",
+},
+
+mobileSystemType: {
+  marginTop: 2,
+  fontSize: 12,
+  color: "#6B7280",
+  fontWeight: "600",
+},
+
+mobileBadge: {
+  paddingHorizontal: 10,
+  paddingVertical: 5,
+  borderRadius: 999,
+  backgroundColor: "#FEF3C7",
+},
+
+mobileBadgeText: {
+  fontSize: 11,
+  fontWeight: "700",
+  color: "#92400E",
+},
+
+mobileMetaGrid: {
+  gap: 10,
+},
+
+mobileField: {
+  marginBottom: 12,
+},
+
+mobileFieldLabel: {
+  fontSize: 11,
+  color: "#6B7280",
+  fontWeight: "700",
+  marginBottom: 2,
+},
+
+mobileFieldValue: {
+  fontSize: 14,
+  color: "#111827",
+},
+input: {
+  borderWidth: 1,
+  borderColor: "#D1D5DB",
+  borderRadius: 10,
+  paddingHorizontal: 10,
+  paddingVertical: 8,
+  fontSize: 14,
+  backgroundColor: "#fff",
+},
+
+mobileFooterRow: {
+  flexDirection: "row",
+  flexWrap: "wrap",
+  gap: 8,
+  marginTop: 14,
+},
+
+countPill: {
+  paddingHorizontal: 10,
+  paddingVertical: 6,
+  borderRadius: 999,
+  backgroundColor: "#F3F4F6",
+  borderWidth: 1,
+  borderColor: "#E5E7EB",
+},
+
+countPillText: {
+  fontSize: 11,
+  fontWeight: "700",
+  color: "#374151",
+},
+
+actionsRowMobile: {
+  marginTop: 12,
+  gap: 10,
+},
+
+btnMobile: {
+  width: "100%",
+},
+searchInput: {
+  marginTop: 10,
+  marginBottom: 6,
+  backgroundColor: "#F9FAFB",
+  borderWidth: 1,
+  borderColor: "#E5E7EB",
+  borderRadius: 12,
+  paddingHorizontal: 12,
+  paddingVertical: 10,
+  fontSize: 14,
+  color: "#111827",
+},
 });

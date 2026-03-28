@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from "react";
-import { Alert, Pressable, SafeAreaView, StyleSheet, Text, View } from "react-native";
+import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import KaiOrb from "../components/KaiOrb";
+import { ScrollView, KeyboardAvoidingView, Platform } from "react-native";
 
 const QUESTIONS = [
   {
@@ -101,8 +103,15 @@ if (onAssetChoiceStep) {
 };
 
   return (
-    <SafeAreaView style={styles.screen}>
-      <View style={styles.content}>
+    <SafeAreaView style={styles.screen} edges={["top", "bottom"]}>
+  <KeyboardAvoidingView
+    style={{ flex: 1 }}
+    behavior={Platform.OS === "ios" ? "padding" : undefined}
+  >
+    <ScrollView
+      contentContainerStyle={styles.scrollContent}
+      keyboardShouldPersistTaps="handled"
+    >
         <View style={styles.headerRow}>
           <View style={styles.orbWrap}>
           <KaiOrb size={88} />
@@ -156,11 +165,12 @@ if (onAssetChoiceStep) {
           </>
         ) : onModelStep ? (
           <>
-            <Text style={styles.stepLabel}>Happy your're here! </Text>
+            <Text style={styles.stepLabel}>We're happy you're here! </Text>
             <Text style={styles.title}>
-              Keepr™ organizes things around four simple ideas.
+              Keepr™ Summary...
             </Text>
-
+            <Text style={styles.summaryText}>{summary}</Text>
+            
             <View style={styles.modelCard}>
               <Text style={styles.modelItem}>
                 <Text style={styles.modelStrong}>Asset</Text> — the thing you
@@ -182,13 +192,8 @@ if (onAssetChoiceStep) {
               </Text>
             </View>
 
-            <Text style={styles.summaryText}>{summary}</Text>
 
-            <Text style={styles.storyText}>
-              Every asset has a story. Every system has a story. Over time,
-              Keepr™ helps you build that story so you — and the people who help
-              you — Your Team, Family, KeeprPros - can understand, maintain, and help you.
-            </Text>
+
           </>
         ) : (
           <>
@@ -265,7 +270,8 @@ if (onAssetChoiceStep) {
             </Text>
           </Pressable>
         </View>
-      </View>
+      </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -275,16 +281,12 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#F6F7FB",
   },
-  content: {
-    flex: 1,
-    width: "100%",
-    maxWidth: 820,
-    alignSelf: "center",
-    paddingHorizontal: 24,
-    paddingTop: 28,
-    paddingBottom: 28,
-    justifyContent: "space-between",
-  },
+scrollContent: {
+  flexGrow: 1,
+  paddingHorizontal: 24,
+  paddingTop: 28,
+  paddingBottom: 32,
+},
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -311,8 +313,8 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   title: {
-    fontSize: 30,
-    lineHeight: 38,
+    fontSize: 24,
+    lineHeight: 30,
     fontWeight: "800",
     color: "#111827",
     maxWidth: 760,

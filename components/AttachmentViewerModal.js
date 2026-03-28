@@ -15,6 +15,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, radius, shadows } from "../styles/theme";
 import { confirmAction } from "../lib/confirm";
+import { WebView } from "react-native-webview";
 
 const IS_WEB = Platform.OS === "web";
   const IS_MOBILE = Platform.OS !== "web";
@@ -229,31 +230,20 @@ export default function AttachmentViewerModal({
   const content = (
     <>
       <View style={styles.headerRow}>
-        <View style={styles.headerLeft}>
-          <View style={styles.headerIcon}>
-            <Ionicons name={iconName} size={18} color={colors.textSecondary} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.title} numberOfLines={1}>
-              {title}
-            </Text>
-            <View style={styles.metaRow}>
-              <Badge label={badge.label} tone={badge.tone} />
-              <Text style={styles.metaFileName} numberOfLines={1}>
-                {fileName}
-              </Text>
-              {canNav ? (
-                <Text style={styles.counter}>
-                  {safeIndex + 1}/{collection.length}
-                </Text>
-              ) : null}
-            </View>
-          </View>
-        </View>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.title} numberOfLines={1}>
+          {title}
+        </Text>
+        {canNav ? (
+          <Text style={styles.counter}>
+            {safeIndex + 1} of {collection.length}
+          </Text>
+        ) : null}
+      </View>
 
-        <TouchableOpacity onPress={onClose} accessibilityLabel="Close preview">
-          <Ionicons name="close-outline" size={26} color={colors.textSecondary} />
-        </TouchableOpacity>
+      <TouchableOpacity onPress={onClose}>
+        <Ionicons name="close-outline" size={26} color={colors.textSecondary} />
+      </TouchableOpacity>
       </View>
 
       <View style={styles.body}>
@@ -271,10 +261,22 @@ export default function AttachmentViewerModal({
           ) : null}
 
           {isPhoto && url ? (
-            <Image source={{ uri: url }} style={styles.image} resizeMode="contain" />
-          ) : IS_WEB && isPdfDoc && url ? (
-            <iframe title="Preview" src={url} style={styles.pdfFrame} />
-          ) : isLink && url ? (
+              <View style={styles.imageStage}>
+                <Image source={{ uri: url }} style={styles.image} resizeMode="contain" />
+              </View>
+            ) : isPdfDoc && url ? (
+              IS_WEB ? (
+                <iframe title="Preview" src={url} style={styles.pdfFrame} />
+              ) : (
+                <WebView
+                  source={{ uri: url }}
+                  style={styles.pdfNativeFrame}
+                  originWhitelist={["*"]}
+                  scrollEnabled
+                  nestedScrollEnabled
+                />
+              )
+            ) : isLink && url ? (
             <View style={styles.evidenceCard}>
               <View style={styles.evidenceTop}>
                 <Badge label="LINK" tone="badgeMuted" />
@@ -372,13 +374,6 @@ export default function AttachmentViewerModal({
                 <Ionicons name="open-outline" size={18} color={colors.surface} />
                 <Text style={styles.btnTextPrimary}>Open</Text>
               </TouchableOpacity>
-
-              {(onSendToKI || onIntelligence) && assetId && attachment?.id ? (
-                <TouchableOpacity style={[styles.btn, styles.secondary]} onPress={handleSendToKI}>
-                  <Ionicons name="sparkles-outline" size={18} color={colors.text} />
-                  <Text style={styles.btnTextSecondary}>Intelligence</Text>
-                </TouchableOpacity>
-              ) : null}
 
               {onDelete ? (
                 <TouchableOpacity style={[styles.btn, styles.danger]} onPress={confirmDelete}>
@@ -491,37 +486,51 @@ const styles = StyleSheet.create({
 
   body: { flexDirection: IS_WEB ? "row" : "column", gap: spacing.md },
 
-  preview: {
-    flex: IS_WEB ? 3 : 0,
-    minHeight: IS_WEB ? 560 : 360,
-    backgroundColor: colors.surfaceSubtle,
-    borderRadius: radius.lg,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: spacing.md,
-    width: "100%",
-    overflow: "hidden",
-    position: "relative",
-  },
+preview: {
+  flex: IS_WEB ? 3 : 0,
+  minHeight: IS_WEB ? 560 : 360,
+  backgroundColor: "#000",
+  borderRadius: radius.lg,
+  overflow: "hidden",
+  position: "relative",
+},
 
-  navBtn: {
-    position: "absolute",
-    top: "50%",
-    marginTop: -22,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "rgba(255,255,255,0.78)",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 5,
-    borderWidth: 1,
-    borderColor: "rgba(148,163,184,0.35)",
-  },
+image: {
+  width: "100%",
+  height: "100%",
+  alignSelf: "center",
+},
+
+imageStage: {
+  flex: 1,
+  width: "100%",
+  height: "100%",
+  alignItems: "center",
+  justifyContent: "center",
+  backgroundColor: "#000",
+},
+
+
+pdfNativeFrame: {
+  width: "100%",
+  height: "100%",
+  backgroundColor: "#fff",
+},
+navBtn: {
+  position: "absolute",
+  top: "50%",
+  marginTop: -20,
+  width: 40,
+  height: 40,
+  borderRadius: 20,
+  backgroundColor: "rgba(0,0,0,0.4)",
+  alignItems: "center",
+  justifyContent: "center",
+  zIndex: 5,
+},
   navLeft: { left: 12 },
   navRight: { right: 12 },
 
-  image: { width: "100%", height: "100%" },
   pdfFrame: { width: "100%", height: "100%", border: "none", borderRadius: radius.md },
 
   evidenceCard: {

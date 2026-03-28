@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { supabase } from "../lib/supabaseClient";
 import { exportToXlsx } from "../utils/exportPackageToXlsx";
+import { Modal, TextInput } from "react-native";
 
 /**
  * Timeline Cost Report (single table)
@@ -10,6 +11,21 @@ import { exportToXlsx } from "../utils/exportPackageToXlsx";
  * - Uses only "detail" rows from package_rows (row.section === 'detail')
  * - Computes year totals client-side and renders a single table grouped by year.
  */
+
+    const COST_CATEGORIES = [
+      "Electricity",
+      "Gas",
+      "Water",
+      "Insurance",
+      "Taxes",
+      "Mortgage Interest",
+      "HOA",
+      "Maintenance",
+      "Repairs",
+      "Cleaning",
+      "Supplies",
+      "Other",
+    ];
 
 function formatReportDate(value) {
   const s = String(value || "").trim();
@@ -30,6 +46,19 @@ export default function TimelineCostPackagePrintScreen({ route, navigation }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+
+  const [manualCosts, setManualCosts] = useState({});
+  const [showModal, setShowModal] = useState(false);
+  const [editing, setEditing] = useState(null);
+
+const [form, setForm] = useState({
+  title: "",
+  amount: "",
+  year: new Date().getFullYear(),
+  date: "",
+  category: "Electricity",
+  provider: "",
+});
 
   useEffect(() => {
     let cancelled = false;
@@ -124,6 +153,38 @@ export default function TimelineCostPackagePrintScreen({ route, navigation }) {
 
     const grouped = Array.from(byYear.values()).sort((a, b) => b.year - a.year);
 
+    // 🔥 merge manual costs
+      grouped.forEach((g) => {
+        const manualYear = manualCosts[g.year] || [];
+
+        const manualTotal = manualYear.reduce(
+          (sum, m) => sum + (Number(m.amount) || 0),
+          0
+        );
+
+        g.manual_rows = manualYear;
+        g.total_cost += manualTotal;
+      });
+
+      grouped.forEach((g) => {
+      const categoryMap = {};
+
+      const allRows = [...g.rows, ...(g.manual_rows || [])];
+
+      allRows.forEach((r) => {
+        const cat =
+        r.category ||
+        r.extra_metadata?.category ||
+        "Other";
+        const amount = Number(r.cost ?? r.amount ?? 0) || 0;
+
+        if (!categoryMap[cat]) categoryMap[cat] = 0;
+        categoryMap[cat] += amount;
+      });
+
+      g.categoryTotals = categoryMap;
+    });
+
     // Sort rows newest -> oldest within each year group
     grouped.forEach((g) => {
       g.rows.sort((a, b) => String(b.performed_at || "").localeCompare(String(a.performed_at || "")));
@@ -165,6 +226,7 @@ export default function TimelineCostPackagePrintScreen({ route, navigation }) {
 
     const assetName = pkg?.snapshot_meta?.asset_name || "Asset";
     const title = pkg?.title || "Timeline Cost Report";
+
 
     await exportToXlsx({
       fileName: `${assetName} - ${title}`,
@@ -258,8 +320,26 @@ export default function TimelineCostPackagePrintScreen({ route, navigation }) {
             <Pressable onPress={onPrint} style={styles.btn}>
               <Text style={styles.btnText}>Print / Save PDF</Text>
             </Pressable>
+            
           ) : null}
+                  <Pressable
+          onPress={() => {
+            setEditing(null);
+            setForm({
+              title: "",
+              amount: "",
+              year: new Date().getFullYear(),
+              category: "Electricity",
+              provider: "",
+            });
+            setShowModal(true);
+          }}
+          style={styles.btn}
+        >
+          <Text style={styles.btnText}>+ Add Cost</Text>
+        </Pressable>
         </View>
+
       </View>
 
       {/* Single section table */}
@@ -286,13 +366,51 @@ export default function TimelineCostPackagePrintScreen({ route, navigation }) {
             grouped.map((g) => (
               <React.Fragment key={`year-${g.year}`}>
                 <View style={styles.yearRow}>
+                  <View style={{ paddingHorizontal: 10, paddingBottom: 8 }}>
+                  {Object.entries(g.categoryTotals || {}).map(([cat, total]) => (
+                    <Text key={cat} style={{ fontSize: 12, opacity: 0.8 }}>
+                      {cat} — {fmtMoney(total)}
+                    </Text>
+                  ))}
+                </View>
                   <Text style={styles.yearRowText}>
                     {(g.year && g.year !== 0 ? g.year : "Unknown") +
                       ` • Total ${fmtMoney(g.total_cost)} • ${g.record_count} records • ${g.proof_items} proof`}
                   </Text>
                 </View>
 
-                {g.rows.map((r, idx) => (
+                      {g.manual_rows?.map((m, idx) => (
+                      <Pressable
+                        key={`manual-${g.year}-${idx}`}
+                        style={[styles.tr, { backgroundColor: "#f9fafb" }]}
+                        onPress={() => {
+                          setEditing({ ...m, year: g.year, idx });
+                          setForm(m);
+                          setShowModal(true);
+                        }}
+                      >
+                       <Text style={[styles.td, styles.colDate]}>
+                          {m.date ? formatReportDate(m.date) : "—"}
+                        </Text>
+                        <Text style={[styles.td, styles.colTitle]}>
+                          {m.title || "Manual Entry"}
+                        </Text>
+                        <Text style={[styles.td, styles.colSystem]}>—</Text>
+                        <Text style={[styles.td, styles.colSmall]}>
+                          {m.category}
+                        </Text>
+                        <Text style={[styles.td, styles.colPro]}>
+                          {m.provider || ""}
+                        </Text>
+                        <Text style={[styles.td, styles.colMoney]}>
+                          {fmtMoney(m.amount)}
+                        </Text>
+                        <Text style={[styles.td, styles.colNum]}>—</Text>
+                      </Pressable>
+                    ))}
+
+                {g.rows.map((r, idx) => (  
+
                   <View key={`${g.year}-${r.performed_at}-${idx}`} style={styles.tr}>
                     <Text style={[styles.td, styles.colDate]} numberOfLines={1}>
                       {formatReportDate(r.performed_at)}
@@ -322,7 +440,103 @@ export default function TimelineCostPackagePrintScreen({ route, navigation }) {
           )}
         </View>
       </View>
+        <Modal visible={showModal} transparent animationType="fade">
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>
+              {editing ? "Edit Cost" : "Add Cost"}
+            </Text>
 
+            <Pressable onPress={() => setShowModal(false)}>
+              <Text style={styles.modalClose}>Close</Text>
+            </Pressable>
+          </View>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+
+            <TextInput
+              placeholder="Title"
+              value={form.title}
+              onChangeText={(t) => setForm({ ...form, title: t })}
+              style={styles.input}
+            />
+            <TextInput
+              placeholder="Date (YYYY-MM-DD) or leave blank for annual rollup"
+              value={form.date}
+              onChangeText={(t) => setForm({ ...form, date: t })}
+              style={styles.input}
+            />
+            <TextInput
+              placeholder="Amount"
+              keyboardType="numeric"
+              value={form.amount}
+              onChangeText={(t) => setForm({ ...form, amount: t })}
+              style={styles.input}
+            />
+
+            <View style={styles.categoryWrap}>
+              {COST_CATEGORIES.map((c) => {
+                const selected = form.category === c;
+                return (
+                  <Pressable
+                    key={c}
+                    onPress={() => setForm({ ...form, category: c })}
+                    style={[styles.categoryChip, selected && styles.categoryChipActive]}
+                  >
+                    <Text
+                      style={[
+                        styles.categoryChipText,
+                        selected && styles.categoryChipTextActive,
+                      ]}
+                    >
+                      {c}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <TextInput
+              placeholder="Provider (e.g. DTE)"
+              value={form.provider}
+              onChangeText={(t) => setForm({ ...form, provider: t })}
+              style={styles.input}
+            />
+
+            <Pressable
+              style={styles.saveBtn}
+              onPress={() => {
+                const year = Number(form.year);
+                const updated = { ...manualCosts };
+
+                if (!updated[year]) updated[year] = [];
+
+                if (editing) {
+                  updated[year][editing.idx] = form;
+                } else {
+                  updated[year].push(form);
+                }
+
+                setManualCosts(updated);
+                setShowModal(false);
+              }}
+            >
+              <Text style={styles.btnText}>Save</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => setShowModal(false)}
+              style={styles.cancelBtn}
+            >
+              <Text>Cancel</Text>
+            </Pressable>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
       <View style={styles.footer}>
         <Text style={styles.footerText}>Generated from Keepr™</Text>
       </View>
@@ -333,6 +547,13 @@ export default function TimelineCostPackagePrintScreen({ route, navigation }) {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#fff" },
   content: { padding: 16, paddingBottom: 40 },
+  input: {
+  borderWidth: 1,
+  borderColor: "#ddd",
+  borderRadius: 8,
+  padding: 8,
+  marginTop: 8,
+},
 
   header: { marginBottom: 14 },
   title: { fontSize: 22, fontWeight: "700" },
@@ -362,6 +583,96 @@ const styles = StyleSheet.create({
 
   th: { fontSize: 12, fontWeight: "700", opacity: 0.85 },
   td: { fontSize: 12, opacity: 0.9 },
+
+  modalBackdrop: {
+  flex: 1,
+  backgroundColor: "rgba(0,0,0,0.35)",
+  justifyContent: "flex-end",
+  alignItems: "center",
+  padding: 16,
+},
+
+ modalSheet: {
+  backgroundColor: "#fff",
+  borderRadius: 16,
+  padding: 16,
+  width: "100%",
+  maxWidth: 760,
+  maxHeight: "88%",
+},
+
+    modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+  },
+
+  modalClose: {
+    fontSize: 14,
+    color: "#666",
+    fontWeight: "600",
+  },
+
+categoryWrap: {
+  flexDirection: "row",
+  flexWrap: "wrap",
+  gap: 8,
+  marginTop: 10,
+  marginBottom: 8,
+},
+
+categoryChip: {
+  paddingHorizontal: 10,
+  paddingVertical: 8,
+  borderRadius: 999,
+  borderWidth: 1,
+  borderColor: "#ddd",
+  backgroundColor: "#fff",
+},
+
+categoryChipActive: {
+  backgroundColor: "#111",
+  borderColor: "#111",
+},
+
+categoryChipText: {
+  fontSize: 13,
+  color: "#111",
+  fontWeight: "500",
+},
+
+categoryChipTextActive: {
+  color: "#fff",
+},
+
+saveBtn: {
+  backgroundColor: "#111",
+  paddingVertical: 12,
+  borderRadius: 10,
+  alignItems: "center",
+  marginTop: 14,
+},
+
+saveBtnText: {
+  color: "#fff",
+  fontWeight: "700",
+},
+
+cancelBtn: {
+  paddingVertical: 12,
+  alignItems: "center",
+},
+
+cancelBtnText: {
+  color: "#555",
+  fontWeight: "600",
+},
 
   yearRow: {
     backgroundColor: "#f7f7f7",

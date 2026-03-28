@@ -5,6 +5,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { supabase } from "../../lib/supabaseClient";
 import { navigationRef } from "../../navigationRoot";
 import KaiOrb from "../../components/KaiOrb";
+import { ScrollView, KeyboardAvoidingView, Platform } from "react-native";
 
 async function dismissOnboarding() {
   const { data } = await supabase.auth.getUser();
@@ -31,9 +32,16 @@ function SecondaryButton({ title, onPress }) {
 
 export default function OnboardingNarrative3Screen() {
   return (
-    <SafeAreaView style={styles.screen}>
-      <View style={styles.container}>
-        <View style={styles.card}>
+    <SafeAreaView style={styles.screen} edges={["top", "bottom"]}>
+  <KeyboardAvoidingView
+    style={{ flex: 1 }}
+    behavior={Platform.OS === "ios" ? "padding" : undefined}
+  >
+    <ScrollView
+      contentContainerStyle={styles.scrollContent}
+      keyboardShouldPersistTaps="handled"
+    >
+      <View style={styles.card}>
                       <View style={styles.kaiGuideWrap}>
                       <KaiOrb size={88} variant="compact" rotate={false} />
                       <View style={styles.kaiGuideTextWrap}>
@@ -45,12 +53,12 @@ export default function OnboardingNarrative3Screen() {
                     </View>
           <Text style={styles.h1}>In the next 5 minutes…</Text>
 
-          <Text style={styles.p}>You can:</Text>
+          <Text style={styles.sub}>You can:</Text>
 
           <View style={{ height: 10 }} />
 
           <Text style={styles.bullet}>• Add an asset you care about</Text>
-          <Text style={styles.bullet}>• Define a key system</Text>
+          <Text style={styles.bullet}>• Define key systems</Text>
           <Text style={styles.bullet}>• Record something that’s already happened</Text>
           <Text style={styles.bullet}>• Attach the proof</Text>
 
@@ -79,14 +87,19 @@ export default function OnboardingNarrative3Screen() {
             <Text style={styles.skipText}>Skip for now</Text>
           </TouchableOpacity>
         </View>
-      </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#F5F6F8" },
-  container: { flex: 1, padding: 24, justifyContent: "center" },
+  scrollContent: {
+  flexGrow: 1,
+  padding: 24,
+  justifyContent: "flex-start",
+},
   card: {
     backgroundColor: "#FFFFFF",
     borderRadius: 18,
@@ -96,6 +109,11 @@ const styles = StyleSheet.create({
   },
   h1: { fontSize: 22, fontWeight: "900", color: "#111827", lineHeight: 28, marginBottom: 14 },
   p: { fontSize: 15, color: "#111827", lineHeight: 22 },
+  sub: {
+  fontSize: 16,
+  fontWeight: "700",
+  marginBottom: 8,
+  },
   bullet: { fontSize: 15, color: "#111827", lineHeight: 22, marginBottom: 6 },
   primaryBtn: {
     backgroundColor: "#111827",

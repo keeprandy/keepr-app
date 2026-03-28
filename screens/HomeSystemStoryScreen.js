@@ -37,6 +37,7 @@ import { supabase } from "../lib/supabaseClient";
 import { useAttachments } from "../hooks/useAttachments";
 import { ATTACHMENT_BUCKET, getSignedUrl } from "../lib/attachmentsApi";
 import AttachmentViewerModal from "../components/AttachmentViewerModal";
+import { WebView } from "react-native-webview";
 
 const HERO_ASPECT = 4 / 3;
 const IS_WEB = Platform.OS === "web";
@@ -522,22 +523,28 @@ useFocusEffect(
 
 
     if (showcase) return showcase;    // 3) Default hero: stable oldest photo (so adding new proof doesn't change the hero)
-    const photoCandidates = attachmentPreview.filter((a) => a.isPhoto);
+    const storyAttachments = attachmentPreview.filter((a) =>
+      ["proof", "manual", "warranty"].includes(a.role || "")
+    );
+
+    const photoCandidates = storyAttachments.filter((a) => a.isPhoto);
+
     if (photoCandidates.length) {
       const sorted = [...photoCandidates].sort((a, b) => {
         const da = a.created_at || a.inserted_at || a.updated_at || null;
         const db = b.created_at || b.inserted_at || b.updated_at || null;
         const ta = da ? new Date(da).getTime() : 0;
         const tb = db ? new Date(db).getTime() : 0;
-        return ta - tb; // oldest first
+        return ta - tb;
       });
       return sorted[0];
     }
 
-    // 4) Fallback to first attachment
+    if (storyAttachments.length) {
+      return storyAttachments[0];
+    }
 
-
-    return attachmentPreview[0];
+    return null;
 
 
   }, [attachmentPreview, system?.hero_attachment_id]);
@@ -938,47 +945,59 @@ const warrantyStarts = warrantyMeta?.starts_on || warrantyMeta?.start_on || warr
       openViewerAt(heroIndex);
     }}
   >
-    <View
-      style={[
-        styles.heroImageWrap,
-        !isWide && { maxWidth: heroWidth },
-      ]}
-    >
+
       {attachmentsLoading ? (
         <View style={styles.heroPlaceholder}>
           <ActivityIndicator color={colors.brandWhite} />
         </View>
-      ) : heroAttachment &&
-        heroAttachment.isPhoto &&
-        heroAttachment.previewUrl &&
-        !heroImageError ? (
-        <Image
-          source={{ uri: heroAttachment.previewUrl }}
-          style={styles.heroImage}
-          resizeMode="cover"
-          onError={() => setHeroImageError(true)}
-        />
-      ) : (
-        <View style={styles.heroPlaceholder}>
-          <Ionicons
-            name={
-              hasAnyAttachments
-                ? "document-text-outline"
-                : "construct-outline"
-            }
-            size={32}
-            color={colors.brandWhite}
+      ) : heroAttachment?.isPhoto && heroAttachment?.previewUrl && !heroImageError ? (
+        <View style={styles.heroImageStage}>
+          <Image
+            source={{ uri: heroAttachment.previewUrl }}
+            style={styles.heroImage}
+            resizeMode="contain"
+            onError={() => setHeroImageError(true)}
           />
-          <Text style={styles.heroPlaceholderText}>
-            {hasAnyAttachments
-  ? `Latest proof is a file or link${
-      heroAttachment?.fileName ? ` (${heroAttachment.fileName})` : ""
-    }. Open attachments below to view it.`
-  : "Add attachments (photos, files, links) for this system to see them here."}
-          </Text>
         </View>
-      )}
-    </View>
+      ) : heroAttachment?.isPdf && heroAttachment?.previewUrl ? (
+        <View style={styles.heroPdfWrap}>
+          {IS_WEB ? (
+            <iframe
+              title="PDF preview"
+              src={heroAttachment.previewUrl}
+              style={styles.heroPdfFrame}
+            />
+          ) : (
+            <WebView
+              source={{ uri: heroAttachment.previewUrl }}
+              style={styles.heroPdfWebView}
+              originWhitelist={["*"]}
+              scrollEnabled
+              nestedScrollEnabled
+            />
+          )}
+
+          <View style={styles.heroPdfBadge}>
+            <Ionicons name="document-text-outline" size={14} color="#fff" />
+            <Text style={styles.heroPdfBadgeText}>PDF Preview</Text>
+          </View>
+        </View>
+      ) : (
+      <View style={styles.heroPlaceholder}>
+        <Ionicons
+          name={
+            heroAttachment?.kind === "link"
+              ? "link-outline"
+              : "document-text-outline"
+          }
+          size={32}
+          color={colors.brandWhite}
+        />
+        <Text style={styles.heroPlaceholderText}>
+          {heroAttachment?.fileName || "Attachment preview not available"}
+        </Text>
+      </View>
+    )}
 
     <View style={styles.heroBottomRow}>
       <View style={[styles.statusPill, statusStyle(status)]}>
@@ -1869,6 +1888,51 @@ detailActionText: {
     color: colors.textSecondary,
     flex: 1,
   },
+  heroImageStage: {
+  width: "100%",
+  aspectRatio: HERO_ASPECT,
+  alignItems: "center",
+  justifyContent: "center",
+  backgroundColor: colors.surfaceSubtle,
+},
+
+heroPdfWrap: {
+  width: "100%",
+  aspectRatio: HERO_ASPECT,
+  backgroundColor: colors.surface,
+  position: "relative",
+},
+
+heroPdfFrame: {
+  width: "100%",
+  height: "100%",
+  border: "none",
+},
+
+heroPdfWebView: {
+  width: "100%",
+  height: "100%",
+  backgroundColor: colors.surface,
+},
+
+heroPdfBadge: {
+  position: "absolute",
+  top: 10,
+  right: 10,
+  flexDirection: "row",
+  alignItems: "center",
+  paddingHorizontal: 10,
+  paddingVertical: 6,
+  borderRadius: radius.pill,
+  backgroundColor: "rgba(15,23,42,0.75)",
+},
+
+heroPdfBadgeText: {
+  marginLeft: 6,
+  fontSize: 11,
+  fontWeight: "700",
+  color: "#fff",
+},
 
   statusPill: {
     borderRadius: radius.pill,

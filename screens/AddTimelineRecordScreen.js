@@ -24,6 +24,7 @@ import { supabase } from "../lib/supabaseClient";
 import { layoutStyles } from "../styles/layout";
 import { colors, radius, shadows, spacing } from "../styles/theme";
 import KeeprDateField from "../components/KeeprDateField";
+import { Linking } from "react-native";
 
 /* ---------------- helpers ---------------- */
 function safeMoney(raw) {
@@ -35,6 +36,23 @@ function safeMoney(raw) {
   if (Number.isNaN(n)) return null;
   return n;
 }
+
+const COST_CATEGORIES = [
+  "Electricity",
+  "Gas",
+  "Water",
+  "Insurance",
+  "Taxes",
+  "Mortgage Interest",
+  "HOA",
+  "Maintenance",
+  "Repairs",
+  "Cleaning",
+  "Supplies",
+  "Other",
+];
+
+
 function getTodayISO() {
   const now = new Date();
   const yyyy = String(now.getFullYear());
@@ -141,9 +159,16 @@ const {
   backTo,
   origin,
 
-  // PB handoff
+  // EVENT + PB handoff
+  eventId,
+  source,
   prefillTitle,
   prefillNotes,
+  prefillDate,
+  prefillAmount,
+  prefillAssetId,
+  prefillSystemId,
+  existingAttachments = [],
   pendingAttachmentId,
   pendingAttachmentTitle,
 } = route?.params || {};
@@ -155,17 +180,25 @@ const {
     return null;
   }, [backTo, origin]);
 
-  const [serviceType, setServiceType] = useState("moment"); // moment | diy | pro
-  const [date, setDate] = useState(() => getTodayISO());
+  const [serviceType, setServiceType] = useState("moment"); // moment | diy | pro | cost
+
+    const effectiveAssetId = prefillAssetId || assetId || null;
+
+    const [date, setDate] = useState(() => prefillDate || getTodayISO());
+    const [cost, setCost] = useState(() => prefillAmount || "");
+    const [selectedSystemId, setSelectedSystemId] = useState(
+      () => prefillSystemId || initialSystemId || null
+    );
+
   const [title, setTitle] = useState(() => prefillTitle || "");
   const [provider, setProvider] = useState("");
   const [location, setLocation] = useState("");
-  const [cost, setCost] = useState("");
+
   const [notes, setNotes] = useState(() => prefillNotes || "");
 
   const [systems, setSystems] = useState([]);
   const [pros, setPros] = useState([]);
-  const [selectedSystemId, setSelectedSystemId] = useState(initialSystemId || null);
+  
   const [selectedKeeprProId, setSelectedKeeprProId] = useState(null);
   const [selectedKeeprProLabel, setSelectedKeeprProLabel] = useState("");
 
@@ -187,13 +220,51 @@ const {
 
   const [recordAttachments, setRecordAttachments] = useState([]);
   const [loadingAttachments, setLoadingAttachments] = useState(false);
+  const [costCategory, setCostCategory] = useState("Electricity");
+  const [costMode, setCostMode] = useState("annual"); // annual | single
+  const [costYear, setCostYear] = useState(new Date().getFullYear());
+  const [costBreakdown, setCostBreakdown] = useState("");
+  const [backfillRows, setBackfillRows] = useState([]);
+
+  const addBackfillRow = () => {
+  setBackfillRows((prev) => [
+    ...prev,
+    {
+      year: String(Number(costYear || new Date().getFullYear()) - (prev.length + 1)),
+      amount: "",
+      breakdown: "",
+    },
+  ]);
+};
+
+const updateBackfillBreakdown = (idx, value) => {
+  setBackfillRows((prev) =>
+    prev.map((row, i) => (i === idx ? { ...row, breakdown: value } : row))
+  );
+};
+
+const updateBackfillYear = (idx, value) => {
+  setBackfillRows((prev) =>
+    prev.map((row, i) => (i === idx ? { ...row, year: value } : row))
+  );
+};
+
+const updateBackfillAmount = (idx, value) => {
+  setBackfillRows((prev) =>
+    prev.map((row, i) => (i === idx ? { ...row, amount: value } : row))
+  );
+};
+
+const removeBackfillRow = (idx) => {
+  setBackfillRows((prev) => prev.filter((_, i) => i !== idx));
+};
 
   // Web-only: persist in-progress draft so tab switches / refresh don't lose work
   const draftKey = useMemo(() => {
     if (Platform.OS !== "web") return null;
-    if (!assetId) return null;
-    return `keepr.draft.timeline.add.${assetId}`;
-  }, [assetId]);
+    if (!effectiveAssetId) return null;
+    return `keepr.draft.timeline.add.${effectiveAssetId}`;
+  }, [effectiveAssetId]);
 
   const clearDraft = useMemo(() => {
     if (!draftKey) return () => {};
@@ -279,7 +350,21 @@ const {
     () => (selectedSystemId ? systems.find((s) => s.id === selectedSystemId) : null),
     [selectedSystemId, systems]
   );
-
+  const allAttachments = useMemo(() => {
+    return [
+      ...(existingAttachments || []),
+      ...(pendingAttachmentId
+        ? [
+            {
+              id: pendingAttachmentId,
+              file_name: pendingAttachmentTitle || "Document",
+              mime_type: "file",
+              isPending: true,
+            },
+          ]
+        : []),
+    ];
+  }, [existingAttachments, pendingAttachmentId, pendingAttachmentTitle]);
   
 
 const notesHasUrls = useMemo(() => {
@@ -312,10 +397,10 @@ const notesHasUrls = useMemo(() => {
 
     (async () => {
       try {
-        if (!assetId) {
+        if (!effectiveAssetId) {
           setSystems([]);
         } else {
-          const sys = await loadSystemsForAsset(assetId);
+          const sys = await loadSystemsForAsset(effectiveAssetId);
           if (isActive) setSystems(sys);
         }
 
@@ -340,7 +425,7 @@ const notesHasUrls = useMemo(() => {
     return () => {
       isActive = false;
     };
-  }, [assetId]);
+  }, [effectiveAssetId]);
 
   const handleSelectSystem = (id) => {
     setSelectedSystemId(id === selectedSystemId ? null : id);
@@ -365,8 +450,9 @@ const notesHasUrls = useMemo(() => {
       setCreatingQuickSystem(true);
 
       // Prefer the canonical systems table; use a safe placeholder KSC code
+
       const payload = {
-        asset_id: assetId,
+        asset_id: effectiveAssetId,
         name,
         ksc_code: "custom",
         source_type: "manual",
@@ -383,7 +469,7 @@ const notesHasUrls = useMemo(() => {
       if (error) throw error;
 
       // Refresh system list and select the new one
-      const sys = await loadSystemsForAsset(assetId);
+      const sys = await loadSystemsForAsset(effectiveAssetId);
       setSystems(sys);
       if (data?.id) setSelectedSystemId(data.id);
 
@@ -502,125 +588,262 @@ const notesHasUrls = useMemo(() => {
   }
 };
 
-  const handleSave = async () => {
-    Keyboard.dismiss();
-    if (saving) return;
+const promoteEventAttachmentsToRecord = async (recordId) => {
+  if (
+    !recordId ||
+    !effectiveAssetId ||
+    !Array.isArray(existingAttachments) ||
+    existingAttachments.length === 0
+  ) {
+    return;
+  }
 
-    setSaving(true);
-    setSubmitError(null);
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  if (userError) {
+    console.error("Could not get current user", userError);
+    return;
+  }
 
-    if (!assetId) {
-      setSubmitError("This record must be linked to an asset.");
-      setSaving(false);
-      return;
-    }
+  const userId = userData?.user?.id;
+  if (!userId) {
+    console.error("No signed-in user found for attachment promotion");
+    return;
+  }
 
-    const dateIso = date;
-    if (!dateIso) {
-      setSaving(false);
-      setSubmitError("Please select a date.");
-      return;
-    }
-
-
-    const payload = {
-      asset_id: assetId,
-      title: title?.trim() || "Story moment",
-      notes: notes?.trim() || null,
-      service_type: serviceType === "moment" ? "moment" : serviceType,
-      performed_at: dateIso,
-      location: location?.trim?.() || null,
-      provider: provider?.trim?.() || null,
-      cost: safeMoney(cost),
-      system_id: selectedSystemId || null,
-      keepr_pro_id: selectedKeeprProId || null,
-      source_type: "manual",
-      verification_status: "verified",
-    };
-
-    let recordId = null;
-
+  for (const a of existingAttachments) {
     try {
-      // Some schemas may not have a provider column; try gracefully.
-      let { data, error } = await supabase
-        .from("service_records")
-        .insert(payload)
-        .select("*")
-        .single();
+      if (!a?.storage_path && !a?.public_url) continue;
 
-      if (error && String(error.message || "").toLowerCase().includes("provider")) {
-        const fallback = { ...payload };
-        delete fallback.provider;
-        const res2 = await supabase
-          .from("service_records")
-          .insert(fallback)
-          .select("*")
+      const payload = {
+        owner_user_id: userId,
+        asset_id: effectiveAssetId,
+        kind: String(a?.mime_type || "").toLowerCase().startsWith("image/")
+          ? "photo"
+          : "file",
+        bucket: "asset-files",
+        storage_path: a?.storage_path || null,
+        url: a?.public_url || null,
+        file_name: a?.file_name || "Attachment",
+        mime_type: a?.mime_type || null,
+        title: a?.file_name || "Attachment",
+        source_context: {
+          source: "event_inbox",
+          event_id: eventId || null,
+          event_attachment_id: a?.id || null,
+        },
+      };
+
+      const { data: insertedAttachment, error: insertAttachmentError } =
+        await supabase
+          .from("attachments")
+          .insert(payload)
+          .select("id")
           .single();
-        error = res2.error;
-        data = res2.data;
+
+      if (insertAttachmentError) throw insertAttachmentError;
+      if (!insertedAttachment?.id) continue;
+
+      const { error: placementError } = await supabase
+        .from("attachment_placements")
+        .insert({
+          attachment_id: insertedAttachment.id,
+          target_type: "service_record",
+          target_id: recordId,
+          role: "proof",
+        });
+
+      if (
+        placementError &&
+        placementError.code !== "23505" &&
+        !String(placementError.message || "").toLowerCase().includes("duplicate key")
+      ) {
+        throw placementError;
       }
-
-      if (error) throw error;
-      recordId = data?.id;
-
-      if (recordId && pendingAttachmentId) {
-  try {
-    const { error: placementError } = await supabase
-      .from("attachment_placements")
-      .insert({
-        attachment_id: pendingAttachmentId,
-        target_type: "service_record",
-        target_id: recordId,
-        role: "proof",
-      });
-
-    if (
-      placementError &&
-      placementError.code !== "23505" &&
-      !String(placementError.message || "").toLowerCase().includes("duplicate key")
-    ) {
-      throw placementError;
+    } catch (e) {
+      console.error("Promote event attachment failed:", e, a);
     }
+  }
+};
+
+const cleanupSourceEvent = async () => {
+  if (!eventId) return;
+
+  try {
+    await supabase
+      .from("event_inbox_attachments")
+      .delete()
+      .eq("event_id", eventId);
+
+    await supabase
+      .from("event_inbox")
+      .delete()
+      .eq("id", eventId);
   } catch (e) {
-    console.error("Attach pending proof error:", e);
-    setSubmitError(e?.message || "Record created, but the document could not be attached.");
+    console.error("Cleanup source event failed:", e);
+  }
+};
+
+const handleSave = async () => {
+  Keyboard.dismiss();
+  if (saving) return;
+
+  setSaving(true);
+  setSubmitError(null);
+
+  if (!effectiveAssetId) {
+    setSubmitError("This record must be linked to an asset.");
     setSaving(false);
     return;
   }
-}
-    } catch (e) {
-      console.error("Create timeline record error:", e);
-      setSubmitError(e?.message || "Could not save this record.");
-      setSaving(false);
-      return;
-    }
 
+  let finalDate = date;
+  let finalTitle = title?.trim();
+
+  if (serviceType === "cost") {
+    finalDate = costMode === "annual" ? `${costYear}-12-31` : date;
+
+    finalTitle =
+      finalTitle ||
+      (costMode === "annual"
+        ? `${costCategory} — Annual Rollup`
+        : `${costCategory}`);
+  }
+
+  if (!finalDate) {
+    setSubmitError("Please select a date.");
     setSaving(false);
+    return;
+  }
 
-    // Clear any in-progress draft on success
-    clearDraft();
-
-    // Navigate to the story view for this new record
-    if (recordId) {
-      try {
-        navigation.replace("TimelineRecord", {
-          recordId,
-          timelineRecordId: recordId,
-          serviceRecordId: recordId,
-          // Start in "proof mode" after create
-          mode: "add_proof",
-        });
-        return;
-      } catch {}
-    }
-
-    // Fallback
-    try {
-      back();
-    } catch (e) {
-      console.error(e);
-    }
+  const payload = {
+    asset_id: effectiveAssetId,
+    title: finalTitle || "Record",
+    notes: notes?.trim() || null,
+    service_type: serviceType,
+    performed_at: finalDate,
+    location: location?.trim?.() || null,
+    provider: provider?.trim?.() || null,
+    cost: safeMoney(cost),
+    system_id: selectedSystemId || null,
+    keepr_pro_id: selectedKeeprProId || null,
+    source_type: "manual",
+    verification_status: "verified",
+    extra_metadata:
+      serviceType === "cost"
+        ? {
+            category: costCategory,
+            mode: costMode,
+            year: costYear,
+            breakdown: costBreakdown || null,
+          }
+        : {},
   };
+
+  const payloads = [payload];
+
+  if (serviceType === "cost" && costMode === "annual") {
+    backfillRows.forEach((row) => {
+      const year = Number(row.year);
+      const amount = safeMoney(row.amount);
+
+      if (!year || amount == null) return;
+      if (year === Number(costYear)) return;
+
+      payloads.push({
+        ...payload,
+        title: `${costCategory} — Annual Rollup`,
+        performed_at: `${year}-12-31`,
+        cost: amount,
+        extra_metadata: {
+          ...payload.extra_metadata,
+          year,
+          breakdown: row.breakdown || null,
+          is_backfill: true,
+        },
+      });
+    });
+  }
+
+  let recordId = null;
+
+  try {
+    let { data, error } = await supabase
+      .from("service_records")
+      .insert(payloads)
+      .select("*");
+
+    if (
+      error &&
+      String(error.message || "").toLowerCase().includes("provider")
+    ) {
+      const fallbackPayloads = payloads.map((p) => {
+        const next = { ...p };
+        delete next.provider;
+        return next;
+      });
+
+      const res2 = await supabase
+        .from("service_records")
+        .insert(fallbackPayloads)
+        .select("*");
+
+      error = res2.error;
+      data = res2.data;
+    }
+
+    if (error) throw error;
+
+    recordId = data?.[0]?.id;
+
+    if (recordId && pendingAttachmentId) {
+      const { error: placementError } = await supabase
+        .from("attachment_placements")
+        .insert({
+          attachment_id: pendingAttachmentId,
+          target_type: "service_record",
+          target_id: recordId,
+          role: "proof",
+        });
+
+      if (
+        placementError &&
+        placementError.code !== "23505" &&
+        !String(placementError.message || "")
+          .toLowerCase()
+          .includes("duplicate key")
+      ) {
+        throw placementError;
+      }
+    }
+  } catch (e) {
+    console.error("Create timeline record error:", e);
+    setSubmitError(e?.message || "Could not save this record.");
+    setSaving(false);
+    return;
+  }
+
+  clearDraft();
+  setSaving(false);
+
+  navigation.replace("TimelineRecord", {
+    recordId,
+    timelineRecordId: recordId,
+    serviceRecordId: recordId,
+    mode: "add_proof",
+  });
+
+  if (existingAttachments.length > 0) {
+    promoteEventAttachmentsToRecord(recordId).catch((e) =>
+      console.error("Attachment promotion failed:", e)
+    );
+  }
+
+  if (eventId) {
+    cleanupSourceEvent().catch((e) =>
+      console.error("Cleanup failed:", e)
+    );
+  }
+};
 
   return (
     <SafeAreaView style={layoutStyles.screen}>
@@ -712,6 +935,20 @@ const notesHasUrls = useMemo(() => {
                     Pro
                   </Text>
                 </TouchableOpacity>
+                <TouchableOpacity
+                style={[styles.togglePill, serviceType === "cost" && styles.toggleActiveSoft]}
+                onPress={() => setServiceType("cost")}
+              >
+                <Ionicons
+                  name={serviceType === "cost" ? "cash" : "cash-outline"}
+                  size={14}
+                  color={serviceType === "cost" ? colors.accentBlue : colors.textMuted}
+                  style={{ marginRight: 6 }}
+                />
+                <Text style={[styles.toggleText, serviceType === "cost" && styles.toggleTextSoftActive]}>
+                  Expense
+                </Text>
+              </TouchableOpacity>
               </View>
 
               <View style={styles.row}>
@@ -725,38 +962,178 @@ const notesHasUrls = useMemo(() => {
                     placeholderTextColor={colors.textMuted}
                   />
                 </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.label}>Date</Text>
-                <KeeprDateField
-                  value={date}
-                  onChange={setDate}
-                />
-              </View>
+                {!(serviceType === "cost" && costMode === "annual") && (
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.label}>Date</Text>
+                    <KeeprDateField
+                      value={date}
+                      onChange={setDate}
+                    />
+                  </View>
+                )}
               </View>
 
-              <View style={styles.row}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Cost</Text>
+              {serviceType === "cost" && (
+                <>
+                  <Text style={styles.label}>Category</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    <View style={{ flexDirection: "row", gap: 8 }}>
+                      {COST_CATEGORIES.map((c) => {
+                        const selected = costCategory === c;
+                        return (
+                          <TouchableOpacity
+                            key={c}
+                            onPress={() => setCostCategory(c)}
+                            style={[
+                              styles.togglePill,
+                              selected && styles.toggleActiveSoft,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.toggleText,
+                                selected && styles.toggleTextSoftActive,
+                              ]}
+                            >
+                              {c}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </ScrollView>
+
+                  <Text style={styles.label}>Amount</Text>
                   <TextInput
                     style={styles.input}
                     placeholder="$0"
                     value={cost}
                     onChangeText={setCost}
-                    placeholderTextColor={colors.textMuted}
                     keyboardType="decimal-pad"
                   />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Location</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Optional"
-                    value={location}
-                    onChangeText={setLocation}
-                    placeholderTextColor={colors.textMuted}
-                  />
-                </View>
-              </View>
+
+                  <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
+                    <TouchableOpacity
+                      style={[styles.togglePill, costMode === "single" && styles.toggleActiveSoft]}
+                      onPress={() => setCostMode("single")}
+                    >
+                      <Text style={styles.toggleText}>Single</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.togglePill, costMode === "annual" && styles.toggleActiveSoft]}
+                      onPress={() => setCostMode("annual")}
+                    >
+                      <Text style={styles.toggleText}>Annual</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {costMode === "annual" && (
+                    <>
+                      <Text style={styles.label}>Annual rollup</Text>
+
+                      <View style={styles.row}>
+                        <View style={{ flex: 1 }}>
+                          <TextInput
+                            style={styles.input}
+                            value={String(costYear)}
+                            onChangeText={(t) => setCostYear(Number(t))}
+                            placeholder="Year"
+                            keyboardType="number-pad"
+                          />
+                        </View>
+
+                        <View style={{ flex: 1 }}>
+                          <TextInput
+                            style={styles.input}
+                            value={cost}
+                            onChangeText={setCost}
+                            placeholder="$0"
+                            keyboardType="decimal-pad"
+                          />
+                          <TextInput
+                            style={[styles.input, { minHeight: 90, marginTop: 8 }]}
+                            value={costBreakdown}
+                            onChangeText={setCostBreakdown}
+                            placeholder={`Paste breakdown for ${costYear} (optional)`}
+                            multiline
+                            textAlignVertical="top"
+                          />
+                        </View>
+                      </View>
+
+                      <Text style={styles.label}>Backfill previous years</Text>
+                      {backfillRows.map((row, idx) => (
+                        <View key={`${row.year}-${idx}`} style={styles.row}>
+                          <View style={{ flex: 1 }}>
+                            <TextInput
+                              style={styles.input}
+                              value={String(row.year)}
+                              onChangeText={(t) => updateBackfillYear(idx, t)}
+                              placeholder="Year"
+                              keyboardType="number-pad"
+                            />
+                          </View>
+
+                          <View style={{ flex: 1 }}>
+                            <TextInput
+                              style={styles.input}
+                              value={row.amount}
+                              onChangeText={(t) => updateBackfillAmount(idx, t)}
+                              placeholder="$0"
+                              keyboardType="decimal-pad"
+                            />
+                            <TextInput
+                              style={[styles.input, { minHeight: 90, marginTop: 8 }]}
+                              value={row.breakdown}
+                              onChangeText={(t) => updateBackfillBreakdown(idx, t)}
+                              placeholder="Paste breakdown for this year (optional)"
+                              multiline
+                              textAlignVertical="top"
+                            />
+                          </View>
+
+                          <TouchableOpacity onPress={() => removeBackfillRow(idx)}>
+                            <Ionicons name="close-circle-outline" size={20} color={colors.textMuted} />
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+                      <TouchableOpacity onPress={addBackfillRow} style={styles.quickAddRow}>
+                        <Ionicons name="add-circle-outline" size={16} color={colors.brandBlue} />
+                        <Text style={styles.quickAddText}>Add previous year</Text>
+                      </TouchableOpacity>
+                    
+                    </>
+                  )}
+                </>
+              )}
+              
+                {serviceType !== "cost" && (
+                  <View style={styles.row}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.label}>Cost</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="$0"
+                        value={cost}
+                        onChangeText={setCost}
+                        placeholderTextColor={colors.textMuted}
+                        keyboardType="decimal-pad"
+                      />
+                    </View>
+
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.label}>Location</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Optional"
+                        value={location}
+                        onChangeText={setLocation}
+                        placeholderTextColor={colors.textMuted}
+                      />
+                    </View>
+                  </View>
+                )}     
             </View>
             <View style={styles.card}>
                   <Text style={styles.cardTitle}>Context</Text>
@@ -838,38 +1215,37 @@ const notesHasUrls = useMemo(() => {
 
               <View style={{ height: spacing.md }} />
             </View>
-
-            {pendingAttachmentId ? (
+            {allAttachments.length > 0 && (
               <View style={styles.card}>
                 <Text style={styles.cardTitle}>Attached Proof</Text>
                 <Text style={styles.helper}>
-                  This document will be attached to the timeline record when you create it.
+                  These will be attached to the timeline record.
                 </Text>
 
-                <View style={styles.pendingAttachmentRow}>
-                  <Ionicons name="document-text-outline" size={18} color={colors.textSecondary} />
-                  <View style={{ flex: 1, marginLeft: 10 }}>
-                    <Text style={styles.pendingAttachmentTitle} numberOfLines={1}>
-                      {pendingAttachmentTitle || "Document"}
-                    </Text>
-                    <Text style={styles.pendingAttachmentMeta} numberOfLines={1}>
-                      Ready to attach on save
-                    </Text>
-                  </View>
-                </View>
+                {allAttachments.map((a) => (
+                  <TouchableOpacity
+                    key={a.id}
+                    style={styles.pendingAttachmentRow}
+                    activeOpacity={0.85}
+                    onPress={() => {
+                      if (a?.public_url) {
+                        Linking.openURL(a.public_url).catch(() => {});
+                      }
+                    }}
+                  >
+                    <Ionicons name="document-text-outline" size={18} color={colors.textSecondary} />
+                    <View style={{ flex: 1, marginLeft: 10 }}>
+                      <Text style={styles.pendingAttachmentTitle} numberOfLines={1}>
+                        {a.file_name || "Attachment"}
+                      </Text>
+                      <Text style={styles.pendingAttachmentMeta} numberOfLines={1}>
+                        {a.isPending ? "Ready to attach" : `${a.mime_type || "file"} · tap to review`}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
               </View>
-            ) : null}
-           
-            {/* Proof helper */}
-                <View style={styles.card}>
-                  <Text style={styles.cardTitle}>Proof</Text>
-                  <Text style={styles.helper}>
-                    {pendingAttachmentId
-                      ? "This record will be created with the attached document already linked as proof."
-                      : "Once you save this story moment, you can attach photos, files, and links as proof from the story view."}
-                  </Text>
-                </View>
-            {submitError ? <Text style={styles.errorText}>{submitError}</Text> : null}
+            )}
           </ScrollView>
 
           {/* System picker */}
@@ -1105,7 +1481,6 @@ const notesHasUrls = useMemo(() => {
     </SafeAreaView>
   );
 }
-
 /* ---------------- styles ---------------- */
 
 const styles = StyleSheet.create({
@@ -1161,7 +1536,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.textPrimary,
   },
-  multiline: { minHeight: 140 },
+  multiline: { minHeight: 240 },
 
   row: { flexDirection: "row", gap: spacing.md, marginTop: spacing.md },
 

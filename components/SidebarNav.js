@@ -14,7 +14,7 @@ const CONSUMER_ITEMS = [
   { key: "MyHome", label: "Homes", icon: "home-outline" },
   { key: "Garage", label: "Garage", icon: "car-outline" },
   { key: "Boats", label: "Boats", icon: "boat-outline" },
-  { key: "Notifications", label: "Event Inbox", icon: "notifications-outline" },
+  { key: "Notifications", label: "Actions Inbox", icon: "notifications-outline" },
   { key: "KeeprPros", label: "Keepr™ Pros", icon: "construct-outline" },
   { key: "PlanUpgrade", label: "Plan & Upgrade", icon: "pricetag-outline" },
   { key: "Settings", label: "Settings", icon: "settings-outline" },

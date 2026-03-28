@@ -5,6 +5,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { supabase } from "../../lib/supabaseClient";
 import { navigationRef } from "../../navigationRoot";
 import KaiOrb from "../../components/KaiOrb";
+import { ScrollView, KeyboardAvoidingView, Platform } from "react-native";
 
 async function dismissOnboarding() {
   const { data } = await supabase.auth.getUser();
@@ -31,9 +32,16 @@ function SecondaryButton({ title, onPress }) {
 
 export default function OnboardingNarrative2Screen() {
   return (
-    <SafeAreaView style={styles.screen}>
-      <View style={styles.container}>
-        <View style={styles.card}>
+<SafeAreaView style={styles.screen} edges={["top", "bottom"]}>
+  <KeyboardAvoidingView
+    style={{ flex: 1 }}
+    behavior={Platform.OS === "ios" ? "padding" : undefined}
+  >
+    <ScrollView
+      contentContainerStyle={styles.scrollContent}
+      keyboardShouldPersistTaps="handled"
+    >
+      <View style={styles.card}>
             <View style={styles.kaiGuideWrap}>
             <KaiOrb size={88} variant="compact" rotate={false} />
             <View style={styles.kaiGuideTextWrap}>
@@ -43,20 +51,20 @@ export default function OnboardingNarrative2Screen() {
               </Text>
             </View>
           </View>
-          <Text style={styles.h1}>How Keepr™ works: 4 Basics</Text>
+          <Text style={styles.h1}>The Keepr™ : 4 Basics</Text>
 
           <View style={styles.row}>
-            <Text style={styles.term}>Asset</Text>
-            <Text style={styles.def}>What you own: Home, Car, Boat, etc.</Text>
-          </View>
+          <Text style={styles.term}>Assets</Text>
+          <Text style={styles.def}>What you own: Home, Car, Boat, etc.</Text>
+        </View>
 
           <View style={styles.row}>
-            <Text style={styles.term}>System</Text>
+            <Text style={styles.term}>Systems</Text>
             <Text style={styles.def}>Things inside the asset: Think Furnace, Generator, Tires, Motor </Text>
           </View>
 
           <View style={styles.row}>
-            <Text style={styles.term}>Record</Text>
+            <Text style={styles.term}>Records</Text>
             <Text style={styles.def}>What happened: Oil Change, New Refrigerator</Text>
           </View>
 
@@ -92,14 +100,19 @@ export default function OnboardingNarrative2Screen() {
             <Text style={styles.skipText}>Skip for now</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#F5F6F8" },
-  container: { flex: 1, padding: 24, justifyContent: "center" },
+  scrollContent: {
+  flexGrow: 1,
+  padding: 24,
+  justifyContent: "flex-start",
+},
   card: {
     backgroundColor: "#FFFFFF",
     borderRadius: 18,
@@ -108,9 +121,19 @@ const styles = StyleSheet.create({
     padding: 22,
   },
   h1: { fontSize: 22, fontWeight: "900", color: "#111827", lineHeight: 28, marginBottom: 14 },
-  row: { flexDirection: "row", alignItems: "baseline", marginBottom: 10 },
-  term: { width: 110, fontSize: 16, fontWeight: "900", color: "#111827" },
-  def: { fontSize: 16, color: "#111827" },
+  row: {
+  marginBottom: 12,
+},
+term: {
+  fontSize: 16,
+  fontWeight: "900",
+  color: "#111827",
+  marginBottom: 2,
+},
+def: {
+  fontSize: 16,
+  color: "#111827",
+},
   p: { fontSize: 15, color: "#111827", lineHeight: 22 },
   primaryBtn: {
     backgroundColor: "#111827",
