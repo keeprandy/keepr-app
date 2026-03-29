@@ -23,6 +23,7 @@ import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { layoutStyles } from "../styles/layout";
 import { colors, spacing, radius, shadows } from "../styles/theme";
+import { buildTimelinePrefillFromEmailText } from "../utils/emailToTimeline";
 
 /* --------------------------- helpers --------------------------- */
 
@@ -56,7 +57,19 @@ function resolveInboxAction(ev, attachments) {
   if (source === "invoice" || source === "service_update") return "timeline";
   if (hasAttachment && (hasMoney || hasProvider)) return "timeline";
 
-  if (origin === "email" || source === "email") return "chooser";
+  if (origin === "email" || source === "email") {
+  const prefill = buildTimelinePrefillFromEmailText({
+    subject: ev?.title,
+    textBody: ev?.notes,
+    date: ev?.created_at,
+  });
+
+  const looksStructured =
+  prefill?.emailType !== "noise" &&
+  ((prefill?.confidence || 0) >= 2 || prefill?.emailType === "invoice");
+
+  return looksStructured ? "timeline" : "chooser";
+}
 
   return "draft";
 }
@@ -532,6 +545,7 @@ const remindersByDate = useMemo(() => {
             attachmentsMap[a.event_id].push(a);
           });
         }
+
         setAttachmentsByEvent(attachmentsMap);
 
         /* --------- 1b. Reminders (reminders) --------- */
@@ -1100,10 +1114,6 @@ const remindersByDate = useMemo(() => {
     if (ev.system_id && systemNameById[ev.system_id])
       ctxBits.push(systemNameById[ev.system_id]);
     const ctxLine = ctxBits.join(" • ");
-    if (action === "chooser") {
-      setSelectedEventId(ev.id);
-      return;
-    }
 
     return (
       <TouchableOpacity
@@ -1112,14 +1122,29 @@ const remindersByDate = useMemo(() => {
         activeOpacity={0.9}
         onPress={() => {
 
-        if (action === "timeline") {
-          navigation.navigate("AddTimelineRecord", {
-            eventId: ev.id,
-            prefillFromEvent: true,
-            carryAttachments: true,
-          });
-          return;
-        }
+        // TEMP: force timeline flow for email ingestion
+{
+        const prefill = buildTimelinePrefillFromEmailText({
+          subject: ev.title,
+          textBody: ev.notes,
+          date: ev.created_at,
+        });
+
+const eventAttachments = attachmentsByEvent[ev.id] || [];
+
+      navigation.navigate("AddTimelineRecord", {
+        eventId: ev.id,
+        assetId: ev.asset_id || null,
+        systemId: ev.system_id || null,
+        prefillTitle: prefill.prefillTitle,
+        prefillNotes: prefill.prefillNotes,
+        prefillDate: prefill.prefillDate,
+        prefillAmount: prefill.prefillAmount,
+        existingAttachments: eventAttachments,
+        source: "email",
+      });
+        return;
+      }
 
         if (action === "draft") {
           navigation.navigate("CreateEvent", {
@@ -1653,10 +1678,6 @@ const remindersByDate = useMemo(() => {
         Draft emails, links, and quick captures waiting to be enriched into
         verified timeline records.
       </Text>
-        <Text style={styles.subtitle}>
-          Draft emails, links, and quick captures waiting to be enriched into
-          verified timeline records.
-        </Text>
 
         <View style={styles.filterRow}>
           <TouchableOpacity
@@ -2820,7 +2841,7 @@ intakeSub: {
     position: "absolute",
     right: spacing.lg,
     bottom: spacing.lg,
-    backgroundColor: "rgba(45, 124, 227, 0.8);",
+    backgroundColor: "rgba(45, 124, 227, 0.8)",
     borderRadius: 999,
     paddingHorizontal: 16,
     paddingVertical: 12,

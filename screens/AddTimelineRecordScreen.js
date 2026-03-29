@@ -52,7 +52,6 @@ const COST_CATEGORIES = [
   "Other",
 ];
 
-
 function getTodayISO() {
   const now = new Date();
   const yyyy = String(now.getFullYear());
@@ -135,7 +134,7 @@ async function loadRecordAttachments(recordId) {
           file_url
         )
       `)
-      .eq("target_type", "timeline_record")
+      .eq("target_type", "service_record")
       .eq("target_id", recordId);
 
     if (error) throw error;
@@ -180,12 +179,16 @@ const {
     return null;
   }, [backTo, origin]);
 
-  const [serviceType, setServiceType] = useState("moment"); // moment | diy | pro | cost
+const [serviceType, setServiceType] = useState("moment");
 
-    const effectiveAssetId = prefillAssetId || assetId || null;
+const [selectedAssetId, setSelectedAssetId] = useState(
+  () => prefillAssetId || assetId || null
+);
 
-    const [date, setDate] = useState(() => prefillDate || getTodayISO());
-    const [cost, setCost] = useState(() => prefillAmount || "");
+const effectiveAssetId = selectedAssetId || prefillAssetId || assetId || null;
+
+const [date, setDate] = useState(() => prefillDate || getTodayISO());
+const [cost, setCost] = useState(() => prefillAmount || "");
     const [selectedSystemId, setSelectedSystemId] = useState(
       () => prefillSystemId || initialSystemId || null
     );
@@ -225,6 +228,8 @@ const {
   const [costYear, setCostYear] = useState(new Date().getFullYear());
   const [costBreakdown, setCostBreakdown] = useState("");
   const [backfillRows, setBackfillRows] = useState([]);
+  const [showAssetPicker, setShowAssetPicker] = useState(false);
+  const [assets, setAssets] = useState([]);
 
   const addBackfillRow = () => {
   setBackfillRows((prev) => [
@@ -236,6 +241,7 @@ const {
     },
   ]);
 };
+
 
 const updateBackfillBreakdown = (idx, value) => {
   setBackfillRows((prev) =>
@@ -397,12 +403,27 @@ const notesHasUrls = useMemo(() => {
 
     (async () => {
       try {
+
+        const assetRows = await safeSelect("assets", (q) =>
+          q
+            .is("deleted_at", null)   // 🔑 only non-deleted
+            .order("name", { ascending: true })
+        );
+
+        if (isActive) setAssets(assetRows ?? []);
+
         if (!effectiveAssetId) {
           setSystems([]);
         } else {
           const sys = await loadSystemsForAsset(effectiveAssetId);
           if (isActive) setSystems(sys);
         }
+
+        const cleanAssets = (assetRows || []).filter(
+          (a) => a?.status === "active" && !a?.name?.toLowerCase().includes("test")
+        );
+
+        setAssets(cleanAssets);
 
         // Keepr Pros (same model as EditTimelineRecordScreen)
         let rows = await safeSelect("keepr_pros", (q) =>
@@ -425,7 +446,7 @@ const notesHasUrls = useMemo(() => {
     return () => {
       isActive = false;
     };
-  }, [effectiveAssetId]);
+  }, [selectedAssetId]);
 
   const handleSelectSystem = (id) => {
     setSelectedSystemId(id === selectedSystemId ? null : id);
@@ -588,6 +609,7 @@ const notesHasUrls = useMemo(() => {
   }
 };
 
+
 const promoteEventAttachmentsToRecord = async (recordId) => {
   if (
     !recordId ||
@@ -598,13 +620,18 @@ const promoteEventAttachmentsToRecord = async (recordId) => {
     return;
   }
 
-  const { data: userData, error: userError } = await supabase.auth.getUser();
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
   if (userError) {
     console.error("Could not get current user", userError);
     return;
   }
 
-  const userId = userData?.user?.id;
+  const userId = user?.id;
+
   if (!userId) {
     console.error("No signed-in user found for attachment promotion");
     return;
@@ -612,31 +639,22 @@ const promoteEventAttachmentsToRecord = async (recordId) => {
 
   for (const a of existingAttachments) {
     try {
-      if (!a?.storage_path && !a?.public_url) continue;
-
-      const payload = {
-        owner_user_id: userId,
-        asset_id: effectiveAssetId,
-        kind: String(a?.mime_type || "").toLowerCase().startsWith("image/")
-          ? "photo"
-          : "file",
-        bucket: "asset-files",
-        storage_path: a?.storage_path || null,
-        url: a?.public_url || null,
-        file_name: a?.file_name || "Attachment",
-        mime_type: a?.mime_type || null,
-        title: a?.file_name || "Attachment",
-        source_context: {
-          source: "event_inbox",
-          event_id: eventId || null,
-          event_attachment_id: a?.id || null,
-        },
-      };
-
       const { data: insertedAttachment, error: insertAttachmentError } =
         await supabase
           .from("attachments")
-          .insert(payload)
+          .insert({
+            owner_user_id: userId,
+            asset_id: effectiveAssetId,
+            kind: String(a?.mime_type || "").startsWith("image/")
+              ? "photo"
+              : "file",
+            bucket: a?.storage_bucket || "asset-files",
+            storage_path: a?.storage_path,
+            url: a?.public_url || null,
+            file_name: a?.file_name || "Attachment",
+            mime_type: a?.mime_type || null,
+            title: a?.file_name || "Attachment",
+          })
           .select("id")
           .single();
 
@@ -652,15 +670,9 @@ const promoteEventAttachmentsToRecord = async (recordId) => {
           role: "proof",
         });
 
-      if (
-        placementError &&
-        placementError.code !== "23505" &&
-        !String(placementError.message || "").toLowerCase().includes("duplicate key")
-      ) {
-        throw placementError;
-      }
+      if (placementError) throw placementError;
     } catch (e) {
-      console.error("Promote event attachment failed:", e, a);
+      console.error("PROMOTE ERROR:", e, a);
     }
   }
 };
@@ -683,6 +695,12 @@ const cleanupSourceEvent = async () => {
   }
 };
 
+const isFromInbox = route?.params?.eventId;
+
+const handleDiscardToInbox = () => {
+  navigation.replace("Notifications");
+};
+
 const handleSave = async () => {
   Keyboard.dismiss();
   if (saving) return;
@@ -690,11 +708,12 @@ const handleSave = async () => {
   setSaving(true);
   setSubmitError(null);
 
-  if (!effectiveAssetId) {
-    setSubmitError("This record must be linked to an asset.");
-    setSaving(false);
-    return;
-  }
+if (!effectiveAssetId) {
+  setSubmitError("Select an asset to continue.");
+  setShowAssetPicker(true);
+  setSaving(false);
+  return;
+}
 
   let finalDate = date;
   let finalTitle = title?.trim();
@@ -822,6 +841,22 @@ const handleSave = async () => {
     return;
   }
 
+  if (existingAttachments.length > 0) {
+    try {
+      await promoteEventAttachmentsToRecord(recordId);
+    } catch (e) {
+      console.error("Attachment promotion failed:", e);
+    }
+  }
+
+  if (eventId) {
+    try {
+      await cleanupSourceEvent();
+    } catch (e) {
+      console.error("Cleanup failed:", e);
+    }
+  }
+
   clearDraft();
   setSaving(false);
 
@@ -831,18 +866,6 @@ const handleSave = async () => {
     serviceRecordId: recordId,
     mode: "add_proof",
   });
-
-  if (existingAttachments.length > 0) {
-    promoteEventAttachmentsToRecord(recordId).catch((e) =>
-      console.error("Attachment promotion failed:", e)
-    );
-  }
-
-  if (eventId) {
-    cleanupSourceEvent().catch((e) =>
-      console.error("Cleanup failed:", e)
-    );
-  }
 };
 
   return (
@@ -862,6 +885,14 @@ const handleSave = async () => {
             <View style={{ flex: 1 }}>
               <Text style={styles.headerTitle}>Add Timeline Record</Text>
               <Text style={styles.headerSubtitle}>{contextLabel}</Text>
+              {isFromInbox && (
+              <TouchableOpacity
+                onPress={handleDiscardToInbox}
+                style={styles.headerSecondaryBtn}
+              >
+                <Text style={styles.headerSecondaryText}>Back to Inbox</Text>
+              </TouchableOpacity>
+            )}
             </View>
 
             <TouchableOpacity
@@ -1175,6 +1206,17 @@ const handleSave = async () => {
                 </View>
               ) : (
                 <View>
+                  <TouchableOpacity
+                    style={styles.selector}
+                    onPress={() => setShowAssetPicker(true)}
+                  >
+                    <Text style={selectedAssetId ? styles.selectorText : styles.selectorPlaceholder}>
+                      {selectedAssetId
+                        ? assets.find(a => a.id === selectedAssetId)?.name
+                        : "Select asset (required)"}
+                    </Text>
+                    <Ionicons name="chevron-forward" size={16} />
+                  </TouchableOpacity>
                   <TouchableOpacity style={styles.selector} onPress={() => setShowSystemModal(true)}>
                   <Text style={selectedSystem ? styles.selectorText : styles.selectorPlaceholder} numberOfLines={1}>
                     {selectedSystem ? (selectedSystem.__label || systemLabel(selectedSystem)) : "Whole asset"}
@@ -1248,55 +1290,150 @@ const handleSave = async () => {
             )}
           </ScrollView>
 
-          {/* System picker */}
+          {/* Asset picker */}
+          <Modal
+            visible={showAssetPicker}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setShowAssetPicker(false)}
+          >
+            <TouchableOpacity
+              style={styles.modalBackdrop}
+              activeOpacity={1}
+              onPress={() => setShowAssetPicker(false)}
+            >
+              <TouchableOpacity
+                activeOpacity={1}
+                style={styles.modalCardCentered}
+                onPress={() => {}}
+              >
+                <View style={styles.modalHeaderRow}>
+                  <Text style={styles.modalTitle}>Select Asset</Text>
+
+                  <TouchableOpacity
+                    onPress={() => setShowAssetPicker(false)}
+                    style={styles.modalCloseBtn}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons name="close" size={18} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                </View>
+
+                <ScrollView showsVerticalScrollIndicator>
+                  {assets.map((a) => {
+                    const isSelected = selectedAssetId === a.id;
+
+                    return (
+                      <TouchableOpacity
+                        key={a.id}
+                        style={[
+                          styles.modalOptionRow,
+                          isSelected && styles.modalOptionRowActive,
+                        ]}
+                        onPress={() => {
+                          setSelectedAssetId(a.id);
+                          setSelectedSystemId(null); // critical: reset system
+                          setShowAssetPicker(false);
+                        }}
+                      >
+                        <Text
+                          style={
+                            isSelected
+                              ? styles.modalOptionTextActive
+                              : styles.modalOptionText
+                          }
+                        >
+                          {a.name}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </TouchableOpacity>
+            </TouchableOpacity>
+          </Modal>
+
+                    {/* System picker */}
           <Modal
             visible={showSystemModal}
             transparent
             animationType="fade"
             onRequestClose={() => setShowSystemModal(false)}
           >
-            <View style={styles.modalBackdrop}>
-              <View style={styles.modalCard}>
+            <TouchableOpacity
+              style={styles.modalBackdrop}
+              activeOpacity={1}
+              onPress={() => setShowSystemModal(false)}
+            >
+              <TouchableOpacity
+                activeOpacity={1}
+                style={styles.modalCardCentered}
+                onPress={() => {}}
+              >
                 <View style={styles.modalHeaderRow}>
                   <Text style={styles.modalTitle}>Link to a system</Text>
-                  <TouchableOpacity onPress={() => setShowSystemModal(false)} style={styles.modalCloseBtn}>
+                  <TouchableOpacity
+                    onPress={() => setShowSystemModal(false)}
+                    style={styles.modalCloseBtn}
+                    activeOpacity={0.85}
+                  >
                     <Ionicons name="close" size={18} color={colors.textSecondary} />
                   </TouchableOpacity>
                 </View>
-                <ScrollView>
+
+                <ScrollView showsVerticalScrollIndicator>
                   <TouchableOpacity
-                    style={styles.modalOptionRow}
+                    style={[
+                      styles.modalOptionRow,
+                      selectedSystemId == null && styles.modalOptionRowActive,
+                    ]}
                     onPress={() => {
                       handleSelectSystem(null);
                       setShowSystemModal(false);
                     }}
                   >
-                    <Text style={selectedSystemId == null ? styles.modalOptionTextActive : styles.modalOptionText}>
+                    <Text
+                      style={
+                        selectedSystemId == null
+                          ? styles.modalOptionTextActive
+                          : styles.modalOptionText
+                      }
+                    >
                       Whole asset
                     </Text>
                   </TouchableOpacity>
-                  {systems.map((sys) => (
-                    <TouchableOpacity
-                      key={sys.id}
-                      style={styles.modalOptionRow}
-                      onPress={() => {
-                        handleSelectSystem(sys.id);
-                        setShowSystemModal(false);
-                      }}
-                    >
-                      <Text
-                        style={
-                          selectedSystemId === sys.id ? styles.modalOptionTextActive : styles.modalOptionText
-                        }
-                        numberOfLines={1}
+
+                  {systems.map((sys) => {
+                    const isSelected = selectedSystemId === sys.id;
+
+                    return (
+                      <TouchableOpacity
+                        key={sys.id}
+                        style={[
+                          styles.modalOptionRow,
+                          isSelected && styles.modalOptionRowActive,
+                        ]}
+                        onPress={() => {
+                          handleSelectSystem(sys.id);
+                          setShowSystemModal(false);
+                        }}
                       >
-                        {sys.__label || systemLabel(sys)}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+                        <Text
+                          style={
+                            isSelected
+                              ? styles.modalOptionTextActive
+                              : styles.modalOptionText
+                          }
+                          numberOfLines={1}
+                        >
+                          {sys.__label || systemLabel(sys)}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </ScrollView>
-              </View>
-            </View>
+              </TouchableOpacity>
+            </TouchableOpacity>
           </Modal>
 
           {/* Keepr Pro picker */}
@@ -1306,23 +1443,45 @@ const handleSave = async () => {
             animationType="fade"
             onRequestClose={() => setShowProModal(false)}
           >
-            <View style={styles.modalBackdrop}>
-              <View style={styles.modalCard}>
+            <TouchableOpacity
+              style={styles.modalBackdrop}
+              activeOpacity={1}
+              onPress={() => setShowProModal(false)}
+            >
+              <TouchableOpacity
+                activeOpacity={1}
+                style={styles.modalCardCentered}
+                onPress={() => {}}
+              >
                 <View style={styles.modalHeaderRow}>
                   <Text style={styles.modalTitle}>Link a Keepr Pro</Text>
-                  <TouchableOpacity onPress={() => setShowProModal(false)} style={styles.modalCloseBtn}>
+                  <TouchableOpacity
+                    onPress={() => setShowProModal(false)}
+                    style={styles.modalCloseBtn}
+                    activeOpacity={0.85}
+                  >
                     <Ionicons name="close" size={18} color={colors.textSecondary} />
                   </TouchableOpacity>
                 </View>
-                <ScrollView>
+
+                <ScrollView showsVerticalScrollIndicator>
                   <TouchableOpacity
-                    style={styles.modalOptionRow}
+                    style={[
+                      styles.modalOptionRow,
+                      !selectedKeeprProId && styles.modalOptionRowActive,
+                    ]}
                     onPress={() => {
                       handleSelectPro(null);
                       setShowProModal(false);
                     }}
                   >
-                    <Text style={!selectedKeeprProId ? styles.modalOptionTextActive : styles.modalOptionText}>
+                    <Text
+                      style={
+                        !selectedKeeprProId
+                          ? styles.modalOptionTextActive
+                          : styles.modalOptionText
+                      }
+                    >
                       Not linked
                     </Text>
                   </TouchableOpacity>
@@ -1332,32 +1491,47 @@ const handleSave = async () => {
                     onPress={openQuickAddPro}
                     activeOpacity={0.85}
                   >
-                    <Ionicons name="add-circle-outline" size={16} color={colors.brandBlue} />
+                    <Ionicons
+                      name="add-circle-outline"
+                      size={16}
+                      color={colors.brandBlue}
+                    />
                     <Text style={styles.quickAddText}>Quick add Keepr Pro</Text>
                   </TouchableOpacity>
-                  {pros.map((pro) => (
-                    <TouchableOpacity
-                      key={pro.id}
-                      style={styles.modalOptionRow}
-                      onPress={() => {
-                        handleSelectPro(pro);
-                        setShowProModal(false);
-                      }}
-                    >
-                      <Text
-                        style={
-                          selectedKeeprProId === pro.id ? styles.modalOptionTextActive : styles.modalOptionText
-                        }
-                        numberOfLines={1}
+
+                  {pros.map((pro) => {
+                    const isSelected = selectedKeeprProId === pro.id;
+
+                    return (
+                      <TouchableOpacity
+                        key={pro.id}
+                        style={[
+                          styles.modalOptionRow,
+                          isSelected && styles.modalOptionRowActive,
+                        ]}
+                        onPress={() => {
+                          handleSelectPro(pro);
+                          setShowProModal(false);
+                        }}
                       >
-                        {buildKeeprProLabel(pro)}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+                        <Text
+                          style={
+                            isSelected
+                              ? styles.modalOptionTextActive
+                              : styles.modalOptionText
+                          }
+                          numberOfLines={1}
+                        >
+                          {buildKeeprProLabel(pro)}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </ScrollView>
-              </View>
-            </View>
+              </TouchableOpacity>
+            </TouchableOpacity>
           </Modal>
+
           <Modal
             visible={showQuickProModal}
             transparent
@@ -1411,6 +1585,7 @@ const handleSave = async () => {
               </View>
             </View>
           </Modal>
+
           <Modal
             visible={showQuickSystemModal}
             transparent
@@ -1594,6 +1769,26 @@ const styles = StyleSheet.create({
     borderColor: colors.borderSubtle,
     ...(shadows?.lg || {}),
   },
+
+modalOverlay: {
+  flex: 1,
+  backgroundColor: "rgba(0,0,0,0.4)",
+  justifyContent: "center",
+  alignItems: "center",
+},
+
+modalCardCentered: {
+  width: "90%",
+  maxWidth: 420,
+  maxHeight: "70%",
+  borderRadius: radius.xl,
+  backgroundColor: colors.surface,
+  padding: spacing.lg,
+  borderWidth: 1,
+  borderColor: colors.borderSubtle,
+  ...(shadows?.lg || {}),
+},
+
   modalHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1614,6 +1809,15 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.borderSubtle,
   },
+  modalOptionRowActive: {
+  backgroundColor: colors.surfaceSecondary,
+  borderRadius: 8,
+},
+
+modalOptionTextActive: {
+  color: colors.textPrimary,
+  fontWeight: "600",
+},
   modalOptionText: { fontSize: 13, color: colors.textSecondary, fontWeight: "700" },
   modalOptionTextActive: { fontSize: 13, color: colors.accentBlue, fontWeight: "900" },
   quickAddRow: {
