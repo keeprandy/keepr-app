@@ -1,8 +1,18 @@
 // index.js
-import { registerRootComponent } from 'expo';
-import App from './App';
+import "react-native-gesture-handler";
+import { registerRootComponent } from "expo";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import App from "./App";
 
-// This tells Expo (and React Native) to use App.js as the root component
-registerRootComponent(App);
+function Root() {
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <App />
+    </GestureHandlerRootView>
+  );
+}
 
-export default App;
+// This tells Expo to use Root instead of App directly
+registerRootComponent(Root);
+
+export default Root;

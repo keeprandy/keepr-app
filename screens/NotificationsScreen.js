@@ -24,6 +24,9 @@ import { useAuth } from "../context/AuthContext";
 import { layoutStyles } from "../styles/layout";
 import { colors, spacing, radius, shadows } from "../styles/theme";
 import { buildTimelinePrefillFromEmailText } from "../utils/emailToTimeline";
+import * as Haptics from "expo-haptics";
+import { Swipeable } from "react-native-gesture-handler";
+
 
 /* --------------------------- helpers --------------------------- */
 
@@ -1031,6 +1034,7 @@ const remindersByDate = useMemo(() => {
     }
   };
 
+  
   const handlePrimaryModalAction = () => {
   if (!selectedEvent) return;
 
@@ -1100,6 +1104,24 @@ const remindersByDate = useMemo(() => {
     );
   };
 
+  const renderRightDeleteAction = (ev) => (
+  <View style={styles.swipeDeleteWrap}>
+    <TouchableOpacity
+      style={styles.swipeDeleteBtn}
+      activeOpacity={0.85}
+      onPress={async () => {
+        try {
+          await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        } catch {}
+        deleteEvent(ev);
+      }}
+    >
+      <Ionicons name="trash-outline" size={18} color="#DC2626" />
+      <Text style={styles.swipeDeleteText}>Delete</Text>
+    </TouchableOpacity>
+  </View>
+);
+
   const renderEventCard = (ev) => {
     const isSelected = ev?.id === selectedEventId;
     const attCount = (attachmentsByEvent[ev.id] || []).length;
@@ -1115,12 +1137,17 @@ const remindersByDate = useMemo(() => {
       ctxBits.push(systemNameById[ev.system_id]);
     const ctxLine = ctxBits.join(" • ");
 
-    return (
-      <TouchableOpacity
-        key={ev.id}
-        style={[styles.card, isSelected && styles.cardSelected]}
-        activeOpacity={0.9}
-        onPress={() => {
+return (
+  <Swipeable
+    key={ev.id}
+    renderRightActions={() => renderRightDeleteAction(ev)}
+    overshootRight={false}
+    rightThreshold={40}
+  >
+    <TouchableOpacity
+      style={[styles.card, isSelected && styles.cardSelected]}
+      activeOpacity={0.9}
+      onPress={() => {
 
         // TEMP: force timeline flow for email ingestion
 {
@@ -1168,6 +1195,7 @@ const eventAttachments = attachmentsByEvent[ev.id] || [];
       }}
       >
         <View style={styles.cardHeaderRow}>
+        <View style={styles.cardHeaderLeft}>
           <View style={styles.cardIconWrap}>
             <Ionicons
               name="sparkles-outline"
@@ -1192,21 +1220,35 @@ const eventAttachments = attachmentsByEvent[ev.id] || [];
               {ev.status ? ` · ${String(ev.status).toUpperCase()}` : ""}
             </Text>
           </View>
-
-          <View style={{ alignItems: "flex-end" }}>
-            {getEventModeLabel(ev) ? (
-              <View style={[styles.statusPill, styles.statusDraft]}>
-                <Text style={[styles.statusText, styles.statusTextDraft]}>
-                  {getEventModeLabel(ev)}
-                </Text>
-              </View>
-            ) : null}
-
-            <View style={{ marginTop: getEventModeLabel(ev) ? 6 : 0 }}>
-              {badgeForStatus(ev.status)}
-            </View>
-          </View>
         </View>
+
+        <View style={styles.cardHeaderRight}>
+          <TouchableOpacity
+            onPress={async (e) => {
+              e?.stopPropagation?.();
+              try {
+                await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              } catch {}
+              deleteEvent(ev);
+            }}
+            hitSlop={12}
+            style={styles.cardDeleteBtn}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="trash-outline" size={18} color="#DC2626" />
+          </TouchableOpacity>
+
+          {getEventModeLabel(ev) ? (
+            <View style={[styles.statusPill, styles.statusDraft]}>
+              <Text style={[styles.statusText, styles.statusTextDraft]}>
+                {getEventModeLabel(ev)}
+              </Text>
+            </View>
+          ) : null}
+
+          <View>{badgeForStatus(ev.status)}</View>
+        </View>
+      </View>
 
         <View style={styles.cardBody}>
           <Text style={styles.cardSubtle} numberOfLines={1}>
@@ -1235,6 +1277,7 @@ const eventAttachments = attachmentsByEvent[ev.id] || [];
           </View>
         </View>
       </TouchableOpacity>
+      </Swipeable>
     );
   };
 
@@ -2683,6 +2726,56 @@ intakeSub: {
     justifyContent: "space-between",
     gap: spacing.sm,
   },
+
+  cardHeaderLeft: {
+  flexDirection: "row",
+  alignItems: "flex-start",
+  gap: spacing.sm,
+  flex: 1,
+},
+
+cardHeaderRight: {
+  alignItems: "flex-end",
+  justifyContent: "flex-start",
+  gap: 6,
+},
+
+cardDeleteBtn: {
+  width: 32,
+  height: 32,
+  borderRadius: 16,
+  alignItems: "center",
+  justifyContent: "center",
+  backgroundColor: "rgba(220, 38, 38, 0.08)",
+  borderWidth: 1,
+  borderColor: "rgba(220, 38, 38, 0.20)",
+},
+
+swipeDeleteWrap: {
+  justifyContent: "center",
+  alignItems: "flex-end",
+  marginBottom: spacing.md,
+},
+
+swipeDeleteBtn: {
+  width: 92,
+  height: "100%",
+  minHeight: 96,
+  borderRadius: radius.xl,
+  alignItems: "center",
+  justifyContent: "center",
+  backgroundColor: "rgba(220, 38, 38, 0.08)",
+  borderWidth: 1,
+  borderColor: "rgba(220, 38, 38, 0.20)",
+  gap: 4,
+},
+
+swipeDeleteText: {
+  fontSize: 11,
+  fontWeight: "900",
+  color: "#DC2626",
+},
+
   tipText: {
     flex: 1,
     fontSize: 11,
