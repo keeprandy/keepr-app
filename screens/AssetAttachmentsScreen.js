@@ -2246,7 +2246,13 @@ return (
         </TouchableOpacity>
 
         <View style={styles.headerCenter}>
-          <Text style={styles.assetTitle}>{assetName}</Text>
+          <Text
+            style={styles.assetTitle}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
+            {assetName}
+          </Text>
           <Text style={styles.assetSubtitle} numberOfLines={1}>
             {isScoped ? `Attachments • ${effectiveScopeLabel}` : "Attachments"}
           </Text>
@@ -3727,8 +3733,19 @@ primaryActionBtnText: {
   },
   backLabel: { marginLeft: 6, fontWeight: "600", color: colors.textPrimary },
 
-  headerCenter: { flex: 1, alignItems: "center" },
-  assetTitle: { fontSize: 18, fontWeight: "700", color: colors.textPrimary },
+  headerCenter: {
+  flex: 1,
+  alignItems: "center",
+  minWidth: 0,
+  paddingHorizontal: 10,
+},
+  assetTitle: {
+  fontSize: 18,
+  fontWeight: "700",
+  color: colors.textPrimary,
+  textAlign: "center",
+  width: "100%",
+},
   assetSubtitle: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
 
   headerRight: { flexDirection: "row", alignItems: "center" },

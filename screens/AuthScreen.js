@@ -92,21 +92,19 @@ export default function AuthScreen() {
   const canSubmit = !submitting && !emailErr && !passwordErr;
 
   const ensureProfile = async (userId) => {
-    // Safe “upsert” so we don’t care if a trigger exists or not.
-    const { error } = await supabase.from("profiles").upsert(
-      {
-        id: userId,
-        email: normalizedEmail || null,
-        display_name: displayName?.trim() || null,
-        role: "consumer",
-        plan: "free",
-        onboarding_state: "in_progress",
-      },
-      { onConflict: "id" }
-    );
+  const { error } = await supabase.from("profiles").upsert(
+    {
+      id: userId,
+      email: normalizedEmail || null,
+      display_name: displayName?.trim() || null,
+      role: "consumer",
+      onboarding_state: "in_progress",
+    },
+    { onConflict: "id" }
+  );
 
-    if (error) throw error;
-  };
+  if (error) throw error;
+};
 
   const markAllTouched = () => {
     setTouched((t) => ({

@@ -277,6 +277,12 @@ function MainTabs() {
   React.useEffect(() => {
   const loadLast = async () => {
     try {
+      if (Platform.OS === "web") {
+        const stored = window?.localStorage?.getItem("lastCaptureAsset");
+        if (stored) setSelectedCaptureAsset(JSON.parse(stored));
+        return;
+      }
+
       const stored = await AsyncStorage.getItem("lastCaptureAsset");
       if (stored) {
         setSelectedCaptureAsset(JSON.parse(stored));
@@ -312,11 +318,15 @@ const handleSelectCaptureAsset = async (asset) => {
   setSelectedCaptureAsset(asset);
   setShowAssetPicker(false);
 
-  try {
+try {
+  if (Platform.OS === "web") {
+    window?.localStorage?.setItem("lastCaptureAsset", JSON.stringify(asset));
+  } else {
     await AsyncStorage.setItem("lastCaptureAsset", JSON.stringify(asset));
-  } catch (e) {
-    console.log("Failed to save last asset", e);
   }
+} catch (e) {
+  console.log("Failed to save last asset", e);
+}
 
   navigationRef.current?.navigate("AssetAttachmentsMobile", {
     assetId: asset.id,
@@ -981,30 +991,22 @@ React.useEffect(() => {
   const didInitialNavResolve = React.useRef(false);
   const lastResetRouteRef = React.useRef(null);
 
-  React.useEffect(() => {
+React.useEffect(() => {
   if (!targetRoute) return;
   if (!navigationRef?.isReady?.()) return;
 
-  // ✅ Boot-only navigation enforcement:
-  // After the first successful resolve, NEVER reset nav again on web tab-focus / token refresh.
-  if (didInitialNavResolve.current) return;
-
   const current = navigationRef.getCurrentRoute()?.name;
 
-  // If we're already in the right stack/screen, lock and stop.
-  if (current === targetRoute) {
-    didInitialNavResolve.current = true;
-    lastResetRouteRef.current = targetRoute;
-    return;
+  // Always enforce correct landing if restored state puts us elsewhere
+  if (current !== targetRoute) {
+    navigationRef.reset({
+      index: 0,
+      routes: [{ name: targetRoute }],
+    });
   }
 
-  navigationRef?.reset?.({
-    index: 0,
-    routes: [{ name: targetRoute }],
-  });
-
-  lastResetRouteRef.current = targetRoute;
   didInitialNavResolve.current = true;
+  lastResetRouteRef.current = targetRoute;
 }, [targetRoute]);
 
 

@@ -513,16 +513,14 @@ try {
     .limit(1)
     .maybeSingle();
 
-  console.log("INTAKE LOOKUP", { ownerId, intake, intakeErr });
+ 
 
   if (intakeErr) {
-    console.log("INTAKE LOOKUP ERROR", intakeErr);
     setProfileUsername(null);
   } else {
     setProfileUsername(intake?.token || null);
   }
 } catch (e) {
-  console.log("INTAKE LOOKUP EXCEPTION", e);
   setProfileUsername(null);
 }
 

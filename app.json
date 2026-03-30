@@ -4,11 +4,11 @@
     "slug": "keepr",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/favicon-48.png",
+    "icon": "./assets/app_logo_icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/app_logo_icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
@@ -17,7 +17,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./assets/app_logo_icon.png",
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true
