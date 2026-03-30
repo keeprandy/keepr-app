@@ -41,6 +41,7 @@ const todayISO = () => {
   return `${yyyy}-${mm}-${dd}`;
 };
 
+
 /* ------------------------------------------------------------- */
 
 export default function CreateReminderScreen({ navigation, route }) {
@@ -150,6 +151,16 @@ export default function CreateReminderScreen({ navigation, route }) {
           : todayISO();
 
         setDueDateISO(iso);
+
+                const existingTime = data.due_at
+          ? new Date(data.due_at)
+          : null;
+
+        if (existingTime) {
+          setTimeText(
+            `${pad2(existingTime.getHours())}:${pad2(existingTime.getMinutes())}`
+          );
+        }
 
         setHasTime(
           typeof data.has_time === "boolean" ? data.has_time : true
@@ -364,17 +375,59 @@ export default function CreateReminderScreen({ navigation, route }) {
   };
 
   const buildDueAtISO = () => {
-    const isoDate = dueDateISO || todayISO();
-    const [yyyy, mm, dd] = isoDate.split("-").map((x) => Number(x));
-    const d = new Date();
-    d.setFullYear(yyyy, mm - 1, dd);
-    if (hasTime) {
-      d.setHours(9, 0, 0, 0); // 9AM
-    } else {
-      d.setHours(0, 0, 0, 0);
+  const isoDate = dueDateISO || todayISO();
+  const [yyyy, mm, dd] = isoDate.split("-").map((x) => Number(x));
+  const d = new Date();
+  d.setFullYear(yyyy, mm - 1, dd);
+
+  if (hasTime) {
+    const normalized = normalizeTimeText(timeText) || "09:00";
+    const [hh, min] = normalized.split(":").map(Number);
+    d.setHours(hh, min, 0, 0);
+  } else {
+    d.setHours(0, 0, 0, 0);
+  }
+
+  return d.toISOString();
+};
+
+const normalizeTimeText = (value) => {
+  const raw = String(value || "").trim().toLowerCase();
+
+  let m = raw.match(/^(\d{1,2}):(\d{2})$/);
+  if (m) {
+    const hh = Number(m[1]);
+    const mm = Number(m[2]);
+    if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
+      return `${pad2(hh)}:${pad2(mm)}`;
     }
-    return d.toISOString();
-  };
+  }
+
+  m = raw.match(/^(\d{3,4})$/);
+  if (m) {
+    const num = m[1];
+    const hh = Number(num.slice(0, num.length - 2));
+    const mm = Number(num.slice(-2));
+    if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
+      return `${pad2(hh)}:${pad2(mm)}`;
+    }
+  }
+
+  m = raw.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/);
+  if (m) {
+    let hh = Number(m[1]);
+    const mm = Number(m[2] || "0");
+    const period = m[3];
+
+    if (hh >= 1 && hh <= 12 && mm >= 0 && mm <= 59) {
+      if (period === "pm" && hh !== 12) hh += 12;
+      if (period === "am" && hh === 12) hh = 0;
+      return `${pad2(hh)}:${pad2(mm)}`;
+    }
+  }
+
+  return null;
+};
 
   /* ---------------------- save / validate ---------------------------- */
 
@@ -387,8 +440,11 @@ const canSave = useMemo(
     if (!ownerId) return "Not signed in.";
     if (!dueDateISO) return "Please select a date.";
     if (!title.trim()) return "Title is required.";
+    if (hasTime && !normalizeTimeText(timeText)) {
+      return "Please enter time as HH:MM in 24-hour format.";
+    }
     return null;
-  }, [ownerId, dueDateISO, title]);
+  }, [ownerId, dueDateISO, title, hasTime, timeText]);
 
   const onSave = useCallback(
     async (nextStatus) => {
@@ -724,7 +780,7 @@ const canSave = useMemo(
                 placeholderTextColor={colors.textMuted}
                 style={styles.input}
               />
-              <Text style={styles.help}>Use 24-hour time, e.g. 08:00 or 17:30</Text>
+              <Text style={styles.help}>Examples: 08:00, 17:30, 9am, or 1400</Text>
             </>
           ) : null}
             <View style={styles.chipRow}>

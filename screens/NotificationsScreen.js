@@ -505,17 +505,26 @@ const remindersByDate = useMemo(() => {
 
       try {
         /* --------- 0. Profile (username for inbox email) --------- */
-        try {
-          const { data: prof, error: pErr } = await supabase
-            .from("profiles")
-            .select("username")
-            .eq("id", ownerId)
-            .maybeSingle();
+try {
+  const { data: intake, error: intakeErr } = await supabase
+    .from("email_intake_addresses")
+    .select("token, owner_id")
+    .eq("owner_id", ownerId)
+    .limit(1)
+    .maybeSingle();
 
-          if (!pErr) setProfileUsername(prof?.username || null);
-        } catch (_) {
-          // ignore
-        }
+  console.log("INTAKE LOOKUP", { ownerId, intake, intakeErr });
+
+  if (intakeErr) {
+    console.log("INTAKE LOOKUP ERROR", intakeErr);
+    setProfileUsername(null);
+  } else {
+    setProfileUsername(intake?.token || null);
+  }
+} catch (e) {
+  console.log("INTAKE LOOKUP EXCEPTION", e);
+  setProfileUsername(null);
+}
 
         /* --------- 1. Event inbox (event_inbox + attachments) --------- */
         const { data: evRows, error: evErr } = await supabase
@@ -1507,7 +1516,8 @@ const eventAttachments = attachmentsByEvent[ev.id] || [];
                 {profileUsername}@inbox.keeprhome.com
               </Text>
               <Text style={styles.intakeSub}>
-                Forward invoices and receipts here — they’ll appear below as drafts.
+                Your Keepr Inbox is active. Forward records here and they’ll appear as drafts below.
+Use this for your own forwarding or with trusted sources.
               </Text>
             </View>
 
@@ -1534,9 +1544,9 @@ const eventAttachments = attachmentsByEvent[ev.id] || [];
             </View>
 
             <View style={{ flex: 1 }}>
-              <Text style={styles.intakeTitle}>Set up your Keepr inbox</Text>
+              <Text style={styles.intakeTitle}>Your Inbox is active with this email address.</Text>
               <Text style={styles.intakeSub}>
-                Choose a username to enable forwarding from email.
+                You can rename this inbox once in Profile. The previous email address will become inactive.
               </Text>
             </View>
 

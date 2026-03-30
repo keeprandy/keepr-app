@@ -40,6 +40,39 @@ function initialsFromName(name, email) {
   return prefix.slice(0, 2).toUpperCase();
 }
 
+function sanitizeInboxHandle(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]/g, "")
+    .replace(/^\.+|\.+$/g, "");
+}
+function formatBirthdayForInput(value) {
+  const v = firstNonEmpty(value);
+  if (!v) return "";
+
+  const isoMatch = v.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    const [, yyyy, mm, dd] = isoMatch;
+    return `${mm}/${dd}/${yyyy}`;
+  }
+
+  return v.replace(/-/g, "/");
+}
+
+function normalizeBirthdayForSave(value) {
+  const v = firstNonEmpty(value).replace(/-/g, "/");
+  if (!v) return null;
+
+  const usMatch = v.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (usMatch) {
+    const [, mm, dd, yyyy] = usMatch;
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  return v;
+}
+
 export default function ProfileScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -51,14 +84,19 @@ export default function ProfileScreen({ navigation }) {
   const [avatarViewerOpen, setAvatarViewerOpen] = useState(false);
   const [pendingPhotoPick, setPendingPhotoPick] = useState(false);
 const [isPickingPhoto, setIsPickingPhoto] = useState(false);
+const [showInboxModal, setShowInboxModal] = useState(false);
+const [inboxDraft, setInboxDraft] = useState("");
+const [savingInbox, setSavingInbox] = useState(false);
+const [intakeToken, setIntakeToken] = useState(null);
 
   const [contactDraft, setContactDraft] = useState({
-    fullName: "",
-    displayName: "",
-    phone: "",
-    birthday: "",
-    language: "English",
-  });
+  fullName: "",
+  displayName: "",
+  email: "",
+  phone: "",
+  birthday: "",
+  language: "English",
+});
 
   const [placesDraft, setPlacesDraft] = useState({
     homeAddress: "",
@@ -90,6 +128,19 @@ const [isPickingPhoto, setIsPickingPhoto] = useState(false);
       if (profileError) {
         throw profileError;
       }
+
+      const { data: intakeRow, error: intakeError } = await supabase
+        .from("email_intake_addresses")
+        .select("token")
+        .eq("owner_id", user.id)
+        .maybeSingle();
+
+      if (intakeError) {
+        console.log("PROFILE INTAKE LOAD ERROR", intakeError);
+      }
+
+      setIntakeToken(intakeRow?.token || null);
+
 const hydrateAvatarFromAttachmentId = async (attachmentId) => {
   try {
     const { data, error } = await supabase
@@ -121,18 +172,26 @@ const hydrateAvatarFromAttachmentId = async (attachmentId) => {
   await hydrateAvatarFromAttachmentId(profile.profile_photo_attachment_id);
 }
 
+setInboxDraft(
+  firstNonEmpty(
+    profile?.inbox_name,
+    user.email?.split("@")[0]
+  )
+);
+
       setContactDraft({
-        fullName: firstNonEmpty(profile?.full_name, profile?.name),
-        displayName: firstNonEmpty(
-          profile?.display_name,
-          profile?.full_name,
-          profile?.name,
-          user.email?.split("@")[0]
-        ),
-        phone: firstNonEmpty(profile?.phone),
-        birthday: firstNonEmpty(profile?.birthday),
-        language: firstNonEmpty(profile?.language, "English"),
-      });
+      fullName: firstNonEmpty(profile?.full_name, profile?.name),
+      displayName: firstNonEmpty(
+        profile?.display_name,
+        profile?.full_name,
+        profile?.name,
+        user.email?.split("@")[0]
+      ),
+      email: firstNonEmpty(user.email, profile?.email),
+      phone: firstNonEmpty(profile?.phone),
+      birthday: formatBirthdayForInput(profile?.birthday),
+      language: firstNonEmpty(profile?.language, "English"),
+    });
 
       setPlacesDraft({
         homeAddress: firstNonEmpty(
@@ -165,11 +224,13 @@ const hydrateAvatarFromAttachmentId = async (attachmentId) => {
   const homeAddress = firstNonEmpty(placesDraft.homeAddress);
   const workAddress = firstNonEmpty(placesDraft.workAddress);
 
-  const inboxHandle = firstNonEmpty(
-    profileRow?.inbox_name,
-    profileRow?.username,
+  const suggestedInboxHandle = firstNonEmpty(
     userEmail.split("@")[0]
   );
+
+const lockedInboxHandle = firstNonEmpty(profileRow?.inbox_name);
+const inboxHandle = firstNonEmpty(lockedInboxHandle, intakeToken, suggestedInboxHandle);
+const inboxClaimed = !!lockedInboxHandle;
 
   const inboxAddress = useMemo(() => {
     if (!inboxHandle) return "";
@@ -193,35 +254,133 @@ const hydrateAvatarFromAttachmentId = async (attachmentId) => {
     return labels;
   }, [profileRow]);
 
-  const handleSaveContact = useCallback(async () => {
-    if (!profileId) return;
+  
 
-    try {
-      setSaving(true);
+const handleSaveContact = useCallback(async () => {
+  if (!profileId) return;
 
-      const payload = {
-        full_name: contactDraft.fullName || null,
-        display_name: contactDraft.displayName || null,
-        phone: contactDraft.phone || null,
-        birthday: contactDraft.birthday || null,
-        language: contactDraft.language || null,
-      };
+  try {
+    setSaving(true);
 
-      const { error } = await supabase
-        .from("profiles")
-        .update(payload)
-        .eq("id", profileId);
+    const nextEmail = firstNonEmpty(contactDraft.email).toLowerCase();
+    const currentEmail = firstNonEmpty(userEmail).toLowerCase();
 
-      if (error) throw error;
-
-      setProfileRow((prev) => ({ ...(prev || {}), ...payload }));
-      setShowContactModal(false);
-    } catch (e) {
-      Alert.alert("Save failed", e?.message || "Could not save contact info.");
-    } finally {
-      setSaving(false);
+    if (contactDraft.email && nextEmail !== currentEmail) {
+      const { error: emailError } = await supabase.auth.updateUser({
+        email: nextEmail,
+      });
+      if (emailError) throw emailError;
     }
-  }, [contactDraft, profileId]);
+
+    const payload = {
+      full_name: contactDraft.fullName || null,
+      display_name: contactDraft.displayName || null,
+      phone: contactDraft.phone || null,
+      birthday: normalizeBirthdayForSave(contactDraft.birthday),
+      language: contactDraft.language || null,
+    };
+
+    const { error } = await supabase
+      .from("profiles")
+      .update(payload)
+      .eq("id", profileId);
+
+    if (error) throw error;
+
+    setProfileRow((prev) => ({ ...(prev || {}), ...payload }));
+
+    // do NOT update UI email until verified
+
+    setShowContactModal(false);
+
+    if (contactDraft.email && nextEmail !== currentEmail) {
+      setContactDraft((prev) => ({
+        ...prev,
+        email: currentEmail,
+      }));
+
+      Platform.OS === "web"
+        ? window.alert("Email update requested. Please verify the new email address.")
+        : Alert.alert(
+            "Verify your new email",
+            "We sent a confirmation link to your new email address."
+          );
+    }
+  } catch (e) {
+    Alert.alert("Save failed", e?.message || "Could not save contact info.");
+  } finally {
+    setSaving(false);
+  }
+}, [contactDraft, profileId, userEmail]);
+
+const handleSaveInbox = useCallback(async () => {
+  if (!profileId) return;
+
+  try {
+    const clean = sanitizeInboxHandle(inboxDraft);
+
+    if (!clean) {
+      Platform.OS === "web"
+        ? window.alert("Please enter an inbox name.")
+        : Alert.alert("Inbox name required", "Please enter an inbox name.");
+      return;
+    }
+
+    if (clean.length < 3) {
+      Platform.OS === "web"
+        ? window.alert("Use at least 3 characters.")
+        : Alert.alert("Too short", "Use at least 3 characters.");
+      return;
+    }
+
+    setSavingInbox(true);
+
+    const { data: authCheck, error: authCheckErr } = await supabase.auth.getUser();
+    console.log("SAVE INBOX AUTH", authCheck?.user?.id, authCheckErr);
+
+    const { error: intakeError } = await supabase
+      .from("email_intake_addresses")
+      .upsert(
+        {
+          owner_id: profileId,
+          token: clean,
+        },
+        { onConflict: "owner_id" }
+      );
+
+    if (intakeError) throw intakeError;
+
+        const { error: profileError } = await supabase
+      .from("profiles")
+      .update({
+        inbox_name: clean,
+      })
+      .eq("id", profileId);
+
+    if (profileError) throw profileError;
+
+    setIntakeToken(clean);
+    setProfileRow((prev) => ({
+      ...(prev || {}),
+      inbox_name: clean,
+    }));
+
+    setInboxDraft(clean);
+    setShowInboxModal(false);
+
+    Platform.OS === "web"
+      ? window.alert(`${clean}@inbox.keeprhome.com is now set.`)
+      : Alert.alert("Keepr Inbox saved", `${clean}@inbox.keeprhome.com is now set.`);
+  } catch (e) {
+    console.log("handleSaveInbox failed:", e);
+
+    Platform.OS === "web"
+      ? window.alert(e?.message || "Could not save inbox name.")
+      : Alert.alert("Save failed", e?.message || "Could not save inbox name.");
+  } finally {
+    setSavingInbox(false);
+  }
+}, [profileId, inboxDraft]);
 
 const handleSelectPhoto = async () => {
   try {
@@ -359,6 +518,10 @@ const handleSelectPhoto = async () => {
     }
   }, []);
 
+const handleOpenSettings = useCallback(() => {
+  navigation.navigate("AdminSettings");
+}, [navigation]);
+
 useEffect(() => {
   if (!pendingPhotoPick) return;
   if (avatarViewerOpen) return;
@@ -404,7 +567,7 @@ useEffect(() => {
         <Text style={styles.headerTitle}>Profile</Text>
 
         <TouchableOpacity
-          onPress={() => navigation.getParent()?.navigate("Settings") || navigation.navigate("Settings")}
+          onPress={handleOpenSettings}
           style={styles.headerRight}
         >
           <Ionicons name="settings-outline" size={20} color={colors.textPrimary} />
@@ -416,26 +579,26 @@ useEffect(() => {
         showsVerticalScrollIndicator={false}
       >
           <View style={styles.heroCard}>
-            <View style={styles.heroTop}>
-              <TouchableOpacity
-                style={styles.avatar}
-                onPress={() => {
-                  if (avatarUrl) setAvatarViewerOpen(true);
-                  else handleSelectPhoto();
-                }}
-              >
-                {avatarUrl ? (
-                  <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
-                ) : (
-                  <Text style={styles.avatarText}>
-                    {initialsFromName(fullName, userEmail)}
-                  </Text>
-                )}
+          <View style={styles.heroTop}>
+            <TouchableOpacity
+              style={styles.avatar}
+              onPress={() => {
+                if (avatarUrl) setAvatarViewerOpen(true);
+                else handleSelectPhoto();
+              }}
+            >
+              {avatarUrl ? (
+                <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
+              ) : (
+                <Text style={styles.avatarText}>
+                  {initialsFromName(fullName, userEmail)}
+                </Text>
+              )}
 
-                <View style={styles.avatarEditBadge}>
-                  <Ionicons name="camera" size={12} color="#fff" />
-                </View>
-              </TouchableOpacity>
+              <View style={styles.avatarEditBadge}>
+                <Ionicons name="camera" size={12} color="#fff" />
+              </View>
+            </TouchableOpacity>
 
             <View style={styles.heroMeta}>
               <Text style={styles.nameText}>{fullName || "Your Name"}</Text>
@@ -487,22 +650,26 @@ useEffect(() => {
         </SectionCard>
 
         <SectionCard
-          title="Your Keepr Inbox"
-          actionLabel="Manage"
-          onAction={() =>
-            Alert.alert(
-              "Keepr Inbox",
-              "Inbox handle changes and routing rules can be managed here next."
-            )
-          }
-        >
+            title="Your Keepr Inbox"
+            actionLabel="Manage"
+            onAction={() => {
+              setInboxDraft(inboxHandle || "");
+              setShowInboxModal(true);
+            }}
+          >
           <InfoRow
             icon="mail-outline"
             title={inboxAddress || "No inbox address"}
-            value="Forward receipts and invoices here."
+            value={
+            inboxClaimed
+              ? "This inbox is active. Forward records here."
+              : "This inbox works now. You can change it once before locking it."
+          }
           />
           <Text style={styles.helperNote}>
-            Username is locked once claimed.
+            {inboxClaimed
+              ? "This inbox name is locked."
+              : "Saving a new inbox name will lock it and your previous inbox will stop working."}
           </Text>
         </SectionCard>
 
@@ -541,14 +708,14 @@ useEffect(() => {
           <NavRow
             icon="calendar-outline"
             title="Birthday"
-            subtitle={birthday || "Not set"}
+            subtitle={formatBirthdayForInput(birthday) || "Not set"}
             onPress={() => setShowContactModal(true)}
           />
           <NavRow
             icon="settings-outline"
             title="Settings"
-            subtitle="Notifications, privacy, and account controls"
-            onPress={() => navigation.getParent()?.navigate("Settings") || navigation.navigate("Settings")}
+            subtitle="App settings and account controls"
+            onPress={handleOpenSettings}
           />
           <NavRow
             icon="log-out-outline"
@@ -580,6 +747,14 @@ useEffect(() => {
           onChangeText={(v) => setContactDraft((p) => ({ ...p, displayName: v }))}
           placeholder="Display name"
         />
+
+        <Field
+          label="Email"
+          value={contactDraft.email}
+          onChangeText={(v) => setContactDraft((p) => ({ ...p, email: v }))}
+          placeholder="Email"
+          keyboardType="email-address"
+        />
         <Field
           label="Phone"
           value={contactDraft.phone}
@@ -591,7 +766,7 @@ useEffect(() => {
           label="Birthday"
           value={contactDraft.birthday}
           onChangeText={(v) => setContactDraft((p) => ({ ...p, birthday: v }))}
-         placeholder="MM-DD-YYYY"
+         placeholder="MM/DD/YYYY"
         />
         <Field
           label="Language"
@@ -623,6 +798,84 @@ useEffect(() => {
           multiline
         />
       </EditCardModal>
+
+      <Modal
+  visible={showInboxModal}
+  transparent
+  animationType="fade"
+  onRequestClose={() => setShowInboxModal(false)}
+>
+  <View style={styles.avatarModalOverlay}>
+    <TouchableOpacity
+      style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
+      onPress={() => setShowInboxModal(false)}
+    />
+    <View style={styles.inboxModalCard}>
+      <View style={styles.avatarModalHeader}>
+        <Text style={styles.avatarModalTitle}>Manage Keepr Inbox</Text>
+        <TouchableOpacity
+          onPress={() => setShowInboxModal(false)}
+          style={styles.avatarModalClose}
+        >
+          <Ionicons name="close" size={18} color={colors.textPrimary} />
+        </TouchableOpacity>
+      </View>
+
+      <Text style={styles.helperNoteInline}>
+      This is your Keepr Inbox address for forwarding receipts, invoices, and service emails.
+      </Text>
+      <Text style={[styles.helperNoteInline, { marginTop: 8 }]}>
+         Your current inbox works now. You can change it one time before locking a new name.
+      </Text>
+
+      <View style={{ marginTop: 14 }}>
+        <Field
+          label="Inbox name"
+          value={inboxDraft}
+          onChangeText={(v) => setInboxDraft(sanitizeInboxHandle(v))}
+          placeholder="yourname"
+          editable={!inboxClaimed}
+        />
+      </View>
+
+      <Text style={styles.inboxPreviewText}>
+        {(sanitizeInboxHandle(inboxDraft || inboxHandle || "") || "yourname")}@inbox.keeprhome.com
+      </Text>
+
+      <Text style={styles.helperNote}>
+  {inboxClaimed
+    ? "This inbox name is locked."
+    : "Save a new inbox name to lock it and retire the current one."}
+      </Text>
+
+      <View style={styles.avatarModalActions}>
+        <TouchableOpacity
+          onPress={() => setShowInboxModal(false)}
+          style={[styles.avatarModalBtn, styles.avatarModalBtnSecondary]}
+        >
+          <Text style={styles.avatarModalBtnSecondaryText}>Close</Text>
+        </TouchableOpacity>
+
+        {!inboxClaimed ? (
+          <TouchableOpacity
+              onPress={handleSaveInbox}
+              style={[
+                styles.avatarModalBtn,
+                styles.avatarModalBtnPrimary,
+                savingInbox && { opacity: 0.6 },
+              ]}
+              disabled={savingInbox}
+            >
+            <Text style={styles.avatarModalBtnPrimaryText}>
+              {savingInbox ? "Saving..." : "Save"}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    </View>
+  </View>
+</Modal>
+
       <Modal
   visible={avatarViewerOpen}
   transparent
@@ -793,6 +1046,7 @@ function Field({
   placeholder,
   keyboardType,
   multiline = false,
+  editable = true,
 }) {
   return (
     <View style={styles.fieldWrap}>
@@ -804,7 +1058,12 @@ function Field({
         placeholderTextColor={colors.textSecondary}
         keyboardType={keyboardType}
         multiline={multiline}
-        style={[styles.fieldInput, multiline && styles.fieldInputMultiline]}
+        editable={editable}
+        style={[
+          styles.fieldInput,
+          multiline && styles.fieldInputMultiline,
+          !editable && { opacity: 0.6 },
+        ]}
       />
     </View>
   );
@@ -873,6 +1132,13 @@ avatarEditBadge: {
     paddingHorizontal: spacing.lg,
     paddingBottom: 130,
   },
+  inboxModalCard: {
+  width: "100%",
+  maxWidth: 520,
+  backgroundColor: colors.surface,
+  borderRadius: 24,
+  padding: 18,
+},
   heroCard: {
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
@@ -972,6 +1238,19 @@ avatarModalBtnPrimaryText: {
 avatarModalBtnSecondaryText: {
   color: colors.textPrimary,
   fontWeight: "700",
+},
+helperNoteInline: {
+  fontSize: 12,
+  color: colors.textSecondary,
+  lineHeight: 18,
+},
+
+inboxPreviewText: {
+  marginTop: 6,
+  marginBottom: 6,
+  fontSize: 15,
+  fontWeight: "700",
+  color: colors.textPrimary,
 },
   heroMeta: {
     flex: 1,

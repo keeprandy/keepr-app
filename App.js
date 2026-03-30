@@ -4,7 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { DefaultTheme, NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import * as Notifications from "expo-notifications";
+// import * as Notifications from "expo-notifications";
 import React from "react";
 import {
   Linking,
@@ -1567,7 +1567,7 @@ export default function App() {
   const [currentRouteName, setCurrentRouteName] = React.useState("SplashIntro");
   const hideSidebarRoutes = ["StoryPrint", "Auth", "ResetPassword"];
 
-  // Global handler for tapping push/local notifications
+  /* Global handler for tapping push/local notifications
   React.useEffect(() => {
     const sub = Notifications.addNotificationResponseReceivedListener((resp) => {
       try {
@@ -1587,6 +1587,7 @@ export default function App() {
 
     return () => sub.remove();
   }, []);
+  */
 
   return (
     <AppErrorBoundary>
