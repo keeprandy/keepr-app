@@ -26,6 +26,8 @@ import {
   uploadAttachmentFromUri,
 } from "../lib/attachmentsUploader";
 
+import { useFocusEffect } from "@react-navigation/native";
+
 const IS_WEB = Platform.OS === "web";
 
 function safeStr(v) {
@@ -493,12 +495,33 @@ useEffect(() => {
   fromTargetId,
   fromTargetRole,
 ]);
+
+useEffect(() => {
+  const openAttachmentId = route?.params?.openAttachmentId;
+  if (!openAttachmentId) return;
+
+  navigation.setParams({ openAttachmentId: null });
+
+  navigation.navigate("ProofBuilder", {
+    assetId,
+    assetName,
+    attachmentId: openAttachmentId,
+  });
+}, [route?.params?.openAttachmentId, navigation, assetId, assetName]);
+
 useEffect(() => {
   if (route?.params?.autoOpen === "library" && !IS_WEB) {
     navigation.setParams({ autoOpen: null });
     addPhotoFromLibrary();
   }
 }, [route?.params?.autoOpen, addPhotoFromLibrary, navigation]);
+
+useFocusEffect(
+  useCallback(() => {
+    if (!assetId) return;
+    refresh();
+  }, [assetId, refresh])
+);
 
 useEffect(() => {
   if (route?.params?.autoOpen === "file") {
@@ -518,8 +541,7 @@ useEffect(() => {
     },
     [assetId, assetName, navigation]
   );
-console.log("AASM assetId:", assetId);
-console.log("AASM params:", route?.params);
+
   return (
     
     <SafeAreaView style={[layoutStyles.screen, styles.screen]}>

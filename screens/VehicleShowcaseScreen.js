@@ -22,6 +22,7 @@ import { colors, spacing, radius, typography, shadows } from "../styles/theme";
 import { useAssets } from "../hooks/useAssets";
 import { supabase } from "../lib/supabaseClient";
 import LightboxModal from "../components/LightboxModal";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
   listAttachmentsForTarget,

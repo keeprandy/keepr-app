@@ -29,6 +29,7 @@ import {
   removePlacementById,
 } from "../lib/attachmentsApi";
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
+import LightboxModal from "../components/LightboxModal";
 
 const TILE_ASPECT = 4 / 3;
 
@@ -184,7 +185,7 @@ export default function BoatShowcaseScreen({ navigation, route }) {
   }, [currentBoat?.hero_placement_id]);
 
   const [lightboxVisible, setLightboxVisible] = useState(false);
-  const [lightboxStartIndex, setLightboxStartIndex] = useState(0);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
 
   const { width, height } = useWindowDimensions();
   const numColumns = width >= 1200 ? 3 : width >= 768 ? 2 : 1;
@@ -193,6 +194,8 @@ export default function BoatShowcaseScreen({ navigation, route }) {
     if (navigation.canGoBack()) navigation.goBack();
     else navigation.navigate("Boat");
   };
+
+  
 
   // --- Navigation helpers ---
 
@@ -589,18 +592,18 @@ export default function BoatShowcaseScreen({ navigation, route }) {
 
   /* ---------- lightbox ---------- */
 
-  const openLightbox = (photo) => {
-    if (!photo?.url) return;
+    const openLightbox = (photo) => {
+      if (!photo?.url) return;
 
-    const idx = photos.findIndex((p) => p.id === photo.id || p.url === photo.url);
-    setLightboxStartIndex(idx >= 0 ? idx : 0);
-    setLightboxVisible(true);
-  };
+      const idx = photos.findIndex((p) => p.id === photo.id || p.url === photo.url);
+      setLightboxIndex(idx >= 0 ? idx : 0);
+      setLightboxVisible(true);
+    };
 
   const closeLightbox = () => {
-    setLightboxVisible(false);
-    setLightboxStartIndex(0);
-  };
+  setLightboxVisible(false);
+  setLightboxIndex(0);
+};
 
   /* ---------- guards ---------- */
 
@@ -647,6 +650,10 @@ export default function BoatShowcaseScreen({ navigation, route }) {
       columns[index % numColumns].push(photo);
     });
   }
+
+  const modalPhotos = photos
+  .filter((p) => !!p.url)
+  .map((p) => ({ uri: p.url }));
 
   const boatDisplayName =
     currentBoat.name ||
@@ -819,43 +826,14 @@ export default function BoatShowcaseScreen({ navigation, route }) {
       </ScrollView>
 
       {/* Lightbox modal with horizontal swipe */}
-      <Modal
-        visible={lightboxVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={closeLightbox}
-      >
-        <View style={styles.lightboxBackdrop}>
-          <View style={styles.lightboxInner}>
-            <ScrollView
-              horizontal
-              pagingEnabled
-              showsHorizontalScrollIndicator={false}
-              contentOffset={{ x: lightboxStartIndex * width, y: 0 }}
-              style={styles.lightboxScroll}
-            >
-              {photos.map((p) => (
-                <View
-                  key={p.id || p.url}
-                  style={[styles.lightboxPage, { width, height }]}
-                >
-                  {p.url && (
-                    <Image
-                      source={{ uri: p.url }}
-                      style={styles.lightboxImage}
-                      resizeMode="contain"
-                    />
-                  )}
-                </View>
-              ))}
-            </ScrollView>
 
-            <TouchableOpacity style={styles.lightboxClose} onPress={closeLightbox}>
-              <Ionicons name="close" size={24} color={colors.brandWhite} />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      <LightboxModal
+        visible={lightboxVisible}
+        photos={modalPhotos}
+        initialIndex={lightboxIndex}
+        onClose={closeLightbox}
+      />
+
     </SafeAreaView>
   );
 }

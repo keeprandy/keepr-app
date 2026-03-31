@@ -1,20 +1,19 @@
-// components/LightboxModal.js
-import React, { useRef, useEffect } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
-  Dimensions,
   FlatList,
   Image,
   Modal,
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { colors, radius, spacing } from "../styles/theme";
+import { colors, spacing } from "../styles/theme";
 
-const { width, height } = Dimensions.get("window");
 
 export default function LightboxModal({
   visible,
@@ -23,20 +22,52 @@ export default function LightboxModal({
   onClose,
 }) {
   const listRef = useRef(null);
+  const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
+  const [currentIndex, setCurrentIndex] = useState(initialIndex || 0);
+
+  const safePhotos = Array.isArray(photos) ? photos.filter((p) => !!p?.uri) : [];
 
   useEffect(() => {
-    if (visible && listRef.current && initialIndex > 0) {
-      // jump to tapped image when opening
-      setTimeout(() => {
-        listRef.current?.scrollToIndex({
-          index: initialIndex,
+    if (!visible) return;
+
+    const nextIndex = Math.max(
+      0,
+      Math.min(Number(initialIndex || 0), Math.max(safePhotos.length - 1, 0))
+    );
+
+    setCurrentIndex(nextIndex);
+
+    if (listRef.current && safePhotos.length > 0) {
+      requestAnimationFrame(() => {
+        try {
+          listRef.current?.scrollToIndex({
+            index: nextIndex,
+            animated: false,
+          });
+        } catch (_) {}
+      });
+    }
+  }, [visible, initialIndex, safePhotos.length]);
+
+  const handleMomentumScrollEnd = (e) => {
+    const offsetX = e?.nativeEvent?.contentOffset?.x || 0;
+    const nextIndex = Math.round(offsetX / Math.max(width, 1));
+    setCurrentIndex(nextIndex);
+  };
+
+  const handleScrollToIndexFailed = (info) => {
+    requestAnimationFrame(() => {
+      try {
+        listRef.current?.scrollToOffset({
+          offset: info.index * width,
           animated: false,
         });
-      }, 0);
-    }
-  }, [visible, initialIndex]);
+      } catch (_) {}
+    });
+  };
 
-  if (!photos || photos.length === 0) return null;
+  if (!safePhotos.length) return null;
 
   return (
     <Modal
@@ -44,39 +75,56 @@ export default function LightboxModal({
       transparent
       animationType="fade"
       onRequestClose={onClose}
+      statusBarTranslucent
     >
       <View style={styles.backdrop}>
-        {/* Top bar */}
-        <View style={styles.topBar}>
+        <View
+          style={[
+            styles.topBar,
+            {
+              top: insets.top + 12,
+              paddingHorizontal: spacing.lg,
+            },
+          ]}
+          pointerEvents="box-none"
+        >
           <TouchableOpacity
             onPress={onClose}
             style={styles.closeButton}
             activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel="Close photo viewer"
           >
             <Ionicons name="close" size={22} color={colors.brandWhite} />
           </TouchableOpacity>
 
-          <Text style={styles.counterText}>
-            {initialIndex + 1} / {photos.length}
-          </Text>
+          <View style={styles.counterPill}>
+            <Text style={styles.counterText}>
+              {currentIndex + 1} / {safePhotos.length}
+            </Text>
+          </View>
         </View>
 
-        {/* Swipeable full-screen images */}
         <FlatList
           ref={listRef}
-          data={photos}
+          data={safePhotos}
           keyExtractor={(_, index) => String(index)}
           horizontal
           pagingEnabled
           showsHorizontalScrollIndicator={false}
-          initialScrollIndex={initialIndex}
+          initialScrollIndex={Math.max(
+            0,
+            Math.min(Number(initialIndex || 0), Math.max(safePhotos.length - 1, 0))
+          )}
           getItemLayout={(_, index) => ({
             length: width,
             offset: width * index,
             index,
           })}
+          onMomentumScrollEnd={handleMomentumScrollEnd}
+          onScrollToIndexFailed={handleScrollToIndexFailed}
           renderItem={({ item }) => (
-            <View style={styles.slide}>
+            <View style={[styles.slide, { width, height }]}>
               <Image
                 source={{ uri: item.uri }}
                 style={styles.image}
@@ -97,30 +145,36 @@ const styles = StyleSheet.create({
   },
   topBar: {
     position: "absolute",
-    top: 40,
     left: 0,
     right: 0,
     zIndex: 10,
-    paddingHorizontal: spacing.lg,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
   closeButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(15,23,42,0.8)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  counterPill: {
+    minWidth: 64,
+    height: 32,
+    paddingHorizontal: 12,
+    borderRadius: 16,
     backgroundColor: "rgba(15,23,42,0.8)",
     alignItems: "center",
     justifyContent: "center",
   },
   counterText: {
     color: colors.brandWhite,
-    fontSize: 14,
+    fontSize: 13,
+    fontWeight: "700",
   },
   slide: {
-    width,
-    height,
     justifyContent: "center",
     alignItems: "center",
     paddingHorizontal: spacing.lg,

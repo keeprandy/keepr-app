@@ -30,6 +30,7 @@ import {
 } from "../lib/attachmentsApi";
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import { confirmRemove } from "../lib/confirmRemove";
+import LightboxModal from "../components/LightboxModal";
 
 const TILE_ASPECT = 4 / 3;
 
@@ -121,6 +122,7 @@ export default function HomeShowcaseScreen({ navigation, route }) {
   const [photos, setPhotos] = useState([]);
   const [photosLoading, setPhotosLoading] = useState(false);
   const [photosError, setPhotosError] = useState(null);
+  
 
   // ✅ Persistent hero: assets.hero_placement_id (NOT a URL)
   const [heroPlacementId, setHeroPlacementId] = useState(
@@ -131,8 +133,8 @@ export default function HomeShowcaseScreen({ navigation, route }) {
     setHeroPlacementId(currentHome?.hero_placement_id || null);
   }, [currentHome?.hero_placement_id]);
 
-  const [lightboxVisible, setLightboxVisible] = useState(false);
-  const [lightboxStartIndex, setLightboxStartIndex] = useState(0);
+ const [lightboxVisible, setLightboxVisible] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
 
   const { width, height } = useWindowDimensions();
   const numColumns = width >= 1200 ? 3 : width >= 768 ? 2 : 1;
@@ -508,16 +510,21 @@ export default function HomeShowcaseScreen({ navigation, route }) {
   // --- Lightbox ---
 
   const openLightbox = (photo) => {
-    if (!photo?.url) return;
-    const idx = photos.findIndex((p) => (p.id && photo.id ? p.id === photo.id : p.url === photo.url));
-    setLightboxStartIndex(idx >= 0 ? idx : 0);
-    setLightboxVisible(true);
-  };
+  if (!photo?.url) return;
 
-  const closeLightbox = () => {
-    setLightboxVisible(false);
-    setLightboxStartIndex(0);
-  };
+  const idx = photos.findIndex((p) => p.id === photo.id || p.url === photo.url);
+  setLightboxIndex(idx >= 0 ? idx : 0);
+  setLightboxVisible(true);
+};
+
+const closeLightbox = () => {
+  setLightboxVisible(false);
+  setLightboxIndex(0);
+};
+
+  const modalPhotos = photos
+  .filter((p) => !!p.url)
+  .map((p) => ({ uri: p.url }));
 
   // --- Masonry columns ---
 
@@ -599,7 +606,7 @@ export default function HomeShowcaseScreen({ navigation, route }) {
         <View style={styles.kHeaderRight}>
           <TouchableOpacity
             style={styles.kHeaderIconBtn}
-            onPress={handleAddPhoto}
+            onPress={() => openLightbox(photo)}
             disabled={photosLoading}
           >
             <Ionicons name="add" size={18} color={colors.textPrimary} />
@@ -713,36 +720,12 @@ export default function HomeShowcaseScreen({ navigation, route }) {
       </ScrollView>
 
       {/* Lightbox modal */}
-      <Modal
+     <LightboxModal
         visible={lightboxVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={closeLightbox}
-      >
-        <View style={styles.lightboxBackdrop}>
-          <View style={styles.lightboxInner}>
-            <ScrollView
-              horizontal
-              pagingEnabled
-              showsHorizontalScrollIndicator={false}
-              contentOffset={{ x: lightboxStartIndex * width, y: 0 }}
-              style={styles.lightboxScroll}
-            >
-              {photos.map((p) => (
-                <View key={p.id || p.url} style={[styles.lightboxPage, { width, height }]}>
-                  {p.url && (
-                    <Image source={{ uri: p.url }} style={styles.lightboxImage} resizeMode="contain" />
-                  )}
-                </View>
-              ))}
-            </ScrollView>
-
-            <TouchableOpacity style={styles.lightboxClose} onPress={closeLightbox}>
-              <Ionicons name="close" size={24} color={colors.brandWhite} />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+        photos={modalPhotos}
+        initialIndex={lightboxIndex}
+        onClose={closeLightbox}
+      />
     </SafeAreaView>
   );
 }
