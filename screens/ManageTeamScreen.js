@@ -15,6 +15,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { supabase } from "../lib/supabaseClient";
+import * as ImagePicker from "expo-image-picker";
+import { Platform } from "react-native";
 
 function initials(str) {
   if (!str) return "?";
@@ -88,6 +90,74 @@ export default function ManageTeamScreen({ navigation, route }) {
   useEffect(() => {
     load();
   }, []);
+
+async function handlePickLogo() {
+  try {
+    const pickerMediaTypes =
+      ImagePicker.MediaType?.Images ??
+      ImagePicker.MediaTypeOptions?.Images;
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: pickerMediaTypes,
+      quality: 0.8,
+    });
+
+    if (result.canceled) return;
+
+    const picked = result.assets?.[0];
+    if (!picked) return;
+
+    const fileExt =
+      (picked.fileName && picked.fileName.split(".").pop()) ||
+      (picked.mimeType && picked.mimeType.split("/").pop()) ||
+      "jpg";
+
+   const fileName = `orgs/${org.id}/logo_${Date.now()}.${fileExt}`;
+    const contentType = picked.mimeType || "image/jpeg";
+
+    let uploadBody;
+
+    if (Platform.OS === "web") {
+      if (!picked.file) {
+        throw new Error("Web file object was not returned by the picker.");
+      }
+      uploadBody = picked.file;
+    } else {
+      const response = await fetch(picked.uri);
+      uploadBody = await response.blob();
+    }
+
+    const { error: uploadError } = await supabase.storage
+      .from("org-images")
+      .upload(fileName, uploadBody, {
+        contentType,
+        upsert: true,
+      });
+
+    if (uploadError) throw uploadError;
+
+    const { data: publicData } = supabase.storage
+      .from("org-images")
+      .getPublicUrl(fileName);
+
+    const publicUrl = publicData?.publicUrl || null;
+    if (!publicUrl) throw new Error("Could not get uploaded logo URL.");
+
+    const { error: saveError } = await supabase
+      .from("orgs")
+      .update({ photo_url: publicUrl })
+      .eq("id", org.id);
+
+    if (saveError) throw saveError;
+
+    setLogoUrl(publicUrl);
+    setEditingLogo(false);
+    await load();
+  } catch (e) {
+    console.error("Logo upload failed", e);
+    Alert.alert("Upload failed", e?.message || "Could not upload logo.");
+  }
+}
 
   async function load() {
     setLoading(true);
@@ -319,6 +389,29 @@ export default function ManageTeamScreen({ navigation, route }) {
   async function removeMember(member) {
     if (member.member_role === "owner") return;
 
+    const performRemove = async () => {
+      const { error } = await supabase
+        .from("org_members")
+        .delete()
+        .eq("org_id", org.id)
+        .eq("user_id", member.user_id);
+
+      if (error) {
+        Alert.alert("Remove failed", error.message);
+        return;
+      }
+
+      await load();
+    };
+
+    if (Platform.OS === "web") {
+      const confirmed = window.confirm(
+        "Remove this member? This revokes access to any shared assets. If you add them back later, you may need to re-share assets."
+      );
+      if (confirmed) await performRemove();
+      return;
+    }
+
     Alert.alert(
       "Remove member?",
       "This revokes access to any shared assets. If you add them back later, you may need to re-share assets.",
@@ -327,18 +420,7 @@ export default function ManageTeamScreen({ navigation, route }) {
         {
           text: "Remove",
           style: "destructive",
-          onPress: async () => {
-            const { error } = await supabase
-              .from("org_members")
-              .delete()
-              .eq("org_id", org.id)
-              .eq("user_id", member.user_id);
-            if (error) {
-              Alert.alert("Remove failed", error.message);
-              return;
-            }
-            load();
-          },
+          onPress: performRemove,
         },
       ]
     );
@@ -425,13 +507,18 @@ export default function ManageTeamScreen({ navigation, route }) {
   };
 
   if (loading) {
+
     return (
       <View style={styles.center}>
         <ActivityIndicator />
       </View>
     );
   }
+    const visibleSharedAssets = (assets || []).filter((a) =>
+      sharedAssetIds.includes(a.id)
+    );
 
+    const previewSharedAssets = visibleSharedAssets.slice(0, 8);
   return (
     <SafeAreaView style={{ flex: 1 }}>
       <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
@@ -460,30 +547,21 @@ export default function ManageTeamScreen({ navigation, route }) {
               <Image
                 source={{ uri: org.photo_url }}
                 style={styles.teamAvatarImg}
-                resizeMode="cover"
+                resizeMode="contain"
               />
             ) : (
               <Text style={styles.teamAvatarText}>{initials(teamName)}</Text>
             )}
           </Pressable>
 
-          {editingLogo && isOwner && (
-            <View style={{ width: "100%", marginTop: 10 }}>
-              <Text style={styles.smallLabel}>Team logo URL (optional)</Text>
-              <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
-                <TextInput
-                  value={logoUrl}
-                  onChangeText={setLogoUrl}
-                  placeholder="https://..."
-                  autoCapitalize="none"
-                  style={[styles.input, { marginBottom: 0, flex: 1 }]}
-                />
-                <Pressable onPress={saveLogo} style={styles.iconBtn}>
-                  <Ionicons name="checkmark" size={18} />
-                </Pressable>
-              </View>
-            </View>
-          )}
+          {isOwner ? (
+            <Pressable style={styles.logoUploadBtn} onPress={handlePickLogo}>
+              <Ionicons name="image-outline" size={16} color="#111827" />
+              <Text style={styles.logoUploadBtnText}>
+                {org?.photo_url ? "Change Logo" : "Upload Logo"}
+              </Text>
+            </Pressable>
+          ) : null}
 
           {editingName ? (
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -535,23 +613,28 @@ export default function ManageTeamScreen({ navigation, route }) {
                   </View>
 
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.memberName}>{display}</Text>
+                  <Text style={styles.memberName}>{display}</Text>
 
-                    {/* ✅ FIX: no View inside Text */}
-                    <View style={styles.memberMetaRow}>
-                      {role === "owner" ? (
-                        <View style={styles.ownerBadge}>
-                          <Text style={styles.ownerBadgeText}>Owner</Text>
-                        </View>
-                      ) : (
-                        <Text style={styles.memberMetaText}>{role}</Text>
-                      )}
+                  {!!m.profiles?.email && (
+                    <Text style={styles.memberEmail} numberOfLines={1}>
+                      {m.profiles.email}
+                    </Text>
+                  )}
 
-                      {!!m.__virtual && (
-                        <Text style={styles.virtualHint}>virtual</Text>
-                      )}
-                    </View>
+                  <View style={styles.memberMetaRow}>
+                    {role === "owner" ? (
+                      <View style={styles.ownerBadge}>
+                        <Text style={styles.ownerBadgeText}>Owner</Text>
+                      </View>
+                    ) : (
+                      <Text style={styles.memberMetaText}>{role}</Text>
+                    )}
+
+                    {!!m.__virtual && (
+                      <Text style={styles.virtualHint}>virtual</Text>
+                    )}
                   </View>
+                </View>
 
                   {role !== "owner" && isOwner && (
                     <Pressable onPress={() => removeMember(m)}>
@@ -601,20 +684,18 @@ export default function ManageTeamScreen({ navigation, route }) {
             </View>
           ) : (
             <View style={styles.whiteCard}>
-              {(assets || [])
-                .filter((a) => sharedAssetIds.includes(a.id))
-                .slice(0, 8)
-                .map((a) => (
-                  <View key={a.id} style={styles.assetRowMini}>
-                    <Text style={styles.assetNameMini} numberOfLines={1}>
-                      {a.name}
-                    </Text>
-                    <Text style={styles.assetTypeMini}>{a.type}</Text>
-                  </View>
-                ))}
-              {sharedAssetIds.length > 8 && (
-                <Text style={styles.muted}>+ {sharedAssetIds.length - 8} more</Text>
-              )}
+              {previewSharedAssets.map((a) => (
+              <View key={a.id} style={styles.assetRowMini}>
+                <Text style={styles.assetNameMini} numberOfLines={1}>
+                  {a.name}
+                </Text>
+                <Text style={styles.assetTypeMini}>{a.type}</Text>
+              </View>
+            ))}
+
+            {visibleSharedAssets.length > 8 && (
+              <Text style={styles.muted}>+ {visibleSharedAssets.length - 8} more</Text>
+            )}
             </View>
           )}
         </View>
@@ -705,6 +786,11 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFF",
     marginBottom: 24,
   },
+  memberEmail: {
+  fontSize: 12,
+  color: "#6B7280",
+  marginTop: 2,
+},
 
   headerRow: {
     flexDirection: "row",
@@ -731,11 +817,28 @@ const styles = StyleSheet.create({
     width: 96,
     height: 96,
     borderRadius: 48,
-    backgroundColor: "#E5E7EB",
+    backgroundColor: "#fff",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 12,
   },
+
+    logoUploadBtn: {
+      marginTop: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      borderRadius: 999,
+      backgroundColor: "#F3F4F6",
+    },
+    logoUploadBtnText: {
+      fontSize: 13,
+      fontWeight: "800",
+      color: "#111827",
+    },
+
   teamAvatarText: { fontSize: 28, fontWeight: "800" },
   teamName: { fontSize: 22, fontWeight: "800" },
   meta: { fontSize: 13, color: "#6B7280", marginTop: 4 },
@@ -886,5 +989,5 @@ const styles = StyleSheet.create({
 
   footerNote: { fontSize: 12, color: "#6B7280", textAlign: "center" },
 
-  teamAvatarImg: { width: 96, height: 96, borderRadius: 48 },
+  teamAvatarImg: { width: 96, height: 96, borderRadius: 36 },
 });

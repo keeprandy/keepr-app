@@ -1122,11 +1122,6 @@ const meta = {
         {/* Vehicle row */}
         <View style={styles.vehiclePickerRow}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.vehiclePickerLabel}>Vehicle</Text>
-            <Text style={styles.vehiclePickerSubtitle} numberOfLines={1}>
-              {vehicleName}
-              {vehicleLocation ? ` · ${vehicleLocation}` : ""}
-            </Text>
           </View>
 
           <TouchableOpacity

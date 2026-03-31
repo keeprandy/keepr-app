@@ -367,6 +367,11 @@ return (
     () => [...homesSorted, ...vehiclesSorted, ...boatsSorted],
     [homesSorted, vehiclesSorted, boatsSorted]
   );
+  const hasVisibleAssets = allAssets.length > 0;
+
+const shouldShowKeeprProgress =
+  !dismissKeeprProgress &&
+  (keeprProgress?.complete || !hasVisibleAssets);
 
   // Keep reorder lists in sync when not actively reordering
   useEffect(() => {
@@ -900,17 +905,17 @@ useFocusEffect(
                       />
                     </View>
 
-                    {!dismissKeeprProgress ? (
-                      <View style={{ marginTop: spacing.md, maxWidth: 640 }}>
+                    {shouldShowKeeprProgress ? (
+                    <View style={{ marginTop: spacing.md, maxWidth: 640 }}>
                       <KeeprProgressCard
                         progress={keeprProgress}
                         loading={achLoading}
                         onPress={handleKeeprProgressPress}
                         onRestartGuidedSetup={restartGuidedSetup}
                         onDismiss={keeprProgress?.complete ? () => setDismissKeeprProgress(true) : null}
-                      />                    
-                      </View>
-                    ) : null}
+                      />
+                    </View>
+                  ) : null}
                   </View>
 
                   {/* Right: fluid signals */}
@@ -955,16 +960,16 @@ useFocusEffect(
                     <WorldChip icon="boat-outline" label="Water" count={boatsSorted.length} onPress={goBoats} />
                   </ScrollView>
 
-                  {!dismissKeeprProgress ? (
-                    <View style={{ marginTop: spacing.md }}>
-                      <KeeprProgressCard
-                        progress={keeprProgress}
-                        loading={achLoading}
-                        onPress={handleKeeprProgressPress}
-                        onDismiss={keeprProgress?.complete ? () => setDismissKeeprProgress(true) : null}
-                      />
-                    </View>
-                  ) : null}
+                  {shouldShowKeeprProgress ? (
+                  <View style={{ marginTop: spacing.md }}>
+                    <KeeprProgressCard
+                      progress={keeprProgress}
+                      loading={achLoading}
+                      onPress={handleKeeprProgressPress}
+                      onDismiss={keeprProgress?.complete ? () => setDismissKeeprProgress(true) : null}
+                    />
+                  </View>
+                ) : null}
 
                   <View style={{ marginTop: spacing.md }}>
                     <AchievementsCard
@@ -1366,7 +1371,7 @@ function AchievementsCard({ ach, loading, dashboardMode, onPress }) {
       accessibilityLabel="View achievements"
     >
       <View style={styles.achTopRow}>
-        <Text style={styles.achTitle}>Ownership Status: Owned</Text>
+        <Text style={styles.achTitle}>Ownership Status:</Text>
         <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
       </View>
 

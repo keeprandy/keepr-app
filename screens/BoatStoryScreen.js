@@ -1121,11 +1121,6 @@ const meta = {
         {/* Boat row */}
         <View style={styles.boatPickerRow}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.boatPickerLabel}>Boat</Text>
-            <Text style={styles.boatPickerSubtitle} numberOfLines={1}>
-              {boatName}
-              {boatLocation ? ` · ${boatLocation}` : ""}
-            </Text>
           </View>
 
           <TouchableOpacity

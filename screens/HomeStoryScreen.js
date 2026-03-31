@@ -1112,11 +1112,7 @@ const filteredTimelineItems = useMemo(() => {
         {/* Home row */}
         <View style={styles.homePickerRow}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.homePickerLabel}>Home</Text>
-            <Text style={styles.homePickerSubtitle} numberOfLines={1}>
-              {homeName}
-              {homeLocation ? ` · ${homeLocation}` : ""}
-            </Text>
+
           </View>
 
           <TouchableOpacity

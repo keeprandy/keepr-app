@@ -77,7 +77,7 @@ let orgRow = null;
 // 1️⃣ First: owned org (same logic as Settings)
 const { data: ownedOrg, error: ownedOrgErr } = await supabase
   .from("orgs")
-  .select("id, name, display_name, org_type, owner_user_id, created_at")
+  .select("id, name, display_name, photo_url, team_photo_url, org_type, owner_user_id, created_at")
   .eq("owner_user_id", uid)
   .neq("org_type", "personal")
   .order("created_at", { ascending: false })
@@ -103,7 +103,7 @@ if (ownedOrg?.id) {
   if (myMembership?.org_id) {
     const { data: memberOrg, error: orgErr } = await supabase
       .from("orgs")
-      .select("id, name, display_name, org_type, owner_user_id, created_at")
+      .select("id, name, display_name, photo_url, team_photo_url, org_type, owner_user_id, created_at")
       .eq("id", myMembership.org_id)
       .maybeSingle();
 
@@ -255,7 +255,7 @@ if (orgRow?.owner_user_id) {
           <Image
             source={{ uri: org?.team_photo_url || org?.photo_url }}
             style={styles.teamAvatarLargeImage}
-            resizeMode="cover"
+            resizeMode="contain"
           />
         ) : (
           <Text style={styles.teamAvatarLargeText}>
@@ -420,12 +420,12 @@ teamAvatarLarge: {
   justifyContent: "center",
   marginBottom: 8,
   borderWidth: 1,
-  borderColor: colors.borderSubtle || "#E5E7EB",
+  borderColor: colors.borderSubtle || "#fff",
 },
 teamAvatarLargeImage: {
   width: "100%",
   height: "100%",
-  borderRadius: 48, // match your avatar size (if 96x96)
+  borderRadius: 36, // match your avatar size (if 96x96)
 },
 
 teamAvatarLargeText: {

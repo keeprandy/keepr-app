@@ -16,6 +16,8 @@ export function buildKeeprProgressModel({
   const hasSystem = Number(systemCount || 0) > 0;
   const hasRecord = Number(recordCount || 0) > 0;
   const hasProof = Number(proofCount || 0) > 0;
+ 
+  
 
   if (mode === "asset") {
     const steps = [
@@ -90,6 +92,7 @@ export function buildKeeprProgressModel({
   const nextStepLabel = steps.find((s) => !s.done)?.label || null;
   const completedCount = steps.filter((s) => s.done).length;
   const complete = completedCount === steps.length;
+  
 
   return {
     mode,
@@ -128,7 +131,7 @@ export default function KeeprProgressCard({
     if (progress?.complete) {
       return {
         title: "You’re a Keepr",
-        subtitle: "Your first ownership story is complete.",
+        subtitle: "Your ownership record is active and growing.",
       };
     }
 
@@ -142,7 +145,7 @@ export default function KeeprProgressCard({
     if (!onPress) return;
     onPress(progress?.nextStep || null);
   };
-
+ const isDashboardComplete = mode === "dashboard" && progress?.complete;
   return (
     <View style={styles.progressCard}>
       <View style={styles.progressTopRow}>
@@ -150,33 +153,32 @@ export default function KeeprProgressCard({
           <Text style={styles.progressTitle}>{cardCopy.title}</Text>
           <Text style={styles.progressSub}>{cardCopy.subtitle}</Text>
         </View>
+        <View style={styles.progressTopActions}>
 
-<View style={styles.progressTopActions}>
+          {onRestartGuidedSetup ? (
+            <TouchableOpacity
+              onPress={onRestartGuidedSetup}
+              style={styles.restartBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Restart guided setup"
+            >
+              <Text style={styles.restartText}>Restart Guided Setup</Text>
+            </TouchableOpacity>
+          ) : null}
 
-  {onRestartGuidedSetup ? (
-    <TouchableOpacity
-      onPress={onRestartGuidedSetup}
-      style={styles.restartBtn}
-      accessibilityRole="button"
-      accessibilityLabel="Restart guided setup"
-    >
-      <Text style={styles.restartText}>Restart Guided Setup</Text>
-    </TouchableOpacity>
-  ) : null}
+          {onDismiss ? (
+            <TouchableOpacity
+              onPress={onDismiss}
+              style={styles.dismissBtn}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss Keepr progress"
+            >
+              <Ionicons name="close" size={16} color={colors.textMuted} />
+            </TouchableOpacity>
+          ) : null}
 
-  {onDismiss ? (
-    <TouchableOpacity
-      onPress={onDismiss}
-      style={styles.dismissBtn}
-      hitSlop={8}
-      accessibilityRole="button"
-      accessibilityLabel="Dismiss Keepr progress"
-    >
-      <Ionicons name="close" size={16} color={colors.textMuted} />
-    </TouchableOpacity>
-  ) : null}
-
-</View>
+        </View>
       </View>
 
       <TouchableOpacity
@@ -186,93 +188,91 @@ export default function KeeprProgressCard({
         accessibilityRole="button"
         accessibilityLabel="View Keepr progress"
       >
-        {!progress?.complete && progress?.nextStepLabel ? (
-          <View style={styles.progressNextRow}>
-            <View style={styles.progressNextBadge}>
-              <Text style={styles.progressNextBadgeText}>Next Step</Text>
-            </View>
+      {!progress?.complete && progress?.nextStepLabel ? (
+        <View style={styles.progressNextRow}>
+          <View style={styles.progressNextBadge}>
+            <Text style={styles.progressNextBadgeText}>Next Step</Text>
+          </View>
 
-            <Text style={styles.progressNextAction}>{progress.nextStepLabel}</Text>
+          <Text style={styles.progressNextAction}>{progress.nextStepLabel}</Text>
 
+          <Ionicons
+            name="chevron-forward"
+            size={14}
+            color={colors.textMuted}
+            style={{ marginLeft: "auto" }}
+          />
+        </View>
+      ) : mode === "asset" ? (
+        <View style={styles.progressCompleteRow}>
+          <Text style={styles.progressCompleteText}>
+            This asset is fully documented.
+          </Text>
+          <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />
+        </View>
+      ) : null}
+
+{loading ? (
+  <Text style={styles.progressMuted}>Loading…</Text>
+) : isDashboardComplete ? null : (
+  <View style={styles.progressStepsWrap}>
+    {progress?.steps?.map((step, index) => {
+      const isCurrent = !step.done && progress?.nextStep === step.key;
+
+      return (
+        <React.Fragment key={step.key}>
+          <TouchableOpacity
+            style={[
+              styles.progressStepChip,
+              step.done && styles.progressStepChipDone,
+              isCurrent && styles.progressStepChipCurrent,
+            ]}
+            activeOpacity={0.85}
+            onPress={(e) => {
+              e?.stopPropagation?.();
+              onStepPress?.(step.key);
+            }}
+          >
+            <Ionicons
+              name={
+                step.done
+                  ? "checkmark-circle"
+                  : isCurrent
+                  ? "radio-button-on"
+                  : "ellipse-outline"
+              }
+              size={14}
+              color={
+                step.done
+                  ? colors.brandBlue
+                  : isCurrent
+                  ? colors.textPrimary
+                  : colors.textMuted
+              }
+            />
+            <Text
+              style={[
+                styles.progressStepText,
+                step.done && styles.progressStepTextDone,
+              ]}
+            >
+              {step.label}
+            </Text>
+          </TouchableOpacity>
+
+          {index < (progress?.steps?.length || 0) - 1 ? (
             <Ionicons
               name="chevron-forward"
               size={14}
               color={colors.textMuted}
-              style={{ marginLeft: "auto" }}
+              style={{ marginHorizontal: 4 }}
             />
-          </View>
-        ) : (
-          <View style={styles.progressCompleteRow}>
-            <Text style={styles.progressCompleteText}>
-              {mode === "asset"
-                ? "This asset is fully documented."
-                : "Your first ownership story is complete."}
-            </Text>
-            <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />
-          </View>
-        )}
-
-        {loading ? (
-          <Text style={styles.progressMuted}>Loading…</Text>
-        ) : (
-          <View style={styles.progressStepsWrap}>
-            {progress?.steps?.map((step, index) => {
-              const isCurrent = !step.done && progress?.nextStep === step.key;
-
-              return (
-                <React.Fragment key={step.key}>
-                  <TouchableOpacity
-                    style={[
-                      styles.progressStepChip,
-                      step.done && styles.progressStepChipDone,
-                      isCurrent && styles.progressStepChipCurrent,
-                    ]}
-                    activeOpacity={0.85}
-                    onPress={(e) => {
-                      e?.stopPropagation?.();
-                      onStepPress?.(step.key);
-                    }}
-                  >
-                    <Ionicons
-                      name={
-                        step.done
-                          ? "checkmark-circle"
-                          : isCurrent
-                          ? "radio-button-on"
-                          : "ellipse-outline"
-                      }
-                      size={14}
-                      color={
-                        step.done
-                          ? colors.brandBlue
-                          : isCurrent
-                          ? colors.textPrimary
-                          : colors.textMuted
-                      }
-                    />
-                    <Text
-                      style={[
-                        styles.progressStepText,
-                        step.done && styles.progressStepTextDone,
-                      ]}
-                    >
-                      {step.label}
-                    </Text>
-                  </TouchableOpacity>
-
-                  {index < (progress?.steps?.length || 0) - 1 ? (
-                    <Ionicons
-                      name="chevron-forward"
-                      size={14}
-                      color={colors.textMuted}
-                      style={{ marginHorizontal: 4 }}
-                    />
-                  ) : null}
-                </React.Fragment>
-              );
-            })}
-          </View>
-        )}
+          ) : null}
+        </React.Fragment>
+      );
+    })}
+  </View>
+)}
       </TouchableOpacity>
     </View>
   );
