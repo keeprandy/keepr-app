@@ -17,6 +17,7 @@ export default function KaiWelcomeScreen({ navigation, route }) {
         </View>
 
         <Text style={styles.eyebrow}>Keepr™ Asset Intelligence</Text>
+        <Text style={styles.title}>Welcome to Keepr™</Text>
         <Text style={styles.title}>Hello — I’m Kai.</Text>
         <Text style={styles.subtitle}>
           KAI standards for Keepr™ Asset Intelligence. I’ll help you get started and show you how Keepr™
