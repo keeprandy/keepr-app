@@ -246,7 +246,7 @@ export default function AuthScreen() {
       <View style={styles.brandContent}>
           <Image
             source={require("../assets/login_image_keepr.png")}
-            style={{ width: 400, height: 250, marginBottom: 24 }}
+            style={{ width: 440, height: 275, marginBottom: 24 }}
           />
           <Text style={styles.brandHeadline}>
             Everything you own has a story.
@@ -280,11 +280,17 @@ export default function AuthScreen() {
 
         <Text style={styles.title}>{title}</Text>
         <Text style={styles.subtitle}>
-          {isSignUp
-            ? "Create your Keepr™ account and start building the story of what you own."
+          {Platform.OS === "web"
+            ? isSignUp
+              ? "Create your Keepr™ account and start building the story of what you own."
+              : isForgot
+              ? "Enter your email and we’ll send a reset link."
+              : ""
+            : isSignUp
+            ? "Get started."
             : isForgot
-            ? "Enter your email and we’ll send a reset link."
-            : "Welcome back. Sign in to continue your Keepr™ story."}
+            ? "Enter your email to reset your password."
+            : "Continue your ownership story."}
         </Text>
       </View>
 
@@ -314,7 +320,7 @@ export default function AuthScreen() {
               activeOpacity={0.9}
             >
               <Text style={[styles.modePillText, mode === "signup" && styles.modePillTextActive]}>
-                Create your Account
+                Create Account
               </Text>
             </TouchableOpacity>
           </View>
@@ -418,6 +424,7 @@ export default function AuthScreen() {
               <Text style={styles.forgotLinkText}>Forgot password?</Text>
             </TouchableOpacity>
           ) : (
+            
             <TouchableOpacity
               style={styles.forgotLink}
               onPress={() => {
@@ -430,15 +437,23 @@ export default function AuthScreen() {
               <Text style={styles.forgotLinkText}>Back to sign in</Text>
             </TouchableOpacity>
           )}
-
-          <Text style={styles.helperText}>
-            Tip: You will be able to change your email and password in Keepr™ later.
-          </Text>
-          <Text style={styles.trustText}>
-            We do not share your data.  
-            We do not use your data to train our system.  
-            You own what you put in.
+<Text style={styles.helperText}>
+  Great for quick capture and action.{" "}
+  <Text style={{ fontWeight: "600" }}>
+    Use Keepr on web for deeper setup and organization.
+  </Text>
+</Text>
+        {Platform.OS === "web" && (
+          <>
+            <Text style={styles.helperText}>
+              Tip: You will be able to change your email and password later.
             </Text>
+
+            <Text style={styles.trustText}>
+              We do not share your data. We do not use your data to train our system.
+            </Text>
+          </>
+        )}
         </View>
       </View>
       </View>
@@ -477,7 +492,7 @@ const styles = StyleSheet.create({
   authCard: {
   width: "100%",
   maxWidth: 760,
-  minWidth: 420,
+  minWidth: 320,
   alignSelf: "center",
   backgroundColor: "#FFFFFF",
   borderRadius: 20,
@@ -555,13 +570,6 @@ brandSub: {
   fontSize: 12,
   color: colors.textMuted,
   marginTop: 2,
-},
-
-  brand: {
-  fontSize: 16,
-  fontWeight: "800",
-  color: colors.brandBlue,
-  marginBottom: 4,
 },
 
 trustText: {

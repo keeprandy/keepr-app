@@ -22,7 +22,8 @@
       "buildNumber": "1",
       "infoPlist": {
         "NSCameraUsageDescription": "Take photos for your asset records and proof.",
-        "NSPhotoLibraryUsageDescription": "Upload photos and documents to your assets."
+        "NSPhotoLibraryUsageDescription": "Upload photos and documents to your assets.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -39,6 +40,11 @@
     },
     "plugins": [
       "react-native-document-scanner-plugin"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "7705d387-cff3-4310-b835-58cf3dfac948"
+      }
+    }
   }
 }

@@ -1043,8 +1043,11 @@ React.useEffect(() => {
           .single();
 
         const { count: aCount, error: aErr } = await supabase
-          .from("assets")
-          .select("id", { count: "exact", head: true });
+      .from("assets")
+      .select("id", { count: "exact", head: true })
+      .eq("owner_id", user.id)
+      .is("deleted_at", null)
+      .eq("status", "active");
 
         if (!mounted) return;
 if (error || aErr) {
@@ -1054,19 +1057,13 @@ if (error || aErr) {
     aErr?.message || aErr
   );
 
-  // ✅ Do NOT force onboarding on transient DB/RLS/session timing issues
-  // Leave unresolved so Splash stays up and we retry.
-  setRole(null);
-  setOnboardingState(null);
-  setAssetCount(null);
-
-  // retry once shortly after (session often hydrates right after first render)
-  setTimeout(() => {
-        if (mounted) loadRole("retry", { force: true });
-  }, 400);
-
-  return;
-    }
+  // Store-safe fallback: do not deadlock behind splash
+  setRole("consumer");
+setOnboardingState("not_started");
+setAssetCount(0);
+setLoadingRole(false);
+return;
+}
 
     setRole(data?.role || "consumer");
     setOnboardingState((data?.onboarding_state || "not_started").toLowerCase());
@@ -1077,16 +1074,10 @@ if (error || aErr) {
   console.log("PROFILE ROLE LOAD EXCEPTION:", e?.message || e);
   if (!mounted) return;
 
-  // Do NOT force onboarding.
-  // Reset to unresolved and retry once.
-  setRole(null);
-  setOnboardingState(null);
-  setAssetCount(null);
-
-  setTimeout(() => {
-        if (mounted) loadRole("retry", { force: true });
-  }, 400);
-
+  // Store-safe fallback: do not deadlock behind splash
+  setRole("consumer");
+  setOnboardingState("not_started");
+  setAssetCount(0);
   return;
 } finally {
   if (!mounted) return;
