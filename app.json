@@ -1,21 +1,33 @@
 {
   "expo": {
-    "name": "Keepr - For Keeprs",
+    "name": "Keepr",
     "slug": "keepr",
     "version": "1.0.0",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "orientation": "portrait",
     "icon": "./assets/app_logo_icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
+    "scheme": "keepr",
     "splash": {
       "image": "./assets/app_logo_icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.keeprhome.app",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Take photos for your asset records and proof.",
+        "NSPhotoLibraryUsageDescription": "Upload photos and documents to your assets."
+      }
     },
     "android": {
+      "package": "com.keeprhome.app",
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/app_logo_icon.png",
         "backgroundColor": "#ffffff"

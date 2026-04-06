@@ -80,8 +80,8 @@ export default function AuthScreen() {
 
   const title = useMemo(() => {
     if (isForgot) return "Reset your password";
-    if (isSignUp) return "Become a Keepr";
-    return "Sign in to Keepr";
+    if (isSignUp) return "Become a Keepr™";
+    return "Sign in to Keepr™";
   }, [isForgot, isSignUp]);
 
   const normalizedEmail = useMemo(() => email.trim().toLowerCase(), [email]);
@@ -274,17 +274,17 @@ export default function AuthScreen() {
         />
           <View style={styles.brandTextWrap}>
             <Text style={styles.brand}>Keepr™ </Text>
-            <Text style={styles.brandSub}>Asset Lifecycle Intelligence - - early access V1</Text>
+            <Text style={styles.brandSub}>Asset Lifecycle Intelligence</Text>
           </View>
         </View>
 
         <Text style={styles.title}>{title}</Text>
         <Text style={styles.subtitle}>
           {isSignUp
-            ? "Create your Keepr account and start building the story of what you own."
+            ? "Create your Keepr™ account and start building the story of what you own."
             : isForgot
             ? "Enter your email and we’ll send a reset link."
-            : "Welcome back. Sign in to continue your Keepr story."}
+            : "Welcome back. Sign in to continue your Keepr™ story."}
         </Text>
       </View>
 
@@ -432,7 +432,7 @@ export default function AuthScreen() {
           )}
 
           <Text style={styles.helperText}>
-            Tip: You will be able to change your email and password in Keepr later.
+            Tip: You will be able to change your email and password in Keepr™ later.
           </Text>
           <Text style={styles.trustText}>
             We do not share your data.  
