@@ -196,36 +196,36 @@ const linking = {
     "https://keeprfleet.com",
     "https://keeprpros.com",
   ],
-  config: {
-    screens: {
-      KacResolve: "k/:kac",
-      PublicAction: "k/:kac/actions",
-RootTabs: {
-  screens: {
-    Dashboard: "dashboard",
-    MyHome: "home",
-    Garage: "garage",
-    Boats: "boats",
-    Notifications: {
-      path: "inbox",
+    config: {
       screens: {
-        InboxHome: "",
+        ResetPassword: "reset",
+        Auth: "auth",
+        KacResolve: "k/:kac",
+        PublicAction: "k/:kac/actions",
+        RootTabs: {
+          screens: {
+            Dashboard: "dashboard",
+            MyHome: "home",
+            Garage: "garage",
+            Boats: "boats",
+            Notifications: {
+              path: "inbox",
+              screens: {
+                InboxHome: "",
+              },
+            },
+            KeeprPros: "pros",
+            Settings: "settings",
+          },
+        },
+        TimelineRecord: "TimelineRecord",
+        UploadLab: "upload-lab",
+        AssetAttachments: "asset/:assetId/attachments",
+        HomePublic: "public/home/:assetId",
+        GaragePublic: "public/garage/:assetId",
+        BoatPublic: "public/boat/:assetId",
       },
     },
-    KeeprPros: "pros",
-    Settings: "settings",
-  },
-},
-      TimelineRecord: "TimelineRecord",
-
-      UploadLab: "upload-lab",
-      AssetAttachments: "asset/:assetId/attachments",
-
-      HomePublic: "public/home/:assetId",
-      GaragePublic: "public/garage/:assetId",
-      BoatPublic: "public/boat/:assetId",
-    },
-  },
 };
 
 /* ----------------- HOME STACK (optional) ----------------- */
@@ -991,13 +991,33 @@ const [assetCount, setAssetCount] = React.useState(0);
   const didInitialNavResolve = React.useRef(false);
   const lastResetRouteRef = React.useRef(null);
 
+  const isResetLink = React.useMemo(() => {
+  if (Platform.OS !== "web") return false;
+  try {
+    const href = window.location.href || "";
+    const path = window.location.pathname || "";
+    const hash = window.location.hash || "";
+    const search = window.location.search || "";
+    if (path.startsWith("/reset")) return true;
+    if (href.includes("/reset")) return true;
+    if (hash.includes("type=recovery")) return true;
+    if (hash.includes("access_token=") && hash.includes("refresh_token=")) return true;
+    if (search.includes("code=")) return true;
+    if (hash.includes("error=")) return true;
+    return false;
+  } catch (_) {
+    return false;
+  }
+}, []);
+
 React.useEffect(() => {
   if (!targetRoute) return;
   if (!navigationRef?.isReady?.()) return;
 
+  if (isResetLink) return;
+
   const current = navigationRef.getCurrentRoute()?.name;
 
-  // Always enforce correct landing if restored state puts us elsewhere
   if (current !== targetRoute) {
     navigationRef.reset({
       index: 0,
@@ -1007,7 +1027,8 @@ React.useEffect(() => {
 
   didInitialNavResolve.current = true;
   lastResetRouteRef.current = targetRoute;
-}, [targetRoute]);
+}, [targetRoute, isResetLink]);
+
 
 
   React.useEffect(() => {
@@ -1056,6 +1077,7 @@ if (error || aErr) {
     error?.message || error,
     aErr?.message || aErr
   );
+
 
   // Store-safe fallback: do not deadlock behind splash
   setRole("consumer");
@@ -1106,24 +1128,16 @@ return;
     else if (!user) setCurrentRouteName("Auth");
   }, [initializing, user, setCurrentRouteName]);
 
-const isResetLink = React.useMemo(() => {
-  if (Platform.OS !== "web") return false;
-  try {
-    const href = window.location.href || "";
-    const path = window.location.pathname || "";
-    const hash = window.location.hash || "";
-    const search = window.location.search || "";
-    if (path.startsWith("/reset")) return true;
-    if (href.includes("/reset")) return true;
-    if (hash.includes("type=recovery")) return true;
-    if (hash.includes("access_token=") && hash.includes("refresh_token=")) return true;
-    if (search.includes("code=")) return true;
-    if (hash.includes("error=")) return true;
-    return false;
-  } catch (_) {
-    return false;
-  }
-}, []);
+
+React.useEffect(() => {
+  if (!isResetLink) return;
+  if (!navigationRef?.isReady?.()) return;
+
+  navigationRef.reset({
+    index: 0,
+    routes: [{ name: "ResetPassword" }],
+  });
+}, [isResetLink]);
 
 
 const handleNavStateChange = React.useCallback(
@@ -1193,12 +1207,13 @@ if (!user) {
 
 if (loadingRole && role === null) return <SplashIntroScreen />;
 
-const initialRouteName =
-  shouldShowOnboarding
-    ? "OnboardingStack"
-    : role === "superkeepr"
-    ? "SuperKeeprStack"
-    : "RootTabs";
+const initialRouteName = isResetLink
+  ? "ResetPassword"
+  : shouldShowOnboarding
+  ? "OnboardingStack"
+  : role === "superkeepr"
+  ? "SuperKeeprStack"
+  : "RootTabs";
 
 
   return (

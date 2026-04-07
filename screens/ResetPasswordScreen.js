@@ -1,126 +1,179 @@
-import React, { useMemo, useState, useEffect } from "react";
+import { Ionicons } from "@expo/vector-icons";
+import React, { useEffect, useMemo, useState } from "react";
 import {
-  View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  Platform,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
-  ActivityIndicator,
-  Platform,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { supabase } from "../lib/supabaseClient";
-import { colors, radius, spacing } from "../styles/theme";
 
-function validatePassword(pw) {
-  const v = (pw || "").trim();
-  if (!v) return "Password is required.";
-  if (v.length < 6) return "Password must be at least 6 characters.";
-  return "";
+import { supabase } from "../lib/supabaseClient";
+import { layoutStyles } from "../styles/layout";
+import { colors, radius, spacing, typography } from "../styles/theme";
+
+function validatePassword(password) {
+  if (!password) return "Password is required.";
+  if (password.length < 8) return "Password must be at least 8 characters.";
+  return null;
 }
 
 export default function ResetPasswordScreen({ navigation }) {
+  const [booting, setBooting] = useState(Platform.OS === "web");
+  const [bootError, setBootError] = useState("");
+  const [recoveryReady, setRecoveryReady] = useState(Platform.OS !== "web");
+
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
 
-  const pwError = useMemo(() => validatePassword(password), [password]);
-  const confirmError = useMemo(() => {
+  const passwordErr = useMemo(() => validatePassword(password), [password]);
+  const confirmErr = useMemo(() => {
     if (!confirm) return "";
     if (confirm !== password) return "Passwords do not match.";
     return "";
   }, [confirm, password]);
 
-  const hasBlockingErrors = !!pwError || !!confirmError;
+  const hasBlockingErrors = !!passwordErr || !!confirmErr;
+  const canSubmit =
+    recoveryReady && !booting && !bootError && !submitting && !hasBlockingErrors;
 
+  useEffect(() => {
+    let alive = true;
 
-// ---------------- RECOVERY SESSION BOOTSTRAP (WEB) ----------------
-const [booting, setBooting] = useState(Platform.OS === "web");
-const [bootError, setBootError] = useState("");
+    const parseParams = (href) => {
+      try {
+        const u = new URL(href);
+        const query = new URLSearchParams(u.search || "");
+        const hash = new URLSearchParams((u.hash || "").replace(/^#/, ""));
+        const get = (k) => hash.get(k) || query.get(k) || "";
+        return {
+          code: get("code"),
+          access_token: get("access_token"),
+          refresh_token: get("refresh_token"),
+          error: get("error"),
+          error_code: get("error_code"),
+          error_description: get("error_description"),
+          type: get("type"),
+        };
+      } catch {
+        return {
+          code: "",
+          access_token: "",
+          refresh_token: "",
+          error: "",
+          error_code: "",
+          error_description: "",
+          type: "",
+        };
+      }
+    };
 
-useEffect(() => {
-  let alive = true;
-
-  const parseParams = (href) => {
-    try {
-      const u = new URL(href);
-      const query = new URLSearchParams(u.search || "");
-      const hash = new URLSearchParams((u.hash || "").replace(/^#/, ""));
-      const get = (k) => hash.get(k) || query.get(k) || "";
-      return {
-        code: get("code"),
-        access_token: get("access_token"),
-        refresh_token: get("refresh_token"),
-        error: get("error"),
-        error_code: get("error_code"),
-        error_description: get("error_description"),
-      };
-    } catch {
-      return {
-        code: "",
-        access_token: "",
-        refresh_token: "",
-        error: "",
-        error_code: "",
-        error_description: "",
-      };
-    }
-  };
-
-  const bootstrapRecoverySession = async () => {
-    if (Platform.OS !== "web") return;
-
-    try {
-      const href = window.location.href;
-      const p = parseParams(href);
-
-      if (p.error || p.error_code || p.error_description) {
-        const msg =
-          decodeURIComponent(p.error_description || "") ||
-          (p.error_code ? `Reset link error: ${p.error_code}` : "Reset link is invalid.");
-        if (alive) setBootError(msg);
+    const bootstrapRecoverySession = async () => {
+      if (Platform.OS !== "web") {
+        setRecoveryReady(true);
         return;
       }
 
-      const before = await supabase.auth.getSession();
-      if (before?.data?.session) return;
+      try {
+        const href = window.location.href;
+        const p = parseParams(href);
 
-      if (p.code) {
-        const { error } = await supabase.auth.exchangeCodeForSession(href);
-        if (error) {
-          if (alive) setBootError(error.message || "Reset link is invalid or expired.");
+        if (p.error || p.error_code || p.error_description) {
+          const msg =
+            decodeURIComponent(p.error_description || "") ||
+            (p.error_code
+              ? `Reset link error: ${p.error_code}`
+              : "Reset link is invalid or expired.");
+          if (alive) {
+            setBootError(msg);
+            setRecoveryReady(false);
+          }
           return;
         }
-      } else if (p.access_token && p.refresh_token) {
-        const { error } = await supabase.auth.setSession({
-          access_token: p.access_token,
-          refresh_token: p.refresh_token,
-        });
-        if (error) {
-          if (alive) setBootError(error.message || "Reset link is invalid or expired.");
+
+        const before = await supabase.auth.getSession();
+        if (before?.data?.session) {
+          if (alive) setRecoveryReady(true);
           return;
         }
-      }
 
-      const after = await supabase.auth.getSession();
-      if (!after?.data?.session) {
-        if (alive) setBootError("Reset link is invalid or expired. Please request a new one.");
+        if (p.code) {
+          const { error } = await supabase.auth.exchangeCodeForSession(href);
+          if (error) {
+            if (alive) {
+              setBootError(error.message || "Reset link is invalid or expired.");
+              setRecoveryReady(false);
+            }
+            return;
+          }
+        } else if (p.access_token && p.refresh_token) {
+          const { error } = await supabase.auth.setSession({
+            access_token: p.access_token,
+            refresh_token: p.refresh_token,
+          });
+          if (error) {
+            if (alive) {
+              setBootError(error.message || "Reset link is invalid or expired.");
+              setRecoveryReady(false);
+            }
+            return;
+          }
+        } else {
+          if (alive) {
+            setBootError("This reset link is invalid or expired. Please request a new one.");
+            setRecoveryReady(false);
+          }
+          return;
+        }
+
+        try {
+          window.history.replaceState(null, "", "/reset");
+        } catch {}
+
+        const after = await supabase.auth.getSession();
+        if (!after?.data?.session) {
+          if (alive) {
+            setBootError("This reset link is invalid or expired. Please request a new one.");
+            setRecoveryReady(false);
+          }
+          return;
+        }
+
+        if (alive) setRecoveryReady(true);
+      } catch (e) {
+        if (alive) {
+          setBootError(e?.message || "Reset link is invalid or expired.");
+          setRecoveryReady(false);
+        }
       }
-    } catch (e) {
-      if (alive) setBootError(e?.message || "Reset link is invalid or expired.");
+    };
+
+    bootstrapRecoverySession().finally(() => {
+      if (alive) setBooting(false);
+    });
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const handleExit = () => {
+    if (navigation?.canGoBack?.()) {
+      navigation.goBack();
+      return;
     }
+    navigation.reset({
+      index: 0,
+      routes: [{ name: "Auth" }],
+    });
   };
-
-  bootstrapRecoverySession().finally(() => {
-    if (alive) setBooting(false);
-  });
-
-  return () => {
-    alive = false;
-  };
-}, []);
-
 
   const handleUpdatePassword = async () => {
     setFormError("");
@@ -130,8 +183,10 @@ useEffect(() => {
       return;
     }
 
-    if (bootError) {
-      setFormError(bootError);
+    if (bootError || !recoveryReady) {
+      setFormError(
+        bootError || "This reset link is invalid or expired. Please request a new one."
+      );
       return;
     }
 
@@ -152,157 +207,326 @@ useEffect(() => {
         return;
       }
 
-      navigation.navigate("RootTabs");
+      Alert.alert("Password updated", "Your password has been changed.");
+
+      navigation.reset({
+        index: 0,
+        routes: [{ name: "RootTabs" }],
+      });
     } catch (e) {
-      setFormError("Could not update password.");
+      setFormError(e?.message || "Could not update password.");
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <SafeAreaView style={styles.screen}>
-      <View style={styles.card}>
-        <Text style={styles.title}>Set a new password</Text>
-        <Text style={styles.subtitle}>
-          Choose a strong, unique password. If your password is too common, it may be rejected.
-        </Text>
+    <SafeAreaView style={layoutStyles.screen}>
+      <View
+        style={[
+          styles.container,
+          Platform.OS === "web" && styles.webContainer,
+        ]}
+      >
+        {Platform.OS === "web" && (
+          <View style={styles.brandPanel}>
+            <View style={styles.brandContent}>
+              <Image
+                source={require("../assets/login_image_keepr.png")}
+                style={{ width: 440, height: 275, marginBottom: 24 }}
+              />
+              <Text style={styles.brandHeadline}>Secure your Keepr™ account.</Text>
+              <Text style={styles.brandMessage}>
+                Set a new password to continue your ownership story.
+              </Text>
+            </View>
+          </View>
+        )}
 
+        <View style={styles.loginPanel}>
+          <View style={styles.authCard}>
+            <View style={styles.header}>
+              <View style={styles.brandRow}>
+                <Image
+                  source={require("../assets/app_logo_icon.png")}
+                  style={styles.logo}
+                />
+                <View style={styles.brandTextWrap}>
+                  <Text style={styles.brand}>Keepr™</Text>
+                  <Text style={styles.brandSub}>Asset Lifecycle Intelligence</Text>
+                </View>
+              </View>
 
-{booting && (
-  <View style={styles.bootRow}>
-    <ActivityIndicator />
-    <Text style={styles.bootText}>Preparing reset…</Text>
-  </View>
-)}
+              <Text style={styles.title}>Set a new password</Text>
+              <Text style={styles.subtitle}>
+                This will secure your account and restore access.
+              </Text>
+            </View>
 
-{!!bootError && (
-  <View style={styles.bootErrorBox}>
-    <Text style={styles.bootErrorTitle}>Reset link issue</Text>
-    <Text style={styles.bootErrorText}>{bootError}</Text>
-    <TouchableOpacity
-      style={styles.secondaryButton}
-      onPress={() => navigation.navigate("Auth")}
-      activeOpacity={0.85}
-    >
-      <Text style={styles.secondaryButtonText}>Request a new reset link</Text>
-    </TouchableOpacity>
-  </View>
-)}
+            {booting && (
+              <View style={styles.bootRow}>
+                <ActivityIndicator />
+                <Text style={styles.bootText}>Preparing secure reset…</Text>
+              </View>
+            )}
 
+            {!!bootError && !booting && (
+              <View style={styles.bootErrorBox}>
+                <Text style={styles.bootErrorTitle}>Reset link issue</Text>
+                <Text style={styles.bootErrorText}>{bootError}</Text>
+                <TouchableOpacity
+                  style={styles.secondaryButton}
+                  onPress={handleExit}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.secondaryButtonText}>Back to sign in</Text>
+                </TouchableOpacity>
+              </View>
+            )}
 
-        <TextInput
-          value={password}
-          onChangeText={(v) => {
-            setPassword(v);
-            if (formError) setFormError("");
-          }}
-          placeholder="New password"
-          placeholderTextColor={colors.textMuted}
-          secureTextEntry
-          style={[styles.input, pwError ? styles.inputError : null]}
-        />
-        {!!pwError && <Text style={styles.errorText}>{pwError}</Text>}
+            {!bootError && !booting && (
+              <View style={styles.form}>
+                <Text style={styles.label}>New password</Text>
+                <TextInput
+                  value={password}
+                  onChangeText={(v) => {
+                    setPassword(v);
+                    if (formError) setFormError("");
+                  }}
+                  placeholder="••••••••"
+                  placeholderTextColor={colors.textMuted}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  style={[styles.input, passwordErr ? styles.inputError : null]}
+                />
+                {!!passwordErr && <Text style={styles.errorText}>{passwordErr}</Text>}
 
-        <TextInput
-          value={confirm}
-          onChangeText={(v) => {
-            setConfirm(v);
-            if (formError) setFormError("");
-          }}
-          placeholder="Confirm new password"
-          placeholderTextColor={colors.textMuted}
-          secureTextEntry
-          style={[styles.input, confirmError ? styles.inputError : null]}
-        />
-        {!!confirmError && <Text style={styles.errorText}>{confirmError}</Text>}
+                <Text style={[styles.label, { marginTop: spacing.md }]}>
+                  Confirm password
+                </Text>
+                <TextInput
+                  value={confirm}
+                  onChangeText={(v) => {
+                    setConfirm(v);
+                    if (formError) setFormError("");
+                  }}
+                  placeholder="••••••••"
+                  placeholderTextColor={colors.textMuted}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  style={[styles.input, confirmErr ? styles.inputError : null]}
+                />
+                {!!confirmErr && <Text style={styles.errorText}>{confirmErr}</Text>}
 
-        {!!formError && <Text style={styles.formError}>{formError}</Text>}
+                {!!formError && <Text style={styles.formError}>{formError}</Text>}
 
-        <TouchableOpacity
-          style={[
-            styles.primaryButton,
-            submitting || hasBlockingErrors ? styles.primaryButtonDisabled : null,
-          ]}
-          onPress={handleUpdatePassword}
-          disabled={submitting || hasBlockingErrors}
-          activeOpacity={0.85}
-        >
-          {submitting ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.primaryButtonText}>Update password</Text>
-          )}
-        </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.button,
+                    !canSubmit ? styles.buttonDisabled : null,
+                  ]}
+                  onPress={handleUpdatePassword}
+                  disabled={!canSubmit}
+                  activeOpacity={0.85}
+                >
+                  {submitting ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <>
+                      <Ionicons
+                        name="checkmark-circle-outline"
+                        size={18}
+                        color="#fff"
+                        style={{ marginRight: 6 }}
+                      />
+                      <Text style={styles.buttonText}>Update password</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.secondary}
+                  onPress={handleExit}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.secondaryText}>Back to sign in</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        </View>
       </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {
+  container: {
     flex: 1,
-    backgroundColor: colors.background,
-    padding: spacing.lg,
+    padding: spacing.xl,
+  },
+  webContainer: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 48,
+  },
+  brandPanel: {
+    width: 420,
     justifyContent: "center",
   },
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: "#11182722",
+  brandContent: {
+    maxWidth: 420,
   },
-  title: {
-    fontSize: 18,
-    fontWeight: "900",
+  brandHeadline: {
+    fontSize: 28,
+    fontWeight: "700",
+    marginBottom: 16,
+  },
+  brandMessage: {
+    fontSize: 16,
+    color: "#475569",
+    lineHeight: 24,
+  },
+  loginPanel: {
+    flex: 1,
+    justifyContent: "center",
+  },
+  authCard: {
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    padding: spacing.xl,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+  },
+  header: {
+    marginBottom: spacing.lg,
+  },
+  brandRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: spacing.sm,
+  },
+  logo: {
+    width: 40,
+    height: 40,
+    resizeMode: "contain",
+  },
+  brandTextWrap: {
+    marginLeft: 10,
+  },
+  brand: {
+    fontWeight: "800",
     color: colors.textPrimary,
   },
+  brandSub: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  title: {
+    ...typography.title,
+  },
   subtitle: {
-    marginTop: 8,
-    marginBottom: 14,
+    ...typography.subtitle,
+    marginTop: 4,
+  },
+  form: {},
+  label: {
     fontSize: 13,
-    lineHeight: 18,
     color: colors.textSecondary,
+    marginBottom: 4,
   },
   input: {
     borderWidth: 1,
-    borderColor: "#E5E7EB",
+    borderColor: colors.borderSubtle,
     borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
     paddingVertical: 10,
-    paddingHorizontal: 12,
+    fontSize: 14,
     color: colors.textPrimary,
-    backgroundColor: "#fff",
-    marginTop: 10,
+    backgroundColor: colors.surface,
   },
   inputError: {
-    borderColor: "#ef4444",
+    borderColor: "#DC2626",
   },
   errorText: {
     marginTop: 6,
-    color: "#ef4444",
     fontSize: 12,
-    fontWeight: "700",
+    color: "#DC2626",
+    fontWeight: "600",
   },
   formError: {
-    marginTop: 10,
-    color: "#ef4444",
-    fontSize: 12,
-    fontWeight: "800",
+    marginTop: spacing.md,
+    fontSize: 13,
+    color: "#DC2626",
+    fontWeight: "700",
   },
-  primaryButton: {
-    marginTop: 14,
+  button: {
+    marginTop: spacing.lg,
     backgroundColor: colors.brandBlue,
-    borderRadius: 999,
     paddingVertical: 12,
+    borderRadius: radius.pill,
     alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "center",
   },
-  primaryButtonDisabled: {
+  buttonDisabled: {
     opacity: 0.6,
   },
-  primaryButtonText: {
+  buttonText: {
     color: "#fff",
-    fontWeight: "900",
+    fontWeight: "600",
+    fontSize: 14,
+  },
+  secondary: {
+    marginTop: spacing.md,
+    alignItems: "center",
+  },
+  secondaryText: {
+    color: colors.brandBlue,
+    fontWeight: "600",
+  },
+  bootRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: spacing.md,
+  },
+  bootText: {
+    color: colors.textMuted,
+    fontSize: 13,
+  },
+  bootErrorBox: {
+    marginTop: spacing.sm,
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+  },
+  bootErrorTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#991B1B",
+    marginBottom: 6,
+  },
+  bootErrorText: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: "#991B1B",
+  },
+  secondaryButton: {
+    marginTop: spacing.md,
+    alignSelf: "flex-start",
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: radius.pill,
+    backgroundColor: colors.brandBlue,
+  },
+  secondaryButtonText: {
+    color: "#fff",
+    fontWeight: "700",
     fontSize: 13,
   },
 });
