@@ -629,7 +629,7 @@ const config = useMemo(
     : "Photo optional";
 
   return (
-    <SafeAreaView style={layoutStyles.screen}>
+    <SafeAreaView style={layoutStyles.screen} edges={["top", "left", "right", "bottom"]}>
       <KeeprAlertModal
         open={modal.open}
         title={modal.title}
@@ -645,7 +645,10 @@ const config = useMemo(
           <TouchableOpacity
             style={styles.backBtn}
             activeOpacity={0.85}
-            onPress={() => navigation.goBack()}
+            onPress={() => {
+              if (navigation.canGoBack()) navigation.goBack();
+              else navigation.replace("RootTabs");
+            }}
           >
             <Ionicons
               name="chevron-back"
@@ -846,8 +849,10 @@ const config = useMemo(
                 </TouchableOpacity>
               </View>
             )}
-
-          {!allQuestionsAnswered && (
+        </>
+      )}
+        </ScrollView>
+            {!allQuestionsAnswered && (
             <View style={styles.inputWrap}>
               {!!currentQuestion && (
                 <Text style={styles.promptLabel}>
@@ -892,9 +897,6 @@ const config = useMemo(
               </View>
             </View>
           )}
-        </>
-      )}
-        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -1119,11 +1121,13 @@ choiceHint: {
     fontWeight: "800",
   },
   inputWrap: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.lg,
-    backgroundColor: colors.background,
-  },
+  paddingHorizontal: spacing.lg,
+  paddingTop: spacing.sm,
+  paddingBottom: spacing.lg,
+  backgroundColor: colors.background,
+  borderTopWidth: 1,
+  borderTopColor: colors.borderSubtle,
+},
   promptLabel: {
     fontSize: 12,
     fontWeight: "700",

@@ -9,7 +9,7 @@
     "orientation": "portrait",
     "icon": "./assets/app_logo_icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "scheme": "keepr",
     "splash": {
       "image": "./assets/app_logo_icon.png",

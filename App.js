@@ -960,9 +960,9 @@ React.useEffect(() => {
   setInitialNavState(undefined);
 }, [initializing, user]);
 
-  const [role, setRole] = React.useState(null);
-  const [onboardingState, setOnboardingState] = React.useState(null);
-  const [assetCount, setAssetCount] = React.useState(null);
+  const [role, setRole] = React.useState("consumer");
+const [onboardingState, setOnboardingState] = React.useState("not_started");
+const [assetCount, setAssetCount] = React.useState(0);
   const [loadingRole, setLoadingRole] = React.useState(false);
 
   const lastRoleLoadAtRef = React.useRef(0);
@@ -1191,7 +1191,7 @@ if (!user) {
   );
 }
 
-if (loadingRole || !role || onboardingState === null || assetCount === null) return <SplashIntroScreen />;
+if (loadingRole && role === null) return <SplashIntroScreen />;
 
 const initialRouteName =
   shouldShowOnboarding
@@ -1488,6 +1488,16 @@ class AppErrorBoundary extends React.Component {
 
   render() {
     if (!this.state.hasError) return this.props.children;
+
+console.log("🔥 RENDER ERROR:", this.state.error);
+
+return (
+  <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+    <Text style={{ color: "black" }}>
+      {String(this.state.error?.message || this.state.error)}
+    </Text>
+  </View>
+);
 
     return (
       <View style={boundaryStyles.container}>

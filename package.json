@@ -3,8 +3,8 @@
   "main": "index.js",
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "build:web": "npx expo export --platform web",
     "web": "expo start --web"
   },
@@ -52,5 +52,7 @@
     "@types/react": "~19.1.10",
     "madge": "^8.0.0",
     "typescript": "~5.9.2"
-  }
+  },
+  "name": "keepr",
+  "version": "1.0.0"
 }
