@@ -273,7 +273,7 @@ const config = useMemo(
     setInput("");
     setStep("collecting");
     setPhotoLocal(null);
-  }, [selectedAssetType, intro, questions]);
+  }, [selectedAssetType]);
 
   useEffect(() => {
     setTimeout(() => {
