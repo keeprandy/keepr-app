@@ -83,6 +83,9 @@ export default function PlanUpgradeScreen({ navigation }) {
   const [teamContext, setTeamContext] = useState({ isOwner: false, isMember: false, orgName: null, orgId: null });
   const [checkoutModalVisible, setCheckoutModalVisible] = useState(false);
   const [pendingPlan, setPendingPlan] = useState(null);
+  const [currentPeriodEnd, setCurrentPeriodEnd] = useState(null);
+  const [stripeSubscriptionId, setStripeSubscriptionId] = useState(null);
+  const [cancelBusy, setCancelBusy] = useState(false);
 
   const teamLift = useRef(new Animated.Value(0)).current;
 
@@ -109,7 +112,7 @@ export default function PlanUpgradeScreen({ navigation }) {
 
       const { data: prof, error } = await supabase
         .from("profiles")
-        .select("plan,billing_status,billing_cycle")
+        .select("plan,billing_status,billing_cycle,current_period_end,stripe_subscription_id")
         .eq("id", user.id)
         .single();
 
@@ -117,6 +120,8 @@ export default function PlanUpgradeScreen({ navigation }) {
         setPlan(prof.plan || "free");
         setBillingStatus(prof.billing_status || "inactive");
         setBillingCycle(prof.billing_cycle || null);
+        setCurrentPeriodEnd(prof.current_period_end || null);
+        setStripeSubscriptionId(prof.stripe_subscription_id || null);
       }
 
       if (isMounted) {
@@ -181,14 +186,33 @@ export default function PlanUpgradeScreen({ navigation }) {
   const pricing = PRICES[cycle];
 
   const normalizedPlan = String(plan || "free").toLowerCase();
-  const effectivePlan =
-  normalizedPlan === "team" && teamContext?.isOwner ? "team" : normalizedPlan;
+  const effectivePlan = normalizedPlan;
 
   const isOnFree = effectivePlan === "free";
   const isOnPlus = effectivePlan === "plus";
   const isOnTeam = effectivePlan === "team";
+  const isPaidPlan = normalizedPlan === "plus" || normalizedPlan === "team";
+const isBillingActive = billingStatus === "active";
+const isCancelAtPeriodEnd = billingStatus === "canceled";
 
-  const isTeamOwner = !!teamContext?.isOwner;
+  const formatRenewalDate = (value) => {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+
+  return d.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+};
+
+const renewalDateLabel = useMemo(
+  () => formatRenewalDate(currentPeriodEnd),
+  [currentPeriodEnd]
+);
+
+  const isTeamOwner = effectivePlan === "team";
 
   const currentPlanLabel = useMemo(() => {
     if (loading) return "Loading…";
@@ -197,7 +221,9 @@ export default function PlanUpgradeScreen({ navigation }) {
     const isMember = !!teamContext?.isMember;
     const orgName = teamContext?.orgName || "a team";
 
-    if (isOwner) return "Team Owner";
+    if (effectivePlan === "team") return "Team Owner";
+    if (effectivePlan === "plus") return "Plus";
+    if (effectivePlan === "free") return "Starter";
     if (isMember) return `Team Member (${orgName})`;
 
     const p = effectivePlan;
@@ -247,6 +273,63 @@ export default function PlanUpgradeScreen({ navigation }) {
     setPendingPlan(planKey);
     setCheckoutModalVisible(true);
   };
+
+  const handleCancelPlan = async () => {
+  if (!stripeSubscriptionId) {
+    Alert.alert("Cancel unavailable", "No active subscription was found.");
+    return;
+  }
+
+  Alert.alert(
+    "Cancel plan",
+    "Your plan will remain active until the end of the current billing period.",
+    [
+      { text: "Keep plan", style: "cancel" },
+      {
+        text: "Cancel plan",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            setCancelBusy(true);
+
+            const { error } = await supabase.functions.invoke("cancel-subscription", {
+              body: { subscriptionId: stripeSubscriptionId },
+            });
+
+            if (error) {
+              Alert.alert("Cancel failed", error.message || String(error));
+              return;
+            }
+
+            const { data: auth } = await supabase.auth.getUser();
+            const user = auth?.user;
+            if (!user?.id) return;
+
+            const { data: prof, error: reloadErr } = await supabase
+              .from("profiles")
+              .select("plan,billing_status,billing_cycle,current_period_end,stripe_subscription_id")
+              .eq("id", user.id)
+              .single();
+
+            if (!reloadErr && prof) {
+              setPlan(prof.plan || "free");
+              setBillingStatus(prof.billing_status || "inactive");
+              setBillingCycle(prof.billing_cycle || null);
+              setCurrentPeriodEnd(prof.current_period_end || null);
+              setStripeSubscriptionId(prof.stripe_subscription_id || null);
+            }
+
+            Alert.alert("Plan updated", "Your subscription will not renew after the current period ends.");
+          } catch (e) {
+            Alert.alert("Cancel failed", String(e?.message || e));
+          } finally {
+            setCancelBusy(false);
+          }
+        },
+      },
+    ]
+  );
+};
 
   const pendingPlanLabel = useMemo(() => {
     if (pendingPlan === "plus") return "Keepr Plus";
@@ -539,6 +622,42 @@ export default function PlanUpgradeScreen({ navigation }) {
           </Text>
         </View>
 
+        {isPaidPlan && renewalDateLabel && (
+        <View style={styles.billingCard}>
+          <Ionicons name="refresh-outline" size={16} color="#6B7280" />
+          <View style={{ flex: 1 }}>
+            {isBillingActive ? (
+              <Text style={styles.billingCardText}>
+                Renews automatically on <Text style={styles.inlineStrong}>{renewalDateLabel}</Text>.
+              </Text>
+            ) : isCancelAtPeriodEnd ? (
+              <Text style={styles.billingCardText}>
+                Your plan will remain active until <Text style={styles.inlineStrong}>{renewalDateLabel}</Text>.
+              </Text>
+            ) : (
+              <Text style={styles.billingCardText}>
+                Billing period ends on <Text style={styles.inlineStrong}>{renewalDateLabel}</Text>.
+              </Text>
+            )}
+          </View>
+        </View>
+      )}
+
+      {isPaidPlan && isBillingActive && (
+        <Pressable
+          onPress={cancelBusy ? undefined : handleCancelPlan}
+          style={({ pressed }) => [
+            styles.cancelPlanBtn,
+            cancelBusy && styles.ctaDisabled,
+            pressed && !cancelBusy && { opacity: 0.92 },
+          ]}
+        >
+          <Text style={styles.cancelPlanText}>
+            {cancelBusy ? "Canceling..." : "Cancel plan"}
+          </Text>
+        </Pressable>
+      )}
+
         <View style={styles.debugRow}>
           <Text style={styles.debugText}>
           Current: {currentPlanLabel}
@@ -631,6 +750,42 @@ const styles = StyleSheet.create({
   },
   h1: { fontSize: 20, fontWeight: "800", color: "#111827" },
   h2: { marginTop: 2, fontSize: 13, color: "#6B7280" },
+
+  billingCard: {
+  marginTop: 14,
+  flexDirection: "row",
+  alignItems: "flex-start",
+  gap: 8,
+  padding: 12,
+  borderRadius: 14,
+  backgroundColor: "#FFFFFF",
+  borderWidth: 1,
+  borderColor: "#E5E7EB",
+},
+
+billingCardText: {
+  flex: 1,
+  fontSize: 12,
+  color: "#6B7280",
+  lineHeight: 18,
+},
+
+cancelPlanBtn: {
+  marginTop: 12,
+  height: 44,
+  borderRadius: 999,
+  alignItems: "center",
+  justifyContent: "center",
+  backgroundColor: "#FFFFFF",
+  borderWidth: 1,
+  borderColor: "#E5E7EB",
+},
+
+cancelPlanText: {
+  fontSize: 14,
+  fontWeight: "800",
+  color: "#111827",
+},
 
   toggleWrap: {
     flexDirection: "row",
