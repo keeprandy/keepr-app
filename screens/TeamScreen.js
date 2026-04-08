@@ -72,6 +72,14 @@ export default function TeamScreen({ navigation }) {
 
       setProfile(prof || null);
 
+      const currentPlan = String(prof?.plan || "").toLowerCase();
+      if (currentPlan !== "team") {
+        setOrg(null);
+        setMembers([]);
+        setLoading(false);
+        return;
+      }
+
 let orgRow = null;
 
 // 1️⃣ First: owned org (same logic as Settings)
@@ -102,10 +110,11 @@ if (ownedOrg?.id) {
 
   if (myMembership?.org_id) {
     const { data: memberOrg, error: orgErr } = await supabase
-      .from("orgs")
-      .select("id, name, display_name, photo_url, team_photo_url, org_type, owner_user_id, created_at")
-      .eq("id", myMembership.org_id)
-      .maybeSingle();
+  .from("orgs")
+  .select("id, name, display_name, photo_url, team_photo_url, org_type, owner_user_id, created_at")
+  .eq("id", myMembership.org_id)
+  .neq("org_type", "personal")
+  .maybeSingle();
 
     if (orgErr) throw orgErr;
 
@@ -242,27 +251,36 @@ if (orgRow?.owner_user_id) {
               color={colors.textPrimary}
             />
             <Text style={styles.noticeText}>
-              Team is available on the Team plan.
+              Invite family, partners, or staff to share visibility across assets.
             </Text>
           </View>
         )}
-
-        <View style={styles.card}>
-      <View style={styles.teamIdentity}>
-        
-      <View style={styles.teamAvatarLarge}>
-        {(org?.team_photo_url || org?.photo_url) ? (
-          <Image
-            source={{ uri: org?.team_photo_url || org?.photo_url }}
-            style={styles.teamAvatarLargeImage}
-            resizeMode="contain"
-          />
-        ) : (
-          <Text style={styles.teamAvatarLargeText}>
-            {initials(org?.display_name || org?.name || "Our Team")}
-          </Text>
+        {!isTeam && (
+          <TouchableOpacity
+            style={styles.inviteBtn}
+            onPress={() => navigation.navigate("PlanUpgrade")}
+            activeOpacity={0.9}
+          >
+            <Text style={styles.inviteText}>Upgrade to Team</Text>
+          </TouchableOpacity>
         )}
-      </View>
+{isTeam && (
+  <>
+    <View style={styles.card}>
+      <View style={styles.teamIdentity}>
+        <View style={styles.teamAvatarLarge}>
+          {(org?.team_photo_url || org?.photo_url) ? (
+            <Image
+              source={{ uri: org?.team_photo_url || org?.photo_url }}
+              style={styles.teamAvatarLargeImage}
+              resizeMode="contain"
+            />
+          ) : (
+            <Text style={styles.teamAvatarLargeText}>
+              {initials(org?.display_name || org?.name || "Our Team")}
+            </Text>
+          )}
+        </View>
 
         <Text style={styles.teamNameLarge}>
           {org?.display_name || org?.name || "Our Team"}
@@ -272,86 +290,85 @@ if (orgRow?.owner_user_id) {
           Owner · {profile?.display_name || profile?.full_name || profile?.email}
         </Text>
       </View>
-          {isTeam && org?.id && (
-            <TouchableOpacity
-                style={styles.manageRow}
-                onPress={() =>
-                navigation.navigate("ManageTeam", { orgId: org.id })
-                }
-                activeOpacity={0.85}
-            >
-                <Text style={styles.manageText}>Manage team</Text>
-                <Ionicons
-                name="chevron-forward-outline"
-                size={16}
-                color={colors.textMuted}
-                />
-            </TouchableOpacity>
-            )}
-          <View style={styles.divider} />
 
-          <View style={styles.rowBetween}>
-            <Text style={styles.sectionLabel}>Members</Text>
-            <Text style={styles.countText}>{members.length}/5</Text>
-          </View>
-
-          {loading ? (
-            <View style={{ paddingVertical: 14 }}>
-              <ActivityIndicator size="small" color={colors.textMuted} />
-            </View>
-          ) : (
-            <View style={{ gap: 10, paddingTop: 6 }}>
-              {members.length === 0 ? (
-                <Text style={styles.emptyText}>No members found yet.</Text>
-              ) : (
-                members.map((m) => (
-                  <View key={m.user_id} style={styles.memberRow}>
-                    <View style={styles.avatar}>
-                      <Text style={styles.avatarText}>
-                        {initials(m.display)}
-                      </Text>
-                    </View>
-
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.memberName} numberOfLines={1}>
-                        {m.display}
-                      </Text>
-                      <Text style={styles.memberMeta} numberOfLines={1}>
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                        {m.member_role === "owner" && (
-                          <View style={styles.ownerBadge}>
-                            <Text style={styles.ownerBadgeText}>Owner</Text>
-                          </View>
-                        )}
-                        {m.member_role !== "owner" && (
-                          <Text style={styles.memberMeta}>{m.member_role}</Text>
-                        )}
-                      </View>
-                        {m.email ? ` • ${m.email}` : ""}
-                      </Text>
-                    </View>
-
-
-                  </View>
-                ))
-              )}
-            </View>
-          )}
-
-
-        </View>
-
-        <View style={styles.footerNote}>
+      {org?.id && (
+        <TouchableOpacity
+          style={styles.manageRow}
+          onPress={() => navigation.navigate("ManageTeam", { orgId: org.id })}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.manageText}>Manage team</Text>
           <Ionicons
-            name="information-circle-outline"
+            name="chevron-forward-outline"
             size={16}
             color={colors.textMuted}
           />
-          <Text style={styles.footerText}>
-            V1 scope: members share visibility. Fine-grained permissions
-            (systems-only access) comes next.
-          </Text>
+        </TouchableOpacity>
+      )}
+
+      <View style={styles.divider} />
+
+      <View style={styles.rowBetween}>
+        <Text style={styles.sectionLabel}>Members</Text>
+        <Text style={styles.countText}>{members.length}/5</Text>
+      </View>
+
+      {loading ? (
+        <View style={{ paddingVertical: 14 }}>
+          <ActivityIndicator size="small" color={colors.textMuted} />
         </View>
+      ) : (
+        <View style={{ gap: 10, paddingTop: 6 }}>
+          {members.length === 0 ? (
+            <Text style={styles.emptyText}>No members found yet.</Text>
+          ) : (
+            members.map((m) => (
+              <View key={m.user_id} style={styles.memberRow}>
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>
+                    {initials(m.display)}
+                  </Text>
+                </View>
+
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.memberName} numberOfLines={1}>
+                    {m.display}
+                  </Text>
+
+                  <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 2 }}>
+                    {m.member_role === "owner" ? (
+                      <View style={styles.ownerBadge}>
+                        <Text style={styles.ownerBadgeText}>Owner</Text>
+                      </View>
+                    ) : (
+                      <Text style={styles.memberMeta}>{m.member_role}</Text>
+                    )}
+
+                    {!!m.email && (
+                      <Text style={styles.memberMeta}>• {m.email}</Text>
+                    )}
+                  </View>
+                </View>
+              </View>
+            ))
+          )}
+        </View>
+      )}
+    </View>
+
+    <View style={styles.footerNote}>
+      <Ionicons
+        name="information-circle-outline"
+        size={16}
+        color={colors.textMuted}
+      />
+      <Text style={styles.footerText}>
+        V1 scope: members share visibility. Fine-grained permissions
+        (systems-only access) comes next.
+      </Text>
+    </View>
+  </>
+)}
       </ScrollView>
     </SafeAreaView>
   );

@@ -123,12 +123,13 @@ export default function PlanUpgradeScreen({ navigation }) {
         let ctx = { isOwner: false, isMember: false, orgName: null, orgId: null };
 
         const { data: ownedOrg } = await supabase
-          .from("orgs")
-          .select("id, display_name, name")
-          .eq("owner_user_id", user.id)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
+        .from("orgs")
+        .select("id, display_name, name, org_type")
+        .eq("owner_user_id", user.id)
+        .in("org_type", ["family", "team"])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
         if (ownedOrg?.id) {
           ctx = {
@@ -148,10 +149,11 @@ export default function PlanUpgradeScreen({ navigation }) {
 
           if (mem?.org_id) {
             const { data: orgRow } = await supabase
-              .from("orgs")
-              .select("id, display_name, name")
-              .eq("id", mem.org_id)
-              .maybeSingle();
+            .from("orgs")
+            .select("id, display_name, name, org_type")
+            .eq("id", mem.org_id)
+            .neq("org_type", "personal")
+            .maybeSingle();
 
             if (orgRow?.id) {
               ctx = {
@@ -179,7 +181,8 @@ export default function PlanUpgradeScreen({ navigation }) {
   const pricing = PRICES[cycle];
 
   const normalizedPlan = String(plan || "free").toLowerCase();
-  const effectivePlan = teamContext?.isOwner ? "team" : normalizedPlan;
+  const effectivePlan =
+  normalizedPlan === "team" && teamContext?.isOwner ? "team" : normalizedPlan;
 
   const isOnFree = effectivePlan === "free";
   const isOnPlus = effectivePlan === "plus";
@@ -434,7 +437,7 @@ export default function PlanUpgradeScreen({ navigation }) {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        {teamContext?.isMember && !teamContext?.isOwner && (
+        {normalizedPlan === "team" && teamContext?.isMember && !teamContext?.isOwner && (
           <View style={styles.teamMemberNote}>
             <Ionicons name="people-outline" size={16} color="#374151" />
             <Text style={styles.teamMemberNoteText}>
@@ -506,7 +509,7 @@ export default function PlanUpgradeScreen({ navigation }) {
             badge="Most popular"
             elevated
           >
-            {isOnTeam && (
+            {isTeamOwner && (
               <Pressable
                 onPress={() => navigation.navigate("Team")}
                 style={({ pressed }) => [
@@ -538,10 +541,10 @@ export default function PlanUpgradeScreen({ navigation }) {
 
         <View style={styles.debugRow}>
           <Text style={styles.debugText}>
-            Current: {currentPlanLabel}
-            {billingStatus ? ` · ${billingStatus}` : ""}
-            {billingCycle ? ` · ${billingCycle}` : ""}
-          </Text>
+          Current: {currentPlanLabel}
+          {normalizedPlan !== "free" && billingStatus ? ` · ${billingStatus}` : ""}
+          {normalizedPlan !== "free" && billingCycle ? ` · ${billingCycle}` : ""}
+        </Text>
         </View>
       </ScrollView>
 

@@ -146,6 +146,7 @@ export default function SettingsScreen({ navigation }) {
         .from("orgs")
         .select("id,name,display_name,photo_url,org_type,owner_user_id,created_at")
         .eq("owner_user_id", uid)
+        .in("org_type", ["team", "family"])
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -189,10 +190,11 @@ for (const m of myMemberships) {
     break;
   }
 
-  // Fallback candidate if everything is personal
-  if (!chosenOrg) {
-    chosenOrg = orgRow;
-  }
+// Only accept non-personal orgs
+if (orgRow.org_type && orgRow.org_type !== "personal") {
+  chosenOrg = orgRow;
+  break;
+}
 }
 setTeamOrg(chosenOrg);
 
@@ -378,26 +380,22 @@ setTeamOrg(chosenOrg);
             />
 
             {/* Team (owners + members). If you're not on Team yet, this can still be visible if you belong to a team. */}
-            {(teamLoading || teamOrg?.id || plan === "team") && (
-              <>
-                <View style={styles.divider} />
-                <Row
-                  icon="people-outline"
-                  iconBg={colors.surfaceSubtle}
-                  title="Team"
-                  subtitle={
-                    teamLoading
-                      ? "Loading team…"
-                      : teamOrg?.id
-                      ? `Team: ${teamOrg.display_name || teamOrg.name || ""}`
-                      : plan === "team"
-                      ? "Create your first team"
-                      : "Join or create a team"
-                  }
-                  onPress={handleOpenTeam}
-                />
-              </>
-            )}
+            <View style={styles.divider} />
+            <Row
+              icon="people-outline"
+              iconBg={colors.surfaceSubtle}
+              title="Team"
+              subtitle={
+                plan === "team"
+                  ? teamLoading
+                    ? "Loading team…"
+                    : teamOrg?.id
+                    ? `Team: ${teamOrg.display_name || teamOrg.name || ""}`
+                    : "Manage your team"
+                  : "Invite family, partners, or staff to share visibility across assets."
+              }
+              onPress={handleOpenTeam}
+            />
           </View>
         </View>
 
