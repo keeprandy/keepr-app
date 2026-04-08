@@ -338,7 +338,7 @@ export default function AuthScreen() {
                   if (formError) setFormError("");
                 }}
                 onBlur={() => setTouched((t) => ({ ...t, displayName: true }))}
-                placeholder="Andy"
+                placeholder="Keepr"
                 placeholderTextColor={colors.textMuted}
               />
               <View style={{ height: spacing.md }} />

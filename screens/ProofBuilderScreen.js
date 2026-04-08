@@ -1121,6 +1121,11 @@ const RecordPickerModal = ({ visible, onCancel, onSelect }) => (
 
   const evidenceTitle = title || inferName(attachment);
 
+const androidPdfViewerUrl =
+  Platform.OS === "android" && pdfUrl
+    ? `https://docs.google.com/gview?embedded=1&url=${encodeURIComponent(pdfUrl)}`
+    : "";
+
   if (loading) {
     return (
       <SafeAreaView style={styles.screen}>
@@ -1186,31 +1191,40 @@ const RecordPickerModal = ({ visible, onCancel, onSelect }) => (
           </Text>
 
           <View style={styles.previewWrap}>
-            {previewLoading ? (
-              <View style={styles.previewCenter}>
-                <ActivityIndicator />
-              </View>
-            ) : isImageLike(attachment) && pdfUrl ? (
-              <Image source={{ uri: pdfUrl }} style={styles.previewImage} resizeMode="contain" />
-            ) : isPdfLike(attachment) && pdfUrl ? (
-              IS_WEB ? (
-                // eslint-disable-next-line react/no-unknown-property
-                <iframe title="pdf" src={pdfUrl} style={styles.webIframe} />
-              ) : (
-                <WebView
-                  source={{ uri: pdfUrl }}
-                  style={{ flex: 1 }}
-                  originWhitelist={["*"]}
-                  startInLoadingState
-                />
-              )
+          {previewLoading ? (
+            <View style={styles.previewCenter}>
+              <ActivityIndicator />
+            </View>
+          ) : isImageLike(attachment) && pdfUrl ? (
+            <Image source={{ uri: pdfUrl }} style={styles.previewImage} resizeMode="contain" />
+          ) : isPdfLike(attachment) && pdfUrl ? (
+            IS_WEB ? (
+              // eslint-disable-next-line react/no-unknown-property
+              <iframe title="pdf" src={pdfUrl} style={styles.webIframe} />
+            ) : Platform.OS === "android" ? (
+              <WebView
+                source={{ uri: androidPdfViewerUrl }}
+                style={{ flex: 1 }}
+                originWhitelist={["*"]}
+                startInLoadingState
+                javaScriptEnabled
+                domStorageEnabled
+              />
             ) : (
-              <TouchableOpacity style={styles.previewFallback} onPress={openEvidence}>
-                <Ionicons name="document-text-outline" size={22} color={colors.textMuted} />
-                <Text style={styles.previewFallbackText}>Open attachment</Text>
-              </TouchableOpacity>
-            )}
-          </View>
+              <WebView
+                source={{ uri: pdfUrl }}
+                style={{ flex: 1 }}
+                originWhitelist={["*"]}
+                startInLoadingState
+              />
+            )
+          ) : (
+            <TouchableOpacity style={styles.previewFallback} onPress={openEvidence}>
+              <Ionicons name="document-text-outline" size={22} color={colors.textMuted} />
+              <Text style={styles.previewFallbackText}>Open attachment</Text>
+            </TouchableOpacity>
+          )}
+        </View>
         </View>
               {attachment ? (
   <View style={styles.card}>

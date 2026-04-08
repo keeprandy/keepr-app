@@ -642,17 +642,10 @@ useFocusEffect(
       return;
     }
 
-    if (Platform.OS === "web") {
-      setAddPickerVisible(true);
-      return;
-    }
-
-    Alert.alert("Add an asset", "Choose a type", [
-      { text: "Home", onPress: () => go(0) },
-      { text: "Vehicle", onPress: () => go(1) },
-      { text: "Boat", onPress: () => go(2) },
-      { text: "Cancel", style: "cancel" },
-    ]);
+if (Platform.OS !== "ios") {
+  setAddPickerVisible(true);
+  return;
+}
   }, [goAddHome, goAddVehicle, goAddBoat]);
 
   const handleKeeprProgressPress = useCallback(() => {

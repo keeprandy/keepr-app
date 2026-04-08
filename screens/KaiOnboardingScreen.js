@@ -43,7 +43,7 @@ export default function KaiOnboardingScreen({ navigation, route }) {
 
 const nextRoute =
   route?.params?.nextRoute || "OnboardingChooseAssetType";
-  const skipRoute = route?.params?.skipRoute || "Dashboard";
+  const skipRoute = route?.params?.skipRoute || "RootTabs";
 
   const inQuestions = stepIndex < QUESTIONS.length;
   const onModelStep = stepIndex === QUESTIONS.length;
@@ -246,10 +246,13 @@ if (onAssetChoiceStep) {
               pressed && { opacity: 0.8 },
             ]}
             onPress={() =>
-              stepIndex === 0
-                ? navigation.navigate(skipRoute)
-                : setStepIndex((s) => Math.max(0, s - 1))
-            }
+            stepIndex === 0
+              ? navigation.reset({
+                  index: 0,
+                  routes: [{ name: skipRoute }],
+                })
+              : setStepIndex((s) => Math.max(0, s - 1))
+          }
           >
             <Text style={styles.linkBtnText}>
               {stepIndex === 0 ? "Skip for now" : "Back"}
