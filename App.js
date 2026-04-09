@@ -274,26 +274,96 @@ function MainTabs() {
   const [showAssetPicker, setShowAssetPicker] = React.useState(false);
   const [pendingCaptureType, setPendingCaptureType] = React.useState(null);
   const [selectedCaptureAsset, setSelectedCaptureAsset] = React.useState(null);
-  React.useEffect(() => {
-  const loadLast = async () => {
-    try {
-      if (Platform.OS === "web") {
-        const stored = window?.localStorage?.getItem("lastCaptureAsset");
-        if (stored) setSelectedCaptureAsset(JSON.parse(stored));
-        return;
-      }
 
-      const stored = await AsyncStorage.getItem("lastCaptureAsset");
+  React.useEffect(() => {
+    let active = true;
+
+    const loadLast = async () => {
+      try {
+        const user = (await supabase.auth.getUser()).data?.user;
+        const userId = user?.id;
+
+        if (!userId) {
+          if (active) setSelectedCaptureAsset(null);
+          return;
+        }
+
+        const scopedKey = `lastCaptureAsset:${userId}`;
+
+        // one-time cleanup of the old global key
+        if (Platform.OS === "web") {
+          try {
+            window?.localStorage?.removeItem("lastCaptureAsset");
+          } catch (_) {}
+
+          const stored = window?.localStorage?.getItem(scopedKey);
+          if (!active) return;
+
+          if (stored) {
+            setSelectedCaptureAsset(JSON.parse(stored));
+          } else {
+            setSelectedCaptureAsset(null);
+          }
+          return;
+        }
+
+        try {
+          await AsyncStorage.removeItem("lastCaptureAsset");
+        } catch (_) {}
+
+        const stored = await AsyncStorage.getItem(scopedKey);
+        if (!active) return;
+
+        if (stored) {
+          setSelectedCaptureAsset(JSON.parse(stored));
+        } else {
+          setSelectedCaptureAsset(null);
+        }
+      } catch (e) {
+        console.log("Failed to load last asset", e);
+        if (active) setSelectedCaptureAsset(null);
+      }
+    };
+
+    loadLast();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  React.useEffect(() => {
+  const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
+    if (event === "SIGNED_OUT" || !session?.user?.id) {
+      setSelectedCaptureAsset(null);
+      setPickerAssets([]);
+      return;
+    }
+
+    const scopedKey = `lastCaptureAsset:${session.user.id}`;
+
+    try {
+      const stored =
+        Platform.OS === "web"
+          ? window?.localStorage?.getItem(scopedKey)
+          : await AsyncStorage.getItem(scopedKey);
+
       if (stored) {
         setSelectedCaptureAsset(JSON.parse(stored));
+      } else {
+        setSelectedCaptureAsset(null);
       }
     } catch (e) {
-      console.log("Failed to load last asset", e);
+      console.log("Failed to restore scoped capture asset", e);
+      setSelectedCaptureAsset(null);
     }
-  };
+  });
 
-  loadLast();
+  return () => {
+    sub?.subscription?.unsubscribe?.();
+  };
 }, []);
+
   const [pickerAssets, setPickerAssets] = React.useState([]);
   const [pickerAssetsLoading, setPickerAssetsLoading] = React.useState(false);
 
@@ -315,24 +385,42 @@ const handleQuickCaptureFile = () => {
 };
 
 const handleSelectCaptureAsset = async (asset) => {
-  setSelectedCaptureAsset(asset);
-  setShowAssetPicker(false);
+  try {
+    const user = (await supabase.auth.getUser()).data?.user;
+    const userId = user?.id;
 
-try {
-  if (Platform.OS === "web") {
-    window?.localStorage?.setItem("lastCaptureAsset", JSON.stringify(asset));
-  } else {
-    await AsyncStorage.setItem("lastCaptureAsset", JSON.stringify(asset));
+    if (!userId) {
+      console.log("Quick Capture blocked: no signed-in user");
+      return;
+    }
+
+    const isValid = pickerAssets.some((a) => a.id === asset?.id);
+    if (!isValid) {
+      console.log("Quick Capture blocked: asset not in current user's picker list", asset);
+      setSelectedCaptureAsset(null);
+      setShowAssetPicker(true);
+      return;
+    }
+
+    const scopedKey = `lastCaptureAsset:${userId}`;
+
+    setSelectedCaptureAsset(asset);
+    setShowAssetPicker(false);
+
+    if (Platform.OS === "web") {
+      window?.localStorage?.setItem(scopedKey, JSON.stringify(asset));
+    } else {
+      await AsyncStorage.setItem(scopedKey, JSON.stringify(asset));
+    }
+
+    navigationRef.current?.navigate("AssetAttachmentsMobile", {
+      assetId: asset.id,
+      assetName: asset.name,
+      autoOpen: pendingCaptureType,
+    });
+  } catch (e) {
+    console.log("Failed to save/select capture asset", e);
   }
-} catch (e) {
-  console.log("Failed to save last asset", e);
-}
-
-  navigationRef.current?.navigate("AssetAttachmentsMobile", {
-    assetId: asset.id,
-    assetName: asset.name,
-    autoOpen: pendingCaptureType,
-  });
 };
   
 const handleQuickCapturePhoto = () => {
@@ -512,9 +600,11 @@ React.useEffect(() => {
 
                 <View style={{ width: 42, height: 42 }} />
               </View>
-              <Text style={{ fontSize: 12, color: "#6B7280", marginTop: 4 }}>
-                Adding to {selectedCaptureAsset?.name}
-              </Text>
+              {selectedCaptureAsset?.name ? (
+                <Text style={{ fontSize: 12, color: "#6B7280", marginTop: 4 }}>
+                  Adding to {selectedCaptureAsset.name}
+                </Text>
+              ) : null}
               <Text
                 style={{
                   fontSize: 13,
