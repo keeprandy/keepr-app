@@ -11,6 +11,7 @@ import appLogo from "../assets/app_logo_icon.png"; // ✅ Keepr™ logo
 /** Consumer menu (RootTabs) */
 const CONSUMER_ITEMS = [
   { key: "Dashboard", label: "Dashboard", icon: "grid-outline" },
+  { key: "SuperKeeprStack", label: "SuperKeepr", icon: "business-outline" },
   { key: "MyHome", label: "Homes", icon: "home-outline" },
   { key: "Garage", label: "Garage", icon: "car-outline" },
   { key: "Boats", label: "Boats", icon: "boat-outline" },
@@ -57,7 +58,9 @@ function getLeafRouteNameSafe() {
 function normalizeToSection(routeName) {
   if (!routeName) return "Dashboard";
 
-  if (routeName === "SuperKeeprDashboard") return "SuperKeeprDashboard";
+if (routeName === "SuperKeeprDashboard" || routeName === "SuperKeeprStack") {
+  return "SuperKeeprStack";
+}  
 
   if (
     routeName === "MyHome" ||
@@ -116,6 +119,43 @@ if (
 export default function SidebarNav({ currentRouteName }) {
   const { user } = useAuth();
   const userId = user?.id || null;
+
+  const [userRole, setUserRole] = useState(null);
+
+useEffect(() => {
+  let active = true;
+
+  const loadRole = async () => {
+    if (!userId) {
+      if (active) setUserRole(null);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", userId)
+        .single();
+
+      if (!active) return;
+      if (error) {
+        setUserRole(null);
+        return;
+      }
+
+      setUserRole(data?.role || null);
+    } catch {
+      if (active) setUserRole(null);
+    }
+  };
+
+  loadRole();
+
+  return () => {
+    active = false;
+  };
+}, [userId]);
 
   const [leafRouteName, setLeafRouteName] = useState(null);
   const [inboxCount, setInboxCount] = useState(0);
@@ -213,7 +253,13 @@ export default function SidebarNav({ currentRouteName }) {
     return rn === "SuperKeeprDashboard" || rn.startsWith("SuperKeepr");
   }, [leafRouteName, currentRouteName]);
 
-  const navItems = useMemo(() => (inSuperKeepr ? SUPER_ITEMS : CONSUMER_ITEMS), [inSuperKeepr]);
+const navItems = useMemo(() => {
+  if (inSuperKeepr) return SUPER_ITEMS;
+
+  if (userRole === "superkeepr") return CONSUMER_ITEMS;
+
+  return CONSUMER_ITEMS.filter((item) => item.key !== "SuperKeeprStack");
+}, [inSuperKeepr, userRole]);
 
     // Public View SideBar Collapse
   const isPublicFlow = useMemo(() => {
@@ -248,27 +294,37 @@ export default function SidebarNav({ currentRouteName }) {
    * SAFE navigation wrapper
    */
   const go = (key) => {
-    if (!navigationRef?.isReady?.() || !navigationRef.isReady()) return;
+  if (!navigationRef?.isReady?.() || !navigationRef.isReady()) return;
 
-    try {
-      if (key === "__exit__") {
-        navigationRef.navigate("RootTabs", { screen: "Dashboard" });
-        return;
-      }
-      if (key === "PlanUpgrade") {
+  try {
+    if (key === "__exit__") {
+      navigationRef.navigate("RootTabs", { screen: "Dashboard" });
+      return;
+    }
+
+    if (key === "PlanUpgrade") {
       navigationRef.navigate("PlanUpgrade");
       return;
     }
-      if (inSuperKeepr) {
-        navigationRef.navigate("SuperKeeprStack", { screen: key });
-        return;
-      }
 
-      navigationRef.navigate("RootTabs", { screen: key });
-    } catch {
-      // no-op
+    if (key === "SuperKeeprStack") {
+      navigationRef.navigate("SuperKeeprStack", {
+        screen: "SuperKeeprDashboard",
+      });
+      return;
     }
-  };
+
+    if (inSuperKeepr) {
+      navigationRef.navigate("SuperKeeprStack", { screen: key });
+      return;
+    }
+
+    navigationRef.navigate("RootTabs", { screen: key });
+  } catch {
+    // no-op
+  }
+};
+
 if (isPublicFlow) return null;
   return (
     <View

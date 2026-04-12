@@ -196,36 +196,42 @@ const linking = {
     "https://keeprfleet.com",
     "https://keeprpros.com",
   ],
-    config: {
+ config: {
+  screens: {
+    ResetPassword: "reset",
+    Auth: "auth",
+    KacResolve: "k/:kac",
+    PublicAction: "k/:kac/actions",
+    RootTabs: {
       screens: {
-        ResetPassword: "reset",
-        Auth: "auth",
-        KacResolve: "k/:kac",
-        PublicAction: "k/:kac/actions",
-        RootTabs: {
+        Dashboard: "dashboard",
+        MyHome: "home",
+        Garage: "garage",
+        Boats: "boats",
+        Notifications: {
+          path: "inbox",
           screens: {
-            Dashboard: "dashboard",
-            MyHome: "home",
-            Garage: "garage",
-            Boats: "boats",
-            Notifications: {
-              path: "inbox",
-              screens: {
-                InboxHome: "",
-              },
-            },
-            KeeprPros: "pros",
-            Settings: "settings",
+            InboxHome: "",
           },
         },
-        TimelineRecord: "TimelineRecord",
-        UploadLab: "upload-lab",
-        AssetAttachments: "asset/:assetId/attachments",
-        HomePublic: "public/home/:assetId",
-        GaragePublic: "public/garage/:assetId",
-        BoatPublic: "public/boat/:assetId",
+        KeeprPros: "pros",
+        Settings: "settings",
       },
     },
+    SuperKeeprStack: {
+      path: "super",
+      screens: {
+        SuperKeeprDashboard: "",
+      },
+    },
+    TimelineRecord: "TimelineRecord",
+    UploadLab: "upload-lab",
+    AssetAttachments: "asset/:assetId/attachments",
+    HomePublic: "public/home/:assetId",
+    GaragePublic: "public/garage/:assetId",
+    BoatPublic: "public/boat/:assetId",
+  },
+},
 };
 
 /* ----------------- HOME STACK (optional) ----------------- */

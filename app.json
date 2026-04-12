@@ -9,7 +9,6 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": false,
     "scheme": "keepr",
     "splash": {
       "image": "./assets/icon.png",
@@ -32,14 +31,14 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#ffffff"
-      },
-      "edgeToEdgeEnabled": true
+      }
+      
     },
     "web": {
       "favicon": "./assets/favicon-48.png"
     },
     "plugins": [
-      "react-native-document-scanner-plugin"
+      
     ],
     "extra": {
       "eas": {

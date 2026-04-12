@@ -24,6 +24,8 @@ import { colors, shadows } from "../styles/theme";
 
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext";
+import { getSignedUrl } from "../lib/attachmentsApi";
+import { useFocusEffect } from "@react-navigation/native";
 
 const LIFECYCLE_STATES = [
   "Under Contract",
@@ -39,6 +41,13 @@ const SORT_OPTIONS = [
   { key: "created_desc", label: "Newest" },
   { key: "state_days_desc", label: "Days in state" },
   { key: "name_asc", label: "Name" },
+];
+
+const MODE_OPTIONS = [
+  { key: "all", label: "All" },
+  { key: "flipper", label: "Flipper" },
+  { key: "builder", label: "Builder" },
+  { key: "dealer", label: "Dealer" },
 ];
 
 function getMd(asset) {
@@ -80,6 +89,7 @@ function safeSubtitle(asset) {
 function pickHeroUri(asset) {
   const md = getMd(asset);
   return (
+    asset?.primary_attachment_url ||
     asset?.hero_image_url ||
     md.hero_url ||
     md.primary_photo_url ||
@@ -144,6 +154,7 @@ export default function SuperKeeprDashboardScreen({ navigation }) {
   const [query, setQuery] = useState("");
   const [stateFilter, setStateFilter] = useState("All");
   const [sortKey, setSortKey] = useState("created_desc");
+  const [modeFilter, setModeFilter] = useState("all");
 
   // ✅ Measure actual available content width (important on web w/ sidebar + maxWidth shells)
   const [containerWidth, setContainerWidth] = useState(null);
@@ -183,33 +194,132 @@ export default function SuperKeeprDashboardScreen({ navigation }) {
     [cardWidth]
   );
 
-  const fetchAssets = useCallback(async () => {
-    setLoading(true);
-    try {
-      let subtypes = ["home", "property", "rental"];
-      if (assetClass === "boats") subtypes = ["boat", "marine"];
-      if (assetClass === "vehicles")
-        subtypes = ["vehicle", "car", "motorcycle", "rv"];
+const fetchAssets = useCallback(async () => {
+  setLoading(true);
 
-      const { data, error } = await supabase
-        .from("assets")
-        .select("*")
-        .in("asset_subtype", subtypes)
-        .order("created_at", { ascending: false });
+  try {
+    const { data, error } = await supabase
+      .from("assets")
+      .select("*")
+      .eq("owner_id", user?.id)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false });
 
-      if (error) throw error;
-      setAssets(data || []);
-    } catch (e) {
-      console.error(e);
-      Alert.alert("Error", e?.message || "Failed to load portfolio.");
-    } finally {
-      setLoading(false);
-    }
-  }, [assetClass]);
+    if (error) throw error;
+
+    const allAssets = data || [];
+
+    const classFiltered = allAssets.filter((asset) => {
+      const kind = String(asset?.asset_subtype || asset?.type || "")
+        .trim()
+        .toLowerCase();
+
+      if (assetClass === "homes") {
+        return ["home", "property", "rental"].includes(kind);
+      }
+
+      if (assetClass === "boats") {
+        return ["boat", "marine"].includes(kind);
+      }
+
+      if (assetClass === "vehicles") {
+        return ["vehicle", "car", "motorcycle", "rv"].includes(kind);
+      }
+
+      return true;
+    });
+
+    const assetsWithHero = await Promise.all(
+      classFiltered.map(async (asset) => {
+        try {
+          if (asset?.hero_placement_id) {
+            const { data: placement, error: placementError } = await supabase
+              .from("attachment_placements")
+              .select(`
+                id,
+                attachment:attachments (
+                  bucket,
+                  storage_path,
+                  url,
+                  mime_type,
+                  kind,
+                  deleted_at
+                )
+              `)
+              .eq("id", asset.hero_placement_id)
+              .maybeSingle();
+
+            if (!placementError) {
+              const a = placement?.attachment;
+
+              if (a && !a.deleted_at) {
+                if (a.url) {
+                  return {
+                    ...asset,
+                    primary_attachment_url: a.url,
+                  };
+                }
+
+                if (a.bucket && a.storage_path) {
+                  const signed = await getSignedUrl({
+                    bucket: a.bucket,
+                    path: a.storage_path,
+                  });
+
+                  if (signed) {
+                    return {
+                      ...asset,
+                      primary_attachment_url: signed,
+                    };
+                  }
+                }
+              }
+            } else {
+              console.log(
+                "Hero placement lookup failed:",
+                asset.id,
+                placementError.message
+              );
+            }
+          }
+
+          if (asset?.hero_image_url) {
+            return {
+              ...asset,
+              primary_attachment_url: asset.hero_image_url,
+            };
+          }
+
+          return asset;
+        } catch (heroErr) {
+          console.log(
+            "Hero enrichment failed:",
+            asset?.id,
+            heroErr?.message || heroErr
+          );
+          return asset;
+        }
+      })
+    );
+
+    setAssets(assetsWithHero);
+  } catch (e) {
+    console.error(e);
+    Alert.alert("Error", e?.message || "Failed to load portfolio.");
+  } finally {
+    setLoading(false);
+  }
+}, [assetClass, user?.id]);
 
   useEffect(() => {
     fetchAssets();
   }, [fetchAssets]);
+
+  useFocusEffect(
+  useCallback(() => {
+    fetchAssets();
+  }, [fetchAssets])
+);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -217,6 +327,11 @@ export default function SuperKeeprDashboardScreen({ navigation }) {
     let list = (assets || []).filter((a) => {
       const state = getLifecycleState(a);
       if (stateFilter !== "All" && state !== stateFilter) return false;
+
+      if (modeFilter !== "all") {
+        const mode = getModeForAsset(a);
+        if (mode !== modeFilter) return false;
+      }
 
       if (!q) return true;
 
@@ -249,17 +364,43 @@ export default function SuperKeeprDashboardScreen({ navigation }) {
     }
 
     return list;
-  }, [assets, query, stateFilter, sortKey]);
+  }, [assets, query, stateFilter, sortKey, modeFilter]);
 
-  const openAsset = useCallback(
-    (asset) => {
-      navigation.navigate("HomeStory", {
-        homeId: asset.id,
-        homeName: asset.name,
+const openAsset = useCallback(
+  (asset) => {
+    const kind = String(asset?.asset_subtype || asset?.type || "")
+      .trim()
+      .toLowerCase();
+
+    if (["boat", "marine"].includes(kind)) {
+      navigation.navigate("BoatStory", {
+        boatId: asset.id,
+        assetId: asset.id,
+        boatName: asset.name,
+        assetName: asset.name,
       });
-    },
-    [navigation]
-  );
+      return;
+    }
+
+    if (["vehicle", "car", "motorcycle", "rv"].includes(kind)) {
+      navigation.navigate("VehicleStory", {
+        vehicleId: asset.id,
+        assetId: asset.id,
+        vehicleName: asset.name,
+        assetName: asset.name,
+      });
+      return;
+    }
+
+    navigation.navigate("HomeStory", {
+      homeId: asset.id,
+      assetId: asset.id,
+      homeName: asset.name,
+      assetName: asset.name,
+    });
+  },
+  [navigation]
+);
 
   const updateLifecycleState = useCallback(
     async (assetId, newState) => {
@@ -486,6 +627,8 @@ export default function SuperKeeprDashboardScreen({ navigation }) {
   const renderCard = ({ item }) => {
     const heroUri = pickHeroUri(item);
     const state = getLifecycleState(item);
+    const contextLine = getContextLine(item);
+    const fitType = getFitType(item);
 
     return (
       <TouchableOpacity
@@ -515,48 +658,132 @@ export default function SuperKeeprDashboardScreen({ navigation }) {
         </View>
 
         <View style={styles.cardBody}>
-          <Text style={styles.cardTitle} numberOfLines={1}>
-            {safeTitle(item)}
-          </Text>
-          <Text style={styles.cardSubtitle} numberOfLines={2}>
-            {safeSubtitle(item)}
-          </Text>
+  <Text style={styles.cardTitle} numberOfLines={1}>
+    {safeTitle(item)}
+  </Text>
 
-          <View style={styles.metaRow}>
-            <Text style={styles.metaText}>
-              {item._stateDays != null ? `${item._stateDays}d in state` : ""}
-            </Text>
-            <Text style={styles.metaText}>
-              {item.created_at ? `Created ${daysSince(item.created_at)}d ago` : ""}
-            </Text>
-          </View>
+  <Text style={styles.cardSubtitle} numberOfLines={2}>
+    {safeSubtitle(item)}
+  </Text>
 
-          <View style={styles.quickRow}>
-            <TouchableOpacity
-              onPress={(e) => {
-                e.stopPropagation?.();
-                const idx = Math.max(0, LIFECYCLE_STATES.indexOf(state));
-                const next = LIFECYCLE_STATES[(idx + 1) % LIFECYCLE_STATES.length];
-                updateLifecycleState(item.id, next);
-              }}
-              style={styles.quickBtn}
-              activeOpacity={0.85}
-            >
-              <Ionicons name="swap-horizontal" size={16} color={colors.textPrimary} />
-              <Text style={styles.quickBtnText}>Advance</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+  {contextLine ? (
+    <Text style={styles.cardContext} numberOfLines={1}>
+      {contextLine}
+    </Text>
+  ) : null}
+
+  <View style={styles.cardTagRow}>
+    <View style={styles.cardTag}>
+      <Text style={styles.cardTagText}>{state}</Text>
+    </View>
+
+    {fitType ? (
+      <View style={styles.cardTagMuted}>
+        <Text style={styles.cardTagMutedText}>{fitType}</Text>
+      </View>
+    ) : null}
+  </View>
+
+  <View style={styles.metaRow}>
+    <Text style={styles.metaText}>
+      {item._stateDays != null ? `${item._stateDays}d in state` : ""}
+    </Text>
+    <Text style={styles.metaText}>
+      {item.created_at ? `Created ${daysSince(item.created_at)}d ago` : ""}
+    </Text>
+  </View>
+
+  <View style={styles.quickRow}>
+    <TouchableOpacity
+      onPress={(e) => {
+        e.stopPropagation?.();
+        const idx = Math.max(0, LIFECYCLE_STATES.indexOf(state));
+        const next = LIFECYCLE_STATES[(idx + 1) % LIFECYCLE_STATES.length];
+        updateLifecycleState(item.id, next);
+      }}
+      style={styles.quickBtn}
+      activeOpacity={0.85}
+    >
+      <Ionicons name="swap-horizontal" size={16} color={colors.textPrimary} />
+      <Text style={styles.quickBtnText}>Next stage</Text>
+    </TouchableOpacity>
+  </View>
+</View>
       </TouchableOpacity>
     );
   };
+
+  function getAssetKind(asset) {
+  return String(asset?.asset_subtype || asset?.type || "")
+    .trim()
+    .toLowerCase();
+}
+
+function getContextLine(asset) {
+  const md = getMd(asset);
+
+  return (
+    md.community ||
+    md.portfolio_name ||
+    md.portfolio ||
+    md.model ||
+    md.dealer_name ||
+    md.oem ||
+    null
+  );
+}
+
+function getFitType(asset) {
+  const md = getMd(asset);
+  return md.fit_type || md.mode || null;
+}
+
+function getModeForAsset(asset) {
+  const md = getMd(asset);
+  const fit = String(md.fit_type || md.mode || "")
+    .trim()
+    .toLowerCase();
+  const kind = getAssetKind(asset);
+
+  if (
+    fit.includes("repair") ||
+    fit.includes("rehab") ||
+    fit.includes("distressed") ||
+    fit.includes("flip") ||
+    fit.includes("cash sale")
+  ) {
+    return "flipper";
+  }
+
+  if (
+    fit.includes("builder") ||
+    md.community ||
+    md.model ||
+    md.builder
+  ) {
+    return "builder";
+  }
+
+  if (
+    fit.includes("dealer") ||
+    fit.includes("resale") ||
+    md.dealer_name ||
+    md.oem ||
+    kind === "boat" ||
+    kind === "marine"
+  ) {
+    return "dealer";
+  }
+
+  return "all";
+}
 
   const header = (
     <View style={styles.top}>
       <View style={styles.titleRow}>
         <View style={{ flex: 1 }}>
           <Text style={styles.h1}>SuperKeepr</Text>
-          <Text style={styles.h2}>Portfolio stewardship dashboard</Text>
+          <Text style={styles.h2}>Ownership Portfolio</Text>
         </View>
 
         <TouchableOpacity
@@ -593,6 +820,29 @@ export default function SuperKeeprDashboardScreen({ navigation }) {
           );
         })}
       </View>
+
+      <View style={styles.modeRow}>
+  {MODE_OPTIONS.map((m) => {
+    const active = modeFilter === m.key;
+    return (
+      <TouchableOpacity
+        key={m.key}
+        onPress={() => setModeFilter(m.key)}
+        style={[styles.modePill, active ? styles.modePillActive : null]}
+        activeOpacity={0.85}
+      >
+        <Text
+          style={[
+            styles.modePillText,
+            active ? styles.modePillTextActive : null,
+          ]}
+        >
+          {m.label}
+        </Text>
+      </TouchableOpacity>
+    );
+  })}
+</View>
 
       <View style={styles.searchRow}>
         <Ionicons name="search-outline" size={18} color={colors.textMuted} />
@@ -653,13 +903,6 @@ export default function SuperKeeprDashboardScreen({ navigation }) {
         </Text>
 
         <View style={{ flexDirection: "row", gap: 10 }}>
-          {filtered.length === 0 ? (
-            <TouchableOpacity onPress={seedDemoHomes} style={styles.seedBtn} activeOpacity={0.85}>
-              <Ionicons name="sparkles-outline" size={18} color={colors.textPrimary} />
-              <Text style={styles.seedText}>Seed demo homes</Text>
-            </TouchableOpacity>
-          ) : null}
-
           <TouchableOpacity onPress={fetchAssets} style={styles.refreshBtn} activeOpacity={0.85}>
             <Ionicons name="refresh" size={18} color={colors.textPrimary} />
             <Text style={styles.refreshText}>Refresh</Text>
@@ -831,6 +1074,70 @@ const styles = StyleSheet.create({
     marginTop: 12,
     flexWrap: "wrap",
   },
+
+  modeRow: {
+  flexDirection: "row",
+  gap: 8,
+  marginTop: 10,
+  flexWrap: "wrap",
+},
+modePill: {
+  paddingHorizontal: 10,
+  paddingVertical: 7,
+  borderRadius: 999,
+  backgroundColor: colors.surface,
+  borderWidth: 1,
+  borderColor: "#11182722",
+},
+modePillActive: {
+  backgroundColor: "#111827",
+  borderColor: "#111827",
+},
+modePillText: {
+  color: colors.textPrimary,
+  fontWeight: "700",
+  fontSize: 12,
+},
+modePillTextActive: {
+  color: colors.brandWhite,
+},
+cardContext: {
+  marginTop: 5,
+  color: colors.textMuted,
+  fontSize: 12,
+  fontWeight: "700",
+},
+cardTagRow: {
+  marginTop: 10,
+  flexDirection: "row",
+  gap: 8,
+  flexWrap: "wrap",
+},
+cardTag: {
+  paddingHorizontal: 9,
+  paddingVertical: 5,
+  borderRadius: 999,
+  backgroundColor: "#111827",
+},
+cardTagText: {
+  color: "white",
+  fontSize: 11,
+  fontWeight: "800",
+},
+cardTagMuted: {
+  paddingHorizontal: 9,
+  paddingVertical: 5,
+  borderRadius: 999,
+  backgroundColor: "#f2f3f5",
+  borderWidth: 1,
+  borderColor: "#11182722",
+},
+cardTagMutedText: {
+  color: colors.textPrimary,
+  fontSize: 11,
+  fontWeight: "700",
+},
+
   classPill: {
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -919,7 +1226,7 @@ const styles = StyleSheet.create({
     borderColor: "#11182722",
     ...(shadows?.subtle || {}),
   },
-  heroWrap: { position: "relative", width: "100%", backgroundColor: "#111" },
+  heroWrap: { position: "relative", width: "100%", backgroundColor: "#f2f3f5" },
   hero: { width: "100%", height: "100%" },
   heroPlaceholder: {
     flex: 1,
