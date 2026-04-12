@@ -97,7 +97,6 @@ export default function AuthScreen() {
       id: userId,
       email: normalizedEmail || null,
       display_name: displayName?.trim() || null,
-      role: "consumer",
       onboarding_state: "in_progress",
     },
     { onConflict: "id" }
