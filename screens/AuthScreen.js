@@ -78,6 +78,14 @@ export default function AuthScreen() {
   const isSignUp = mode === "signup";
   const isForgot = mode === "forgot";
 
+  const isMobileWeb =
+  Platform.OS === "web" &&
+  typeof navigator !== "undefined" &&
+  /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+  const iosUrl = "https://apps.apple.com/app/YOUR_APP_ID";
+const androidUrl = "https://play.google.com/store/apps/details?id=YOUR_PACKAGE";
+
   const title = useMemo(() => {
     if (isForgot) return "Reset your password";
     if (isSignUp) return "Become a Keepr™";
@@ -235,6 +243,39 @@ export default function AuthScreen() {
 
   return (
     <SafeAreaView style={layoutStyles.screen}>
+    {isMobileWeb && (
+  <View style={{ marginBottom: 16, padding: 12, borderRadius: 10, backgroundColor: "#EEF2FF" }}>
+    <Text style={{ fontWeight: "600", marginBottom: 6 }}>
+      Keepr works best on mobile
+    </Text>
+    <Text style={{ fontSize: 13, marginBottom: 10 }}>
+      Download the app for faster capture, photos, and on-the-go access.
+    </Text>
+
+    <View style={{ flexDirection: "row", gap: 10 }}>
+      <TouchableOpacity
+        onPress={() => {
+          const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+          window.location.href = isIOS ? iosUrl : androidUrl;
+        }}
+        style={{
+          backgroundColor: "#2563EB",
+          paddingVertical: 8,
+          paddingHorizontal: 12,
+          borderRadius: 8,
+        }}
+      >
+        <Text style={{ color: "#fff", fontWeight: "600" }}>Download App</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity>
+        <Text style={{ fontSize: 13, marginTop: 6 }}>
+          Continue on web
+        </Text>
+      </TouchableOpacity>
+    </View>
+  </View>
+)}
      <View style={[
         styles.container,
         Platform.OS === "web" && styles.webContainer
