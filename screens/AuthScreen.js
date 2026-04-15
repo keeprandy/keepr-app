@@ -246,7 +246,7 @@ const androidUrl = "https://play.google.com/store/apps/details?id=YOUR_PACKAGE";
     {isMobileWeb && (
   <View style={{ marginBottom: 16, padding: 12, borderRadius: 10, backgroundColor: "#EEF2FF" }}>
     <Text style={{ fontWeight: "600", marginBottom: 6 }}>
-      Keepr works best on mobile
+      Keepr works best when using web and mobile
     </Text>
     <Text style={{ fontSize: 13, marginBottom: 10 }}>
       Download the app for faster capture, photos, and on-the-go access.
