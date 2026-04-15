@@ -11,6 +11,7 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -20,6 +21,7 @@ import { colors, radius, spacing, typography } from "../styles/theme";
 import { Image } from "react-native";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 
 function validateEmail(email) {
   const v = (email || "").trim();
@@ -52,7 +54,7 @@ function friendlyAuthError(err) {
 }
 
 function getResetRedirectTo() {
-  // Supabase will redirect to this URL after the user clicks the email link.
+  // Supabase will redirect to this URL after the user clicks the email link. Cool.
   // Web expects https://<host>/reset (handled by ResetPasswordScreen).
   if (Platform.OS === "web") {
     try {
@@ -65,6 +67,7 @@ function getResetRedirectTo() {
   return "keepr://reset";
 }
 
+
 export default function AuthScreen() {
   const [mode, setMode] = useState("signin"); // "signin" | "signup" | "forgot"
   const [displayName, setDisplayName] = useState("");
@@ -72,19 +75,27 @@ export default function AuthScreen() {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  const { width } = useWindowDimensions();
+
+const isWeb = Platform.OS === "web";
+
+const isMobileWeb =
+  isWeb &&
+  typeof navigator !== "undefined" &&
+  /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+const isNarrow = width < 920;
+const showDesktopSplit = isWeb && !isMobileWeb && !isNarrow;
+
   const [touched, setTouched] = useState({ email: false, password: false, displayName: false });
   const [formError, setFormError] = useState("");
 
   const isSignUp = mode === "signup";
   const isForgot = mode === "forgot";
 
-  const isMobileWeb =
-  Platform.OS === "web" &&
-  typeof navigator !== "undefined" &&
-  /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
-  const iosUrl = "https://apps.apple.com/app/YOUR_APP_ID";
-const androidUrl = "https://play.google.com/store/apps/details?id=YOUR_PACKAGE";
+  const iosUrl = "https://apps.apple.com/us/app/keepr-home-asset-care/id6761725280";
+const androidUrl = "https://play.google.com/store/apps/details?id=com.keeprhome.app";
 
   const title = useMemo(() => {
     if (isForgot) return "Reset your password";
@@ -241,48 +252,47 @@ const androidUrl = "https://play.google.com/store/apps/details?id=YOUR_PACKAGE";
 
   const onSubmit = isForgot ? handleForgotPassword : isSignUp ? handleSignUp : handleSignIn;
 
+  
+
   return (
     <SafeAreaView style={layoutStyles.screen}>
-    {isMobileWeb && (
-  <View style={{ marginBottom: 16, padding: 12, borderRadius: 10, backgroundColor: "#EEF2FF" }}>
-    <Text style={{ fontWeight: "600", marginBottom: 6 }}>
-      Keepr works best when using web and mobile
-    </Text>
-    <Text style={{ fontSize: 13, marginBottom: 10 }}>
-      Download the app for faster capture, photos, and on-the-go access.
+{isMobileWeb && (
+  <View style={styles.mobileBanner}>
+    <Text style={styles.mobileBannerTitle}>
+      Capture on mobile. Manage on web.
     </Text>
 
-    <View style={{ flexDirection: "row", gap: 10 }}>
+    <Text style={styles.mobileBannerBody}>
+      Download the app for faster capture, photos, and on-the-go access. Continue on web if you want to sign in or do deeper setup.
+    </Text>
+
+    <View style={styles.mobileBannerActions}>
       <TouchableOpacity
         onPress={() => {
           const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
           window.location.href = isIOS ? iosUrl : androidUrl;
         }}
-        style={{
-          backgroundColor: "#2563EB",
-          paddingVertical: 8,
-          paddingHorizontal: 12,
-          borderRadius: 8,
-        }}
+        style={styles.mobileBannerButton}
       >
-        <Text style={{ color: "#fff", fontWeight: "600" }}>Download App</Text>
+        <Text style={styles.mobileBannerButtonText}>Download App</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity>
-        <Text style={{ fontSize: 13, marginTop: 6 }}>
-          Continue on web
-        </Text>
+      <TouchableOpacity activeOpacity={0.85}>
+        <Text style={styles.mobileContinueText}>Continue on web</Text>
       </TouchableOpacity>
     </View>
   </View>
 )}
-     <View style={[
-        styles.container,
-        Platform.OS === "web" && styles.webContainer
-      ]}>
-        {Platform.OS === "web" && (
-        
-       <View style={styles.brandPanel}>
+    <View
+  style={[
+    styles.container,
+    showDesktopSplit && styles.webContainer,
+    !showDesktopSplit && styles.singleColumnContainer,
+    isMobileWeb && styles.mobileWebContainer,
+      ]}
+    >
+        {showDesktopSplit && (
+        <View style={styles.brandPanel}>
       <View style={styles.brandContent}>
           <Image
             source={require("../assets/login_image_keepr.png")}
@@ -304,8 +314,20 @@ const androidUrl = "https://play.google.com/store/apps/details?id=YOUR_PACKAGE";
         </View>
       )}
       
-      <View style={styles.loginPanel}>
-      <View style={styles.authCard}>
+      <View
+  style={[
+    styles.loginPanel,
+    !showDesktopSplit && styles.loginPanelSingle,
+    isMobileWeb && styles.loginPanelMobileWeb,
+  ]}
+    >
+      <View
+        style={[
+          styles.authCard,
+          !showDesktopSplit && styles.authCardSingle,
+          isMobileWeb && styles.authCardMobileWeb,
+        ]}
+      >
       <View style={styles.header}>
         <View style={styles.brandRow}>
         <Image
@@ -325,7 +347,7 @@ const androidUrl = "https://play.google.com/store/apps/details?id=YOUR_PACKAGE";
               ? "Create your Keepr™ account and start building the story of what you own."
               : isForgot
               ? "Enter your email and we’ll send a reset link."
-              : ""
+              : "Sign in to continue your ownership story."
             : isSignUp
             ? "Get started."
             : isForgot
@@ -478,9 +500,9 @@ const androidUrl = "https://play.google.com/store/apps/details?id=YOUR_PACKAGE";
             </TouchableOpacity>
           )}
 <Text style={styles.helperText}>
-  Great for quick capture and action.{" "}
+  Mobile is great for quick capture and action, and also has full functionality.{" "}
   <Text style={{ fontWeight: "600" }}>
-    Use Keepr on web for deeper setup and organization.
+    Use Keepr Web for deeper setup and organization.
   </Text>
 </Text>
         {Platform.OS === "web" && (
@@ -532,19 +554,42 @@ const styles = StyleSheet.create({
   authCard: {
   width: "100%",
   maxWidth: 760,
-  minWidth: 320,
+  minWidth: 0,
   alignSelf: "center",
   backgroundColor: "#FFFFFF",
   borderRadius: 20,
   borderWidth: 1,
   borderColor: colors.borderSubtle,
-  padding: spacing.xl,
+  padding: 24,
   shadowColor: "#000",
   shadowOpacity: 0.08,
   shadowRadius: 18,
   shadowOffset: { width: 0, height: 8 },
   elevation: 6,
 },
+
+brandContent: {
+  maxWidth: 420,
+  minWidth: 420,
+
+},
+
+singleColumnContainer: {
+  flex: 1,
+  justifyContent: "center",
+  alignItems: "center",
+  paddingHorizontal: 24,
+  paddingVertical: 24,
+},
+
+mobileWebContainer: {
+  flex: 1,
+  paddingHorizontal: 16,
+  paddingTop: 16,
+  paddingBottom: 24,
+  alignItems: "stretch",
+},
+
 webContainer: {
   flex: 1,
   flexDirection: "row",
@@ -554,10 +599,83 @@ webContainer: {
   paddingHorizontal: 48,
 },
 
-brandContent: {
-  maxWidth: 420,
-  minWidth: 420,
+loginPanelSingle: {
+  width: "100%",
+  maxWidth: 640,
+},
 
+loginPanelMobileWeb: {
+  width: "100%",
+  maxWidth: "100%",
+  justifyContent: "flex-start",
+},
+
+authCardSingle: {
+  width: "100%",
+  maxWidth: 640,
+  minWidth: 0,
+},
+
+authCardMobileWeb: {
+  width: "100%",
+  maxWidth: "100%",
+  minWidth: 0,
+  borderRadius: 16,
+  padding: 20,
+  shadowOpacity: 0.05,
+  shadowRadius: 12,
+  shadowOffset: { width: 0, height: 4 },
+},
+
+mobileBanner: {
+  marginHorizontal: 16,
+  marginTop: 16,
+  marginBottom: 8,
+  padding: 14,
+  borderRadius: 14,
+  backgroundColor: "#EEF2FF",
+  borderWidth: 1,
+  borderColor: "#D9E3FF",
+},
+
+mobileBannerTitle: {
+  fontSize: 16,
+  fontWeight: "700",
+  color: colors.textPrimary,
+  marginBottom: 6,
+},
+
+mobileBannerBody: {
+  fontSize: 14,
+  color: colors.textSecondary,
+  lineHeight: 20,
+  marginBottom: 12,
+},
+
+mobileBannerActions: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 12,
+  flexWrap: "wrap",
+},
+
+mobileBannerButton: {
+  backgroundColor: "#2563EB",
+  paddingVertical: 10,
+  paddingHorizontal: 14,
+  borderRadius: 10,
+},
+
+mobileBannerButtonText: {
+  color: "#fff",
+  fontWeight: "700",
+  fontSize: 14,
+},
+
+mobileContinueText: {
+  fontSize: 14,
+  fontWeight: "600",
+  color: colors.textPrimary,
 },
 
 brandPanel: {
