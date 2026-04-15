@@ -6,6 +6,7 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -14,14 +15,13 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Image } from "react-native";
 
 import { supabase } from "../lib/supabaseClient";
 import { layoutStyles } from "../styles/layout";
 import { colors, radius, spacing, typography } from "../styles/theme";
-import { Image } from "react-native";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 
 function validateEmail(email) {
   const v = (email || "").trim();
@@ -33,7 +33,7 @@ function validateEmail(email) {
 function validatePassword(password) {
   const v = password || "";
   if (!v) return "Password is required.";
-  if (v.length < 6) return "Password must be at least 8 characters.";
+  if (v.length < 8) return "Password must be at least 8 characters.";
   return null;
 }
 
@@ -48,14 +48,14 @@ function friendlyAuthError(err) {
     return "That password appears in a leak. Use a different password.";
   }
   if (msg.includes("password")) return "Password doesn’t meet requirements.";
-  if (msg.includes("rate limit") || msg.includes("too many")) return "Too many attempts. Try again in a few minutes.";
+  if (msg.includes("rate limit") || msg.includes("too many")) {
+    return "Too many attempts. Try again in a few minutes.";
+  }
 
   return err?.message || "Something went wrong. Please try again.";
 }
 
 function getResetRedirectTo() {
-  // Supabase will redirect to this URL after the user clicks the email link. Cool.
-  // Web expects https://<host>/reset (handled by ResetPasswordScreen).
   if (Platform.OS === "web") {
     try {
       return `${window.location.origin}/reset`;
@@ -63,10 +63,8 @@ function getResetRedirectTo() {
       return "http://localhost:8081/reset";
     }
   }
-  // Native: deeplink to keepr://reset
   return "keepr://reset";
 }
-
 
 export default function AuthScreen() {
   const [mode, setMode] = useState("signin"); // "signin" | "signup" | "forgot"
@@ -75,27 +73,29 @@ export default function AuthScreen() {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  const [touched, setTouched] = useState({
+    email: false,
+    password: false,
+    displayName: false,
+  });
+  const [formError, setFormError] = useState("");
+
   const { width } = useWindowDimensions();
 
-const isWeb = Platform.OS === "web";
+  const isWeb = Platform.OS === "web";
+  const isMobileWeb =
+    isWeb &&
+    typeof navigator !== "undefined" &&
+    /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
-const isMobileWeb =
-  isWeb &&
-  typeof navigator !== "undefined" &&
-  /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-
-const isNarrow = width < 920;
-const showDesktopSplit = isWeb && !isMobileWeb && !isNarrow;
-
-  const [touched, setTouched] = useState({ email: false, password: false, displayName: false });
-  const [formError, setFormError] = useState("");
+  const isNarrow = width < 920;
+  const showDesktopSplit = isWeb && !isMobileWeb && !isNarrow;
 
   const isSignUp = mode === "signup";
   const isForgot = mode === "forgot";
 
-
   const iosUrl = "https://apps.apple.com/us/app/keepr-home-asset-care/id6761725280";
-const androidUrl = "https://play.google.com/store/apps/details?id=com.keeprhome.app";
+  const androidUrl = "https://play.google.com/store/apps/details?id=com.keeprhome.app";
 
   const title = useMemo(() => {
     if (isForgot) return "Reset your password";
@@ -103,26 +103,41 @@ const androidUrl = "https://play.google.com/store/apps/details?id=com.keeprhome.
     return "Sign in to Keepr™";
   }, [isForgot, isSignUp]);
 
-  const normalizedEmail = useMemo(() => email.trim().toLowerCase(), [email]);
+  const subtitle = useMemo(() => {
+    if (Platform.OS === "web") {
+      if (isSignUp) {
+        return "Create your Keepr™ account and start building the story of what you own.";
+      }
+      if (isForgot) {
+        return "Enter your email and we’ll send a reset link.";
+      }
+      return "Sign in to continue your ownership story.";
+    }
 
+    if (isSignUp) return "Get started.";
+    if (isForgot) return "Enter your email to reset your password.";
+    return "Continue your ownership story.";
+  }, [isForgot, isSignUp]);
+
+  const normalizedEmail = useMemo(() => email.trim().toLowerCase(), [email]);
   const emailErr = useMemo(() => validateEmail(normalizedEmail), [normalizedEmail]);
   const passwordErr = useMemo(() => (isForgot ? null : validatePassword(password)), [isForgot, password]);
 
   const canSubmit = !submitting && !emailErr && !passwordErr;
 
   const ensureProfile = async (userId) => {
-  const { error } = await supabase.from("profiles").upsert(
-    {
-      id: userId,
-      email: normalizedEmail || null,
-      display_name: displayName?.trim() || null,
-      onboarding_state: "in_progress",
-    },
-    { onConflict: "id" }
-  );
+    const { error } = await supabase.from("profiles").upsert(
+      {
+        id: userId,
+        email: normalizedEmail || null,
+        display_name: displayName?.trim() || null,
+        onboarding_state: "in_progress",
+      },
+      { onConflict: "id" }
+    );
 
-  if (error) throw error;
-};
+    if (error) throw error;
+  };
 
   const markAllTouched = () => {
     setTouched((t) => ({
@@ -133,13 +148,18 @@ const androidUrl = "https://play.google.com/store/apps/details?id=com.keeprhome.
     }));
   };
 
+  const openAppStore = () => {
+    if (typeof navigator === "undefined") return;
+    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    window.location.href = isIOS ? iosUrl : androidUrl;
+  };
+
   const handleSignIn = async () => {
     setFormError("");
     markAllTouched();
 
     const eErr = validateEmail(normalizedEmail);
     if (eErr) return;
-
     if (!password) return;
 
     try {
@@ -155,13 +175,11 @@ const androidUrl = "https://play.google.com/store/apps/details?id=com.keeprhome.
         return;
       }
 
-      // Ensure a profile row exists for this user (safe if they signed up earlier but profile insert was skipped)
       const userId = data?.user?.id;
       if (userId) {
         try {
           await ensureProfile(userId);
         } catch (e) {
-          // Non-blocking — user can still use the app, and role bootstrap will retry.
           console.log("[AuthScreen] ensureProfile failed:", e?.message || e);
         }
       }
@@ -229,10 +247,7 @@ const androidUrl = "https://play.google.com/store/apps/details?id=com.keeprhome.
         return;
       }
 
-      // If email confirmations are enabled, signUp may not return a session yet.
-      // Only write the profile if we actually have an authenticated session.
       const sessionUserId = data?.session?.user?.id || null;
-
       if (sessionUserId) {
         await ensureProfile(sessionUserId);
       }
@@ -252,259 +267,189 @@ const androidUrl = "https://play.google.com/store/apps/details?id=com.keeprhome.
 
   const onSubmit = isForgot ? handleForgotPassword : isSignUp ? handleSignUp : handleSignIn;
 
-  
-
-  return (
-    <SafeAreaView style={layoutStyles.screen}>
-{isMobileWeb && (
-  <View style={styles.mobileBanner}>
-    <Text style={styles.mobileBannerTitle}>
-      Capture on mobile. Manage on web.
-    </Text>
-
-    <Text style={styles.mobileBannerBody}>
-      Download the app for faster capture, photos, and on-the-go access. Continue on web if you want to sign in or do deeper setup.
-    </Text>
-
-    <View style={styles.mobileBannerActions}>
-      <TouchableOpacity
-        onPress={() => {
-          const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-          window.location.href = isIOS ? iosUrl : androidUrl;
-        }}
-        style={styles.mobileBannerButton}
-      >
-        <Text style={styles.mobileBannerButtonText}>Download App</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity activeOpacity={0.85}>
-        <Text style={styles.mobileContinueText}>Continue on web</Text>
-      </TouchableOpacity>
-    </View>
-  </View>
-)}
-    <View
-  style={[
-    styles.container,
-    showDesktopSplit && styles.webContainer,
-    !showDesktopSplit && styles.singleColumnContainer,
-    isMobileWeb && styles.mobileWebContainer,
-      ]}
-    >
-        {showDesktopSplit && (
-        <View style={styles.brandPanel}>
-      <View style={styles.brandContent}>
-          <Image
-            source={require("../assets/login_image_keepr.png")}
-            style={{ width: 440, height: 275, marginBottom: 24 }}
-          />
-          <Text style={styles.brandHeadline}>
-            Everything you own has a story.
-          </Text>
-
-          <Text style={styles.brandMessage}>
-            Keepr records the life of the things you care about —
-            homes, vehicles, boats, and more.
-          </Text>
-
-          <Text style={styles.brandTag}>
-            Become a keepr.
-          </Text>
-        </View>
-        </View>
-      )}
-      
-      <View
-  style={[
-    styles.loginPanel,
-    !showDesktopSplit && styles.loginPanelSingle,
-    isMobileWeb && styles.loginPanelMobileWeb,
-  ]}
-    >
-      <View
-        style={[
-          styles.authCard,
-          !showDesktopSplit && styles.authCardSingle,
-          isMobileWeb && styles.authCardMobileWeb,
-        ]}
-      >
+  const renderAuthCardContent = () => (
+    <>
       <View style={styles.header}>
         <View style={styles.brandRow}>
-        <Image
-          source={require("../assets/app_logo_icon.png")}
-          style={styles.logo}
-        />
+          <Image
+            source={require("../assets/app_logo_icon.png")}
+            style={styles.logo}
+          />
           <View style={styles.brandTextWrap}>
-            <Text style={styles.brand}>Keepr™ </Text>
+            <Text style={styles.brand}>Keepr™</Text>
             <Text style={styles.brandSub}>Asset Lifecycle Intelligence</Text>
           </View>
         </View>
 
         <Text style={styles.title}>{title}</Text>
-        <Text style={styles.subtitle}>
-          {Platform.OS === "web"
-            ? isSignUp
-              ? "Create your Keepr™ account and start building the story of what you own."
-              : isForgot
-              ? "Enter your email and we’ll send a reset link."
-              : "Sign in to continue your ownership story."
-            : isSignUp
-            ? "Get started."
-            : isForgot
-            ? "Enter your email to reset your password."
-            : "Continue your ownership story."}
-        </Text>
+        <Text style={styles.subtitle}>{subtitle}</Text>
       </View>
 
-        {!isForgot && (
-          <View style={styles.modeRow}>
-            <TouchableOpacity
-              style={[styles.modePill, mode === "signin" && styles.modePillActive]}
-              onPress={() => {
-                setMode("signin");
-                setFormError("");
-              }}
-              disabled={submitting}
-              activeOpacity={0.9}
-            >
-              <Text style={[styles.modePillText, mode === "signin" && styles.modePillTextActive]}>
-                Sign in
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.modePill, mode === "signup" && styles.modePillActive]}
-              onPress={() => {
-                setMode("signup");
-                setFormError("");
-              }}
-              disabled={submitting}
-              activeOpacity={0.9}
-            >
-              <Text style={[styles.modePillText, mode === "signup" && styles.modePillTextActive]}>
-                Create Account
-              </Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        <View style={styles.form}>
-          {isSignUp && (
-            <>
-              <Text style={styles.label}>Name (optional)</Text>
-              <TextInput
-                style={styles.input}
-                value={displayName}
-                onChangeText={(v) => {
-                  setDisplayName(v);
-                  if (formError) setFormError("");
-                }}
-                onBlur={() => setTouched((t) => ({ ...t, displayName: true }))}
-                placeholder="Keepr"
-                placeholderTextColor={colors.textMuted}
-              />
-              <View style={{ height: spacing.md }} />
-            </>
-          )}
-
-          <Text style={styles.label}>Email</Text>
-          <TextInput
-            value={email}
-            onChangeText={(v) => {
-              setEmail(v);
-              if (formError) setFormError("");
-            }}
-            onBlur={() => setTouched((t) => ({ ...t, email: true }))}
-            style={[styles.input, touched.email && emailErr ? styles.inputError : null]}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            placeholder="you@example.com"
-            placeholderTextColor={colors.textMuted}
-          />
-          {touched.email && emailErr ? <Text style={styles.errorText}>{emailErr}</Text> : null}
-
-          {!isForgot && (
-            <>
-              <Text style={[styles.label, { marginTop: spacing.md }]}>Password</Text>
-              <TextInput
-                value={password}
-                onChangeText={(v) => {
-                  setPassword(v);
-                  if (formError) setFormError("");
-                }}
-                onBlur={() => setTouched((t) => ({ ...t, password: true }))}
-                style={[styles.input, touched.password && passwordErr ? styles.inputError : null]}
-                secureTextEntry
-                placeholder="••••••••"
-                placeholderTextColor={colors.textMuted}
-              />
-              {touched.password && passwordErr ? <Text style={styles.errorText}>{passwordErr}</Text> : null}
-              {isSignUp ? (
-                <Text style={styles.hintText}>
-                  Use at least 8 characters. (Keepr is extremely secure and private.)
-                </Text>
-              ) : null}
-            </>
-            
-          )}
-
-          {formError ? <Text style={styles.formError}>{formError}</Text> : null}
-
+      {!isForgot && (
+        <View style={styles.modeRow}>
           <TouchableOpacity
-            style={[styles.button, !canSubmit ? styles.buttonDisabled : null]}
-            onPress={onSubmit}
-            activeOpacity={0.85}
-            disabled={!canSubmit}
+            style={[styles.modePill, mode === "signin" && styles.modePillActive]}
+            onPress={() => {
+              setMode("signin");
+              setFormError("");
+            }}
+            disabled={submitting}
+            activeOpacity={0.9}
           >
-            {submitting ? (
-              <ActivityIndicator size="small" color={colors.brandWhite} />
-            ) : (
-              <>
-                <Ionicons
-                  name={isForgot ? "mail-outline" : isSignUp ? "person-add-outline" : "log-in-outline"}
-                  size={18}
-                  color={colors.brandWhite}
-                  style={{ marginRight: 6 }}
-                />
-                <Text style={styles.buttonText}>
-                  {isForgot ? "Send reset link" : isSignUp ? "Create account" : "Sign in"}
-                </Text>
-              </>
-            )}
+            <Text
+              style={[
+                styles.modePillText,
+                mode === "signin" && styles.modePillTextActive,
+              ]}
+            >
+              Sign in
+            </Text>
           </TouchableOpacity>
 
-          {!isForgot ? (
-            <TouchableOpacity
-              style={styles.forgotLink}
-              onPress={() => {
-                setMode("forgot");
-                setFormError("");
-              }}
-              disabled={submitting}
-              activeOpacity={0.85}
+          <TouchableOpacity
+            style={[styles.modePill, mode === "signup" && styles.modePillActive]}
+            onPress={() => {
+              setMode("signup");
+              setFormError("");
+            }}
+            disabled={submitting}
+            activeOpacity={0.9}
+          >
+            <Text
+              style={[
+                styles.modePillText,
+                mode === "signup" && styles.modePillTextActive,
+              ]}
             >
-              <Text style={styles.forgotLinkText}>Forgot password?</Text>
-            </TouchableOpacity>
+              Create Account
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      <View style={styles.form}>
+        {isSignUp && (
+          <>
+            <Text style={styles.label}>Name (optional)</Text>
+            <TextInput
+              style={styles.input}
+              value={displayName}
+              onChangeText={(v) => {
+                setDisplayName(v);
+                if (formError) setFormError("");
+              }}
+              onBlur={() => setTouched((t) => ({ ...t, displayName: true }))}
+              placeholder="Keepr"
+              placeholderTextColor={colors.textMuted}
+            />
+            <View style={{ height: spacing.md }} />
+          </>
+        )}
+
+        <Text style={styles.label}>Email</Text>
+        <TextInput
+          value={email}
+          onChangeText={(v) => {
+            setEmail(v);
+            if (formError) setFormError("");
+          }}
+          onBlur={() => setTouched((t) => ({ ...t, email: true }))}
+          style={[styles.input, touched.email && emailErr ? styles.inputError : null]}
+          autoCapitalize="none"
+          keyboardType="email-address"
+          placeholder="you@example.com"
+          placeholderTextColor={colors.textMuted}
+        />
+        {touched.email && emailErr ? <Text style={styles.errorText}>{emailErr}</Text> : null}
+
+        {!isForgot && (
+          <>
+            <Text style={[styles.label, { marginTop: spacing.md }]}>Password</Text>
+            <TextInput
+              value={password}
+              onChangeText={(v) => {
+                setPassword(v);
+                if (formError) setFormError("");
+              }}
+              onBlur={() => setTouched((t) => ({ ...t, password: true }))}
+              style={[styles.input, touched.password && passwordErr ? styles.inputError : null]}
+              secureTextEntry
+              placeholder="••••••••"
+              placeholderTextColor={colors.textMuted}
+            />
+            {touched.password && passwordErr ? <Text style={styles.errorText}>{passwordErr}</Text> : null}
+            {isSignUp ? (
+              <Text style={styles.hintText}>
+                Use at least 8 characters. Keepr is private and secure.
+              </Text>
+            ) : null}
+          </>
+        )}
+
+        {formError ? <Text style={styles.formError}>{formError}</Text> : null}
+
+        <TouchableOpacity
+          style={[styles.button, !canSubmit ? styles.buttonDisabled : null]}
+          onPress={onSubmit}
+          activeOpacity={0.85}
+          disabled={!canSubmit}
+        >
+          {submitting ? (
+            <ActivityIndicator size="small" color={colors.brandWhite} />
           ) : (
-            
-            <TouchableOpacity
-              style={styles.forgotLink}
-              onPress={() => {
-                setMode("signin");
-                setFormError("");
-              }}
-              disabled={submitting}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.forgotLinkText}>Back to sign in</Text>
-            </TouchableOpacity>
+            <>
+              <Ionicons
+                name={
+                  isForgot
+                    ? "mail-outline"
+                    : isSignUp
+                    ? "person-add-outline"
+                    : "log-in-outline"
+                }
+                size={18}
+                color={colors.brandWhite}
+                style={{ marginRight: 6 }}
+              />
+              <Text style={styles.buttonText}>
+                {isForgot ? "Send reset link" : isSignUp ? "Create account" : "Sign in"}
+              </Text>
+            </>
           )}
-<Text style={styles.helperText}>
-  Mobile is great for quick capture and action, and also has full functionality.{" "}
-  <Text style={{ fontWeight: "600" }}>
-    Use Keepr Web for deeper setup and organization.
-  </Text>
-</Text>
+        </TouchableOpacity>
+
+        {!isForgot ? (
+          <TouchableOpacity
+            style={styles.forgotLink}
+            onPress={() => {
+              setMode("forgot");
+              setFormError("");
+            }}
+            disabled={submitting}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.forgotLinkText}>Forgot password?</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={styles.forgotLink}
+            onPress={() => {
+              setMode("signin");
+              setFormError("");
+            }}
+            disabled={submitting}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.forgotLinkText}>Back to sign in</Text>
+          </TouchableOpacity>
+        )}
+
+        <Text style={styles.helperText}>
+          Mobile is great for quick capture and action, and also has full functionality.{" "}
+          <Text style={{ fontWeight: "600" }}>
+            Use Keepr Web for deeper setup and organization.
+          </Text>
+        </Text>
+
         {Platform.OS === "web" && (
           <>
             <Text style={styles.helperText}>
@@ -516,232 +461,315 @@ const androidUrl = "https://play.google.com/store/apps/details?id=com.keeprhome.
             </Text>
           </>
         )}
+      </View>
+    </>
+  );
+
+  return (
+    <SafeAreaView style={layoutStyles.screen}>
+      {isMobileWeb ? (
+        <ScrollView
+          style={styles.mobileScroll}
+          contentContainerStyle={styles.mobileScrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.mobileBanner}>
+            <Text style={styles.mobileBannerTitle}>
+              Capture on mobile. Manage on web.
+            </Text>
+
+            <Text style={styles.mobileBannerBody}>
+              Download the app for faster capture, photos, and on-the-go access. Continue on web if you want to sign in or do deeper setup.
+            </Text>
+
+            <View style={styles.mobileBannerActions}>
+              <TouchableOpacity
+                onPress={openAppStore}
+                style={styles.mobileBannerButton}
+                activeOpacity={0.9}
+              >
+                <Text style={styles.mobileBannerButtonText}>Download App</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity activeOpacity={0.85}>
+                <Text style={styles.mobileContinueText}>Continue on web</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <View style={styles.mobileCardWrap}>
+            <View style={[styles.authCard, styles.authCardMobileWeb]}>
+              {renderAuthCardContent()}
+            </View>
+          </View>
+        </ScrollView>
+      ) : (
+        <View
+          style={[
+            styles.container,
+            showDesktopSplit ? styles.webContainer : styles.singleColumnContainer,
+          ]}
+        >
+          {showDesktopSplit && (
+            <View style={styles.brandPanel}>
+              <View style={styles.brandContent}>
+                <Image
+                  source={require("../assets/login_image_keepr.png")}
+                  style={styles.heroImage}
+                />
+                <Text style={styles.brandHeadline}>
+                  Everything you own has a story.
+                </Text>
+
+                <Text style={styles.brandMessage}>
+                  Keepr records the life of the things you care about — homes, vehicles, boats, and more.
+                </Text>
+
+                <Text style={styles.brandTag}>Become a keepr.</Text>
+              </View>
+            </View>
+          )}
+
+          <View
+            style={[
+              styles.loginPanel,
+              !showDesktopSplit && styles.loginPanelSingle,
+            ]}
+          >
+            <View
+              style={[
+                styles.authCard,
+                !showDesktopSplit && styles.authCardSingle,
+              ]}
+            >
+              {renderAuthCardContent()}
+            </View>
+          </View>
         </View>
-      </View>
-      </View>
-      </View>
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-  flex: 1,
-  paddingHorizontal: spacing.xl,
-  paddingTop: spacing.xl,
-  alignItems: "stretch",
-},
-  
-  header: { marginBottom: spacing.lg },
-  logoCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#EEF2FF",
-    marginBottom: spacing.sm,
+    flex: 1,
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.xl,
+    alignItems: "stretch",
   },
-  title: { ...typography.title },
-  subtitle: { ...typography.subtitle, marginTop: 4 },
-  logo: {
-  width: 48,
-  height: 48,
-  resizeMode: "contain",
-  marginBottom: 12,
-},
+
+  singleColumnContainer: {
+    flex: 1,
+    justifyContent: "flex-start",
+    alignItems: "center",
+    paddingHorizontal: 24,
+    paddingVertical: 24,
+  },
+
+  webContainer: {
+    flex: 1,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 48,
+    paddingHorizontal: 48,
+  },
+
+  mobileScroll: {
+    flex: 1,
+  },
+
+  mobileScrollContent: {
+    paddingBottom: 32,
+  },
+
+  mobileBanner: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 12,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: "#EEF2FF",
+    borderWidth: 1,
+    borderColor: "#D9E3FF",
+  },
+
+  mobileBannerTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: colors.textPrimary,
+    marginBottom: 6,
+  },
+
+  mobileBannerBody: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+
+  mobileBannerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    flexWrap: "wrap",
+  },
+
+  mobileBannerButton: {
+    backgroundColor: "#2563EB",
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+  },
+
+  mobileBannerButtonText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 14,
+  },
+
+  mobileContinueText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: colors.textPrimary,
+  },
+
+  mobileCardWrap: {
+    paddingHorizontal: 16,
+  },
+
+  brandPanel: {
+    width: 420,
+    justifyContent: "center",
+  },
+
+  brandContent: {
+    maxWidth: 420,
+    minWidth: 420,
+  },
+
+  heroImage: {
+    width: 440,
+    height: 275,
+    marginBottom: 24,
+    resizeMode: "contain",
+  },
+
+  brandHeadline: {
+    fontSize: 28,
+    fontWeight: "700",
+    marginBottom: 16,
+    color: colors.textPrimary,
+  },
+
+  brandMessage: {
+    fontSize: 16,
+    lineHeight: 24,
+    color: "#475569",
+    marginBottom: 20,
+  },
+
+  brandTag: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#2563EB",
+  },
+
+  loginPanel: {
+    width: 760,
+    maxWidth: "100%",
+    justifyContent: "center",
+  },
+
+  loginPanelSingle: {
+    width: "100%",
+    maxWidth: 640,
+  },
 
   authCard: {
-  width: "100%",
-  maxWidth: 760,
-  minWidth: 0,
-  alignSelf: "center",
-  backgroundColor: "#FFFFFF",
-  borderRadius: 20,
-  borderWidth: 1,
-  borderColor: colors.borderSubtle,
-  padding: 24,
-  shadowColor: "#000",
-  shadowOpacity: 0.08,
-  shadowRadius: 18,
-  shadowOffset: { width: 0, height: 8 },
-  elevation: 6,
-},
+    width: "100%",
+    maxWidth: 760,
+    minWidth: 0,
+    alignSelf: "center",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    padding: 24,
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
+  },
 
-brandContent: {
-  maxWidth: 420,
-  minWidth: 420,
+  authCardSingle: {
+    width: "100%",
+    maxWidth: 640,
+    minWidth: 0,
+  },
 
-},
+  authCardMobileWeb: {
+    width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
+    borderRadius: 16,
+    padding: 20,
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+  },
 
-singleColumnContainer: {
-  flex: 1,
-  justifyContent: "center",
-  alignItems: "center",
-  paddingHorizontal: 24,
-  paddingVertical: 24,
-},
+  header: {
+    marginBottom: spacing.lg,
+  },
 
-mobileWebContainer: {
-  flex: 1,
-  paddingHorizontal: 16,
-  paddingTop: 16,
-  paddingBottom: 24,
-  alignItems: "stretch",
-},
+  brandRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: spacing.sm,
+  },
 
-webContainer: {
-  flex: 1,
-  flexDirection: "row",
-  justifyContent: "center",
-  alignItems: "center",
-  gap: 48,
-  paddingHorizontal: 48,
-},
+  logo: {
+    width: 48,
+    height: 48,
+    resizeMode: "contain",
+    marginBottom: 12,
+  },
 
-loginPanelSingle: {
-  width: "100%",
-  maxWidth: 640,
-},
+  brandTextWrap: {
+    marginLeft: 12,
+  },
 
-loginPanelMobileWeb: {
-  width: "100%",
-  maxWidth: "100%",
-  justifyContent: "flex-start",
-},
+  brand: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: colors.textPrimary,
+  },
 
-authCardSingle: {
-  width: "100%",
-  maxWidth: 640,
-  minWidth: 0,
-},
+  brandSub: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
 
-authCardMobileWeb: {
-  width: "100%",
-  maxWidth: "100%",
-  minWidth: 0,
-  borderRadius: 16,
-  padding: 20,
-  shadowOpacity: 0.05,
-  shadowRadius: 12,
-  shadowOffset: { width: 0, height: 4 },
-},
+  title: {
+    ...typography.title,
+  },
 
-mobileBanner: {
-  marginHorizontal: 16,
-  marginTop: 16,
-  marginBottom: 8,
-  padding: 14,
-  borderRadius: 14,
-  backgroundColor: "#EEF2FF",
-  borderWidth: 1,
-  borderColor: "#D9E3FF",
-},
-
-mobileBannerTitle: {
-  fontSize: 16,
-  fontWeight: "700",
-  color: colors.textPrimary,
-  marginBottom: 6,
-},
-
-mobileBannerBody: {
-  fontSize: 14,
-  color: colors.textSecondary,
-  lineHeight: 20,
-  marginBottom: 12,
-},
-
-mobileBannerActions: {
-  flexDirection: "row",
-  alignItems: "center",
-  gap: 12,
-  flexWrap: "wrap",
-},
-
-mobileBannerButton: {
-  backgroundColor: "#2563EB",
-  paddingVertical: 10,
-  paddingHorizontal: 14,
-  borderRadius: 10,
-},
-
-mobileBannerButtonText: {
-  color: "#fff",
-  fontWeight: "700",
-  fontSize: 14,
-},
-
-mobileContinueText: {
-  fontSize: 14,
-  fontWeight: "600",
-  color: colors.textPrimary,
-},
-
-brandPanel: {
-  width: 420,
-  justifyContent: "center",
-},
-
-brandHeadline: {
-  fontSize: 28,
-  fontWeight: "700",
-  marginBottom: 16,
-},
-
-brandMessage: {
-  fontSize: 16,
-  lineHeight: 24,
-  color: "#475569",
-  marginBottom: 20,
-},
-
-brandTag: {
-  fontSize: 16,
-  fontWeight: "600",
-  color: "#2563EB",
-},
-
-loginPanel: {
-  width: 760,
-  maxWidth: "100%",
-  justifyContent: "center",
-},
-
-brandRow: {
-  flexDirection: "row",
-  alignItems: "center",
-  marginBottom: spacing.sm,
-},
-
-brandTextWrap: {
-  marginLeft: 12,
-},
-
-brand: {
-  fontSize: 18,
-  fontWeight: "800",
-  color: colors.textPrimary,
-},
-
-brandSub: {
-  fontSize: 12,
-  color: colors.textMuted,
-  marginTop: 2,
-},
-
-trustText: {
-  fontSize: 12,
-  color: colors.textMuted,
-  marginTop: 14,
-  lineHeight: 18,
-},
+  subtitle: {
+    ...typography.subtitle,
+    marginTop: 4,
+  },
 
   modeRow: {
     flexDirection: "row",
     gap: 10,
     marginBottom: spacing.lg,
   },
+
   modePill: {
     flex: 1,
     borderRadius: 999,
@@ -751,15 +779,32 @@ trustText: {
     paddingVertical: 10,
     alignItems: "center",
   },
+
   modePillActive: {
     borderColor: colors.brandBlue,
     backgroundColor: "#EEF2FF",
   },
-  modePillText: { fontSize: 13, color: colors.textSecondary, fontWeight: "600" },
-  modePillTextActive: { color: colors.brandBlue },
 
-  form: { marginTop: 2 },
-  label: { fontSize: 13, color: colors.textSecondary, marginBottom: 4 },
+  modePillText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    fontWeight: "600",
+  },
+
+  modePillTextActive: {
+    color: colors.brandBlue,
+  },
+
+  form: {
+    marginTop: 2,
+  },
+
+  label: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginBottom: 4,
+  },
+
   input: {
     borderRadius: radius.md,
     borderWidth: 1,
@@ -770,27 +815,32 @@ trustText: {
     color: colors.textPrimary,
     backgroundColor: colors.surface,
   },
+
   inputError: {
     borderColor: "#DC2626",
   },
+
   errorText: {
     marginTop: 6,
     fontSize: 12,
     color: "#DC2626",
     fontWeight: "600",
   },
+
   hintText: {
     marginTop: 8,
     fontSize: 12,
     color: colors.textMuted,
     lineHeight: 18,
   },
+
   formError: {
     marginTop: spacing.md,
     fontSize: 13,
     color: "#DC2626",
     fontWeight: "700",
   },
+
   button: {
     marginTop: spacing.lg,
     borderRadius: radius.pill,
@@ -801,23 +851,39 @@ trustText: {
     alignItems: "center",
     justifyContent: "center",
   },
+
   buttonDisabled: {
     opacity: 0.6,
   },
-  buttonText: { fontSize: 14, color: colors.brandWhite, fontWeight: "600" },
+
+  buttonText: {
+    fontSize: 14,
+    color: colors.brandWhite,
+    fontWeight: "600",
+  },
+
+  forgotLink: {
+    marginTop: spacing.sm,
+    alignSelf: "center",
+  },
+
+  forgotLinkText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.brandBlue,
+  },
+
   helperText: {
     fontSize: 12,
     color: colors.textMuted,
     marginTop: spacing.md,
     lineHeight: 18,
   },
-  forgotLink: {
-    marginTop: spacing.sm,
-    alignSelf: "center",
-  },
-  forgotLinkText: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: colors.brandBlue,
+
+  trustText: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 14,
+    lineHeight: 18,
   },
 });

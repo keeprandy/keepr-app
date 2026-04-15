@@ -50,4 +50,4 @@ app-example
 .tmp.driveupload/
 
 # Supabase CLI local temp
-supabase/.temp/
+supabase/.temp/.tmp.drivedownload/
