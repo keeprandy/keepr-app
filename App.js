@@ -56,6 +56,7 @@ import StoryPrintScreen from "./screens/StoryPrintScreen";
 import SystemReadinessPackagePrintScreen from "./screens/SystemReadinessPackagePrintScreen";
 import SystemStoryPrintScreen from "./screens/SystemStoryPrintScreen";
 import TimelineCostPackagePrintScreen from "./screens/TimelineCostPackagePrintScreen";
+import KeeprStoryScreen from "./screens/KeeprStoryScreen";
 
 // Public Action Screen Launched from QR Code or Direct Link
 import PublicActionScreen from "./screens/PublicActionScreen";
@@ -1360,6 +1361,11 @@ const initialRouteName = isResetLink
           <RootStack.Screen
             name="StoryPrint"
             component={StoryPrintScreen}
+            options={{ headerShown: false }}
+          />
+          <RootStack.Screen
+            name="KeeprStory"
+            component={KeeprStoryScreen}
             options={{ headerShown: false }}
           />
           {/* Print your System Story */}

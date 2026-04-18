@@ -29,12 +29,13 @@ import * as ImagePicker from "expo-image-picker";
 import KeeprProgressCard, {
   buildKeeprProgressModel,
 } from "../components/KeeprProgressCard";
+import { buildHighlights } from "../lib/storyHighlightEngine";
 
 // ✅ low-level upload helper (NOT a hook)
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 
 // ✅ attachments helpers (for hero placement resolution)
-import { getSignedUrl } from "../lib/attachmentsApi";
+import { getSignedUrl, listAttachmentsForTarget } from "../lib/attachmentsApi";
 
 // Context-aware Add Event pill
 import EventPill from "../components/EventPill";
@@ -251,6 +252,7 @@ const loadAssetProgress = useCallback(async (assetId) => {
   // Local snapshot so big updates (hero photo, delete, edits) reflect immediately
   const [homeSnapshot, setHomeSnapshot] = useState(null);
   const home = homeSnapshot || currentHome;
+  const [showcasePhotos, setShowcasePhotos] = useState([]);
 
   // Keep snapshot in sync when user switches homes
     useEffect(() => {
@@ -278,12 +280,6 @@ useEffect(() => {
 
   const [reportsOpen, setReportsOpen] = useState(false);
  const [assetProgress, setAssetProgress] = useState(null);
-
-useEffect(() => {
-  if (home?.id) {
-    loadAssetProgress(home.id);
-  }
-}, [home?.id]);
 
 
   // ✅ Persistent hero resolved from hero_placement_id
@@ -491,8 +487,61 @@ useEffect(() => {
       setSvcLoading(false);
       setStoryLoading(false);
     }
+
+    // 4) Showcase / proof photos for story page
+// 4) Showcase / proof photos for story page
+try {
+  const rows = await listAttachmentsForTarget("asset", homeId);
+
+  const gallery = [];
+
+  for (const row of rows || []) {
+    if (!row.is_showcase) continue;
+
+    const mime = String(row.mime_type || "").toLowerCase();
+    const kind = row.kind || "";
+
+    const isImage =
+      kind === "photo" || mime.startsWith("image/");
+
+    if (!isImage) continue;
+
+    let url = row.url || null;
+
+    if (!url && row.bucket && row.storage_path) {
+      url = await getSignedUrl({
+        bucket: row.bucket,
+        path: row.storage_path,
+      });
+    }
+
+    if (!url) continue;
+
+    gallery.push({
+      uri: url,
+      placement_id: row.placement_id,
+      isHero: home?.hero_placement_id === row.placement_id,
+      created_at: row.created_at || null,
+    });
+  }
+
+  const deduped = [];
+  const seen = new Set();
+
+  for (const item of gallery) {
+    if (!item?.uri || seen.has(item.uri)) continue;
+    seen.add(item.uri);
+    deduped.push(item);
+  }
+
+  setShowcasePhotos(deduped);
+} catch (err) {
+  console.error("Error loading showcase photos", err);
+  setShowcasePhotos([]);
+}
   }, [home?.id]);
 
+  
   useFocusEffect(
     useCallback(() => {
       if (home?.id) loadHomeData();
@@ -831,17 +880,28 @@ const handleConfirmRemove = async () => {
         return;
       }
 
+      const title = ev.title || "";
+      const normalizedTitle = title.toLowerCase();
+
+      const isUpgrade =
+        normalizedTitle.includes("built") ||
+        normalizedTitle.includes("finished") ||
+        normalizedTitle.includes("renovated") ||
+        normalizedTitle.includes("remodeled");
+
       items.push({
         id: ev.id,
         kind: "story",
         eventType: type,
-        title: ev.title || "",
+        title,
         description: ev.description || "",
-        date:
-          ev.occurred_at ||
-          ev.created_at ||
-          ev.inserted_at ||
-          new Date().toISOString(),
+        date: ev.occurred_at || ev.created_at || new Date().toISOString(),
+
+        signal: {
+          type: isUpgrade ? "upgrade" : "story",
+          isUpgrade,
+          isHighValue: false,
+        },
       });
     });
 
@@ -857,18 +917,44 @@ const handleConfirmRemove = async () => {
           ? systemMap[rec.system_id]
           : null;
 
-      items.push({
-        id: rec.id,
-        kind: "service",
-        serviceRecordId: rec.id,
-        title: rec.title || "Service visit",
-        description: rec.notes || "",
-        provider: rec.location || null,
-        serviceType: rec.service_type || null,
-        systemName,
-        cost: rec.cost,
-        date,
-      });
+      const title = rec.title || "Service visit";
+
+const normalizedTitle = title.toLowerCase();
+
+const isUpgrade =
+  normalizedTitle.includes("install") ||
+  normalizedTitle.includes("replace") ||
+  normalizedTitle.includes("upgrade") ||
+  normalizedTitle.includes("remodel") ||
+  normalizedTitle.includes("build") ||
+  normalizedTitle.includes("new");
+
+const isMaintenance =
+  normalizedTitle.includes("service") ||
+  normalizedTitle.includes("clean") ||
+  normalizedTitle.includes("inspect") ||
+  normalizedTitle.includes("repair");
+
+  items.push({
+    id: rec.id,
+    kind: "service",
+    serviceRecordId: rec.id,
+    title,
+    description: rec.notes || "",
+    provider: rec.location || null,
+    serviceType: rec.service_type || null,
+    systemName,
+    cost: rec.cost,
+    date,
+
+    // 👇 ADD THIS
+    signal: {
+      type: isUpgrade ? "upgrade" : isMaintenance ? "maintenance" : "other",
+      isUpgrade,
+      isMaintenance,
+      isHighValue: Number(rec.cost || 0) > 5000,
+    },
+  });
     });
 
     items.sort(
@@ -966,23 +1052,134 @@ const filteredTimelineItems = useMemo(() => {
   const homeLocation = meta.location || null;
   const homeName = home?.name || "My home";
 
-  const goToStoryPrint = () => {
-    if (!home) return;
+const goToStoryPrint = (target = "StoryPrint") => {
+  if (!home) return;
 
-    const story = {
-      title: homeName,
-      subtitle: meta.homeType || null,
-      heroUri: heroUri || null,
-      context: home?.notes || null,
-      purchaseDate: meta.purchaseDate || null,
-      purchasePrice: meta.purchasePrice || null,
-      estimatedValue: meta.estValue || null,
-      location: homeLocation || null,
-      timeline: timelineItems,
+  const timelineSorted = [...timelineItems].sort(
+    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+  );
+
+  let highlights = [];
+
+try {
+  highlights = buildHighlights(
+    timelineSorted.filter((item) => {
+      if (!item.signal) return false;
+
+      return (
+        item.signal.isUpgrade ||
+        item.signal.isHighValue ||
+        item.signal.type === "upgrade"
+      );
+    })
+  );
+} catch (err) {
+  console.log("buildHighlights failed", err);
+  highlights = [];
+}
+
+  
+  const documentedSpend = timelineSorted.reduce((sum, item) => {
+    const raw = item?.cost;
+    const num =
+      typeof raw === "number"
+        ? raw
+        : raw !== null && raw !== undefined && raw !== ""
+        ? Number(String(raw).replace(/[$,]/g, ""))
+        : 0;
+
+    return Number.isFinite(num) ? sum + num : sum;
+  }, 0);
+
+  const investmentSummary = {
+  totalSpend: documentedSpend,
+  majorProjects: highlights.length,
+  largestProject: highlights[0]?.cost || 0,
+};
+
+  const systemCards = (systems || []).map((s) => {
+    const related = timelineSorted.filter((item) => {
+      if (!item.systemName) return false;
+      return (
+        String(item.systemName).trim().toLowerCase() ===
+        String(s.name).trim().toLowerCase()
+      );
+    });
+
+    const last = related[0] || null;
+
+    const proofCount = related.reduce((count, item) => {
+      if (item.kind === "service" && serviceAttachments?.[item.serviceRecordId]) {
+        return count + 1;
+      }
+      return count;
+    }, 0);
+
+    const spend = related.reduce((sum, item) => {
+      const raw = item?.cost;
+      const num =
+        typeof raw === "number"
+          ? raw
+          : raw !== null && raw !== undefined && raw !== ""
+          ? Number(String(raw).replace(/[$,]/g, ""))
+          : 0;
+
+      return Number.isFinite(num) ? sum + num : sum;
+    }, 0);
+
+    return {
+      id: s.id,
+      name: s.name,
+      lastEventTitle: last?.title || null,
+      lastEventDate: last?.date || null,
+      proofCount,
+      spend,
+      packageId: s.id,
+      hasActivity: related.length > 0,
     };
+  });
 
-    navigation.navigate("StoryPrint", { story });
+  const featuredSystems = systemCards
+    .filter((s) => s.hasActivity || s.proofCount > 0 || s.spend > 0)
+    .sort((a, b) => {
+      const aSpend = a.spend || 0;
+      const bSpend = b.spend || 0;
+      if (bSpend !== aSpend) return bSpend - aSpend;
+
+      const aTime = a.lastEventDate ? new Date(a.lastEventDate).getTime() : 0;
+      const bTime = b.lastEventDate ? new Date(b.lastEventDate).getTime() : 0;
+      return bTime - aTime;
+    })
+    .slice(0, 8);
+
+  const story = {
+    title: homeName,
+    subtitle: meta.homeType || null,
+    heroUri: heroUri || null,
+    context: home?.notes || null,
+    purchaseDate: meta.purchaseDate || null,
+    purchasePrice: meta.purchasePrice || null,
+    estimatedValue: meta.estValue || null,
+    location: homeLocation || null,
+    timeline: timelineSorted,
+    documentedSpend,
+    systems: featuredSystems,
+    highlights,
+   proofPhotos:
+  showcasePhotos.length > 0
+    ? showcasePhotos
+    : heroUri
+    ? [{ uri: heroUri, role: "hero" }]
+    : [],
   };
+
+  
+  console.log("GO TO STORY:", target);
+  console.log("BUILT STORY:", story);
+
+  navigation.navigate(target, { story });
+};
+  
 
   /* --------------------------- GUARDS --------------------------- */
 
@@ -995,13 +1192,14 @@ const filteredTimelineItems = useMemo(() => {
         </View>
       
 
-  <ReportsModal
-    visible={reportsOpen}
-    onClose={() => setReportsOpen(false)}
-    asset={home}
-    navigation={navigation}
-    onOpenStorySheet={goToStoryPrint}
-  />
+ <ReportsModal
+  visible={reportsOpen}
+  onClose={() => setReportsOpen(false)}
+  asset={home}
+  navigation={navigation}
+  onOpenStorySheet={() => goToStoryPrint("StoryPrint")}
+  onOpenKeeprStory={() => goToStoryPrint("KeeprStory")}
+/>
 </SafeAreaView>
     );
   }
@@ -1013,20 +1211,13 @@ const filteredTimelineItems = useMemo(() => {
           <Text style={{ color: "red" }}>{error}</Text>
         </View>
       
-
-  <ReportsModal
-    visible={reportsOpen}
-    onClose={() => setReportsOpen(false)}
-    asset={home}
-    navigation={navigation}
-    onOpenStorySheet={goToStoryPrint}
-  />
 </SafeAreaView>
     );
   }
 
   if (!home) {
     return (
+      
       <SafeAreaView style={layoutStyles.screen}>
         <View style={styles.centered}>
           <Text style={styles.appTitle}>
@@ -1072,12 +1263,13 @@ const filteredTimelineItems = useMemo(() => {
       
 
   <ReportsModal
-    visible={reportsOpen}
-    onClose={() => setReportsOpen(false)}
-    asset={home}
-    navigation={navigation}
-    onOpenStorySheet={goToStoryPrint}
-  />
+  visible={reportsOpen}
+  onClose={() => setReportsOpen(false)}
+  asset={home}
+  navigation={navigation}
+  onOpenStorySheet={() => goToStoryPrint("StoryPrint")}
+  onOpenKeeprStory={() => goToStoryPrint("KeeprStory")}
+/>
 </SafeAreaView>
     );
   }
@@ -1567,13 +1759,14 @@ const filteredTimelineItems = useMemo(() => {
       </Modal>
     
 
-  <ReportsModal
-    visible={reportsOpen}
-    onClose={() => setReportsOpen(false)}
-    asset={home}
-    navigation={navigation}
-    onOpenStorySheet={goToStoryPrint}
-  />
+<ReportsModal
+  visible={reportsOpen}
+  onClose={() => setReportsOpen(false)}
+  asset={home}
+  navigation={navigation}
+  onOpenStorySheet={() => goToStoryPrint("StoryPrint")}
+  onOpenKeeprStory={() => goToStoryPrint("KeeprStory")}
+/>
 </SafeAreaView>
   );
 }
@@ -1710,14 +1903,6 @@ heroOverlayIcon: {
   padding: 6,
 },
 
-  heroOverlayIcon: {
-  position: "absolute",
-  right: 10,
-  top: 10,
-  backgroundColor: "rgba(15,23,42,0.6)",
-  borderRadius: 999,
-  padding: 6,
-},
 primaryAddBtn: {
   marginTop: 12,
   backgroundColor: colors.primary, // Keepr blue

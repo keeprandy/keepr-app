@@ -13,7 +13,14 @@ import { supabase } from "../lib/supabaseClient";
  * StoryPrint usually expects a prebuilt "story" payload (built in HomeStoryScreen).
  * So we accept onOpenStorySheet() and call it rather than navigating directly with no params.
  */
-export default function ReportsModal({ visible, onClose, asset, navigation, onOpenStorySheet }) {
+export default function ReportsModal({
+  visible,
+  onClose,
+  asset,
+  navigation,
+  onOpenStorySheet,
+  onOpenKeeprStory,
+}) {
   const isWeb = Platform.OS === "web";
   const assetId = asset?.id || null;
   const assetName = asset?.name || "Asset";
@@ -42,6 +49,25 @@ export default function ReportsModal({ visible, onClose, asset, navigation, onOp
           navigation.navigate("StoryPrint");
         },
       },
+
+        {
+          key: "keepr_story",
+          section: "Story",
+          title: "Keepr Story",
+          subtitle: "Interactive story with systems + proof",
+          icon: "layers-outline",
+          actionLabel: "Open",
+          run: async () => {
+            if (typeof onOpenKeeprStory === "function") {
+              onClose?.();
+              onOpenKeeprStory();
+              return;
+            }
+
+            onClose?.();
+            navigation.navigate("KeeprStory");
+          },
+        },
             {
         key: "qr_codes",
         section: "Sharing",
@@ -128,7 +154,7 @@ export default function ReportsModal({ visible, onClose, asset, navigation, onOp
         },
       },
     ],
-    [asset, assetId, navigation, onClose, onOpenStorySheet]
+    [asset, assetId, navigation, onClose, onOpenStorySheet, onOpenKeeprStory]
   );
 
   const grouped = useMemo(() => {

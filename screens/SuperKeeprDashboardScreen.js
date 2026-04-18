@@ -31,7 +31,7 @@ const LIFECYCLE_STATES = [
   "Under Contract",
   "Owned – Pre-Rehab",
   "Active Rehab",
-  "Stabilized",
+  "For Rent",
   "Leased",
   "For Sale / Wholesale",
   "Sold",
