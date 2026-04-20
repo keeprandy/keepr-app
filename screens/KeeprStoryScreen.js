@@ -43,6 +43,432 @@ function SnapshotCard({ label, value }) {
   );
 }
 
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function renderPrintTimelineRows(items = []) {
+  return items
+    .map((item) => {
+      const kindLabel =
+        item.kind === "service"
+          ? item.serviceType === "pro"
+            ? "PRO SERVICE"
+            : item.serviceType === "diy"
+            ? "DIY"
+            : "SERVICE"
+          : "STORY";
+
+      return `
+        <div class="timeline-row">
+          <div class="timeline-date-col">
+            <div class="timeline-date">${escapeHtml(
+              formatKeeprDate(String(item.date || "").slice(0, 10))
+            )}</div>
+            <div class="timeline-kind">${escapeHtml(kindLabel)}</div>
+          </div>
+
+          <div class="timeline-main-col">
+            ${item.title ? `<div class="timeline-title">${escapeHtml(item.title)}</div>` : ""}
+            ${item.description ? `<div class="timeline-body">${escapeHtml(item.description)}</div>` : ""}
+            <div class="timeline-meta-row">
+              ${item.systemName ? `<span class="timeline-meta-text">System: ${escapeHtml(item.systemName)}</span>` : ""}
+              ${item.provider ? `<span class="timeline-meta-text">Provider: ${escapeHtml(item.provider)}</span>` : ""}
+              ${
+                item.cost !== null && item.cost !== undefined && item.cost !== ""
+                  ? `<span class="timeline-meta-text">Cost: ${escapeHtml(formatMoney(item.cost))}</span>`
+                  : ""
+              }
+            </div>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function buildPrintHtml({
+  title,
+  subtitle,
+  heroUri,
+  purchaseDate,
+  estimatedValue,
+  documentedSpend,
+  location,
+  systems = [],
+  proofPhotos = [],
+  timeline = [],
+}) {
+  const showcase = proofPhotos
+    .map((item) => (typeof item === "string" ? { uri: item } : item))
+    .filter((item) => item?.uri && item.uri !== heroUri)
+    .slice(0, 4);
+
+  const topSystems = systems.slice(0, 9);
+
+  return `
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(title || "Keepr Story")}</title>
+        <style>
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+            margin: 0;
+            padding: 24px;
+            background: #fff;
+            color: #111827;
+          }
+
+          .sheet {
+            max-width: 1024px;
+            margin: 0 auto;
+          }
+
+          .topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            font-size: 12px;
+            color: #6B7280;
+          }
+
+          .story-top {
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
+            margin-bottom: 20px;
+          }
+
+          .hero-pane {
+            flex: 1.6;
+          }
+
+          .hero-image {
+            width: 100%;
+            aspect-ratio: 4 / 3;
+            object-fit: cover;
+            border-radius: 16px;
+            background: #E5E7EB;
+            display: block;
+          }
+
+          .info-pane {
+            flex: 1.05;
+          }
+
+          .asset-title {
+            font-size: 30px;
+            font-weight: 800;
+            margin: 0 0 8px 0;
+            color: #111827;
+          }
+
+          .asset-subtitle {
+            margin: 0 0 12px 0;
+            font-size: 15px;
+            color: #4B5563;
+            line-height: 22px;
+          }
+
+          .trust-row,
+          .snapshot-row,
+          .showcase-grid,
+          .systems-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 12px;
+          }
+
+          .trust-row {
+            margin-bottom: 14px;
+          }
+
+          .trust-pill {
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: #F3F4F6;
+            border: 1px solid #E5E7EB;
+            font-size: 12px;
+          }
+
+          .snapshot-row {
+            margin-bottom: 16px;
+          }
+
+          .snapshot-card {
+            min-width: 90px;
+          }
+
+          .snapshot-label {
+            font-size: 10px;
+            color: #6B7280;
+          }
+
+          .snapshot-value {
+            font-size: 15px;
+            font-weight: 700;
+            color: #111827;
+          }
+
+          .section {
+            width: 100%;
+            box-sizing: border-box;
+            margin-top: 20px;
+            padding: 20px;
+            border: 1px solid #E5E7EB;
+            border-radius: 16px;
+            background: #fff;
+          }
+
+          .section-title {
+            font-size: 15px;
+            font-weight: 800;
+            color: #111827;
+            margin-bottom: 6px;
+          }
+
+          .section-subtle {
+            font-size: 11px;
+            color: #6B7280;
+            margin-bottom: 10px;
+          }
+
+          .showcase-grid {
+            margin-top: 8px;
+          }
+
+          .showcase-image {
+            width: calc(50% - 6px);
+            height: 110px;
+            object-fit: cover;
+            border-radius: 10px;
+            background: #E5E7EB;
+            display: block;
+          }
+
+          .systems-grid {
+            justify-content: space-between;
+          }
+
+          .system-card {
+            width: calc(33.333% - 8px);
+            min-height: 100px;
+            box-sizing: border-box;
+            padding: 12px;
+            border-radius: 12px;
+            border: 1px solid #E5E7EB;
+            background: #fff;
+          }
+
+          .system-title {
+            font-size: 12px;
+            font-weight: 800;
+            color: #111827;
+            line-height: 16px;
+            margin-bottom: 4px;
+          }
+
+          .system-meta {
+            margin-top: 2px;
+            font-size: 10px;
+            color: #6B7280;
+            line-height: 14px;
+          }
+
+          .timeline-row {
+            display: flex;
+            border-top: 1px solid #E5E7EB;
+            padding-top: 10px;
+            margin-top: 10px;
+          }
+
+          .timeline-date-col {
+            width: 140px;
+            padding-right: 16px;
+            box-sizing: border-box;
+          }
+
+          .timeline-date {
+            font-size: 11px;
+            color: #4B5563;
+          }
+
+          .timeline-kind {
+            margin-top: 2px;
+            font-size: 10px;
+            font-weight: 700;
+            color: #6B7280;
+            text-transform: uppercase;
+          }
+
+          .timeline-main-col {
+            flex: 1;
+          }
+
+          .timeline-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: #111827;
+          }
+
+          .timeline-body {
+            margin-top: 2px;
+            font-size: 12px;
+            color: #4B5563;
+            line-height: 18px;
+          }
+
+          .timeline-meta-row {
+            margin-top: 4px;
+          }
+
+          .timeline-meta-text {
+            font-size: 11px;
+            color: #6B7280;
+            margin-right: 12px;
+          }
+
+          .footer {
+            margin-top: 24px;
+            border-top: 1px solid #E5E7EB;
+            padding-top: 10px;
+            text-align: right;
+            font-size: 10px;
+            color: #6B7280;
+          }
+
+          @media print {
+            body {
+              padding: 0;
+            }
+
+            .topbar {
+              display: none;
+            }
+          }
+        </style>
+        <script>
+          window.onafterprint = () => {
+            try { window.close(); } catch (e) {}
+          };
+        </script>
+      </head>
+
+      <body>
+        <div class="sheet">
+          <div class="topbar">
+            <div>
+            <strong>Keepr Story Report</strong><br />
+            <span style="font-size:12px;color:#6B7280;">Print preview</span>
+          </div>
+            <div>Generated ${escapeHtml(
+              formatKeeprDate(new Date().toISOString().slice(0, 10))
+            )}</div>
+          </div>
+
+          <div class="story-top">
+            <div class="hero-pane">
+              ${heroUri ? `<img src="${escapeHtml(heroUri)}" class="hero-image" />` : ""}
+            </div>
+
+            <div class="info-pane">
+              <div class="asset-title">${escapeHtml(title)}</div>
+              <div class="asset-subtitle">${escapeHtml(
+                subtitle || "A documented story of care, upgrades, and ownership over time."
+              )}</div>
+
+              <div class="trust-row">
+                <div class="trust-pill">${timeline.length > 8 ? "Well Documented" : "Growing Record"}</div>
+                <div class="trust-pill">${timeline.length} Records</div>
+                <div class="trust-pill">Proof Attached</div>
+              </div>
+
+              <div class="snapshot-row">
+                <div class="snapshot-card">
+                  <div class="snapshot-label">Owned Since</div>
+                  <div class="snapshot-value">${escapeHtml(formatKeeprDate(purchaseDate) || "—")}</div>
+                </div>
+                <div class="snapshot-card">
+                  <div class="snapshot-label">Records</div>
+                  <div class="snapshot-value">${escapeHtml(String(timeline.length))}</div>
+                </div>
+                <div class="snapshot-card">
+                  <div class="snapshot-label">Documented Spend</div>
+                  <div class="snapshot-value">${escapeHtml(formatMoney(documentedSpend) || "—")}</div>
+                </div>
+                <div class="snapshot-card">
+                  <div class="snapshot-label">Est. Value</div>
+                  <div class="snapshot-value">${escapeHtml(formatMoney(estimatedValue) || "—")}</div>
+                </div>
+                <div class="snapshot-card">
+                  <div class="snapshot-label">Location</div>
+                  <div class="snapshot-value">${escapeHtml(location || "—")}</div>
+                </div>
+              </div>
+
+              ${
+                showcase.length
+                  ? `
+                <div class="section-title">Proof Showcase</div>
+                <div class="section-subtle">Selected images from the ownership story</div>
+                <div class="showcase-grid">
+                  ${showcase
+                    .map(
+                      (item) =>
+                        `<img src="${escapeHtml(item.uri)}" class="showcase-image" />`
+                    )
+                    .join("")}
+                </div>
+              `
+                  : ""
+              }
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Key Systems With History</div>
+            <div class="section-subtle">Systems with documented upgrades, service, or maintenance activity</div>
+            <div class="systems-grid">
+              ${topSystems
+                .map(
+                  (system) => `
+                <div class="system-card">
+                  <div class="system-title">${escapeHtml(system.name)}</div>
+                  ${system.lastEventTitle ? `<div class="system-meta">${escapeHtml(system.lastEventTitle)}</div>` : ""}
+                  ${system.lastEventDate ? `<div class="system-meta">Last activity: ${escapeHtml(formatKeeprDate(String(system.lastEventDate).slice(0, 10)))}</div>` : ""}
+                  ${system.spend > 0 ? `<div class="system-meta">Documented spend: ${escapeHtml(formatMoney(system.spend))}</div>` : ""}
+                  ${system.proofCount > 0 ? `<div class="system-meta">${escapeHtml(String(system.proofCount))} proof item${system.proofCount === 1 ? "" : "s"}</div>` : ""}
+                </div>
+              `
+                )
+                .join("")}
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Key History</div>
+            <div class="section-subtle">Complete timeline of service, ownership, and story records</div>
+            ${renderPrintTimelineRows(timeline)}
+          </div>
+
+          <div class="footer">
+            Generated by Keepr • ${escapeHtml(
+              formatKeeprDate(new Date().toISOString().slice(0, 10))
+            )}
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+}
+
 export default function KeeprStoryScreen() {
   const navigation = useNavigation();
   const route = useRoute();
@@ -71,30 +497,70 @@ const proofPhotos = story.proofPhotos || [];
 
   const hasTimeline = Array.isArray(timeline) && timeline.length > 0;
 
-  const majorTimeline = timeline.filter((item) => {
+const majorTimeline = timeline.filter((item) => {
   const title = item.title?.toLowerCase() || "";
+  const description = item.description?.toLowerCase() || "";
 
-  return (
-    item.kind === "service" ||
+  const isMajorByKeyword =
     title.includes("install") ||
     title.includes("replace") ||
     title.includes("inspection") ||
-    title.includes("repair")
-  );
+    title.includes("repair") ||
+    title.includes("upgrade") ||
+    title.includes("renew") ||
+    title.includes("winterize") ||
+    title.includes("engine") ||
+    title.includes("roof") ||
+    title.includes("hvac") ||
+    description.includes("replace") ||
+    description.includes("repair") ||
+    description.includes("upgrade");
+
+  const isStoryMoment = item.kind === "story";
+
+  return isStoryMoment || isMajorByKeyword;
 });
 
   const handleBack = () => {
     if (navigation.canGoBack()) navigation.goBack();
   };
 
-  const handlePrint = () => {
-    if (!IS_WEB) return;
-    try {
-      window.print();
-    } catch {
-      // ignore
-    }
-  };
+const handlePrint = async () => {
+  if (!IS_WEB) return;
+
+  try {
+    const html = buildPrintHtml({
+      title,
+      subtitle,
+      heroUri,
+      purchaseDate,
+      estimatedValue,
+      documentedSpend,
+      location,
+      systems,
+      proofPhotos,
+      timeline,
+    });
+
+    const w = window.open("", "_blank");
+    if (!w) return;
+
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+
+    await new Promise((resolve) => {
+      w.onload = resolve;
+      setTimeout(resolve, 350);
+    });
+
+    w.focus();
+    w.print();
+  } catch (e) {
+    console.log("KeeprStory print failed", e);
+  }
+};
+
 
   // Shared sheet layout
   const Sheet = () => (
@@ -106,7 +572,7 @@ const proofPhotos = story.proofPhotos || [];
         </Text>
         {IS_WEB && (
           <Text onPress={handlePrint} style={styles.printLink}>
-            Print
+            Print Report
           </Text>
         )}
       </View>
@@ -228,123 +694,72 @@ const proofPhotos = story.proofPhotos || [];
   <View style={styles.timelineCard}>
     <Text style={styles.sectionTitle}>Key History</Text>
     <Text style={styles.sectionSubtle}>
-    Major investments, upgrades, service, and ownership milestones
+      {showFull
+        ? "Complete timeline of service, ownership, and story records"
+        : "Major investments, upgrades, service, and ownership milestones"}
     </Text>
 
-    {majorTimeline.map((item) => {
-      const kindLabel =
-        item.kind === "service"
-          ? item.serviceType === "pro"
-            ? "PRO SERVICE"
-            : item.serviceType === "diy"
-            ? "DIY"
-            : "SERVICE"
-          : "STORY";
+{(showFull ? timeline : majorTimeline).map((item, index) => {
+  const kindLabel =
+    item.kind === "service"
+      ? item.serviceType === "pro"
+        ? "PRO SERVICE"
+        : item.serviceType === "diy"
+        ? "DIY"
+        : "SERVICE"
+      : "STORY";
 
-      return (
-        <View
-          key={item.id ?? `${item.date}-${item.title}`}
-          style={styles.timelineRow}
-        >
-          <View style={styles.timelineDateCol}>
-            <Text style={styles.timelineDate}>
-              {formatKeeprDate(String(item.date).slice(0, 10))}
+  return (
+    <View
+      key={`${showFull ? "full" : "major"}-${item.id ?? `${item.date}-${item.title}`}-${index}`}
+      style={styles.timelineRow}
+    >
+      <View style={styles.timelineDateCol}>
+        <Text style={styles.timelineDate}>
+          {formatKeeprDate(String(item.date).slice(0, 10))}
+        </Text>
+        <Text style={styles.timelineKind}>{kindLabel}</Text>
+      </View>
+
+      <View style={styles.timelineMainCol}>
+        {item.title ? (
+          <Text style={styles.timelineTitle}>{item.title}</Text>
+        ) : null}
+        {item.description ? (
+          <Text style={styles.timelineBody}>{item.description}</Text>
+        ) : null}
+
+        <View style={styles.timelineMetaRow}>
+          {item.systemName ? (
+            <Text style={styles.timelineMetaText}>
+              System: {item.systemName}
             </Text>
-            <Text style={styles.timelineKind}>{kindLabel}</Text>
-          </View>
-
-          <View style={styles.timelineMainCol}>
-            {item.title ? (
-              <Text style={styles.timelineTitle}>{item.title}</Text>
-            ) : null}
-            {item.description ? (
-              <Text style={styles.timelineBody}>{item.description}</Text>
-            ) : null}
-
-            <View style={styles.timelineMetaRow}>
-              {item.systemName ? (
-                <Text style={styles.timelineMetaText}>
-                  System: {item.systemName}
-                </Text>
-              ) : null}
-              {item.provider ? (
-                <Text style={styles.timelineMetaText}>
-                  Provider: {item.provider}
-                </Text>
-              ) : null}
-              {item.cost !== null &&
-              item.cost !== undefined &&
-              item.cost !== "" ? (
-                <Text style={styles.timelineMetaText}>
-                  Cost: {formatMoney(item.cost)}
-                </Text>
-              ) : null}
-            </View>
-          </View>
+          ) : null}
+          {item.provider ? (
+            <Text style={styles.timelineMetaText}>
+              Provider: {item.provider}
+            </Text>
+          ) : null}
+          {item.cost !== null &&
+          item.cost !== undefined &&
+          item.cost !== "" ? (
+            <Text style={styles.timelineMetaText}>
+              Cost: {formatMoney(item.cost)}
+            </Text>
+          ) : null}
         </View>
-      );
-    })}
-
-    <Pressable style={styles.timelineToggle} onPress={() => setShowFull(!showFull)}>
+      </View>
+    </View>
+  );
+})}
+<Pressable
+  style={styles.timelineToggle}
+  onPress={() => setShowFull(!showFull)}
+>
   <Text style={styles.timelineToggleText}>
     {showFull ? "Hide full timeline" : "View full timeline"}
   </Text>
 </Pressable>
-
-    {showFull &&
-      timeline.map((item) => {
-        const kindLabel =
-          item.kind === "service"
-            ? item.serviceType === "pro"
-              ? "PRO SERVICE"
-              : item.serviceType === "diy"
-              ? "DIY"
-              : "SERVICE"
-            : "STORY";
-
-        return (
-          <View
-            key={`full-${item.id ?? `${item.date}-${item.title}`}`}
-            style={styles.timelineRow}
-          >
-            <View style={styles.timelineDateCol}>
-              <Text style={styles.timelineDate}>
-                {formatKeeprDate(String(item.date).slice(0, 10))}
-              </Text>
-              <Text style={styles.timelineKind}>{kindLabel}</Text>
-            </View>
-
-            <View style={styles.timelineMainCol}>
-              {item.title ? (
-                <Text style={styles.timelineTitle}>{item.title}</Text>
-              ) : null}
-              {item.description ? (
-                <Text style={styles.timelineBody}>{item.description}</Text>
-              ) : null}
-
-              <View style={styles.timelineMetaRow}>
-                {item.systemName ? (
-                  <Text style={styles.timelineMetaText}>
-                    System: {item.systemName}
-                  </Text>
-                ) : null}
-                {item.provider ? (
-                  <Text style={styles.timelineMetaText}>
-                    Provider: {item.provider}
-                  </Text>
-                ) : null}
-                {item.cost !== null &&
-                item.cost !== undefined &&
-                item.cost !== "" ? (
-                  <Text style={styles.timelineMetaText}>
-                    Cost: {formatMoney(item.cost)}
-                  </Text>
-                ) : null}
-              </View>
-            </View>
-          </View>
-        );
-      })}
   </View>
 )}
         {/* Footer */}
@@ -359,46 +774,6 @@ const proofPhotos = story.proofPhotos || [];
   return (
     <>
     
-      {IS_WEB && (
-  <style
-    dangerouslySetInnerHTML={{
-      __html: `
-       @media print {
-        html, body {
-            background: #fff !important;
-        }
-
-        /* Hide everything first */
-        body * {
-            visibility: hidden;
-        }
-
-        /* Only show story */
-        #keepr-print-scroll,
-        #keepr-print-scroll * {
-            visibility: visible;
-        }
-
-        #keepr-print-scroll {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 100% !important;
-        }
-
-        /* Force remove sidebar/nav if still present */
-        aside,
-        nav,
-        [class*="sidebar"],
-        [class*="nav"] {
-            display: none !important;
-        }
-        }
-      `,
-    }}
-  />
-)}
-
       <SafeAreaView style={[layoutStyles.screen, styles.root]}>
         <ScrollView
           nativeID={IS_WEB ? "keepr-print-scroll" : undefined}

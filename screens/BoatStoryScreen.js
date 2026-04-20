@@ -29,12 +29,13 @@ import * as ImagePicker from "expo-image-picker";
 import KeeprProgressCard, {
   buildKeeprProgressModel,
 } from "../components/KeeprProgressCard";
+import { buildBoatStory } from "../lib/storyBuilders";
 
 // ✅ low-level upload helper (NOT a hook)
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 
 // ✅ attachments helpers (for hero placement resolution)
-import { getSignedUrl } from "../lib/attachmentsApi";
+import { getSignedUrl, listAttachmentsForTarget } from "../lib/attachmentsApi";
 
 // Context-aware Add Event pill
 import EventPill from "../components/EventPill";
@@ -50,6 +51,7 @@ if (
 ) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
+
 
 /* --------------------------- CHIP COMPONENTS --------------------------- */
 
@@ -251,6 +253,8 @@ const loadAssetProgress = useCallback(async (assetId) => {
   // Local snapshot so big updates (hero photo, delete, edits) reflect immediately
   const [boatSnapshot, setBoatSnapshot] = useState(null);
   const boat = boatSnapshot || currentBoat;
+
+  const [storyAttachments, setStoryAttachments] = useState([]);
 
   // Keep snapshot in sync when user switches boats
     useEffect(() => {
@@ -484,6 +488,54 @@ useEffect(() => {
       setSvcLoading(false);
       setStoryLoading(false);
     }
+
+    // 4) Story attachments / showcase photos
+try {
+  const rows = await listAttachmentsForTarget("asset", boatId);
+  const photos = [];
+
+  for (const row of rows || []) {
+    const kind = row.kind || "";
+    const mime = String(row.mime_type || "").toLowerCase();
+    const fileName = row.file_name || row.storage_path || "";
+    const ext = fileName.split(".").pop()?.toLowerCase() || "";
+
+    const looksLikeImage =
+      kind === "photo" ||
+      mime.startsWith("image/") ||
+      ["jpg", "jpeg", "png", "webp"].includes(ext);
+
+    if (!looksLikeImage) continue;
+
+    let url = row.url || null;
+
+    if (!url && row.bucket && row.storage_path) {
+      try {
+        url = await getSignedUrl({
+          bucket: row.bucket,
+          path: row.storage_path,
+        });
+      } catch (e) {
+        console.log("BoatStory attachment signed URL error", e);
+      }
+    }
+
+    if (!url) continue;
+
+    photos.push({
+      id: row.attachment_id || row.id,
+      uri: url,
+      isShowcase: !!row.is_showcase,
+      placementId: row.placement_id || null,
+      createdAt: row.created_at || null,
+    });
+  }
+
+  setStoryAttachments(photos);
+} catch (e) {
+  console.log("BoatStory attachment load error", e);
+  setStoryAttachments([]);
+}
   }, [boat?.id]);
 
   useFocusEffect(
@@ -812,31 +864,30 @@ const handleConfirmRemove = async () => {
     });
 
     (storyEvents || []).forEach((ev) => {
-      const type = ev.event_type || "";
+  const type = ev.event_type || "";
 
-      if (
-        type === "service_event" ||
-        type === "service_record_created" ||
-        type === "service_record_updated" ||
-        type === "service_record_deleted" ||
-        type.startsWith("service_record_")
-      ) {
-        return;
-      }
+  if (
+    type === "service_event" ||
+    type === "service_record_created" ||
+    type === "service_record_updated" ||
+    type === "service_record_deleted" ||
+    type.startsWith("service_record_")
+  ) {
+    return;
+  }
 
-      items.push({
-        id: ev.id,
-        kind: "story",
-        eventType: type,
-        title: ev.title || "",
-        description: ev.description || "",
-        date:
-          ev.occurred_at ||
-          ev.created_at ||
-          ev.inserted_at ||
-          new Date().toISOString(),
-      });
-    });
+  items.push({
+    id: ev.id,
+    kind: "story",
+    eventType: ev.event_type || null,
+    title: ev.title || "Story update",
+    description: ev.notes || "",
+    date:
+      ev.occurred_at ||
+      ev.created_at ||
+      new Date().toISOString(),
+  });
+});
 
     (serviceRecords || []).forEach((rec) => {
       const date =
@@ -962,6 +1013,20 @@ const meta = {
   const boatDisplayName =
   `${boat?.year || ""} ${boat?.make || ""} ${boat?.model || ""}`.trim() || "Boat";
 
+  const goToKeeprStory = () => {
+  if (!boat?.id) return;
+
+  const story = buildBoatStory({
+    asset: boat,
+    heroUri,
+    records: timelineItems || [],
+    systems: systems || [],
+    attachments: storyAttachments || [],
+    heroPlacementId: boat?.hero_placement_id || null,
+  });
+
+  navigation.navigate("KeeprStory", { story });
+};
 
   const goToStoryPrint = () => {
   if (!currentBoat?.id) return;
@@ -1010,6 +1075,7 @@ const meta = {
     asset={boat}
     navigation={navigation}
     onOpenStorySheet={goToStoryPrint}
+    onOpenKeeprStory={goToKeeprStory}
   />
 </SafeAreaView>
     );
@@ -1029,6 +1095,7 @@ const meta = {
     asset={boat}
     navigation={navigation}
     onOpenStorySheet={goToStoryPrint}
+    onOpenKeeprStory={goToKeeprStory}
   />
 </SafeAreaView>
     );
@@ -1086,6 +1153,7 @@ const meta = {
     asset={boat}
     navigation={navigation}
     onOpenStorySheet={goToStoryPrint}
+    onOpenKeeprStory={goToKeeprStory}
   />
 </SafeAreaView>
     );
@@ -1588,6 +1656,7 @@ const meta = {
     asset={boat}
     navigation={navigation}
     onOpenStorySheet={goToStoryPrint}
+    onOpenKeeprStory={goToKeeprStory}
   />
 </SafeAreaView>
   );

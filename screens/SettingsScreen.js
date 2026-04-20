@@ -81,7 +81,7 @@ export default function SettingsScreen({ navigation }) {
       const { data, error } = await supabase
         .from("profiles")
         .select(
-          "display_name, full_name, email, plan, role, onboarding_state, account_status, created_at, username"
+          "display_name, full_name, email, plan, role, onboarding_state, account_status, created_at, username, inbox_name"
         )
         .eq("id", user.id)
         .single();
@@ -129,7 +129,7 @@ export default function SettingsScreen({ navigation }) {
   }, []);
 
   const email = authEmail;
-  const username = profile?.username || null;
+ const inboxName = profile?.inbox_name || null;
 
   const loadTeamOrg = React.useCallback(async () => {
     setTeamLoading(true);
@@ -360,12 +360,12 @@ setTeamOrg(chosenOrg);
             <Row
               icon="at-outline"
               iconBg={colors.surfaceSubtle}
-              title={username ? `${username}@inbox.keeprhome.com` : "Choose your Keepr inbox"}
-              subtitle={
-                username
-                  ? "Forward receipts and invoices here and they will land in your Event Inbox"
-                  : "Not chosen yet"
-              }
+             title={inboxName ? `${inboxName}@inbox.keeprhome.com` : "Choose your Keepr inbox"}
+            subtitle={
+              inboxName
+                ? "Forward receipts and documents here. They will land in your Keepr inbox."
+                : "Not chosen yet"
+            }
               onPress={() => navigationRef.navigate("Profile")}
             />
             <View style={styles.divider} />
@@ -397,6 +397,19 @@ setTeamOrg(chosenOrg);
               onPress={handleOpenTeam}
             />
           </View>
+        </View>
+
+        {/* PUBLIC VIEW */}
+        <View style={styles.section}>
+          <View style={styles.card}>
+        <Row
+          icon="globe-outline"
+          iconBg={colors.surfaceSubtle}
+          title="Public view & actions"
+          subtitle="Choose an asset to configure its public behavior"
+          onPress={() => navigationRef.navigate("PublicConfigAssetPicker")}
+        />
+        </View>
         </View>
 
         {/* TRUST */}

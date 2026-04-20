@@ -34,11 +34,12 @@ import KeeprProgressCard, {
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 
 // ✅ attachments helpers (for hero placement resolution)
-import { getSignedUrl } from "../lib/attachmentsApi";
+import { getSignedUrl, listAttachmentsForTarget } from "../lib/attachmentsApi";
 
 // Context-aware Add Event pill
 import EventPill from "../components/EventPill";
 import ReportsModal from "../components/ReportsModal";
+import { buildVehicleStory } from "../lib/storyBuilders";
 
 const HERO_ASPECT = 4 / 3;
 const IS_WEB = Platform.OS === "web";
@@ -242,6 +243,21 @@ const loadAssetProgress = useCallback(async (assetId) => {
 
   const { assets: vehicles = [], loading, error } = useAssets("vehicle");
 
+  const goToKeeprStory = () => {
+    if (!currentVehicle?.id) return;
+
+    const story = buildVehicleStory({
+      asset: currentVehicle,
+      heroUri,
+      records: timelineItems || [],
+      systems: systems || [],
+      attachments: storyAttachments || [],
+      heroPlacementId: currentVehicle?.hero_placement_id || null,
+    });
+
+    navigation.navigate("KeeprStory", { story });
+  };
+
   const currentVehicle = useMemo(() => {
     if (!vehicles || vehicles.length === 0) return null;
     if (!initialVehicleId) return vehicles[0];
@@ -269,8 +285,9 @@ const loadAssetProgress = useCallback(async (assetId) => {
     if (!error && data) setVehicleSnapshot(data);
   }, [vehicle?.id]);
 
-  const [reportsOpen, setReportsOpen] = useState(false);
+const [reportsOpen, setReportsOpen] = useState(false);
  const [assetProgress, setAssetProgress] = useState(null);
+ const [storyAttachments, setStoryAttachments] = useState([]);
 
 useEffect(() => {
   if (vehicle?.id) {
@@ -486,6 +503,53 @@ useEffect(() => {
       setSvcLoading(false);
       setStoryLoading(false);
     }
+          // 4) Showcase / proof attachments for story
+      try {
+        const rows = await listAttachmentsForTarget("asset", vehicleId);
+        const photos = [];
+
+        for (const row of rows || []) {
+          const kind = row.kind || "";
+          const mime = String(row.mime_type || "").toLowerCase();
+          const fileName = row.file_name || row.storage_path || "";
+          const ext = fileName.split(".").pop()?.toLowerCase() || "";
+
+          const looksLikeImage =
+            kind === "photo" ||
+            mime.startsWith("image/") ||
+            ["jpg", "jpeg", "png", "webp"].includes(ext);
+
+          if (!looksLikeImage) continue;
+
+          let url = row.url || null;
+
+          if (!url && row.bucket && row.storage_path) {
+            try {
+              url = await getSignedUrl({
+                bucket: row.bucket,
+                path: row.storage_path,
+              });
+            } catch (e) {
+              console.log("VehicleStory attachment signed URL error", e);
+            }
+          }
+
+          if (!url) continue;
+
+          photos.push({
+            id: row.attachment_id || row.id,
+            uri: url,
+            isShowcase: !!row.is_showcase,
+            placementId: row.placement_id || null,
+            createdAt: row.created_at || null,
+          });
+        }
+
+        setStoryAttachments(photos);
+      } catch (e) {
+        console.log("VehicleStory attachment load error", e);
+        setStoryAttachments([]);
+      }
   }, [vehicle?.id]);
 
   useFocusEffect(
@@ -852,7 +916,7 @@ const handleConfirmRemove = async () => {
           ? systemMap[rec.system_id]
           : null;
 
-      items.push({
+        items.push({
         id: rec.id,
         kind: "service",
         serviceRecordId: rec.id,
@@ -860,9 +924,11 @@ const handleConfirmRemove = async () => {
         description: rec.notes || "",
         provider: rec.location || null,
         serviceType: rec.service_type || null,
+        system_id: rec.system_id || null,
         systemName,
         cost: rec.cost,
         date,
+        hasAttachment: !!serviceAttachments?.[rec.id],
       });
     });
 
@@ -1003,16 +1069,16 @@ const meta = {
           <ActivityIndicator />
           <Text style={{ marginTop: spacing.sm }}>Loading vehicle…</Text>
         </View>
-      
 
-  <ReportsModal
-    visible={reportsOpen}
-    onClose={() => setReportsOpen(false)}
-    asset={vehicle}
-    navigation={navigation}
-    onOpenStorySheet={goToStoryPrint}
-  />
-</SafeAreaView>
+        <ReportsModal
+        visible={reportsOpen}
+        onClose={() => setReportsOpen(false)}
+        asset={vehicle}
+        navigation={navigation}
+        onOpenStorySheet={goToStoryPrint}
+        onOpenKeeprStory={goToKeeprStory}
+      />
+      </SafeAreaView>
     );
   }
 
@@ -1023,14 +1089,6 @@ const meta = {
           <Text style={{ color: "red" }}>{error}</Text>
         </View>
       
-
-  <ReportsModal
-    visible={reportsOpen}
-    onClose={() => setReportsOpen(false)}
-    asset={vehicle}
-    navigation={navigation}
-    onOpenStorySheet={goToStoryPrint}
-  />
 </SafeAreaView>
     );
   }
@@ -1079,15 +1137,14 @@ const meta = {
             <Text style={styles.emptySecondaryBtnText}>Add Asset with Kai</Text>
           </TouchableOpacity>
         </View>
-      
-
   <ReportsModal
-    visible={reportsOpen}
-    onClose={() => setReportsOpen(false)}
-    asset={vehicle}
-    navigation={navigation}
-    onOpenStorySheet={goToStoryPrint}
-  />
+  visible={reportsOpen}
+  onClose={() => setReportsOpen(false)}
+  asset={vehicle}
+  navigation={navigation}
+  onOpenStorySheet={goToStoryPrint}
+  onOpenKeeprStory={goToKeeprStory}
+/>
 </SafeAreaView>
     );
   }
@@ -1577,15 +1634,15 @@ const meta = {
           </View>
         </View>
       </Modal>
-    
 
-  <ReportsModal
-    visible={reportsOpen}
-    onClose={() => setReportsOpen(false)}
-    asset={vehicle}
-    navigation={navigation}
-    onOpenStorySheet={goToStoryPrint}
-  />
+ <ReportsModal
+  visible={reportsOpen}
+  onClose={() => setReportsOpen(false)}
+  asset={vehicle}
+  navigation={navigation}
+  onOpenStorySheet={goToStoryPrint}
+  onOpenKeeprStory={goToKeeprStory}
+/>
 </SafeAreaView>
   );
 }

@@ -18,6 +18,8 @@ import {
 } from "react-native";
 
 import { colors, spacing, radius } from "../styles/theme";
+import { supabase } from "../lib/supabaseClient";
+import { useFocusEffect } from "@react-navigation/native";
 
 const PROJECT_REF = "jjzjuqxysucqutgjnrkk";
 const FUNCTIONS_BASE = `https://${PROJECT_REF}.supabase.co/functions/v1`;
@@ -112,7 +114,7 @@ function normalizeResolved(input, { kac, token }) {
     return {
       ...r,
       kac: r.kac || kac || null,
-      asset_id: r.asset_id || null,
+      asset_id: r.asset_id || r.asset?.id || null,
       asset_type: r.asset_type || "asset",
       has_access: !!r.has_access,
       allowed_actions: Array.isArray(r.allowed_actions)
@@ -123,7 +125,9 @@ function normalizeResolved(input, { kac, token }) {
   }
 
   const assetId = r?.asset?.id || r?.asset_id || null;
+
   return {
+    ...r, // <-- important: keep inbox_username / inbox_email_address
     ok: true,
     source: "token",
     token: token || null,
@@ -132,15 +136,87 @@ function normalizeResolved(input, { kac, token }) {
     asset_type: "asset",
     asset_id: assetId,
     has_access: false,
-    allowed_actions: [
-      "answer_question",
-      "capture_event_inbox",
-      "request_access",
-    ],
+    allowed_actions: Array.isArray(r.allowed_actions)
+      ? r.allowed_actions
+      : ["answer_question", "capture_event_inbox", "request_access"],
     asset: r.asset || null,
     system: r.system || null,
     mode: r.mode || null,
   };
+}
+
+const ACTION_META = {
+  request_info: {
+    label: "Request Info",
+    title: "Request information",
+    hint: "Use this for sale, rent, or general questions about this asset.",
+    cta: "Send request",
+    intentType: "request_info",
+    needsTitle: false,
+    messagePlaceholder: "What would you like to know?",
+  },
+  request_service: {
+    label: "Request Service",
+    title: "Request service",
+    hint: "Describe the issue, service need, or maintenance concern.",
+    cta: "Send service request",
+    intentType: "request_service",
+    needsTitle: true,
+    titlePlaceholder: "Title (ex: AC not cooling)",
+    messagePlaceholder: "Describe the issue or service needed…",
+  },
+  submit_quote: {
+    label: "Submit Quote",
+    title: "Submit quote",
+    hint: "Share pricing, scope, and details for this asset.",
+    cta: "Submit quote",
+    intentType: "submit_quote",
+    needsTitle: true,
+    titlePlaceholder: "Title (ex: Landscape quote)",
+    messagePlaceholder: "Add quote details, scope, and notes…",
+  },
+  submit_proposal: {
+    label: "Submit Proposal",
+    title: "Submit service proposal",
+    hint: "Submit a more formal proposal for work on this asset.",
+    cta: "Submit proposal",
+    intentType: "submit_proposal",
+    needsTitle: true,
+    titlePlaceholder: "Title (ex: Spring service proposal)",
+    messagePlaceholder: "Describe scope, timing, and proposal details…",
+  },
+  pay_rent: {
+    label: "Pay Rent",
+    title: "Pay rent",
+    hint: "Payment flow can be enabled here later.",
+    cta: "Pay rent",
+    intentType: "pay_rent",
+    needsTitle: false,
+    messagePlaceholder: "Optional note…",
+  },
+};
+
+function getActionsForMode(mode) {
+  switch (String(mode || "").toLowerCase()) {
+    case "for_sale":
+      return ["request_info", "submit_quote"];
+
+    case "for_rent":
+      return ["request_info", "request_service", "pay_rent"];
+
+    case "builder":
+      return ["request_service", "submit_proposal"];
+
+    case "system_story":
+      return ["request_service", "submit_quote"];
+
+    case "current_story":
+      return ["request_info", "request_service", "submit_quote"];
+
+    case "inquiry":
+    default:
+      return ["request_info", "request_service", "submit_quote"];
+  }
 }
 
 export default function PublicActionScreen({ route, navigation }) {
@@ -161,9 +237,16 @@ export default function PublicActionScreen({ route, navigation }) {
   const [notes, setNotes] = useState("");
   const [question, setQuestion] = useState("");
 
+  const [selectedAction, setSelectedAction] = useState(null);
+  const [actionTitle, setActionTitle] = useState("");
+  const [actionMessage, setActionMessage] = useState("");
+
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+
+  const [viewerUserId, setViewerUserId] = useState(null);
+const [canConfigurePublicView, setCanConfigurePublicView] = useState(false);
 
   const assetId = resolved?.asset_id || null;
   const asset = resolved?.asset || null;
@@ -172,32 +255,67 @@ export default function PublicActionScreen({ route, navigation }) {
     return "Keepr Owner Portal";
   }, []);
 
-  const inboxUsername =
-    resolved?.inbox_username ||
-    resolved?.owner_username ||
-    resolved?.ownerUsername ||
-    resolved?.asset?.owner_username ||
-    resolved?.asset?.ownerUsername ||
-    resolved?.asset?.username ||
-    "owner";
 
-  const inboxEmailAddress = kac
-    ? `${inboxUsername}+${kac}@inbox.keeprhome.com`
-    : `${inboxUsername}@inbox.keeprhome.com`;
+const publicConfig =
+  resolved?.public_config && typeof resolved.public_config === "object"
+    ? resolved.public_config
+    : {};
 
-  const inboxEmailDisplay = `${inboxUsername}@inbox.keeprhome.com`;
+const actionConfig = publicConfig.actions || {};
 
-  const allowedActions = Array.isArray(resolved?.allowed_actions)
-    ? resolved.allowed_actions
-    : [];
+const configuredInboxAddress =
+  publicConfig.inboxEmailAddress ||
+  publicConfig.inbox_email_address ||
+  resolved?.inbox_email_address ||
+  resolved?.inboxEmailAddress ||
+  null;
 
-  const canAsk = allowedActions.length
-    ? allowedActions.includes("answer_question")
-    : true;
+const configuredInboxUsername =
+  publicConfig.inboxUsername ||
+  publicConfig.inbox_username ||
+  resolved?.inbox_username ||
+  resolved?.asset?.owner_inbox_name ||
+  resolved?.asset?.inbox_name ||
+  null;
 
-  const canLog = allowedActions.length
-    ? allowedActions.includes("capture_event_inbox")
-    : !!assetId;
+const inboxUsername = configuredInboxUsername || "owner";
+
+const inboxEmailAddress = configuredInboxAddress
+  ? configuredInboxAddress
+  : kac
+  ? `${inboxUsername}+${kac}@inbox.keeprhome.com`
+  : `${inboxUsername}@inbox.keeprhome.com`;
+
+const inboxEmailDisplay = configuredInboxAddress
+  ? configuredInboxAddress
+  : `${inboxUsername}@inbox.keeprhome.com`;
+
+const mode =
+  actionConfig.mode ||
+  resolved?.mode ||
+  "inquiry";
+
+// backend fallback (what server allows)
+const backendAllowedActions = Array.isArray(resolved?.allowed_actions)
+  ? resolved.allowed_actions
+  : [];
+
+// config-driven actions (owner intent)
+const configuredActions = Array.isArray(actionConfig.actionsEnabled)
+  ? actionConfig.actionsEnabled
+  : null;
+
+// final action set
+const enabledActions = configuredActions
+  ? configuredActions
+  : backendAllowedActions.length
+  ? backendAllowedActions
+  : getActionsForMode(mode);
+
+const selectedActionMeta = selectedAction ? ACTION_META[selectedAction] : null;
+
+const canAsk = enabledActions.includes("request_info");
+const canLog = enabledActions.includes("request_service") || !!assetId;
 
   function requireIdentity() {
     if (!name.trim() || !email.trim()) {
@@ -207,7 +325,8 @@ export default function PublicActionScreen({ route, navigation }) {
     return true;
   }
 
-  useEffect(() => {
+  useFocusEffect(
+  React.useCallback(() => {
     let cancelled = false;
 
     const run = async () => {
@@ -229,6 +348,9 @@ export default function PublicActionScreen({ route, navigation }) {
         const path = token ? "public-resolve" : "kac-resolve";
         const json = await postFunction(path, payload, null);
 
+        console.log("PUBLIC ACTION RESOLVE PATH:", path);
+        console.log("PUBLIC ACTION RAW JSON:", json);
+
         if (cancelled) return;
 
         const normalized = normalizeResolved(json, { kac, token });
@@ -243,10 +365,76 @@ export default function PublicActionScreen({ route, navigation }) {
     };
 
     run();
+
     return () => {
       cancelled = true;
     };
-  }, [kac, token]);
+  }, [kac, token])
+);
+
+useEffect(() => {
+  if (!enabledActions.length) return;
+
+  if (!selectedAction || !enabledActions.includes(selectedAction)) {
+    setSelectedAction(enabledActions[0]);
+  }
+}, [enabledActions]);
+
+useEffect(() => {
+  let cancelled = false;
+
+  const run = async () => {
+    try {
+      const { data: userRes } = await supabase.auth.getUser();
+      const uid = userRes?.user?.id || null;
+
+      if (cancelled) return;
+
+      setViewerUserId(uid);
+
+      if (!uid || !assetId) {
+        setCanConfigurePublicView(false);
+        return;
+      }
+
+      // Owner can always configure
+      if (asset?.owner_id && asset.owner_id === uid) {
+        setCanConfigurePublicView(true);
+        return;
+      }
+
+      // Team / steward access
+      const { data: stewardship, error } = await supabase
+        .from("asset_stewardships")
+        .select("asset_id, user_id, active")
+        .eq("asset_id", assetId)
+        .eq("user_id", uid)
+        .eq("active", true)
+        .maybeSingle();
+
+      if (cancelled) return;
+
+      if (error) {
+        console.log("Public configure access check failed:", error.message);
+        setCanConfigurePublicView(false);
+        return;
+      }
+
+      setCanConfigurePublicView(!!stewardship);
+    } catch (e) {
+      if (!cancelled) {
+        console.log("Public configure access error:", e?.message || e);
+        setCanConfigurePublicView(false);
+      }
+    }
+  };
+
+  run();
+
+  return () => {
+    cancelled = true;
+  };
+}, [assetId, asset?.owner_id]);
 
   const openInboxMailto = async () => {
     const kacCode = String(resolved?.kac || kac || "").trim();
@@ -351,9 +539,75 @@ export default function PublicActionScreen({ route, navigation }) {
     }
   };
 
+  const handleSubmitStructuredAction = async () => {
+  if (!selectedActionMeta) return;
+  if (!requireIdentity()) return;
+
+  if (selectedAction === "pay_rent") {
+    showNotLiveYet("Pay Rent");
+    return;
+  }
+
+  if (selectedActionMeta.needsTitle && !actionTitle.trim()) {
+    Alert.alert("Missing title", "Please add a short title.");
+    return;
+  }
+
+  if (!actionMessage.trim()) {
+    Alert.alert("Missing details", "Please add a message or description.");
+    return;
+  }
+
+  try {
+    const res = await postFunction(
+      "public-action",
+      {
+        kac: resolved?.kac || kac || null,
+        token: token || null,
+        intent: "capture_event_inbox",
+        payload: {
+          title: selectedActionMeta.needsTitle
+            ? actionTitle.trim()
+            : selectedActionMeta.title,
+          notes: actionMessage.trim(),
+          occurred_at: new Date().toISOString().slice(0, 10),
+          type: selectedActionMeta.intentType,
+          contact_name: name,
+          contact_email: email,
+          contact_phone: phone || null,
+        },
+      },
+      null
+    );
+
+    Alert.alert(
+      "Submitted",
+      `${selectedActionMeta.label} sent${res?.event?.id ? ` (${shortId(res.event.id)})` : ""}.`
+    );
+
+    setSelectedAction(null);
+    setActionTitle("");
+    setActionMessage("");
+  } catch (e) {
+    Alert.alert("Could not submit", e?.message || "Try again.");
+  }
+};
+
   const showNotLiveYet = (label) => {
     Alert.alert(label, "Coming soon in Portal V1. This will publish structured demand into the owner’s Event Inbox.");
   };
+
+  const handleOpenPublicConfig = () => {
+  if (!assetId) {
+    Alert.alert("Not ready", "This asset is not fully resolved yet.");
+    return;
+  }
+
+  navigation.navigate("PublicConfig", {
+    assetId,
+    assetName: asset?.name || "Asset",
+  });
+};
 
   if (loading) {
     return (
@@ -383,37 +637,49 @@ export default function PublicActionScreen({ route, navigation }) {
   return (
     <SafeAreaView style={styles.screen}>
       <View style={styles.headerBar}>
-        <View style={{ flexDirection: "row", alignItems: "center" }}>
-          {navigation?.canGoBack?.() ? (
-            <TouchableOpacity
-              onPress={() => navigation.goBack()}
-              style={styles.headerBackBtn}
-            >
-              <Text style={styles.headerBackText}>‹</Text>
-            </TouchableOpacity>
-          ) : null}
-          <View>
-            <Text style={styles.headerTitle}>
-              {asset?.name ? asset.name : "Keepr"}
-            </Text>
-            <Text style={styles.headerSub}>{headerSubtitle}</Text>
-          </View>
-        </View>
+      <View style={{ flexDirection: "row", alignItems: "center", flex: 1 }}>
+        {navigation?.canGoBack?.() ? (
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            style={styles.headerBackBtn}
+          >
+            <Text style={styles.headerBackText}>‹</Text>
+          </TouchableOpacity>
+        ) : null}
 
-        <View style={styles.headerChips}>
-          {resolved?.kac ? (
-            <View style={styles.chip}>
-              <Text style={styles.chipLabel}>KAC</Text>
-              <Text style={styles.chipValue}>{shortId(resolved.kac)}</Text>
-            </View>
-          ) : null}
-
-          <View style={[styles.chip, styles.chipAccessNo]}>
-            <Text style={styles.chipLabel}>Access</Text>
-            <Text style={styles.chipValue}>public</Text>
-          </View>
+        <View>
+          <Text style={styles.headerTitle}>
+            {asset?.name ? asset.name : "Keepr"}
+          </Text>
+          <Text style={styles.headerSub}>{headerSubtitle}</Text>
         </View>
       </View>
+
+      <View style={styles.headerChips}>
+        {resolved?.kac ? (
+          <View style={styles.chip}>
+            <Text style={styles.chipLabel}>KAC</Text>
+            <Text style={styles.chipValue}>{shortId(resolved.kac)}</Text>
+          </View>
+        ) : null}
+
+        <View style={[styles.chip, styles.chipAccessNo]}>
+          <Text style={styles.chipLabel}>Access</Text>
+          <Text style={styles.chipValue}>public</Text>
+        </View>
+
+        {canConfigurePublicView ? (
+          <TouchableOpacity
+            onPress={handleOpenPublicConfig}
+            style={styles.configureBtn}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.configureBtnText}>Configure</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    </View>
+      
 
       {!!error ? (
         <View style={styles.errorBanner}>
@@ -427,65 +693,112 @@ export default function PublicActionScreen({ route, navigation }) {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.portalIntroCard}>
-          <Text style={styles.portalIntroTitle}>Portal Access</Text>
-          <Text style={styles.portalIntroText}>
-            Use this portal to communicate with the owner, submit documents,
-            and add work-related items to this asset’s Event Inbox.
-          </Text>
-        </View>
+  <Text style={styles.portalIntroTitle}>Take Action</Text>
+  <Text style={styles.portalIntroText}>
+    This asset can accept structured requests through Keepr. Choose what you want to do below.
+  </Text>
+</View>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Identify yourself</Text>
-          <Text style={styles.cardHint}>
-            This maps your submission back to the Event Inbox so the owner can reply and accept it into the timeline.
-          </Text>
+{actionConfig.enabled !== false ? (
+  <>
+<Text style={styles.sectionTitle}>CHOOSE AN ACTION</Text>
+<View style={styles.card}>
+  <View style={styles.actionGrid}>
+    {enabledActions.map((actionKey) => {
+      const meta = ACTION_META[actionKey];
+      if (!meta) return null;
 
-          <TextInput
-            value={name}
-            onChangeText={setName}
-            placeholder="Name"
-            style={styles.input}
-          />
+      const active = selectedAction === actionKey;
 
-          <TextInput
-            value={email}
-            onChangeText={setEmail}
-            placeholder="Email"
-            autoCapitalize="none"
-            keyboardType="email-address"
-            style={styles.input}
-          />
-
-          <TextInput
-            value={phone}
-            onChangeText={setPhone}
-            placeholder="Phone (optional)"
-            keyboardType="phone-pad"
-            style={styles.input}
-          />
-        </View>
-
-        <Text style={styles.sectionTitle}>COMMUNICATE</Text>
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Ask a question</Text>
-          <Text style={styles.cardHint}>
-            Great for “What filter size do I need?” or “Where is the shutoff?”
-          </Text>
-          <TextInput
-            value={question}
-            onChangeText={setQuestion}
-            placeholder="Type your question…"
-            placeholderTextColor={colors.textMuted}
-            style={styles.input}
-          />
-          <TouchableOpacity
-            onPress={handleAskQuestion}
-            style={[styles.primaryBtn, !canAsk && styles.btnDisabled]}
-            disabled={!canAsk}
+      return (
+        <TouchableOpacity
+          key={actionKey}
+          onPress={() => {
+            setSelectedAction(actionKey);
+            setActionTitle("");
+            setActionMessage("");
+          }}
+          style={[
+            styles.actionPill,
+            active && styles.actionPillActive,
+          ]}
+          activeOpacity={0.85}
+        >
+          <Text
+            style={[
+              styles.actionPillText,
+              active && styles.actionPillTextActive,
+            ]}
           >
-            <Text style={styles.primaryBtnText}>Send question</Text>
-          </TouchableOpacity>
-        </View>
+            {meta.label}
+          </Text>
+        </TouchableOpacity>
+      );
+    })}
+  </View>
+</View>
+  </>
+) : null}
+
+{selectedActionMeta ? (
+  <>
+    <Text style={styles.sectionTitle}>ACTION DETAILS</Text>
+    <View style={styles.card}>
+      <Text style={styles.cardTitle}>{selectedActionMeta.title}</Text>
+      <Text style={styles.cardHint}>{selectedActionMeta.hint}</Text>
+
+      {selectedActionMeta.needsTitle ? (
+        <TextInput
+          value={actionTitle}
+          onChangeText={setActionTitle}
+          placeholder={selectedActionMeta.titlePlaceholder || "Title"}
+          style={styles.input}
+        />
+      ) : null}
+
+      <TextInput
+        value={actionMessage}
+        onChangeText={setActionMessage}
+        placeholder={selectedActionMeta.messagePlaceholder || "Details…"}
+        placeholderTextColor={colors.textMuted}
+        multiline
+        textAlignVertical="top"
+        style={[styles.input, styles.textArea]}
+      />
+
+      <TextInput
+        value={name}
+        onChangeText={setName}
+        placeholder="Name"
+        style={styles.input}
+      />
+
+      <TextInput
+        value={email}
+        onChangeText={setEmail}
+        placeholder="Email"
+        autoCapitalize="none"
+        keyboardType="email-address"
+        style={styles.input}
+      />
+
+      <TextInput
+        value={phone}
+        onChangeText={setPhone}
+        placeholder="Phone (optional)"
+        keyboardType="phone-pad"
+        style={styles.input}
+      />
+
+      <TouchableOpacity
+        onPress={handleSubmitStructuredAction}
+        style={styles.primaryBtn}
+      >
+        <Text style={styles.primaryBtnText}>{selectedActionMeta.cta}</Text>
+      </TouchableOpacity>
+    </View>
+  </>
+) : null}
 
         <Text style={styles.sectionTitle}>DOCUMENT</Text>
         <View style={styles.card}>
@@ -501,11 +814,13 @@ export default function PublicActionScreen({ route, navigation }) {
           </TouchableOpacity>
         </View>
 
+{(publicConfig?.story?.showSystems ?? true) ? (
+  <>
         <Text style={styles.sectionTitle}>RECORD</Text>
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Quick log</Text>
+          <Text style={styles.cardTitle}>Log something for the owner</Text>
           <Text style={styles.cardHint}>
-            Creates a draft event for the owner to accept into the timeline.
+            Use this if you completed work or want to leave a record.
           </Text>
 
           <TextInput
@@ -539,47 +854,8 @@ export default function PublicActionScreen({ route, navigation }) {
             </Text>
           ) : null}
         </View>
-
-        <Text style={styles.sectionTitle}>SUBMIT / REQUEST </Text>
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Communication Portal</Text>
-          <Text style={styles.cardHint}>
-            Soon this portal will support structured requests like quotes,
-            service requests, warranty claims, and insurance claims.
-          </Text>
-
-          <View style={styles.comingSoonRow}>
-            <TouchableOpacity
-              onPress={() => showNotLiveYet("Submit quote")}
-              style={styles.secondaryBtn}
-            >
-              <Text style={styles.secondaryBtnText}>Submit Quote</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => showNotLiveYet("Submit Service Proposal")}
-              style={styles.secondaryBtn}
-            >
-              <Text style={styles.secondaryBtnText}>Submit Service Proposal</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.comingSoonRow}>
-            <TouchableOpacity
-              onPress={() => showNotLiveYet("View Warranty Claim")}
-              style={styles.secondaryBtn}
-            >
-              <Text style={styles.secondaryBtnText}>View Warranty claim</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => showNotLiveYet("View Insurance Claim")}
-              style={styles.secondaryBtn}
-            >
-              <Text style={styles.secondaryBtnText}>View Insurance Claim</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+        </>
+      ) : null}
 
         <View style={styles.footerNote}>
           <Text style={styles.footerNoteText}>
@@ -599,6 +875,23 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     padding: spacing.lg,
   },
+
+  configureBtn: {
+  marginLeft: spacing.sm,
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 6,
+  paddingHorizontal: 12,
+  paddingVertical: 8,
+  borderRadius: 999,
+  backgroundColor: colors.textPrimary,
+},
+
+configureBtnText: {
+  color: "#FFFFFF",
+  fontSize: 12,
+  fontWeight: "900",
+},
 
   headerBar: {
     flexDirection: "row",
@@ -628,6 +921,37 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 16, fontWeight: "900", color: colors.textPrimary },
   headerSub: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
   headerChips: { flexDirection: "row", alignItems: "center" },
+
+actionGrid: {
+  flexDirection: "row",
+  flexWrap: "wrap",
+  gap: spacing.sm,
+},
+
+actionPill: {
+  paddingHorizontal: spacing.md,
+  paddingVertical: 12,
+  borderRadius: 999,
+  backgroundColor: colors.surface,
+  borderWidth: 1,
+  borderColor: "#11182722",
+},
+
+actionPillActive: {
+  backgroundColor: colors.primary,
+  borderColor: colors.primary,
+},
+
+actionPillText: {
+  fontSize: 12,
+  fontWeight: "900",
+  color: colors.textPrimary,
+},
+
+actionPillTextActive: {
+  color: "#FFFFFF",
+},
+
   chip: {
     marginLeft: spacing.sm,
     paddingHorizontal: spacing.md,

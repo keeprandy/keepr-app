@@ -139,6 +139,8 @@ import EditAssetScreen from "./screens/EditAssetScreen";
 
 // Other
 import SettingsScreen from "./screens/SettingsScreen";
+import PublicConfigScreen from "./screens/PublicConfigScreen";
+import PublicConfigAssetPickerScreen from "./screens/PublicConfigAssetPickerScreen";
 
 // Auth
 import { AuthProvider, useAuth } from "./context/AuthContext";
@@ -995,6 +997,9 @@ function GlobalEventFab({ currentRouteName, role }) {
     "OwnerSystemsPackagePrint",
   "Reports",
   "PrintView",
+  "PublicAction",
+  "KeeprStory",
+  "PublicConfig",
   ];
 
   if (hiddenRoutes.includes(route)) {
@@ -1344,6 +1349,8 @@ const initialRouteName = isResetLink
           <RootStack.Screen name="PlanUpgrade" component={PlanUpgradeScreen}/>
           <RootStack.Screen name="Team" component={TeamScreen}/>
           <RootStack.Screen name="ManageTeam" component={ManageTeamScreen} />
+          <RootStack.Screen name="PublicConfig" component={PublicConfigScreen} />
+          <RootStack.Screen name="PublicConfigAssetPicker" component={PublicConfigAssetPickerScreen} />
 
           <RootStack.Screen name="UploadLab" component={UploadLabScreen} />
 

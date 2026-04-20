@@ -49,8 +49,7 @@ export default function ReportsModal({
           navigation.navigate("StoryPrint");
         },
       },
-
-        {
+         {
           key: "keepr_story",
           section: "Story",
           title: "Keepr Story",
@@ -64,8 +63,7 @@ export default function ReportsModal({
               return;
             }
 
-            onClose?.();
-            navigation.navigate("KeeprStory");
+            throw new Error("Keepr Story requires a built story payload.");
           },
         },
             {

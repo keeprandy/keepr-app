@@ -195,13 +195,19 @@ export default function SuperKeeprDashboardScreen({ navigation }) {
   );
 
 const fetchAssets = useCallback(async () => {
+  if (!user?.id) {
+    setAssets([]);
+    setLoading(false);
+    return;
+  }
+
   setLoading(true);
 
   try {
     const { data, error } = await supabase
       .from("assets")
       .select("*")
-      .eq("owner_id", user?.id)
+      .eq("owner_id", user.id)
       .is("deleted_at", null)
       .order("created_at", { ascending: false });
 
@@ -229,91 +235,91 @@ const fetchAssets = useCallback(async () => {
       return true;
     });
 
-    const assetsWithHero = await Promise.all(
-      classFiltered.map(async (asset) => {
-        try {
-          if (asset?.hero_placement_id) {
-            const { data: placement, error: placementError } = await supabase
-              .from("attachment_placements")
-              .select(`
-                id,
-                attachment:attachments (
-                  bucket,
-                  storage_path,
-                  url,
-                  mime_type,
-                  kind,
-                  deleted_at
-                )
-              `)
-              .eq("id", asset.hero_placement_id)
-              .maybeSingle();
+    // Render immediately so cards appear fast
+    setAssets(classFiltered);
+    setLoading(false);
 
-            if (!placementError) {
-              const a = placement?.attachment;
+    const heroPlacementIds = classFiltered
+      .map((asset) => asset?.hero_placement_id)
+      .filter(Boolean);
 
-              if (a && !a.deleted_at) {
-                if (a.url) {
-                  return {
-                    ...asset,
-                    primary_attachment_url: a.url,
-                  };
-                }
+    if (heroPlacementIds.length === 0) {
+      return;
+    }
 
-                if (a.bucket && a.storage_path) {
-                  const signed = await getSignedUrl({
-                    bucket: a.bucket,
-                    path: a.storage_path,
-                  });
+    const { data: placements, error: placementsError } = await supabase
+      .from("attachment_placements")
+      .select(`
+        id,
+        attachment:attachments (
+          bucket,
+          storage_path,
+          url,
+          mime_type,
+          kind,
+          deleted_at
+        )
+      `)
+      .in("id", heroPlacementIds);
 
-                  if (signed) {
-                    return {
-                      ...asset,
-                      primary_attachment_url: signed,
-                    };
-                  }
-                }
-              }
-            } else {
-              console.log(
-                "Hero placement lookup failed:",
-                asset.id,
-                placementError.message
-              );
-            }
+    if (placementsError) {
+      console.log("Batch hero placement lookup failed:", placementsError.message);
+      return;
+    }
+
+    const placementMap = {};
+    for (const p of placements || []) {
+      placementMap[p.id] = p;
+    }
+
+    for (const asset of classFiltered) {
+      try {
+        let heroUrl = null;
+
+        const placement = asset?.hero_placement_id
+          ? placementMap[asset.hero_placement_id]
+          : null;
+
+        const a = placement?.attachment;
+
+        if (a && !a.deleted_at) {
+          if (a.url) {
+            heroUrl = a.url;
+          } else if (a.bucket && a.storage_path) {
+            heroUrl = await getSignedUrl({
+              bucket: a.bucket,
+              path: a.storage_path,
+            });
           }
-
-          if (asset?.hero_image_url) {
-            return {
-              ...asset,
-              primary_attachment_url: asset.hero_image_url,
-            };
-          }
-
-          return asset;
-        } catch (heroErr) {
-          console.log(
-            "Hero enrichment failed:",
-            asset?.id,
-            heroErr?.message || heroErr
-          );
-          return asset;
         }
-      })
-    );
 
-    setAssets(assetsWithHero);
+        if (!heroUrl && asset?.hero_image_url) {
+          heroUrl = asset.hero_image_url;
+        }
+
+        if (heroUrl) {
+          setAssets((prev) =>
+            prev.map((p) =>
+              p.id === asset.id
+                ? { ...p, primary_attachment_url: heroUrl }
+                : p
+            )
+          );
+        }
+      } catch (heroErr) {
+        console.log(
+          "Hero enrichment failed:",
+          asset?.id,
+          heroErr?.message || heroErr
+        );
+      }
+    }
   } catch (e) {
     console.error(e);
     Alert.alert("Error", e?.message || "Failed to load portfolio.");
-  } finally {
     setLoading(false);
   }
 }, [assetClass, user?.id]);
-
-  useEffect(() => {
-    fetchAssets();
-  }, [fetchAssets]);
 
   useFocusEffect(
   useCallback(() => {

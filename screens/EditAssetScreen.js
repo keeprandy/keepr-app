@@ -964,7 +964,46 @@ export default function EditAssetScreen({ route, navigation }) {
               />
             </View>
           </View>
+          {/* Public View & Actions */}
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>Public view & actions</Text>
 
+            <TouchableOpacity
+              style={styles.settingsCard}
+              onPress={() =>
+                navigation.navigate("PublicConfig", {
+                  assetId,
+                  assetName: name || "Asset",
+                })
+              }
+              activeOpacity={0.85}
+            >
+              <View style={styles.settingsCardContent}>
+                <View style={styles.settingsIcon}>
+                  <Ionicons
+                    name="globe-outline"
+                    size={18}
+                    color={colors.textPrimary}
+                  />
+                </View>
+
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.settingsTitle}>
+                    Configure public view
+                  </Text>
+                  <Text style={styles.settingsSubtitle}>
+                    Control what others can see and do for this asset.
+                  </Text>
+                </View>
+
+                <Ionicons
+                  name="chevron-forward"
+                  size={18}
+                  color={colors.textMuted}
+                />
+              </View>
+            </TouchableOpacity>
+          </View>
           {/* Save button */}
           <View style={styles.footer}>
             <TouchableOpacity
@@ -1032,6 +1071,42 @@ const styles = StyleSheet.create({
     ...typography.subtitle,
     marginTop: 2,
   },
+
+  settingsCard: {
+  backgroundColor: colors.surface,
+  borderRadius: radius.lg,
+  padding: spacing.sm,
+  borderWidth: 1,
+  borderColor: colors.borderSubtle,
+  ...shadows.subtle,
+},
+
+settingsCardContent: {
+  flexDirection: "row",
+  alignItems: "center",
+},
+
+settingsIcon: {
+  width: 36,
+  height: 36,
+  borderRadius: 18,
+  alignItems: "center",
+  justifyContent: "center",
+  marginRight: spacing.sm,
+  backgroundColor: colors.surfaceSubtle,
+},
+
+settingsTitle: {
+  fontSize: 14,
+  fontWeight: "700",
+  color: colors.textPrimary,
+},
+
+settingsSubtitle: {
+  fontSize: 12,
+  color: colors.textMuted,
+  marginTop: 2,
+},
 
   section: {
     paddingHorizontal: spacing.lg,
