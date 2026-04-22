@@ -4,6 +4,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { DefaultTheme, NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
+
+
 // import * as Notifications from "expo-notifications";
 import React from "react";
 import {
@@ -177,6 +179,9 @@ import NotificationsStack from "./navigation/NotificationsStack";
 
 // Reminders
 import CreateReminderScreen from "./screens/CreateReminderScreen";
+
+// In App Purchases
+import { configurePurchases } from "./lib/purchases";
 
 const Tab = createBottomTabNavigator();
 const RootStack = createNativeStackNavigator();
@@ -1033,6 +1038,14 @@ console.log("✅ Enhance configured: ASSURANCE (no edge functions)");
 
 function Root({ onRouteChange, setCurrentRouteName, currentRouteName }) {
   const { initializing, user } = useAuth();
+
+    React.useEffect(() => {
+    if (!user?.id) return;
+
+    configurePurchases(user.id).catch((e) => {
+      console.log("RevenueCat configure failed:", e?.message || e);
+    });
+  }, [user?.id]);
 
 // Web navigation state persistence (prevents tab-switch / refresh from dumping to Dashboard)
 const NAV_PERSIST_KEY = "keepr.nav.state.v1";

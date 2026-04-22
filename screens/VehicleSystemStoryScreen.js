@@ -652,6 +652,29 @@ export default function VehicleSystemStoryScreen(props) {
       ? viewerCollection[viewerIndex]
       : null;
 
+      const handlePrint = async () => {
+  if (!systemId) return;
+
+  try {
+    const { data, error } = await supabase.rpc(
+      "generate_system_readiness_package",
+      { p_system_id: systemId }
+    );
+
+    if (error) throw error;
+
+    const packageId = data?.package_id || data;
+
+    navigation.navigate("SystemReadinessPackagePrint", {
+      packageId,
+    });
+  } catch (e) {
+    Alert.alert("Error", e.message || "Failed to generate report.");
+  }
+
+  
+};
+
   // ---- render ----
   return (
     <SafeAreaView style={layoutStyles.screen}>
@@ -699,6 +722,11 @@ export default function VehicleSystemStoryScreen(props) {
             <Ionicons name="create-outline" size={18} color={colors.textPrimary} style={{ marginRight: 6 }} />
             <Text style={styles.chipLabel}>Edit System Info</Text>
           </TouchableOpacity>
+
+          <TouchableOpacity style={styles.chip} onPress={handlePrint}>
+          <Ionicons name="print-outline" size={14} />
+          <Text style={styles.chipLabel}> Print report</Text>
+        </TouchableOpacity>
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>

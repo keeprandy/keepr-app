@@ -522,6 +522,27 @@ export default function BoatSystemStoryScreen(props) {
     });
   }, [navigation, assetId, assetName, systemId]);
 
+const handlePrint = useCallback(async () => {
+  if (!systemId || !navigation?.navigate) return;
+
+  try {
+    const { data, error } = await supabase.rpc(
+      "generate_system_readiness_package",
+      { p_system_id: systemId }
+    );
+
+    if (error) throw error;
+
+    const packageId = data?.package_id || data;
+    if (!packageId) throw new Error("No package ID returned.");
+
+    navigation.navigate("SystemReadinessPackagePrint", { packageId });
+  } catch (e) {
+    console.error("BoatSystemStoryScreen handlePrint error:", e);
+    Alert.alert("Error", e.message || "Failed to generate report.");
+  }
+}, [systemId, navigation]);
+
   const openKeeprPro = useCallback(
     (keeprPro) => {
       if (!navigation?.navigate || !keeprPro?.id) return;
@@ -628,6 +649,7 @@ export default function BoatSystemStoryScreen(props) {
     );
   }
 
+
   if (error || !system) {
     return (
       <SafeAreaView style={layoutStyles.screen}>
@@ -698,6 +720,10 @@ export default function BoatSystemStoryScreen(props) {
           <TouchableOpacity style={styles.chip} onPress={goToEditSystemStory}>
             <Ionicons name="create-outline" size={18} color={colors.textPrimary} style={{ marginRight: 6 }} />
             <Text style={styles.chipLabel}>Edit System Info</Text>
+          </TouchableOpacity>
+                    <TouchableOpacity style={styles.chip} onPress={handlePrint}>
+                    <Ionicons name="print-outline" size={14} />
+                    <Text style={styles.chipLabel}> Print report</Text>
           </TouchableOpacity>
         </View>
 

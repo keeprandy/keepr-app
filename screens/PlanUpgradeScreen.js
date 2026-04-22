@@ -12,6 +12,12 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../lib/supabaseClient";
 import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  getAnnualPackage,
+  purchaseAnnualPackage,
+  hasTeamEntitlement,
+  restoreRevenueCatPurchases,
+} from "../lib/purchases";
 
 /**
  * V1: keep plan rules centralized here so we can tune limits without touching UI code.
@@ -86,7 +92,7 @@ export default function PlanUpgradeScreen({ navigation }) {
   const [currentPeriodEnd, setCurrentPeriodEnd] = useState(null);
   const [stripeSubscriptionId, setStripeSubscriptionId] = useState(null);
   const [cancelBusy, setCancelBusy] = useState(false);
-
+  const [purchaseBusy, setPurchaseBusy] = useState(false); 
   const teamLift = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -269,8 +275,88 @@ const renewalDateLabel = useMemo(
     }
   };
 
+  const startIOSPurchase = async (planKey) => {
+  try {
+    setPurchaseBusy(true);
+
+    if (planKey !== "team") {
+      Alert.alert("Not ready", "Only Team is available on iPhone right now.");
+      setPurchaseBusy(false);
+      return;
+    }
+
+    const pkg = await getAnnualPackage();
+
+    if (!pkg) {
+  Alert.alert(
+    "Temporarily unavailable",
+    "Purchases are still being activated by Apple. Please try again shortly."
+  );
+  setPurchaseBusy(false);
+  return;
+}
+
+    const customerInfo = await purchaseAnnualPackage(pkg);
+    const entitlement = customerInfo?.entitlements?.active?.team || null;
+    if (!hasTeamEntitlement(customerInfo)) {
+  Alert.alert("Purchase issue", "Team access not granted.");
+  setPurchaseBusy(false);
+  return;
+}
+
+    const { data: auth } = await supabase.auth.getUser();
+    const user = auth?.user;
+
+      if (!user?.id) {
+      Alert.alert("Purchase issue", "User not found after purchase.");
+      setPurchaseBusy(false);
+      return;
+    }
+
+    await supabase
+  .from("profiles")
+  .update({
+    plan: "team",
+    billing_status: "active",
+    billing_cycle: "annual",
+    plan_source: "apple",
+    current_period_end: entitlement?.expirationDate || null,
+    stripe_subscription_id: null,
+  })
+  .eq("id", user.id);
+
+    navigation.reset({
+      index: 0,
+      routes: [{ name: "Dashboard" }],
+    });
+
+  } catch (e) {
+    if (!e?.userCancelled) {
+      const msg = String(e?.message || e || "");
+      const appleConfigIssue =
+        msg.includes("could be fetched from App Store Connect") ||
+        msg.includes("offerings-empty") ||
+        msg.includes("configuration");
+
+      Alert.alert(
+        appleConfigIssue ? "Purchases not ready yet" : "Purchase failed",
+        appleConfigIssue
+          ? "Apple is still activating the subscription. Please try again a little later."
+          : msg
+      );
+    }
+      } finally {
+        setPurchaseBusy(false);
+      }
+    };
+
   const handleUpgrade = (planKey) => {
-    setPendingPlan(planKey);
+  if (Platform.OS === "ios") {
+    startIOSPurchase(planKey);
+    return;
+  }
+
+  setPendingPlan(planKey);
     setCheckoutModalVisible(true);
   };
 
@@ -552,7 +638,7 @@ const renewalDateLabel = useMemo(
             )}
           </Card>
 
-          <Card
+                    <Card
             tier="plus"
             title="Plus"
             subtitle="For serious owners."
@@ -567,13 +653,18 @@ const renewalDateLabel = useMemo(
             ]}
           >
             <PlanButton
-              title={isOnPlus ? "Current plan" : "Upgrade to Plus"}
-              disabled={isOnPlus || loading}
+              title={
+                Platform.OS === "ios"
+                  ? "Coming soon on iPhone"
+                  : isOnPlus
+                  ? "Current plan"
+                  : "Upgrade to Plus"
+              }
+              disabled={Platform.OS === "ios" || isOnPlus || loading || purchaseBusy}
               onPress={() => handleUpgrade("plus")}
               variant={isOnPlus ? "secondary" : "primary"}
             />
           </Card>
-
           <Card
             tier="team"
             title="Team Owner"
@@ -606,11 +697,65 @@ const renewalDateLabel = useMemo(
             )}
 
             <PlanButton
-              title={isTeamOwner ? "Current plan" : "Upgrade to Team Owner"}
-              disabled={isTeamOwner || loading}
+              title={
+              purchaseBusy
+                ? "Processing..."
+                : isTeamOwner
+                ? "Current plan"
+                : "Start Team"
+            }
+              disabled={isTeamOwner || loading || purchaseBusy}
               onPress={() => handleUpgrade("team")}
               variant={isTeamOwner ? "secondary" : "primary"}
             />
+            {Platform.OS === "ios" && (
+            <View style={{ marginTop: 10 }}>
+              <PlanButton
+                title="Restore purchases"
+                disabled={purchaseBusy}
+                onPress={async () => {
+                  try {
+                    setPurchaseBusy(true);
+
+                    const info = await restoreRevenueCatPurchases();
+                    const entitlement = info?.entitlements?.active?.team || null;
+                    if (!hasTeamEntitlement(info)) {
+                    Alert.alert("Nothing to restore");
+                    setPurchaseBusy(false);
+                    return;
+                  }
+                    const { data: auth } = await supabase.auth.getUser();
+                    const user = auth?.user;
+
+                    if (!user?.id) {
+                      Alert.alert("Purchase issue", "User not found after purchase.");
+                      setPurchaseBusy(false);
+                      return;
+                    }
+                    await supabase
+                          .from("profiles")
+                          .update({
+                            plan: "team",
+                            billing_status: "active",
+                            billing_cycle: "annual",
+                            plan_source: "apple",
+                            current_period_end: entitlement?.expirationDate || null,
+                            stripe_subscription_id: null,
+                          })
+                          .eq("id", user.id);
+
+                    Alert.alert("Restored", "Your Team plan is active.");
+
+                  } catch (e) {
+                    Alert.alert("Restore failed", e?.message || String(e));
+                  } finally {
+                    setPurchaseBusy(false);
+                  }
+                }}
+                variant="secondary"
+              />
+            </View>
+          )}
           </Card>
         </View>
 
@@ -643,7 +788,7 @@ const renewalDateLabel = useMemo(
         </View>
       )}
 
-      {isPaidPlan && isBillingActive && (
+      {isPaidPlan && isBillingActive && !!stripeSubscriptionId && (
         <Pressable
           onPress={cancelBusy ? undefined : handleCancelPlan}
           style={({ pressed }) => [
@@ -667,7 +812,7 @@ const renewalDateLabel = useMemo(
         </View>
       </ScrollView>
 
-      {checkoutModalVisible && (
+      {Platform.OS !== "ios" && checkoutModalVisible && (
         <View style={styles.checkoutOverlay}>
           <View style={styles.checkoutModal}>
             <Ionicons name="lock-closed" size={28} color="#1e3a8a" />
