@@ -330,24 +330,23 @@ const renewalDateLabel = useMemo(
       routes: [{ name: "Dashboard" }],
     });
 
-  } catch (e) {
-    if (!e?.userCancelled) {
-      const msg = String(e?.message || e || "");
-      const appleConfigIssue =
-        msg.includes("could be fetched from App Store Connect") ||
-        msg.includes("offerings-empty") ||
-        msg.includes("configuration");
+} catch (e) {
+  if (!e?.userCancelled) {
+    const msg = String(e?.message || e || "");
+    const notReady =
+      msg.includes("not configured yet") ||
+      msg.includes("There is no singleton instance");
 
-      Alert.alert(
-        appleConfigIssue ? "Purchases not ready yet" : "Purchase failed",
-        appleConfigIssue
-          ? "Apple is still activating the subscription. Please try again a little later."
-          : msg
-      );
-    }
-      } finally {
-        setPurchaseBusy(false);
-      }
+    Alert.alert(
+      notReady ? "Purchases still loading" : "Purchase failed",
+      notReady
+        ? "Please wait a moment and try again."
+        : msg
+    );
+  }
+} finally {
+  setPurchaseBusy(false);
+}
     };
 
   const handleUpgrade = (planKey) => {
@@ -653,17 +652,21 @@ const renewalDateLabel = useMemo(
             ]}
           >
             <PlanButton
-              title={
-                Platform.OS === "ios"
-                  ? "Coming soon on iPhone"
-                  : isOnPlus
-                  ? "Current plan"
-                  : "Upgrade to Plus"
-              }
-              disabled={Platform.OS === "ios" || isOnPlus || loading || purchaseBusy}
-              onPress={() => handleUpgrade("plus")}
-              variant={isOnPlus ? "secondary" : "primary"}
-            />
+            title={
+              Platform.OS === "ios"
+                ? "Not Available on iPhone"
+                : isOnPlus
+                ? "Current plan"
+                : "Upgrade to Plus"
+            }
+            disabled={Platform.OS === "ios" || isOnPlus || loading || purchaseBusy}
+            onPress={() => handleUpgrade("plus")}
+            variant={isOnPlus ? "secondary" : "primary"}
+          />
+
+          {Platform.OS === "ios" && (
+            <Text style={styles.webOnlyText}>Available on web</Text>
+          )}
           </Card>
           <Card
             tier="team"
@@ -952,6 +955,13 @@ cancelPlanText: {
   toggleTitleActive: { color: "#FFFFFF" },
   toggleSub: { marginTop: 2, fontSize: 12, color: "#6B7280" },
   toggleSubActive: { color: "#CBD5E1" },
+
+  webOnlyText: {
+  marginTop: 10,
+  fontSize: 12,
+  color: "#8E8E93",
+  textAlign: "center",
+},
 
   content: { paddingHorizontal: 20, paddingVertical: 18 },
   cardsRow: { flexDirection: Platform.OS === "web" ? "row" : "column", gap: 14 },
