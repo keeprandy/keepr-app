@@ -28,11 +28,14 @@ const Row = ({
   danger = false,
 }) => (
   <TouchableOpacity
-    style={[styles.row, disabled && { opacity: 0.55 }]}
-    activeOpacity={0.85}
-    onPress={onPress}
-    disabled={disabled}
-  >
+  style={[styles.row, disabled && { opacity: 0.55 }]}
+  activeOpacity={0.85}
+  onPress={() => {
+    console.log("Row pressed:", title);
+    onPress?.();
+  }}
+  disabled={disabled}
+>
     <View style={[styles.rowIcon, { backgroundColor: iconBg }]}>
       <Ionicons
         name={icon}
@@ -120,6 +123,8 @@ export default function SettingsScreen({ navigation }) {
 
   const plan = profile?.plan || "free";
   const [authEmail, setAuthEmail] = React.useState("");
+
+  const [showDangerModal, setShowDangerModal] = React.useState(false);
 
   React.useEffect(() => {
     (async () => {
@@ -222,37 +227,99 @@ setTeamOrg(chosenOrg);
   };
 
   const handleDeactivate = async () => {
-    Alert.alert(
-      "Deactivate account",
-      "This will pause your account. You can reactivate by logging back in.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Deactivate",
-          style: "destructive",
-          onPress: async () => {
-            setBusy(true);
-            try {
-              const { data: userRes } = await supabase.auth.getUser();
-              const uid = userRes?.user?.id;
-              if (!uid) throw new Error("No signed-in user.");
+    setBusy(true);
+    try {
+      const { data: userRes } = await supabase.auth.getUser();
+      const uid = userRes?.user?.id;
+      if (!uid) throw new Error("No signed-in user.");
 
-              // Soft cancel: mark profile deactivated
-              const { error } = await supabase.from("profiles").update({ account_status: "deactivated" }).eq("id", uid);
+      const { error } = await supabase
+        .from("profiles")
+        .update({ account_status: "deactivated" })
+        .eq("id", uid);
 
-              if (error) throw error;
+      if (error) throw error;
 
-              await supabase.auth.signOut({ scope: "local" });
-            } catch (e) {
-              Alert.alert("Could not deactivate", e?.message || "Try again.");
-            } finally {
-              setBusy(false);
-            }
-          },
-        },
-      ]
-    );
+      await supabase.auth.signOut({ scope: "local" });
+    } catch (e) {
+      Alert.alert("Could not deactivate", e?.message || "Try again.");
+    } finally {
+      setBusy(false);
+    }
   };
+
+  const handleDeleteAccount = async () => {
+  Alert.alert(
+    "Delete account permanently",
+    "This will permanently delete your Keepr account and associated personal data. This action cannot be undone. App Store subscriptions must be canceled separately in your Apple account settings.",
+    [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          setBusy(true);
+          try {
+            const { data: userRes } = await supabase.auth.getUser();
+            const uid = userRes?.user?.id;
+            if (!uid) throw new Error("No signed-in user.");
+
+            /**
+             * OPTION A (SAFE FOR NOW):
+             * Soft-delete flag (recommended for v1 submission)
+             */
+            const { error } = await supabase
+              .from("profiles")
+              .update({
+                account_status: "deleted",
+                deleted_at: new Date().toISOString(),
+              })
+              .eq("id", uid);
+
+            if (error) throw error;
+
+            await supabase.auth.signOut({ scope: "local" });
+
+            Alert.alert(
+              "Account deleted",
+              "Your account has been scheduled for deletion."
+            );
+          } catch (e) {
+            Alert.alert(
+              "Delete failed",
+              e?.message || "Could not delete account."
+            );
+          } finally {
+            setBusy(false);
+          }
+        },
+      },
+    ]
+  );
+};
+
+const handleAccountActions = () => {
+  console.log("Danger zone pressed");
+
+  if (Platform.OS === "web") {
+    setShowDangerModal(true);
+    return;
+  }
+
+  Alert.alert(
+    "Deactivate or delete account",
+    "You can pause your account or permanently delete it.",
+    [
+      { text: "Cancel", style: "cancel" },
+      { text: "Pause account", onPress: handleDeactivate },
+      {
+        text: "Delete permanently",
+        style: "destructive",
+        onPress: handleDeleteAccount,
+      },
+    ]
+  );
+};
 
   const revealInternal = () => {
     // 7 taps within ~1.2s toggles internal tools
@@ -448,27 +515,14 @@ setTeamOrg(chosenOrg);
           <Text style={[styles.sectionLabel, { color: colors.error || "#DC2626" }]}>Danger zone</Text>
           <View style={styles.card}>
             <Row
-              icon="pause-circle-outline"
-              iconBg={colors.surfaceSubtle}
-              title="Deactivate account"
-              subtitle="Pause your account — reactivate anytime"
-              onPress={() =>
-                Alert.alert(
-                  "Deactivate account?",
-                  "This will pause your account. You can reactivate anytime by logging back in.",
-                  [
-                    { text: "Cancel", style: "cancel" },
-                    {
-                      text: "Deactivate",
-                      style: "destructive",
-                      onPress: handleDeactivate,
-                    },
-                  ]
-                )
-              }
-              danger
-              disabled={busy}
-            />
+            icon="pause-circle-outline"
+            iconBg={colors.surfaceSubtle}
+            title="Deactivate or delete account"
+            subtitle="Pause access or permanently remove your account"
+            onPress={handleAccountActions}
+            danger
+            disabled={busy}
+          />
           </View>
         </View>
 
@@ -502,6 +556,50 @@ setTeamOrg(chosenOrg);
         <TouchableOpacity activeOpacity={1} onPress={revealInternal} style={styles.footerTap}>
           <Text style={styles.footerText}>Keepr™</Text>
         </TouchableOpacity>
+
+{showDangerModal && (
+  <View style={styles.modalOverlay}>
+    <View style={styles.modalCard}>
+      <Text style={styles.modalTitle}>
+        Deactivate or delete account
+      </Text>
+
+      <Text style={styles.modalText}>
+        You can pause your account or permanently delete it.
+      </Text>
+
+      <TouchableOpacity
+        style={styles.modalButton}
+        onPress={() => {
+          setShowDangerModal(false);
+          handleDeactivate();
+        }}
+      >
+        <Text style={styles.modalButtonText}>Pause account</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[styles.modalButton, styles.modalDelete]}
+        onPress={() => {
+          setShowDangerModal(false);
+          handleDeleteAccount();
+        }}
+      >
+        <Text style={styles.modalDeleteText}>
+          Delete permanently
+        </Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        onPress={() => setShowDangerModal(false)}
+        style={styles.modalCancel}
+      >
+        <Text style={styles.modalCancelText}>Cancel</Text>
+      </TouchableOpacity>
+    </View>
+  </View>
+)}
+
       </ScrollView>
     </SafeAreaView>
   );
@@ -535,6 +633,70 @@ const styles = StyleSheet.create({
     marginRight: spacing.sm,
     backgroundColor: colors.surfaceSubtle,
   },
+
+modalOverlay: {
+  position: "absolute",
+  top: 0,
+  left: 0,
+  right: 0,
+  bottom: 0,
+  backgroundColor: "rgba(0,0,0,0.4)",
+  justifyContent: "center",
+  alignItems: "center",
+  zIndex: 1000,
+},
+
+modalCard: {
+  width: "90%",
+  maxWidth: 400,
+  backgroundColor: colors.surface,
+  borderRadius: 16,
+  padding: 20,
+},
+
+modalTitle: {
+  fontSize: 18,
+  fontWeight: "700",
+  marginBottom: 8,
+  color: colors.textPrimary,
+},
+
+modalText: {
+  fontSize: 14,
+  color: colors.textMuted,
+  marginBottom: 20,
+},
+
+modalButton: {
+  paddingVertical: 12,
+  borderRadius: 10,
+  backgroundColor: colors.surfaceSubtle,
+  alignItems: "center",
+  marginBottom: 10,
+},
+
+modalButtonText: {
+  fontWeight: "600",
+},
+
+modalDelete: {
+  backgroundColor: "#fee2e2",
+},
+
+modalDeleteText: {
+  color: "#dc2626",
+  fontWeight: "700",
+},
+
+modalCancel: {
+  marginTop: 10,
+  alignItems: "center",
+},
+
+modalCancelText: {
+  color: colors.textMuted,
+},
+
   title: {
     ...(typography?.title || {}),
     fontSize: typography?.title?.fontSize ?? 22,

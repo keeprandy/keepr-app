@@ -13,9 +13,9 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../lib/supabaseClient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
-  getAnnualPackage,
-  purchaseAnnualPackage,
-  hasTeamEntitlement,
+  getPackage,
+  purchasePackage,
+  hasEntitlement,
   restoreRevenueCatPurchases,
 } from "../lib/purchases";
 
@@ -218,7 +218,8 @@ const renewalDateLabel = useMemo(
   [currentPeriodEnd]
 );
 
-  const isTeamOwner = effectivePlan === "team";
+  const isTeamPlan = effectivePlan === "team";
+  const isTeamOwner = isTeamPlan && !!teamContext?.isOwner;
 
   const currentPlanLabel = useMemo(() => {
     if (loading) return "Loading…";
@@ -275,79 +276,63 @@ const renewalDateLabel = useMemo(
     }
   };
 
-  const startIOSPurchase = async (planKey) => {
+const startIOSPurchase = async (planKey) => {
   try {
     setPurchaseBusy(true);
 
-    if (planKey !== "team") {
-      Alert.alert("Not ready", "Only Team is available on iPhone right now.");
-      setPurchaseBusy(false);
+    const pkg = await getPackage(planKey, cycle);
+
+    if (!pkg) {
+      Alert.alert(
+        "Temporarily unavailable",
+        "Purchases are still being activated by Apple. Please try again shortly."
+      );
       return;
     }
 
-    const pkg = await getAnnualPackage();
+    const customerInfo = await purchasePackage(pkg);
 
-    if (!pkg) {
-  Alert.alert(
-    "Temporarily unavailable",
-    "Purchases are still being activated by Apple. Please try again shortly."
-  );
-  setPurchaseBusy(false);
-  return;
-}
+    if (!hasEntitlement(customerInfo, planKey)) {
+      Alert.alert("Purchase issue", `${planKey} access not granted.`);
+      return;
+    }
 
-    const customerInfo = await purchaseAnnualPackage(pkg);
-    const entitlement = customerInfo?.entitlements?.active?.team || null;
-    if (!hasTeamEntitlement(customerInfo)) {
-  Alert.alert("Purchase issue", "Team access not granted.");
-  setPurchaseBusy(false);
-  return;
-}
+    const entitlement =
+      customerInfo?.entitlements?.active?.[planKey] || null;
 
     const { data: auth } = await supabase.auth.getUser();
     const user = auth?.user;
 
-      if (!user?.id) {
+    if (!user?.id) {
       Alert.alert("Purchase issue", "User not found after purchase.");
-      setPurchaseBusy(false);
       return;
     }
 
     await supabase
-  .from("profiles")
-  .update({
-    plan: "team",
-    billing_status: "active",
-    billing_cycle: "annual",
-    plan_source: "apple",
-    current_period_end: entitlement?.expirationDate || null,
-    stripe_subscription_id: null,
-  })
-  .eq("id", user.id);
+      .from("profiles")
+      .update({
+        plan: planKey,
+        billing_status: "active",
+        billing_cycle: cycle === "yearly" ? "annual" : "monthly",
+        plan_source: "apple",
+        current_period_end: entitlement?.expirationDate || null,
+        stripe_subscription_id: null,
+      })
+      .eq("id", user.id);
 
     navigation.reset({
       index: 0,
       routes: [{ name: "Dashboard" }],
     });
 
-} catch (e) {
-  if (!e?.userCancelled) {
-    const msg = String(e?.message || e || "");
-    const notReady =
-      msg.includes("not configured yet") ||
-      msg.includes("There is no singleton instance");
-
-    Alert.alert(
-      notReady ? "Purchases still loading" : "Purchase failed",
-      notReady
-        ? "Please wait a moment and try again."
-        : msg
-    );
+  } catch (e) {
+    if (!e?.userCancelled) {
+      Alert.alert("Purchase failed", e?.message || String(e));
+    }
+  } finally {
+    setPurchaseBusy(false);
   }
-} finally {
-  setPurchaseBusy(false);
-}
-    };
+};
 
   const handleUpgrade = (planKey) => {
   if (Platform.OS === "ios") {
@@ -653,20 +638,15 @@ const renewalDateLabel = useMemo(
           >
             <PlanButton
             title={
-              Platform.OS === "ios"
-                ? "Not Available on iPhone"
-                : isOnPlus
-                ? "Current plan"
-                : "Upgrade to Plus"
-            }
-            disabled={Platform.OS === "ios" || isOnPlus || loading || purchaseBusy}
+            isOnPlus
+              ? "Current plan"
+              : "Upgrade to Plus"
+          }
+          disabled={isOnPlus || loading || purchaseBusy}
             onPress={() => handleUpgrade("plus")}
             variant={isOnPlus ? "secondary" : "primary"}
           />
 
-          {Platform.OS === "ios" && (
-            <Text style={styles.webOnlyText}>Available on web</Text>
-          )}
           </Card>
           <Card
             tier="team"
@@ -701,13 +681,13 @@ const renewalDateLabel = useMemo(
 
             <PlanButton
               title={
-              purchaseBusy
-                ? "Processing..."
-                : isTeamOwner
-                ? "Current plan"
-                : "Start Team"
-            }
-              disabled={isTeamOwner || loading || purchaseBusy}
+                purchaseBusy
+                  ? "Processing..."
+                  : isTeamPlan
+                  ? "Current plan"
+                  : "Start Team"
+              }
+              disabled={isTeamPlan || loading || purchaseBusy}
               onPress={() => handleUpgrade("team")}
               variant={isTeamOwner ? "secondary" : "primary"}
             />
@@ -721,33 +701,53 @@ const renewalDateLabel = useMemo(
                     setPurchaseBusy(true);
 
                     const info = await restoreRevenueCatPurchases();
-                    const entitlement = info?.entitlements?.active?.team || null;
-                    if (!hasTeamEntitlement(info)) {
-                    Alert.alert("Nothing to restore");
-                    setPurchaseBusy(false);
-                    return;
-                  }
+
+                    const activeTeam = info?.entitlements?.active?.team || null;
+                    const activePlus = info?.entitlements?.active?.plus || null;
+
+                    let restoredPlan = null;
+                    let restoredEntitlement = null;
+
+                    if (activeTeam) {
+                      restoredPlan = "team";
+                      restoredEntitlement = activeTeam;
+                    } else if (activePlus) {
+                      restoredPlan = "plus";
+                      restoredEntitlement = activePlus;
+                    } else {
+                      Alert.alert("Nothing to restore");
+                      return;
+                    }
+
                     const { data: auth } = await supabase.auth.getUser();
                     const user = auth?.user;
 
                     if (!user?.id) {
                       Alert.alert("Purchase issue", "User not found after purchase.");
-                      setPurchaseBusy(false);
                       return;
                     }
-                    await supabase
-                          .from("profiles")
-                          .update({
-                            plan: "team",
-                            billing_status: "active",
-                            billing_cycle: "annual",
-                            plan_source: "apple",
-                            current_period_end: entitlement?.expirationDate || null,
-                            stripe_subscription_id: null,
-                          })
-                          .eq("id", user.id);
 
-                    Alert.alert("Restored", "Your Team plan is active.");
+                    const productId =
+                      restoredEntitlement?.productIdentifier ||
+                      restoredEntitlement?.productIdentifier?.toString?.() ||
+                      "";
+
+                    const restoredCycle =
+                    productId?.includes("_monthly") ? "monthly" : "annual";
+
+                    await supabase
+                      .from("profiles")
+                      .update({
+                        plan: restoredPlan,
+                        billing_status: "active",
+                        billing_cycle: restoredCycle,
+                        plan_source: "apple",
+                        current_period_end: restoredEntitlement?.expirationDate || null,
+                        stripe_subscription_id: null,
+                      })
+                      .eq("id", user.id);
+
+                    Alert.alert("Restored", `Your ${restoredPlan === "team" ? "Team" : "Plus"} plan is active.`);
 
                   } catch (e) {
                     Alert.alert("Restore failed", e?.message || String(e));
