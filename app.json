@@ -18,11 +18,11 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.keeprhome.app",
-      "buildNumber": "16",
+      "buildNumber": "18",
       "infoPlist": {
         "NSCameraUsageDescription": "Take photos for your asset records and proof.",
         "NSPhotoLibraryUsageDescription": "Upload photos and documents to your assets.",
-        "    NSContactsUsageDescription": "Keepr uses contacts to help you assign ownership, manage teams, and support service workflows.",
+        "NSContactsUsageDescription": "Contacts are used to associate service providers (KeeprPros) with assets, maintain service records, and invite them to participate in Keepr.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },

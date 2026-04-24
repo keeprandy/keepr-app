@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { Linking } from "react-native";
 
 import { colors, spacing, radius, typography, shadows } from "../styles/theme";
 
@@ -184,19 +185,30 @@ export default function PrivacyTrustScreen({ navigation }) {
           </View>
         </Section>
 
-        <TouchableOpacity
-          onPress={openPrivacyContract}
-          style={styles.contractBtn}
-          activeOpacity={0.85}
-        >
-          <Ionicons
-            name="document-text-outline"
-            size={18}
-            color={colors.textPrimary}
-          />
-          <Text style={styles.contractBtnText}>View privacy contract</Text>
-          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-        </TouchableOpacity>
+        {/* LEGAL LINKS */}
+        <View style={{ marginTop: 14 }}>
+          <TouchableOpacity
+            onPress={() => Linking.openURL("https://keeprhome.com/privacy")}
+            style={styles.contractBtn}
+          >
+            <Ionicons name="lock-closed-outline" size={18} color={colors.textPrimary} />
+            <Text style={styles.contractBtnText}>Privacy Policy</Text>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </TouchableOpacity>
+
+          <View style={styles.divider} />
+
+          <TouchableOpacity
+            onPress={() =>
+              Linking.openURL("https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")
+            }
+            style={styles.contractBtn}
+          >
+            <Ionicons name="document-text-outline" size={18} color={colors.textPrimary} />
+            <Text style={styles.contractBtnText}>Terms of Use</Text>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </TouchableOpacity>
+        </View>
 
         <View style={styles.footer}>
           <Text style={styles.footerText}>

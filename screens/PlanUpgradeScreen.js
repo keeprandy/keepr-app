@@ -13,6 +13,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../lib/supabaseClient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
+  configurePurchases,
   getPackage,
   purchasePackage,
   hasEntitlement,
@@ -94,6 +95,8 @@ export default function PlanUpgradeScreen({ navigation }) {
   const [cancelBusy, setCancelBusy] = useState(false);
   const [purchaseBusy, setPurchaseBusy] = useState(false); 
   const teamLift = useRef(new Animated.Value(0)).current;
+  const [purchasesReady, setPurchasesReady] = useState(Platform.OS !== "ios");
+  
 
   useEffect(() => {
     Animated.timing(teamLift, {
@@ -189,6 +192,39 @@ export default function PlanUpgradeScreen({ navigation }) {
     };
   }, []);
 
+React.useEffect(() => {
+  let isMounted = true;
+
+  async function initPurchases() {
+    if (Platform.OS !== "ios") return;
+
+    try {
+      const { data: auth } = await supabase.auth.getUser();
+      const user = auth?.user;
+      if (!user?.id) {
+        if (isMounted) setPurchasesReady(false);
+        return;
+      }
+
+      await configurePurchases(user.id);
+      console.log("RC API KEY:", process.env.EXPO_PUBLIC_REVENUECAT_APPLE_API_KEY);
+
+      if (isMounted) setPurchasesReady(true);
+    } catch (e) {
+      if (isMounted) {
+        setPurchasesReady(false);
+        console.log("RevenueCat init failed:", e?.message || e);
+      }
+    }
+  }
+
+  initPurchases();
+
+  return () => {
+    isMounted = false;
+  };
+}, []);
+
   const pricing = PRICES[cycle];
 
   const normalizedPlan = String(plan || "free").toLowerCase();
@@ -277,6 +313,11 @@ const renewalDateLabel = useMemo(
   };
 
 const startIOSPurchase = async (planKey) => {
+  if (!purchasesReady) {
+    Alert.alert("Loading", "Purchases are still initializing.");
+    return;
+  }
+
   try {
     setPurchaseBusy(true);
 
@@ -334,15 +375,20 @@ const startIOSPurchase = async (planKey) => {
   }
 };
 
-  const handleUpgrade = (planKey) => {
+const handleUpgrade = (planKey) => {
   if (Platform.OS === "ios") {
+    if (!purchasesReady) {
+      Alert.alert("Loading", "Purchases are still initializing. Please try again.");
+      return;
+    }
+
     startIOSPurchase(planKey);
     return;
   }
 
   setPendingPlan(planKey);
-    setCheckoutModalVisible(true);
-  };
+  setCheckoutModalVisible(true);
+};
 
   const handleCancelPlan = async () => {
   if (!stripeSubscriptionId) {
@@ -638,11 +684,13 @@ const startIOSPurchase = async (planKey) => {
           >
             <PlanButton
             title={
-            isOnPlus
+            !purchasesReady
+              ? "Loading..."
+              : isOnPlus
               ? "Current plan"
               : "Upgrade to Plus"
           }
-          disabled={isOnPlus || loading || purchaseBusy}
+          disabled={isOnPlus || loading || purchaseBusy || !purchasesReady}
             onPress={() => handleUpgrade("plus")}
             variant={isOnPlus ? "secondary" : "primary"}
           />
@@ -681,13 +729,15 @@ const startIOSPurchase = async (planKey) => {
 
             <PlanButton
               title={
-                purchaseBusy
+                !purchasesReady
+                  ? "Loading..."
+                  : purchaseBusy
                   ? "Processing..."
                   : isTeamPlan
                   ? "Current plan"
                   : "Start Team"
               }
-              disabled={isTeamPlan || loading || purchaseBusy}
+              disabled={isTeamPlan || loading || purchaseBusy || !purchasesReady}
               onPress={() => handleUpgrade("team")}
               variant={isTeamOwner ? "secondary" : "primary"}
             />
@@ -695,7 +745,7 @@ const startIOSPurchase = async (planKey) => {
             <View style={{ marginTop: 10 }}>
               <PlanButton
                 title="Restore purchases"
-                disabled={purchaseBusy}
+                disabled={purchaseBusy || !purchasesReady}
                 onPress={async () => {
                   try {
                     setPurchaseBusy(true);

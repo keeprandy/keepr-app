@@ -8,6 +8,7 @@ import {
   Alert,
   ActivityIndicator,
   Platform,
+  Linking,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -379,6 +380,14 @@ const handleAccountActions = () => {
     }
   };
 
+  const handleOpenPrivacyPolicy = () => {
+  Linking.openURL("https://keeprhome.com/privacy");
+};
+
+const handleOpenTerms = () => {
+  Linking.openURL("https://www.apple.com/legal/internet-services/itunes/dev/stdeula/");
+};
+
   const handleOpenTeam = () => {
     try {
       navigationRef.navigate("Team");
@@ -480,18 +489,38 @@ const handleAccountActions = () => {
         </View>
 
         {/* TRUST */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Trust</Text>
-          <View style={styles.card}>
-            <Row
-              icon="shield-checkmark-outline"
-              iconBg={colors.surfaceSubtle}
-              title="Privacy & trust"
-              subtitle="Ownership, security, and data control"
-              onPress={() => navigationRef.navigate("PrivacyTrust")}
-            />
-          </View>
-        </View>
+<View style={styles.section}>
+  <Text style={styles.sectionLabel}>Trust</Text>
+  <View style={styles.card}>
+    <Row
+      icon="shield-checkmark-outline"
+      iconBg={colors.surfaceSubtle}
+      title="Privacy & trust"
+      subtitle="Ownership, security, and data control"
+      onPress={() => navigationRef.navigate("PrivacyTrust")}
+    />
+
+    <View style={styles.divider} />
+
+    <Row
+      icon="lock-closed-outline"
+      iconBg={colors.surfaceSubtle}
+      title="Privacy Policy"
+      subtitle="How Keepr handles your data"
+      onPress={handleOpenPrivacyPolicy}
+    />
+
+    <View style={styles.divider} />
+
+    <Row
+      icon="document-text-outline"
+      iconBg={colors.surfaceSubtle}
+      title="Terms of Use"
+      subtitle="Apple standard EULA"
+      onPress={handleOpenTerms}
+    />
+  </View>
+</View>
 
         {/* ACCOUNT CONTROL */}
         <View style={styles.section}>
