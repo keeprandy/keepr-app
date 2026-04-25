@@ -31,7 +31,12 @@ const Card = ({ title, children, footer }) => (
       <Text style={styles.cardTitle}>{title}</Text>
       {footer ? <View>{footer}</View> : null}
     </View>
-    <View style={{ marginTop: spacing.sm }}>{children}</View>
+
+    <View style={{ marginTop: spacing.sm }}>
+      {React.Children.map(children, (child) =>
+        typeof child === "string" ? null : child
+      )}
+    </View>
   </View>
 );
 
