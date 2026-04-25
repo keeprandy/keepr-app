@@ -56,13 +56,13 @@ if (statsError) {
   const stats = {
     views: 0,
     clicks: 0,
-    accepted: 0,
+    
   };
 
   (events || []).forEach((event) => {
     if (event.event_type === "view") stats.views += 1;
     if (event.event_type === "download_click") stats.clicks += 1;
-    if (event.event_type === "accepted") stats.accepted += 1;
+    
   });
 
   setInviteStats(stats);
@@ -128,13 +128,9 @@ if (statsError) {
 
     <View style={styles.statItem}>
       <Text style={styles.statNumber}>{inviteStats.clicks}</Text>
-      <Text style={styles.statLabel}>Clicks</Text>
+      <Text style={styles.statLabel}>Downloads</Text>
     </View>
 
-    <View style={styles.statItem}>
-      <Text style={styles.statNumber}>{inviteStats.accepted}</Text>
-      <Text style={styles.statLabel}>Accepted</Text>
-    </View>
   </View>
 </View>
     </View>
