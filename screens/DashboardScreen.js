@@ -898,6 +898,13 @@ if (Platform.OS !== "ios") {
                       />
                     </View>
 
+                    <ModeWidget
+                      icon="share-social-outline"
+                      title="Help Grow Keepr"
+                      subtitle="Share Keepr with a link or QR code"
+                      onPress={() => navigation.navigate("ShareKeepr")}
+                    />
+
                     {shouldShowKeeprProgress ? (
                     <View style={{ marginTop: spacing.md, maxWidth: 640 }}>
                       <KeeprProgressCard
@@ -972,6 +979,12 @@ if (Platform.OS !== "ios") {
                       onPress={goProfile}
                     />
                   </View>
+                  <ModeWidget
+                    icon="share-social-outline"
+                    title="Help Grow Keepr"
+                    subtitle="Share Keepr with a link or QR code"
+                    onPress={() => navigation.navigate("ShareKeepr")}
+                  />
 
                   {/* System modes (subtle) */}
                   {renderSystemModeWidget()}

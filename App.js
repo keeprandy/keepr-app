@@ -72,6 +72,7 @@ import SplashIntroScreen from "./screens/SplashIntroScreen";
 // Deep link resolver
 import KacResolveScreen from "./screens/KacResolveScreen";
 import KacRouteScreen from "./screens/KacRouteScreen";
+import ShareKeeprScreen from "./screens/ShareKeeprScreen";
 
 // Home
 import AddHomeAssetScreen from "./screens/AddHomeAssetScreen";
@@ -1311,6 +1312,7 @@ if (!user) {
           <RootStack.Screen name="KacRoute" component={KacRouteScreen} />
           <RootStack.Screen name="PublicAction" component={PublicActionScreen} />
           <RootStack.Screen name="KacResolve" component={KacResolveScreen} />
+          
 
           <RootStack.Screen name="Auth" component={AuthScreen} />
           <RootStack.Screen name="ResetPassword" component={ResetPasswordScreen} />
@@ -1356,6 +1358,8 @@ const initialRouteName = isResetLink
 
           <RootStack.Screen name="OnboardingStack" component={OnboardingStack} />
           <RootStack.Screen name="Profile" component={ProfileScreen} />
+          <RootStack.Screen name="ShareKeepr" component={ShareKeeprScreen} />
+
           <RootStack.Screen name="ChangePassword" component={ChangePasswordScreen} />
           <RootStack.Screen name="AdminSettings" component={SettingsScreen} />
           <RootStack.Screen name="PrivacyTrust" component={PrivacyTrustScreen} options={{ headerShown: false }}/>
