@@ -324,12 +324,10 @@ const startIOSPurchase = async (planKey) => {
     const pkg = await getPackage(planKey, cycle);
 
     if (!pkg) {
-      Alert.alert(
-        "Temporarily unavailable",
-        "Purchases are still being activated by Apple. Please try again shortly."
-      );
-      return;
-    }
+  console.log("No package found for:", planKey, cycle);
+  Alert.alert("Purchase unavailable", "No products found. Check RevenueCat configuration.");
+  return;
+}
 
     const customerInfo = await purchasePackage(pkg);
 
