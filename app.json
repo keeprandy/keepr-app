@@ -2,7 +2,7 @@
   "expo": {
     "name": "Keepr™",
     "slug": "keepr",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "runtimeVersion": {
       "policy": "appVersion"
     },
@@ -18,7 +18,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.keeprhome.app",
-      "buildNumber": "18",
+      "buildNumber": "23",
       "infoPlist": {
         "NSCameraUsageDescription": "Take photos for your asset records and proof.",
         "NSPhotoLibraryUsageDescription": "Upload photos and documents to your assets.",
