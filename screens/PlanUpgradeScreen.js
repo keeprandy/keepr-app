@@ -352,8 +352,7 @@ const startIOSPurchase = async (planKey) => {
       .update({
         plan: planKey,
         billing_status: "active",
-        billing_cycle: cycle === "yearly" ? "annual" : "monthly",
-        plan_source: "apple",
+        billing_cycle: cycle === "yearly" ? "yearly" : "monthly",
         current_period_end: entitlement?.expirationDate || null,
         stripe_subscription_id: null,
       })
@@ -781,19 +780,22 @@ const handleUpgrade = (planKey) => {
                       "";
 
                     const restoredCycle =
-                    productId?.includes("_monthly") ? "monthly" : "annual";
+                    productId?.includes("_monthly") ? "monthly" : "yearly";
 
-                    await supabase
+                    const { error } = await supabase
                       .from("profiles")
                       .update({
                         plan: restoredPlan,
                         billing_status: "active",
                         billing_cycle: restoredCycle,
-                        plan_source: "apple",
                         current_period_end: restoredEntitlement?.expirationDate || null,
                         stripe_subscription_id: null,
                       })
                       .eq("id", user.id);
+
+                    if (error) {
+                      console.log("SUPABASE UPDATE ERROR:", error);
+                    }
 
                     Alert.alert("Restored", `Your ${restoredPlan === "team" ? "Team" : "Plus"} plan is active.`);
 
