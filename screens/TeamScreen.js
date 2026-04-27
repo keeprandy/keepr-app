@@ -15,6 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../lib/supabaseClient";
 import { colors, spacing, radius, typography, shadows } from "../styles/theme";
 import { navigationRef } from "../navigationRoot";
+import { useFocusEffect } from "@react-navigation/native";
 
 function initials(nameOrEmail) {
   const s = String(nameOrEmail || "").trim();
@@ -195,9 +196,11 @@ if (orgRow?.owner_user_id) {
     }
   }, []);
 
-  React.useEffect(() => {
+  useFocusEffect(
+  React.useCallback(() => {
     load();
-  }, [load]);
+  }, [load])
+);
 
   const handleInvite = () => {
     Alert.alert(

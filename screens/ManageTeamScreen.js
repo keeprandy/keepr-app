@@ -193,7 +193,7 @@ async function handlePickLogo() {
         .from("orgs")
         .select("*")
         .eq("owner_user_id", uid)
-        .eq("org_type", "family")
+        .in("org_type", ["family", "team"])
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();

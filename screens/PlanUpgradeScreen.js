@@ -234,8 +234,8 @@ React.useEffect(() => {
   const isOnPlus = effectivePlan === "plus";
   const isOnTeam = effectivePlan === "team";
   const isPaidPlan = normalizedPlan === "plus" || normalizedPlan === "team";
-const isBillingActive = billingStatus === "active";
-const isCancelAtPeriodEnd = billingStatus === "canceled";
+  const isBillingActive = billingStatus === "active";
+  const isCancelAtPeriodEnd = billingStatus === "canceled";
 
   const formatRenewalDate = (value) => {
   if (!value) return null;
@@ -286,6 +286,38 @@ const renewalDateLabel = useMemo(
     const { Linking } = require("react-native");
     Linking.openURL(url);
   };
+
+  const ensureTeamOrg = async (userId) => {
+  if (!userId) return null;
+
+  const { data: existingOrg, error: lookupError } = await supabase
+    .from("orgs")
+    .select("id, org_type")
+    .eq("owner_user_id", userId)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (lookupError) throw lookupError;
+
+  if (!existingOrg?.id) return null;
+
+  if (existingOrg.org_type === "team" || existingOrg.org_type === "family") {
+    return existingOrg.id;
+  }
+
+  const { error: updateOrgError } = await supabase
+    .from("orgs")
+    .update({
+      org_type: "team",
+      display_name: "My Keepr Team",
+    })
+    .eq("id", existingOrg.id);
+
+  if (updateOrgError) throw updateOrgError;
+
+  return existingOrg.id;
+};
 
   const startCheckout = async (targetPlan) => {
     try {
@@ -347,21 +379,46 @@ const startIOSPurchase = async (planKey) => {
       return;
     }
 
-    await supabase
-      .from("profiles")
-      .update({
-        plan: planKey,
-        billing_status: "active",
-        billing_cycle: cycle === "yearly" ? "yearly" : "monthly",
-        current_period_end: entitlement?.expirationDate || null,
-        stripe_subscription_id: null,
-      })
-      .eq("id", user.id);
+const nextBillingCycle = cycle === "yearly" ? "yearly" : "monthly";
 
-    navigation.reset({
-      index: 0,
-      routes: [{ name: "Dashboard" }],
-    });
+const { error: profileUpdateError } = await supabase
+  .from("profiles")
+  .update({
+    plan: planKey,
+    billing_status: "active",
+    billing_cycle: nextBillingCycle,
+    current_period_end: entitlement?.expirationDate || null,
+    stripe_subscription_id: null,
+  })
+  .eq("id", user.id);
+
+if (profileUpdateError) {
+  console.log("SUPABASE PURCHASE UPDATE ERROR:", profileUpdateError);
+  Alert.alert("Purchase issue", "Your Apple purchase succeeded, but Keepr could not update your plan.");
+  return;
+}
+
+if (planKey === "team") {
+  await ensureTeamOrg(user.id);
+}
+
+setPlan(planKey);
+setBillingStatus("active");
+setBillingCycle(nextBillingCycle);
+setCurrentPeriodEnd(entitlement?.expirationDate || null);
+setStripeSubscriptionId(null);
+
+Alert.alert(
+  "Plan updated",
+  planKey === "team"
+    ? "Your Team plan is active. You can now manage your team."
+    : "Your Plus plan is active."
+);
+
+navigation.reset({
+  index: 0,
+  routes: [{ name: planKey === "team" ? "Team" : "Dashboard" }],
+});
 
   } catch (e) {
     if (!e?.userCancelled) {
@@ -782,22 +839,44 @@ const handleUpgrade = (planKey) => {
                     const restoredCycle =
                     productId?.includes("_monthly") ? "monthly" : "yearly";
 
-                    const { error } = await supabase
-                      .from("profiles")
-                      .update({
-                        plan: restoredPlan,
-                        billing_status: "active",
-                        billing_cycle: restoredCycle,
-                        current_period_end: restoredEntitlement?.expirationDate || null,
-                        stripe_subscription_id: null,
-                      })
-                      .eq("id", user.id);
+                    const { error: restoreUpdateError } = await supabase
+                    .from("profiles")
+                    .update({
+                      plan: restoredPlan,
+                      billing_status: "active",
+                      billing_cycle: restoredCycle,
+                      current_period_end: restoredEntitlement?.expirationDate || null,
+                      stripe_subscription_id: null,
+                    })
+                    .eq("id", user.id);
 
-                    if (error) {
-                      console.log("SUPABASE UPDATE ERROR:", error);
-                    }
+                  if (restoreUpdateError) {
+                    console.log("SUPABASE RESTORE UPDATE ERROR:", restoreUpdateError);
+                    Alert.alert("Restore issue", "Your Apple purchase was found, but Keepr could not update your plan.");
+                    return;
+                  }
 
-                    Alert.alert("Restored", `Your ${restoredPlan === "team" ? "Team" : "Plus"} plan is active.`);
+                  if (restoredPlan === "team") {
+                    await ensureTeamOrg(user.id);
+                  }
+
+                  setPlan(restoredPlan);
+                  setBillingStatus("active");
+                  setBillingCycle(restoredCycle);
+                  setCurrentPeriodEnd(restoredEntitlement?.expirationDate || null);
+                  setStripeSubscriptionId(null);
+
+                  Alert.alert(
+                    "Restored",
+                    restoredPlan === "team"
+                      ? "Your Team plan is active. You can now manage your team."
+                      : "Your Plus plan is active."
+                  );
+
+                  navigation.reset({
+                    index: 0,
+                    routes: [{ name: restoredPlan === "team" ? "Team" : "Dashboard" }],
+                  });
 
                   } catch (e) {
                     Alert.alert("Restore failed", e?.message || String(e));
@@ -826,7 +905,7 @@ const handleUpgrade = (planKey) => {
           <View style={{ flex: 1 }}>
             {isBillingActive ? (
               <Text style={styles.billingCardText}>
-                Renews automatically on <Text style={styles.inlineStrong}>{renewalDateLabel}</Text>.
+                Your plan is active through <Text style={styles.inlineStrong}>{renewalDateLabel}</Text>.
               </Text>
             ) : isCancelAtPeriodEnd ? (
               <Text style={styles.billingCardText}>
