@@ -62,10 +62,10 @@ function resolveInboxAction(ev, attachments) {
 
   if (origin === "email" || source === "email") {
   const prefill = buildTimelinePrefillFromEmailText({
-    subject: ev?.title,
-    textBody: ev?.notes,
-    date: ev?.created_at,
-  });
+  subject: ev.title,
+  textBody: ev.context?.original_email?.raw_text || ev.notes || "",
+  date: ev.created_at,
+});
 
   const looksStructured =
   prefill?.emailType !== "noise" &&
@@ -1155,52 +1155,34 @@ return (
       style={[styles.card, isSelected && styles.cardSelected]}
       activeOpacity={0.9}
       onPress={() => {
+  const prefill = buildTimelinePrefillFromEmailText({
+    subject: ev.title,
+    textBody: ev.context?.original_email?.raw_text || ev.notes || "",
+    date: ev.created_at,
+  });
 
-        // TEMP: force timeline flow for email ingestion
-{
-        const prefill = buildTimelinePrefillFromEmailText({
-          subject: ev.title,
-          textBody: ev.notes,
-          date: ev.created_at,
-        });
+  const eventAttachments = attachmentsByEvent[ev.id] || [];
 
-const eventAttachments = attachmentsByEvent[ev.id] || [];
+  navigation.navigate("AddTimelineRecord", {
+    eventId: ev.id,
+    assetId: ev.asset_id || null,
+    systemId: ev.system_id || null,
 
-      navigation.navigate("AddTimelineRecord", {
-        eventId: ev.id,
-        assetId: ev.asset_id || null,
-        systemId: ev.system_id || null,
-        prefillTitle: prefill.prefillTitle,
-        prefillNotes: prefill.prefillNotes,
-        prefillDate: prefill.prefillDate,
-        prefillAmount: prefill.prefillAmount,
-        existingAttachments: eventAttachments,
-        source: "email",
-      });
-        return;
-      }
+    prefillTitle: prefill.prefillTitle,
+    prefillNotes: ev.context?.ki_summary || prefill.prefillNotes || ev.notes || "",
+    prefillDate: prefill.prefillDate,
+    prefillAmount: prefill.prefillAmount,
 
-        if (action === "draft") {
-          navigation.navigate("CreateEvent", {
-            eventId: ev.id,
-            afterSave: "Notifications",
-            mode: "enrich",
-          });
-          return;
-        }
+    existingAttachments: eventAttachments,
+    source: "email",
 
-        if (action === "reminder") {
-          navigation.navigate("CreateReminder", {
-            eventId: ev.id,
-            afterSave: "Notifications",
-          });
-          return;
-        }
-
-        // review (questions, public, ambiguous)
-        setSelectedEventId(ev.id); // reuse your modal as review surface
-      }}
-      >
+    originalEmailHtml: ev.context?.original_email?.raw_html || null,
+    originalEmailText: ev.context?.original_email?.raw_text || ev.notes || null,
+    originalEmailSubject: ev.context?.original_email?.subject || ev.title || "",
+    originalEmailFrom: ev.context?.original_email?.from || ev.context?.from || "",
+  });
+}}
+>
         <View style={styles.cardHeaderRow}>
         <View style={styles.cardHeaderLeft}>
           <View style={styles.cardIconWrap}>

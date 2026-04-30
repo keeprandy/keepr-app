@@ -25,6 +25,9 @@ import { layoutStyles } from "../styles/layout";
 import { colors, radius, shadows, spacing } from "../styles/theme";
 import KeeprDateField from "../components/KeeprDateField";
 import { Linking } from "react-native";
+import RenderHTML from "react-native-render-html";
+import { useWindowDimensions } from "react-native";
+import AttachmentViewerModal from "../components/AttachmentViewerModal";
 
 /* ---------------- helpers ---------------- */
 function safeMoney(raw) {
@@ -170,7 +173,13 @@ const {
   existingAttachments = [],
   pendingAttachmentId,
   pendingAttachmentTitle,
+  originalEmailHtml,
+  originalEmailText,
+  originalEmailSubject,
+  originalEmailFrom,
 } = route?.params || {};
+
+const { width } = useWindowDimensions();
 
   // Origin-aware navigation: callers can pass { backTo: {name, params} } or { origin: {name, params} }
   const resolvedBackTo = useMemo(() => {
@@ -230,6 +239,8 @@ const [cost, setCost] = useState(() => prefillAmount || "");
   const [backfillRows, setBackfillRows] = useState([]);
   const [showAssetPicker, setShowAssetPicker] = useState(false);
   const [assets, setAssets] = useState([]);
+  const [viewerVisible, setViewerVisible] = useState(false);
+const [viewerAttachment, setViewerAttachment] = useState(null);
 
   const addBackfillRow = () => {
   setBackfillRows((prev) => [
@@ -372,6 +383,9 @@ const removeBackfillRow = (idx) => {
     ];
   }, [existingAttachments, pendingAttachmentId, pendingAttachmentTitle]);
   
+const visibleAttachments = useMemo(() => {
+  return allAttachments.filter((a) => a.mime_type !== "text/html");
+}, [allAttachments]);
 
 const notesHasUrls = useMemo(() => {
   try {
@@ -758,6 +772,23 @@ if (!effectiveAssetId) {
         : {},
   };
 
+const deleteInboxAttachment = async (attachmentId) => {
+  try {
+    await supabase
+      .from("event_inbox_attachments")
+      .delete()
+      .eq("id", attachmentId);
+
+    setViewerVisible(false);
+
+    Alert.alert("Removed", "Attachment removed.");
+
+  } catch (e) {
+    console.error(e);
+    Alert.alert("Error", "Could not remove.");
+  }
+};
+
   const payloads = [payload];
 
   if (serviceType === "cost" && costMode === "annual") {
@@ -814,6 +845,7 @@ if (!effectiveAssetId) {
 
     recordId = data?.[0]?.id;
 
+
     if (recordId && pendingAttachmentId) {
       const { error: placementError } = await supabase
         .from("attachment_placements")
@@ -869,54 +901,159 @@ if (!effectiveAssetId) {
 };
 
   return (
-    <SafeAreaView style={layoutStyles.screen}>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={64}
-      >
-        <View style={styles.container}>
-          {/* Header */}
-          <View style={styles.headerRow}>
-            <TouchableOpacity style={styles.iconButton} onPress={back}>
-              <Ionicons name="chevron-back-outline" size={20} />
-            </TouchableOpacity>
+ <SafeAreaView style={layoutStyles.screen}>
+  <KeyboardAvoidingView
+    style={{ flex: 1 }}
+    behavior={Platform.OS === "ios" ? "padding" : undefined}
+    keyboardVerticalOffset={64}
+  >
+    <View style={styles.container}>
+      {/* Header */}
+      <View style={styles.headerRow}>
+        <TouchableOpacity style={styles.iconButton} onPress={back}>
+          <Ionicons name="chevron-back-outline" size={20} />
+        </TouchableOpacity>
 
-            <View style={{ flex: 1 }}>
-              <Text style={styles.headerTitle}>Add Timeline Record</Text>
-              <Text style={styles.headerSubtitle}>{contextLabel}</Text>
-              {isFromInbox && (
-              <TouchableOpacity
-                onPress={handleDiscardToInbox}
-                style={styles.headerSecondaryBtn}
-              >
-                <Text style={styles.headerSecondaryText}>Back to Inbox</Text>
-              </TouchableOpacity>
-            )}
-            </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.headerTitle}>Add Timeline Record</Text>
+          <Text style={styles.headerSubtitle}>{contextLabel}</Text>
 
+          {isFromInbox ? (
             <TouchableOpacity
-              style={[styles.headerSaveBtn, saving && { opacity: 0.7 }]}
-              onPress={handleSave}
-              disabled={saving}
+              onPress={handleDiscardToInbox}
+              style={styles.headerSecondaryBtn}
             >
-              {saving ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <>
-                  <Ionicons name="checkmark-outline" size={18} color="#fff" />
-                  <Text style={styles.headerSaveText}>Create</Text>
-                </>
-              )}
+              <Text style={styles.headerSecondaryText}>Back to Inbox</Text>
             </TouchableOpacity>
-          </View>
+          ) : null}
+        </View>
 
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ paddingBottom: spacing.xl }}
-            keyboardShouldPersistTaps="handled"
-            onScrollBeginDrag={Keyboard.dismiss}
-          >
+        <TouchableOpacity
+          style={[styles.headerSaveBtn, saving && { opacity: 0.7 }]}
+          onPress={handleSave}
+          disabled={saving}
+        >
+          {saving ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : (
+            <>
+              <Ionicons name="checkmark-outline" size={18} color="#fff" />
+              <Text style={styles.headerSaveText}>Create</Text>
+            </>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: spacing.xl }}
+        keyboardShouldPersistTaps="handled"
+        onScrollBeginDrag={Keyboard.dismiss}
+      >
+{originalEmailHtml ? (
+  <View style={styles.emailProofCard}>
+    <View style={styles.emailProofHeaderRow}>
+      <View>
+        <Text style={styles.emailProofTitle}>Original Email</Text>
+      </View>
+    </View>
+
+    {Platform.OS === "web" ? (
+      <iframe
+        title="Original Email"
+        srcDoc={originalEmailHtml}
+        style={{
+          width: "100%",
+          height: 720,
+          border: "1px solid #E5E7EB",
+          borderRadius: 12,
+          background: "#fff",
+        }}
+      />
+    ) : (
+      <Text selectable style={styles.emailProofText}>
+          {originalEmailText || "Original email captured."}
+            </Text>
+          )}
+
+          {/* 🔥 ATTACHMENTS LIVE HERE NOW */}
+          {allAttachments.length > 0 && (
+            <View style={{ marginTop: spacing.md }}>
+              <Text style={styles.emailAttachmentLabel}>
+                Attachments
+              </Text>
+            </View>
+          )}
+        </View>
+      ) : null}
+        {visibleAttachments.length > 0 && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Email Proof Package</Text>
+            <Text style={styles.helper}>
+              Original email and attachments that will be saved with this record.
+            </Text>
+
+            {visibleAttachments.map((a) => (
+              <TouchableOpacity
+                key={a.id}
+                style={styles.pendingAttachmentRow}
+                activeOpacity={0.85}
+                onPress={async () => {
+                try {
+                  let url = a?.public_url;
+
+                  if (!url && a?.storage_path) {
+                    const { data } = await supabase.storage
+                      .from(a.storage_bucket || "asset-files")
+                      .createSignedUrl(a.storage_path, 60 * 5);
+
+                    url = data?.signedUrl;
+                  }
+
+                  if (!url) return;
+
+                  setViewerAttachment({
+                  id: a.id,
+                  url,
+                  fileName: a.file_name || "Attachment.pdf",
+                  file_name: a.file_name || "Attachment.pdf",
+                  title: a.file_name || "Attachment",
+                  contentType: a.mime_type || "application/pdf",
+                  mimeType: a.mime_type || "application/pdf",
+                  mime_type: a.mime_type || "application/pdf",
+                  storage: {
+                    bucket: a.storage_bucket || "asset-files",
+                    path: a.storage_path,
+                  },
+                });
+                  setViewerVisible(true);
+                } catch (e) {
+                  console.error("Viewer open failed", e);
+                }
+              }}
+              >
+                <Ionicons
+                  name="document-text-outline"
+                  size={18}
+                  color={colors.textSecondary}
+                />
+
+                <View style={{ flex: 1, marginLeft: 10 }}>
+                  <Text style={styles.pendingAttachmentTitle} numberOfLines={1}>
+                    {a.file_name || "Attachment"}
+                  </Text>
+                  <Text style={styles.pendingAttachmentMeta} numberOfLines={1}>
+                    {a.mime_type === "text/html"
+                      ? "Original email proof"
+                      : a.isPending
+                        ? "Ready to attach"
+                        : `${a.mime_type || "file"} · attached proof`}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
             {/* Basics */}
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Basics</Text>
@@ -1181,7 +1318,7 @@ if (!effectiveAssetId) {
                 numberOfLines={6}
                 textAlignVertical="top"
               />
-            
+
               {notesHasUrls ? (
                 <View style={{ marginTop: spacing.sm }}>
                   <Text style={styles.linkPreviewLabel}>Links detected in notes</Text>
@@ -1257,37 +1394,7 @@ if (!effectiveAssetId) {
 
               <View style={{ height: spacing.md }} />
             </View>
-            {allAttachments.length > 0 && (
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>Attached Proof</Text>
-                <Text style={styles.helper}>
-                  These will be attached to the timeline record.
-                </Text>
 
-                {allAttachments.map((a) => (
-                  <TouchableOpacity
-                    key={a.id}
-                    style={styles.pendingAttachmentRow}
-                    activeOpacity={0.85}
-                    onPress={() => {
-                      if (a?.public_url) {
-                        Linking.openURL(a.public_url).catch(() => {});
-                      }
-                    }}
-                  >
-                    <Ionicons name="document-text-outline" size={18} color={colors.textSecondary} />
-                    <View style={{ flex: 1, marginLeft: 10 }}>
-                      <Text style={styles.pendingAttachmentTitle} numberOfLines={1}>
-                        {a.file_name || "Attachment"}
-                      </Text>
-                      <Text style={styles.pendingAttachmentMeta} numberOfLines={1}>
-                        {a.isPending ? "Ready to attach" : `${a.mime_type || "file"} · tap to review`}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
           </ScrollView>
 
           {/* Asset picker */}
@@ -1648,9 +1755,12 @@ if (!effectiveAssetId) {
               </View>
             </View>
           </Modal>
-
-
-
+          <AttachmentViewerModal
+            visible={viewerVisible}
+            attachment={viewerAttachment}
+            onClose={() => setViewerVisible(false)}
+            onDelete={() => deleteInboxAttachment(viewerAttachment?.id)}
+          />
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -1697,6 +1807,73 @@ const styles = StyleSheet.create({
     ...(shadows?.sm || {}),
   },
   cardTitle: { fontSize: 15, fontWeight: "900", color: colors.textPrimary },
+
+  emailProofHeaderRow: {
+  flexDirection: "row",
+  justifyContent: "space-between",
+  alignItems: "flex-start",
+  marginBottom: spacing.md,
+},
+
+emailProofSubtext: {
+  marginTop: 3,
+  fontSize: 12,
+  color: colors.textSecondary,
+  fontWeight: "700",
+},
+
+emailProofToggle: {
+  paddingHorizontal: 12,
+  paddingVertical: 7,
+  borderRadius: 999,
+  borderWidth: 1,
+  borderColor: colors.borderSubtle,
+  backgroundColor: colors.surfaceSubtle,
+},
+
+emailProofToggleActive: {
+  backgroundColor: colors.accentBlue,
+  borderColor: colors.accentBlue,
+},
+
+emailProofToggleText: {
+  fontSize: 12,
+  fontWeight: "900",
+  color: colors.textSecondary,
+},
+
+emailProofToggleTextActive: {
+  color: "#fff",
+},
+
+  emailProofCard: {
+  backgroundColor: colors.surface,
+  borderWidth: 1,
+  borderColor: colors.borderSubtle,
+  borderRadius: radius.xl,
+  padding: spacing.lg,
+  marginBottom: spacing.lg,
+},
+
+emailProofText: {
+  fontSize: 12,
+  lineHeight: 18,
+  color: colors.textPrimary,
+},
+
+emailProofTitle: {
+  fontSize: 15,
+  fontWeight: "900",
+  color: colors.textPrimary,
+  marginBottom: spacing.md,
+},
+
+emailPaper: {
+  width: 760,
+  alignSelf: "center",
+  backgroundColor: "#fff",
+  padding: spacing.lg,
+},
 
   label: { fontSize: 12, color: colors.textSecondary, marginBottom: 4, marginTop: spacing.md, fontWeight: "700" },
   helper: { marginTop: spacing.sm, fontSize: 12, color: colors.textMuted, fontWeight: "700" },

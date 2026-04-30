@@ -395,14 +395,7 @@ export default function AttachmentViewerModal({
           {IS_WEB ? (
             content
           ) : (
-            <ScrollView
-              style={styles.cardScroll}
-              contentContainerStyle={styles.cardScrollContent}
-              bounces={false}
-              showsVerticalScrollIndicator={false}
-            >
-              {content}
-            </ScrollView>
+            {content}
           )}
         </View>
       </View>
@@ -454,7 +447,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.borderSubtle,
     ...shadowSm,
-    ...(IS_WEB ? { maxWidth: 1240, maxHeight: "92%" } : { maxHeight: "92%" }),
+    ...(IS_WEB ? { maxWidth: 960, maxHeight: "88%" } : { maxHeight: "88%" }),
   },
   cardScroll: {
     flexGrow: 0,
@@ -484,15 +477,15 @@ const styles = StyleSheet.create({
   metaFileName: { marginLeft: spacing.sm, fontSize: 12, color: colors.textSecondary, maxWidth: 520 },
   counter: { marginLeft: spacing.sm, fontSize: 12, fontWeight: "800", color: colors.textSecondary },
 
-  body: { flexDirection: IS_WEB ? "row" : "column", gap: spacing.md },
+  body: { flexDirection: IS_WEB ? "column" : "column", gap: spacing.md },
 
 preview: {
   flex: IS_WEB ? 3 : 0,
-  minHeight: IS_WEB ? 560 : 360,
+  height: IS_WEB ? undefined : 420,
+  minHeight: IS_WEB ? 560 : undefined,
   backgroundColor: "#000",
   borderRadius: radius.lg,
   overflow: "hidden",
-  position: "relative",
 },
 
 image: {
@@ -512,10 +505,11 @@ imageStage: {
 
 
 pdfNativeFrame: {
+  flex: 1,
   width: "100%",
-  height: "100%",
   backgroundColor: "#fff",
 },
+
 navBtn: {
   position: "absolute",
   top: "50%",

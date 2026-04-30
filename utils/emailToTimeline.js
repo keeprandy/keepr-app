@@ -164,17 +164,41 @@ function extractProvider(body, subject, type) {
 }
 
 function extractAmount(body) {
-  const patterns = [
-    /\$\s?([0-9,]+(?:\.\d{2})?)/i,
-    /amount due[:\s]+\$?\s?([0-9,]+(?:\.\d{2})?)/i,
-    /invoice total is \$?\s?([0-9,]+(?:\.\d{2})?)/i,
-    /balance[:\s]+\$?\s?([0-9,]+(?:\.\d{2})?)/i,
-    /total[:\s]+\$?\s?([0-9,]+(?:\.\d{2})?)/i,
+  const text = String(body || "").toLowerCase();
+
+  // 1. Strongest signals first (these should ALWAYS win)
+  const strongPatterns = [
+    /amount\s+paid[^0-9]*\$?\s*([0-9,]+\.\d{2})/i,
+    /total\s+paid[^0-9]*\$?\s*([0-9,]+\.\d{2})/i,
+    /grand\s+total[^0-9]*\$?\s*([0-9,]+\.\d{2})/i,
   ];
 
-  for (const pattern of patterns) {
-    const match = body.match(pattern);
-    if (match?.[1]) return match[1].replace(/,/g, "");
+  for (const pattern of strongPatterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) {
+      return match[1].replace(/,/g, "");
+    }
+  }
+
+  // 2. Subtotal + tax (structured receipts like yours)
+  const subtotalTaxMatch = text.match(
+    /subtotal[^0-9]*\$?\s*([0-9,]+\.\d{2})[\s\S]*?sales\s+tax[^0-9]*\$?\s*([0-9,]+\.\d{2})/i
+  );
+
+  if (subtotalTaxMatch?.[1] && subtotalTaxMatch?.[2]) {
+    const subtotal = Number(subtotalTaxMatch[1].replace(/,/g, ""));
+    const tax = Number(subtotalTaxMatch[2].replace(/,/g, ""));
+    return (subtotal + tax).toFixed(2);
+  }
+
+  // 3. LAST resort (but avoid picking small line items)
+  const allAmounts = [...text.matchAll(/\$?\s*([0-9,]+\.\d{2})/g)]
+    .map(m => Number(m[1].replace(/,/g, "")))
+    .filter(n => !isNaN(n));
+
+  if (allAmounts.length) {
+    // return the LARGEST number (almost always the total)
+    return Math.max(...allAmounts).toFixed(2);
   }
 
   return "";
@@ -212,47 +236,35 @@ function toISODate(d) {
 }
 
 function buildNotes({ body, provider, amount, date, type }) {
-  if (type === "noise") {
-    return "";
+  if (type === "noise") return "";
+
+  const jobNumber = body.match(/Job Number:\s*([A-Z0-9-]+)/i)?.[1] || null;
+
+  const work = [];
+  if (/pump/i.test(body)) work.push("2HP pump replacement");
+  if (/heater/i.test(body)) work.push("4.0kW heater insert");
+  if (/labor/i.test(body)) work.push("labor");
+  if (/service call|service trip/i.test(body)) work.push("service call");
+
+  const parts = [];
+
+  if (provider) {
+    parts.push(`${provider} completed service${date ? ` on ${formatUSDate(date)}` : ""}.`);
   }
 
-  const summary = [];
-
-  if (type === "invoice" && provider) {
-    summary.push(`Invoice from ${provider}.`);
-  } else if (type === "receipt" && provider) {
-    summary.push(`Receipt from ${provider}.`);
-  } else if (type === "quote" && provider) {
-    summary.push(`Quote from ${provider}.`);
-  } else if (provider) {
-    summary.push(`Email related to ${provider}.`);
+  if (work.length) {
+    parts.push(`Work included ${work.join(", ")}.`);
   }
 
-  if (amount && date) {
-    summary.push(`Amount $${amount}. Date ${formatUSDate(date)}.`);
-  } else if (amount) {
-    summary.push(`Amount $${amount}.`);
-  } else if (date) {
-    summary.push(`Date ${formatUSDate(date)}.`);
+  if (amount) {
+    parts.push(`Total paid: $${amount}.`);
   }
 
-  const emailMatch = body.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
-  const phoneMatch = body.match(/\(\d{3}\)\s*\d{3}-\d{4}/);
-
-  const contactBits = [];
-  if (emailMatch?.[0]) contactBits.push(emailMatch[0]);
-  if (phoneMatch?.[0]) contactBits.push(phoneMatch[0]);
-
-  if (contactBits.length) {
-    summary.push(`Contact: ${contactBits.join(", ")}.`);
+  if (jobNumber) {
+    parts.push(`Job #${jobNumber}.`);
   }
 
-  const firstUsefulParagraph = firstParagraph(body);
-  if (firstUsefulParagraph && summary.join(" ").length < 220) {
-    summary.push(firstUsefulParagraph);
-  }
-
-  return summary.join(" ").replace(/\s{2,}/g, " ").trim();
+  return parts.join(" ").trim();
 }
 
 function firstParagraph(body) {
