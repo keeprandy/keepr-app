@@ -26,22 +26,32 @@ export default function SendToKeeprAssetPicker({ route }) {
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData?.user?.id;
 
-      const { data } = await supabase
+        const { data } = await supabase
         .from("assets")
-        .select("id,name")
+        .select("id,name,status,deleted_at")
         .eq("owner_id", userId)
+        .is("deleted_at", null)
+        .eq("status", "active")
         .order("name", { ascending: true });
 
       setAssets(data || []);
 
       const last = await AsyncStorage.getItem(`lastCaptureAsset:${userId}`);
-      setLastAssetId(last);
+        const stillExists = (data || []).some((a) => a.id === last);
+        if (!stillExists) {
+        await AsyncStorage.removeItem(`lastCaptureAsset:${userId}`);
+        setLastAssetId(null);
+        } else {
+        setLastAssetId(last);
+        }
+        
     } catch (e) {
       console.log("Asset load failed", e);
     } finally {
       setLoading(false);
     }
   };
+
 
   const handleSelect = async (asset) => {
     try {
@@ -77,6 +87,8 @@ export default function SendToKeeprAssetPicker({ route }) {
     if (b.id === lastAssetId) return 1;
     return a.name.localeCompare(b.name);
   });
+
+  
 
   return (
     <View style={{ flex: 1, padding: 20 }}>

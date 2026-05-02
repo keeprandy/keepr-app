@@ -46,8 +46,8 @@
         "activationRule": {
           "NSExtensionActivationSupportsText": true,
           "NSExtensionActivationSupportsWebURLWithMaxCount": 1,
+          "NSExtensionActivationSupportsWebPageWithMaxCount": 1,
           "NSExtensionActivationSupportsImageWithMaxCount": 10,
-          "NSExtensionActivationSupportsMovieWithMaxCount": 1,
           "NSExtensionActivationSupportsFileWithMaxCount": 10
         }
       },

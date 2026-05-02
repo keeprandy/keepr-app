@@ -186,6 +186,8 @@ import CreateReminderScreen from "./screens/CreateReminderScreen";
 // In App Purchases
 import { configurePurchases } from "./lib/purchases";
 
+import { useShareIntent } from "expo-share-intent";
+
 const Tab = createBottomTabNavigator();
 const RootStack = createNativeStackNavigator();
 const SuperKeeprStackNav = createNativeStackNavigator();
@@ -1049,6 +1051,33 @@ function Root({ onRouteChange, setCurrentRouteName, currentRouteName }) {
       console.log("RevenueCat configure failed:", e?.message || e);
     });
   }, [user?.id]);
+
+const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntent();
+
+React.useEffect(() => {
+  if (!user?.id) return;
+  if (!hasShareIntent || !shareIntent) return;
+  if (!navigationRef?.isReady?.()) return;
+
+  const file = shareIntent?.files?.[0] || null;
+  const text = shareIntent?.text || null;
+  const url = shareIntent?.webUrl || shareIntent?.url || null;
+
+  const payload = {
+    type: file ? "file" : url ? "link" : text ? "text" : null,
+    file,
+    url,
+    text,
+  };
+
+  console.log("📥 Incoming share:", payload);
+
+  navigationRef.current?.navigate("SendToKeeprAssetPicker", {
+    incomingShare: payload,
+  });
+
+  resetShareIntent();
+}, [user?.id, hasShareIntent, shareIntent, resetShareIntent]);
 
 // Web navigation state persistence (prevents tab-switch / refresh from dumping to Dashboard)
 const NAV_PERSIST_KEY = "keepr.nav.state.v1";
