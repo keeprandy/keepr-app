@@ -542,6 +542,63 @@ useEffect(() => {
     [assetId, assetName, navigation]
   );
 
+  useEffect(() => {
+  const incoming = route?.params?.incomingShare;
+  if (!incoming) return;
+
+  const handleIncoming = async () => {
+    try {
+      const { data } = await supabase.auth.getUser();
+      const userId = data?.user?.id;
+      if (!userId) return;
+
+      // FILE
+      if (incoming.file?.uri) {
+        await uploadAttachmentFromUri({
+          userId,
+          assetId,
+          kind: "file",
+          fileUri: incoming.file.uri,
+          fileName: incoming.file.fileName || "shared-file",
+          mimeType: incoming.file.mimeType || "application/octet-stream",
+          sizeBytes: incoming.file.size || null,
+          placements: buildPlacements(),
+        });
+      }
+
+      // URL
+      if (incoming.url) {
+        await createLinkAttachment({
+          userId,
+          assetId,
+          url: incoming.url,
+          title: incoming.url,
+          placements: buildPlacements(),
+        });
+      }
+
+      // TEXT (optional for later)
+      if (incoming.text) {
+        await createLinkAttachment({
+          userId,
+          assetId,
+          url: incoming.text,
+          title: incoming.text,
+          placements: buildPlacements(),
+        });
+      }
+
+      await refresh();
+    } catch (e) {
+      console.log("Incoming share failed", e);
+    } finally {
+      navigation.setParams({ incomingShare: null });
+    }
+  };
+
+  handleIncoming();
+}, [route?.params?.incomingShare]);
+
   return (
     
     <SafeAreaView style={[layoutStyles.screen, styles.screen]}>

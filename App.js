@@ -62,6 +62,8 @@ import KeeprStoryScreen from "./screens/KeeprStoryScreen";
 
 // Public Action Screen Launched from QR Code or Direct Link
 import PublicActionScreen from "./screens/PublicActionScreen";
+import SendToKeeprScreen from "./screens/SendToKeeprScreen";
+import SendToKeeprAssetPicker from "./screens/SendToKeeprAssetPicker";
 
 // Screens
 import AssetGroupDashboardScreen from "./screens/AssetGroupDashboardScreen";
@@ -1418,6 +1420,15 @@ const initialRouteName = isResetLink
             name="PublicAction"
             component={PublicActionScreen}
             options={{ title: "Quick Capture" }}
+          />
+          <RootStack.Screen
+            name="SendToKeeprAssetPicker"
+            component={SendToKeeprAssetPicker}
+          />
+          {/* Mobile Send to Keepr Function */}
+          <RootStack.Screen
+            name="SendToKeepr"
+            component={SendToKeeprScreen}
           />
 
           {/* Boats */}
