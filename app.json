@@ -38,7 +38,26 @@
   "favicon": "./assets/favicon-48.png"
 },
 "plugins": [
-  "expo-share-intent"
+  [
+    "expo-share-intent",
+    {
+      "ios": {
+        "enabled": true,
+        "activationRule": {
+          "NSExtensionActivationSupportsText": true,
+          "NSExtensionActivationSupportsWebURLWithMaxCount": 1,
+          "NSExtensionActivationSupportsImageWithMaxCount": 10,
+          "NSExtensionActivationSupportsMovieWithMaxCount": 1,
+          "NSExtensionActivationSupportsFileWithMaxCount": 10
+        }
+      },
+      "android": {
+        "enabled": true,
+        "singleShareMimeTypes": ["text/*", "image/*", "application/pdf", "*/*"],
+        "multipleShareMimeTypes": ["image/*", "application/pdf", "*/*"]
+      }
+    }
+  ]
 ],
 "extra": {
   "eas": {
