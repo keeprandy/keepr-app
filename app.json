@@ -18,7 +18,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.keeprhome.app",
-      "buildNumber": "30",
+      "buildNumber": "37",
       "infoPlist": {
         "NSCameraUsageDescription": "Take photos for your asset records and proof.",
         "NSPhotoLibraryUsageDescription": "Upload photos and documents to your assets.",
@@ -57,7 +57,10 @@
         "multipleShareMimeTypes": ["image/*", "application/pdf", "*/*"]
       }
     }
-  ]
+  ],
+
+  "./plugins/withShareExtensionFix"
+
 ],
 "extra": {
   "eas": {
