@@ -41,7 +41,7 @@ yarn-error.*
 app-example
 
 # generated native folders
-/ios
+# /ios
 /android
 
 .tmp.driveupload/

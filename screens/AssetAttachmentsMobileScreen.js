@@ -468,6 +468,77 @@ const openQuickCapture = useCallback(() => {
 ]);
 
 useEffect(() => {
+  const incoming = route?.params?.incomingShare;
+  if (!incoming || !assetId) return;
+
+  // 🔥 prevent duplicate runs immediately
+  navigation.setParams({ incomingShare: null });
+
+  const run = async () => {
+    try {
+      setUploading(true);
+
+      const { data } = await supabase.auth.getUser();
+      const userId = data?.user?.id;
+      if (!userId) throw new Error("Not signed in.");
+
+      const file = incoming?.file || incoming?.files?.[0] || null;
+      const url = incoming?.url || incoming?.webUrl || null;
+      const text = incoming?.text || null;
+
+      if (file?.uri) {
+        const mimeType = file.mimeType || file.mime || "application/octet-stream";
+        const isPhoto = String(mimeType).startsWith("image/");
+
+        await uploadAttachmentFromUri({
+          userId,
+          assetId,
+          kind: isPhoto ? "photo" : "file",
+          fileUri: file.uri,
+          fileName:
+            file.fileName ||
+            file.name ||
+            file.uri.split("/").pop() ||
+            (isPhoto ? "shared-photo.jpg" : "shared-file"),
+          mimeType,
+          sizeBytes: file.size || file.fileSize || null,
+          placements: buildPlacements(),
+        });
+      } else if (url) {
+        await createLinkAttachment({
+          userId,
+          assetId,
+          url,
+          title: url,
+          notes: null,
+          placements: buildPlacements(),
+        });
+      } else if (text && /^https?:\/\//i.test(text)) {
+        await createLinkAttachment({
+          userId,
+          assetId,
+          url: text,
+          title: text,
+          notes: null,
+          placements: buildPlacements(),
+        });
+      } else {
+        throw new Error("No supported shared item found.");
+      }
+
+      await refresh();
+      Alert.alert("Saved to Keepr", "Ready for Context.");
+    } catch (e) {
+      Alert.alert("Send to Keepr failed", e?.message || "Could not save shared item.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  run();
+}, [route?.params?.incomingShare, assetId]);
+
+useEffect(() => {
   if (route?.params?.autoOpen === "camera" && !IS_WEB) {
     navigation.setParams({ autoOpen: null });
     addCameraPhoto();
@@ -541,63 +612,6 @@ useEffect(() => {
     },
     [assetId, assetName, navigation]
   );
-
-  useEffect(() => {
-  const incoming = route?.params?.incomingShare;
-  if (!incoming) return;
-
-  const handleIncoming = async () => {
-    try {
-      const { data } = await supabase.auth.getUser();
-      const userId = data?.user?.id;
-      if (!userId) return;
-
-      // FILE
-      if (incoming.file?.uri) {
-        await uploadAttachmentFromUri({
-          userId,
-          assetId,
-          kind: "file",
-          fileUri: incoming.file.uri,
-          fileName: incoming.file.fileName || "shared-file",
-          mimeType: incoming.file.mimeType || "application/octet-stream",
-          sizeBytes: incoming.file.size || null,
-          placements: buildPlacements(),
-        });
-      }
-
-      // URL
-      if (incoming.url) {
-        await createLinkAttachment({
-          userId,
-          assetId,
-          url: incoming.url,
-          title: incoming.url,
-          placements: buildPlacements(),
-        });
-      }
-
-      // TEXT (optional for later)
-      if (incoming.text) {
-        await createLinkAttachment({
-          userId,
-          assetId,
-          url: incoming.text,
-          title: incoming.text,
-          placements: buildPlacements(),
-        });
-      }
-
-      await refresh();
-    } catch (e) {
-      console.log("Incoming share failed", e);
-    } finally {
-      navigation.setParams({ incomingShare: null });
-    }
-  };
-
-  handleIncoming();
-}, [route?.params?.incomingShare]);
 
   return (
     
