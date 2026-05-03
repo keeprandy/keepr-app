@@ -1070,7 +1070,8 @@ React.useEffect(() => {
     text,
   };
 
-  console.log("📥 Incoming share:", payload);
+  console.log("📥 RAW shareIntent:", JSON.stringify(shareIntent, null, 2));
+console.log("📥 Normalized payload:", JSON.stringify(payload, null, 2));
 
   navigationRef.current?.navigate("SendToKeeprAssetPicker", {
     incomingShare: payload,
