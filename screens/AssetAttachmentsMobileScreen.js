@@ -41,6 +41,14 @@ function normalizeUrl(input) {
   return `https://${raw}`;
 }
 
+function asText(v) {
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "number") return String(v);
+  if (typeof v === "object") return v.content || "";
+  return "";
+}
+
 export default function AssetAttachmentsMobileScreen({ route, navigation }) {
   const assetId =
     route?.params?.assetId ||
@@ -83,7 +91,8 @@ export default function AssetAttachmentsMobileScreen({ route, navigation }) {
       .filter((x) => {
         if (!query) return true;
         const hay =
-          `${x.title || ""} ${x.notes || ""} ${x.file_name || ""} ${x.url || ""}`.toLowerCase();
+        `${asText(x.title)} ${asText(x.notes)} ${asText(x.file_name)} ${asText(x.url)}`
+          .toLowerCase();
         return hay.includes(query);
       })
       .sort((a, b) => {
@@ -770,10 +779,12 @@ useEffect(() => {
 
                 <View style={{ flex: 1 }}>
                   <Text style={styles.rowTitle} numberOfLines={1}>
-                    {row.title || row.file_name || "Attachment"}
+                    {asText(row.title) || asText(row.file_name) || "Attachment"}
                   </Text>
                   <Text style={styles.rowSub} numberOfLines={1}>
-                    {row.kind === "link" ? row.url : row.file_name}
+                    {row.kind === "link"
+                    ? asText(row.url)
+                    : asText(row.file_name)}
                   </Text>
                   {row.status === "uploading" ? (
                   <Text style={styles.rowSaving}>Saving to Keepr…</Text>
