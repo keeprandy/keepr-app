@@ -98,6 +98,14 @@ function getStandardMeta(systemRow) {
   };
 }
 
+function asText(v) {
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "number") return String(v);
+  if (typeof v === "object") return v.content || "";
+  return "";
+}
+
 function parseDate(value) {
   if (!value) return null;
   const d = new Date(value);
@@ -686,7 +694,7 @@ export default function VehicleSystemStoryScreen(props) {
           </TouchableOpacity>
 
           <View style={styles.headerTextWrap}>
-            <Text style={styles.title}>{system.name}</Text>
+            <Text style={styles.title}>{asText(system.name) || "System"}</Text>
             <Text style={styles.subtitle}>System · {assetName}</Text>
           </View>
         </View>
@@ -1139,7 +1147,8 @@ export default function VehicleSystemStoryScreen(props) {
                 contentContainerStyle={{ paddingTop: spacing.sm, paddingRight: spacing.md }}
               >
                 {attachmentPreview.slice(0, 12).map((att, idx) => {
-                  const label = att.title || att.fileName || att.name || "Attachment";
+                  const label =
+                  asText(att.title) || asText(att.fileName) || asText(att.name) || "Attachment";
                   const key = att._id || att.attachment_id || `${idx}`;
 
                   const heroId = system?.hero_attachment_id || null;
@@ -1251,8 +1260,8 @@ export default function VehicleSystemStoryScreen(props) {
               <View style={{ marginTop: spacing.sm }}>
                 {records.map((rec) => {
                   const date = rec.performed_at || rec.service_date || "";
-                  const title = rec.title || "Service event";
-                  const notes = rec.notes || "";
+                  const title = asText(rec.title) || "Service event";
+                  const notes = asText(rec.notes);
                   const thumbs = (rec.photos || []).slice(0, 6);
 
                   return (
