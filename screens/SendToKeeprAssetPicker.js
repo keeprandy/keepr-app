@@ -21,11 +21,20 @@ export default function SendToKeeprAssetPicker({ route }) {
   const [ready, setReady] = useState(false);
 
   // 🔐 Cold start guard
-  useEffect(() => {
-    if (incomingShare) {
-      setReady(true);
-    }
-  }, [incomingShare]);
+    useEffect(() => {
+      let timeout;
+
+      if (incomingShare) {
+        setReady(true);
+      } else {
+        // wait briefly for share intent to hydrate (cold launch)
+        timeout = setTimeout(() => {
+          setReady(true);
+        }, 400);
+      }
+
+      return () => clearTimeout(timeout);
+    }, [incomingShare]);
 
   useEffect(() => {
     loadAssets();
@@ -78,12 +87,51 @@ export default function SendToKeeprAssetPicker({ route }) {
       const payload = incomingShare ? { ...incomingShare } : null;
 
       // 🔥 SAFE param clear (no mutation)
-      navigationRef.setParams({ incomingShare: null });
+      if (navigationRef.isReady()) {
+          navigationRef.dispatch((state) => {
+            const routes = [...state.routes];
+            const lastRoute = routes[routes.length - 1];
+
+            if (lastRoute?.params?.incomingShare) {
+              lastRoute.params = {
+                ...lastRoute.params,
+                incomingShare: null,
+              };
+            }
+
+            return {
+              ...state,
+              routes,
+            };
+          });
+        }
+
+      const tempId = `temp-${Date.now()}`;
+
+      const optimisticItem = {
+        id: tempId,
+        attachment_id: tempId,
+        kind: payload?.file ? "photo" : payload?.url ? "link" : "file",
+        title:
+          payload?.file?.fileName ||
+          payload?.file?.name ||
+          payload?.url ||
+          payload?.text ||
+          "Shared item",
+        file_name:
+          payload?.file?.fileName ||
+          payload?.file?.name ||
+          null,
+        url: payload?.url || null,
+        status: "uploading",
+        created_at: new Date().toISOString(),
+      };
 
       navigationRef.navigate("AssetAttachmentsMobile", {
         assetId: asset.id,
         assetName: asset.name,
         incomingShare: payload,
+        optimisticItem,
       });
     } catch (e) {
       console.log("Select failed", e);
