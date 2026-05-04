@@ -36,6 +36,14 @@ function cleanDefaultTitle(fileName) {
   return human[0].toUpperCase() + human.slice(1);
 }
 
+function asText(v) {
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "number") return String(v);
+  if (typeof v === "object") return asText(v.content);
+  return "";
+}
+
 function guessKindFromMime(mime) {
   if (!mime) return "file";
   if (mime.startsWith("image/")) return "photo";
@@ -151,7 +159,11 @@ export default function AddAttachmentModal({
 
   const primeDetailsFromAttachment = (att) => {
     if (!att) return;
-    const fileName = att.fileName || att.filename || att.name || "";
+    const fileName =
+      asText(att.fileName) ||
+      asText(att.filename) ||
+      asText(att.name) ||
+      "";
     const defaultTitle = cleanDefaultTitle(fileName);
     setTitle((prev) => prev || defaultTitle);
     setNotes((prev) => prev || "");
@@ -557,8 +569,9 @@ export default function AddAttachmentModal({
                   color={colors.textSecondary}
                 />
                 <Text style={styles.previewLabel}>
-                  {pendingAttachment?.fileName ||
-                    pendingAttachment?.filename ||
+                  {asText(pendingAttachment?.fileName) ||
+                    asText(pendingAttachment?.filename) ||
+                    asText(pendingAttachment?.name) ||
                     "Attachment"}
                 </Text>
               </View>
