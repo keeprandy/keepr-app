@@ -9,6 +9,7 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 // import * as Notifications from "expo-notifications";
 import React from "react";
 import {
+  Alert,
   Linking,
   Platform,
   StyleSheet,
@@ -1071,7 +1072,12 @@ React.useEffect(() => {
   };
 
   console.log("📥 RAW shareIntent:", JSON.stringify(shareIntent, null, 2));
-console.log("📥 Normalized payload:", JSON.stringify(payload, null, 2));
+  console.log("📥 Normalized payload:", JSON.stringify(payload, null, 2));
+
+  Alert.alert(
+  "RAW shareIntent",
+  JSON.stringify(shareIntent, null, 2).slice(0, 1200)
+);
 
   navigationRef.current?.navigate("SendToKeeprAssetPicker", {
     incomingShare: payload,
