@@ -127,7 +127,7 @@ export default function SendToKeeprAssetPicker({ route }) {
         created_at: new Date().toISOString(),
       };
 
-      navigationRef.navigate("AssetAttachmentsMobile", {
+      navigationRef.navigate("AssetAttachmentsMobileScreen", {
         assetId: asset.id,
         assetName: asset.name,
         incomingShare: payload,

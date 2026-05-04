@@ -66,11 +66,12 @@ export default function AssetAttachmentsMobileScreen({ route, navigation }) {
   const [uploading, setUploading] = useState(false);
   const [showWebLinkModal, setShowWebLinkModal] = useState(false);
   const [webLinkValue, setWebLinkValue] = useState("");
+  const [optimisticItems, setOptimisticItems] = useState([]);
 
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase();
 
-    return (hookItems || [])
+    return ([...optimisticItems, ...(hookItems || [])])
       .filter((x) => {
         const kind = safeStr(x.kind).toLowerCase();
         if (tab === "all") return true;
@@ -90,7 +91,7 @@ export default function AssetAttachmentsMobileScreen({ route, navigation }) {
         const db = b.created_at || "";
         return db.localeCompare(da);
       });
-  }, [hookItems, q, tab]);
+ }, [hookItems, optimisticItems, q, tab]);
 
 const buildPlacements = useCallback(() => {
   const placements = [];
@@ -468,6 +469,22 @@ const openQuickCapture = useCallback(() => {
 ]);
 
 useEffect(() => {
+  const optimisticItem = route?.params?.optimisticItem;
+  if (!optimisticItem || !assetId) return;
+
+  setTimeout(() => {
+    setOptimisticItems((prev) => {
+      if (prev.some((x) => x.id === optimisticItem.id)) return prev;
+      return [optimisticItem, ...prev];
+    });
+  }, 50);
+
+  navigation.setParams({ optimisticItem: null });
+}, [route?.params?.optimisticItem, assetId]);
+
+
+
+useEffect(() => {
   const incoming = route?.params?.incomingShare;
   if (!incoming || !assetId) return;
 
@@ -544,6 +561,12 @@ useEffect(() => {
       }
 
       await refresh();
+
+      // 🔥 let optimistic row live briefly so user sees it
+      setTimeout(() => {
+        setOptimisticItems([]);
+      }, 400);
+
       Alert.alert("Saved to Keepr", "Ready for Context.");
     } catch (e) {
       Alert.alert("Send to Keepr failed", e?.message || "Could not save shared item.");
@@ -752,6 +775,9 @@ useEffect(() => {
                   <Text style={styles.rowSub} numberOfLines={1}>
                     {row.kind === "link" ? row.url : row.file_name}
                   </Text>
+                  {row.status === "uploading" ? (
+                  <Text style={styles.rowSaving}>Saving to Keepr…</Text>
+                ) : null}
                 </View>
 
                 <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
@@ -845,6 +871,13 @@ const styles = StyleSheet.create({
 linkBtnText: {
   marginLeft: 6,
   color: colors.textPrimary,
+  fontWeight: "700",
+},
+
+rowSaving: {
+  marginTop: 4,
+  fontSize: 12,
+  color: colors.textSecondary,
   fontWeight: "700",
 },
 
