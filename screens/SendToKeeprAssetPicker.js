@@ -13,6 +13,12 @@ import { navigationRef } from "../navigationRoot";
 export default function SendToKeeprAssetPicker({ route }) {
   const incomingShare = route?.params?.incomingShare;
 
+if (!incomingShare) {
+  console.log("⚠️ No incoming share payload on AssetPicker");
+} else {
+  console.log("📦 incomingShare received:", incomingShare);
+}
+
   const [assets, setAssets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [lastAssetId, setLastAssetId] = useState(null);
@@ -63,10 +69,16 @@ export default function SendToKeeprAssetPicker({ route }) {
         asset.id
       );
 
+      // ✅ copy payload so it can't mutate
+      const payload = incomingShare ? { ...incomingShare } : null;
+
+      // ✅ immediately clear route param (prevents reuse)
+      route.params.incomingShare = null;
+
       navigationRef.navigate("AssetAttachmentsMobile", {
         assetId: asset.id,
         assetName: asset.name,
-        incomingShare,
+        incomingShare: payload,
       });
     } catch (e) {
       console.log("Select failed", e);
@@ -88,13 +100,23 @@ export default function SendToKeeprAssetPicker({ route }) {
     return a.name.localeCompare(b.name);
   });
 
-  
-
   return (
     <View style={{ flex: 1, padding: 20 }}>
       <Text style={{ fontSize: 18, fontWeight: "700", marginBottom: 10 }}>
         Send to Keepr
       </Text>
+
+      {incomingShare?.file && (
+        <Text style={{ marginBottom: 10 }}>
+          📎 {incomingShare.file.fileName || "Shared file"}
+        </Text>
+      )}
+
+      {incomingShare?.url && (
+        <Text style={{ marginBottom: 10 }}>
+          🔗 {incomingShare.url}
+        </Text>
+      )}
 
       <FlatList
         data={sorted}

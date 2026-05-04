@@ -482,29 +482,46 @@ useEffect(() => {
       const userId = data?.user?.id;
       if (!userId) throw new Error("Not signed in.");
 
-      const file = incoming?.file || incoming?.files?.[0] || null;
+      const file =
+      incoming?.file ||
+      (Array.isArray(incoming?.files) ? incoming.files[0] : null) ||
+      null;
       const url = incoming?.url || incoming?.webUrl || null;
       const text = incoming?.text || null;
 
-      if (file?.uri) {
-        const mimeType = file.mimeType || file.mime || "application/octet-stream";
+      const fileUri =
+        file?.uri ||
+        file?.path ||
+        file?.filePath ||
+        file?.contentUri;
+
+      if (fileUri) {
+        const mimeType =
+        file?.mimeType ||
+        file?.type ||
+        file?.mime ||
+        (fileUri?.match(/\.jpg|\.jpeg/i) ? "image/jpeg" :
+        fileUri?.match(/\.png/i) ? "image/png" :
+        "application/octet-stream");
         const isPhoto = String(mimeType).startsWith("image/");
 
         await uploadAttachmentFromUri({
           userId,
           assetId,
           kind: isPhoto ? "photo" : "file",
-          fileUri: file.uri,
+          fileUri,
           fileName:
             file.fileName ||
             file.name ||
-            file.uri.split("/").pop() ||
+            file.fileNameWithExtension ||
+            fileUri.split("/").pop() ||
             (isPhoto ? "shared-photo.jpg" : "shared-file"),
           mimeType,
           sizeBytes: file.size || file.fileSize || null,
           placements: buildPlacements(),
         });
       } else if (url) {
+        
         await createLinkAttachment({
           userId,
           assetId,

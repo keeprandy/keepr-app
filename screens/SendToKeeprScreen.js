@@ -21,12 +21,14 @@ export default function SendToKeeprScreen() {
       text,
     };
 
-    navigationRef.navigate("SendToKeeprAssetPicker", {
-  incomingShare: payload,
-});
+    setTimeout(() => {
+      navigationRef.navigate("SendToKeeprAssetPicker", {
+        incomingShare: payload,
+      });
 
-    resetShareIntent();
-  }, [hasShareIntent, shareIntent]);
+      resetShareIntent();
+    }, 0);
+  }, [hasShareIntent, shareIntent, resetShareIntent]);
 
   return (
     <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
