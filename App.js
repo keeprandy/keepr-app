@@ -63,6 +63,7 @@ import KeeprStoryScreen from "./screens/KeeprStoryScreen";
 
 // Public Action Screen Launched from QR Code or Direct Link
 import PublicActionScreen from "./screens/PublicActionScreen";
+import SendToKeeprScreen from "./screens/SendToKeeprScreen";
 import SendToKeeprAssetPicker from "./screens/SendToKeeprAssetPicker";
 
 // Screens
@@ -1052,19 +1053,12 @@ function Root({ onRouteChange, setCurrentRouteName, currentRouteName }) {
     });
   }, [user?.id]);
 
-// Web navigation state persistence (prevents tab-switch / refresh from dumping to Dashboard)
-const NAV_PERSIST_KEY = "keepr.nav.state.v1";
-const [initialNavState, setInitialNavState] = React.useState(undefined);
-const [isNavReady, setIsNavReady] = React.useState(Platform.OS !== "web");
-const [navReadyTick, setNavReadyTick] = React.useState(0);
-
-
 const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntent();
 
-const [pendingShare, setPendingShare] = React.useState(null);
-
 React.useEffect(() => {
+  if (!user?.id) return;
   if (!hasShareIntent || !shareIntent) return;
+  if (!navigationRef?.isReady?.()) return;
 
   const file = shareIntent?.files?.[0] || null;
   const text = shareIntent?.text || null;
@@ -1080,9 +1074,17 @@ React.useEffect(() => {
   console.log("📥 RAW shareIntent:", JSON.stringify(shareIntent, null, 2));
   console.log("📥 Normalized payload:", JSON.stringify(payload, null, 2));
 
-  setPendingShare(payload);
+  navigationRef.current?.navigate("SendToKeeprAssetPicker", {
+    incomingShare: payload,
+  });
+
   resetShareIntent();
-}, [hasShareIntent, shareIntent, resetShareIntent]);
+}, [user?.id, hasShareIntent, shareIntent, resetShareIntent]);
+
+// Web navigation state persistence (prevents tab-switch / refresh from dumping to Dashboard)
+const NAV_PERSIST_KEY = "keepr.nav.state.v1";
+const [initialNavState, setInitialNavState] = React.useState(undefined);
+const [isNavReady, setIsNavReady] = React.useState(Platform.OS !== "web");
 
 React.useEffect(() => {
   if (Platform.OS !== "web") return;
@@ -1108,8 +1110,8 @@ React.useEffect(() => {
 }, [initializing, user]);
 
   const [role, setRole] = React.useState("consumer");
-  const [onboardingState, setOnboardingState] = React.useState("not_started");
-  const [assetCount, setAssetCount] = React.useState(0);
+const [onboardingState, setOnboardingState] = React.useState("not_started");
+const [assetCount, setAssetCount] = React.useState(0);
   const [loadingRole, setLoadingRole] = React.useState(false);
 
   const lastRoleLoadAtRef = React.useRef(0);
@@ -1137,7 +1139,6 @@ React.useEffect(() => {
 
   const didInitialNavResolve = React.useRef(false);
   const lastResetRouteRef = React.useRef(null);
-  const [initialNavResolved, setInitialNavResolved] = React.useState(false);
 
   const isResetLink = React.useMemo(() => {
   if (Platform.OS !== "web") return false;
@@ -1158,43 +1159,26 @@ React.useEffect(() => {
   }
 }, []);
 
-  React.useEffect(() => {
-    if (!targetRoute) return;
-    if (!navigationRef?.isReady?.()) return;
-    if (isResetLink) return;
+React.useEffect(() => {
+  if (!targetRoute) return;
+  if (!navigationRef?.isReady?.()) return;
 
-    const current = navigationRef.getCurrentRoute()?.name;
+  if (isResetLink) return;
 
-    if (current !== targetRoute) {
-      navigationRef.reset({
-        index: 0,
-        routes: [{ name: targetRoute }],
-      });
-    }
+  const current = navigationRef.getCurrentRoute()?.name;
 
-    didInitialNavResolve.current = true;
-    lastResetRouteRef.current = targetRoute;
-    setInitialNavResolved(true);
-  }, [targetRoute, isResetLink, navReadyTick]);
+  if (current !== targetRoute) {
+    navigationRef.reset({
+      index: 0,
+      routes: [{ name: targetRoute }],
+    });
+  }
 
-  React.useEffect(() => {
-    if (!user?.id) return;
-    if (!pendingShare) return;
-    if (loadingRole) return;
-    if (!targetRoute) return;
-    if (!initialNavResolved) return;
-    if (!navigationRef?.isReady?.()) return;
+  didInitialNavResolve.current = true;
+  lastResetRouteRef.current = targetRoute;
+}, [targetRoute, isResetLink]);
 
-    const timer = setTimeout(() => {
-      navigationRef.current?.navigate("SendToKeeprAssetPicker", {
-        incomingShare: pendingShare,
-      });
 
-      setPendingShare(null);
-    }, 500);
-
-    return () => clearTimeout(timer);
-  }, [user?.id, pendingShare, loadingRole, targetRoute, initialNavResolved]);
 
   React.useEffect(() => {
     let mounted = true;
@@ -1351,10 +1335,7 @@ if (!user) {
           ref={navigationRef}
           linking={linking}
           initialState={undefined}
-          onReady={() => {
-          setIsNavReady(true);
-          setNavReadyTick((x) => x + 1);
-        }}
+          onReady={() => setIsNavReady(true)}
         >
         <RootStack.Navigator
           screenOptions={{ headerShown: false }}
@@ -1474,6 +1455,11 @@ const initialRouteName = isResetLink
           <RootStack.Screen
             name="SendToKeeprAssetPicker"
             component={SendToKeeprAssetPicker}
+          />
+          {/* Mobile Send to Keepr Function */}
+          <RootStack.Screen
+            name="SendToKeepr"
+            component={SendToKeeprScreen}
           />
 
           {/* Boats */}
