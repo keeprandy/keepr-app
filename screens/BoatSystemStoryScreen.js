@@ -120,6 +120,13 @@ function warrantyStatus(expiresOn) {
   return { label: "Covered", tone: "healthy", days };
 }
 
+function asText(v) {
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "number") return String(v);
+  if (typeof v === "object") return v.content || "";
+  return "";
+}
 // ---- screen ----
 
 export default function BoatSystemStoryScreen(props) {
@@ -276,7 +283,19 @@ export default function BoatSystemStoryScreen(props) {
       const rows = [];
 
       for (const row of systemPlacementRows) {
-        const fileName = row.file_name || row.fileName || row.name || "Attachment";
+        const fileName =
+          asText(row.file_name) ||
+          asText(row.fileName) ||
+          asText(row.name) ||
+          asText(row.title) ||
+          "Attachment";
+
+        const safeTitle =
+          asText(row.title) ||
+          fileName ||
+          "Attachment";
+
+        const safeUrl = asText(row.url);
         const ext = getExt(fileName);
         const mime = row.mime_type || row.mimeType || "";
 
@@ -285,7 +304,7 @@ export default function BoatSystemStoryScreen(props) {
 
         const isPdf = isPdfMime(mime) || ext === "pdf";
 
-        let previewUrl = row.url || null;
+       let previewUrl = safeUrl || null;
 
         if (!previewUrl && row.storage_path) {
           try {
@@ -301,13 +320,17 @@ export default function BoatSystemStoryScreen(props) {
         }
 
         rows.push({
-          ...row,
-          _id: row.attachment_id || row.id || row.storage_path || row.url,
-          fileName,
-          isPhoto,
-          isPdf,
-          previewUrl,
-        });
+        ...row,
+        title: safeTitle,
+        name: asText(row.name),
+        file_name: fileName,
+        fileName,
+        url: safeUrl,
+        _id: row.attachment_id || row.id || row.storage_path || row.url,
+        isPhoto,
+        isPdf,
+        previewUrl,
+      });
       }
 
       if (!cancelled) {
@@ -634,7 +657,7 @@ const handlePrint = useCallback(async () => {
   const lastDate = lastRecord?.performed_at || lastRecord?.service_date || null;
 
   const lastServiceLabel = lastRecord
-    ? `${lastDate || "Recent"} · ${lastRecord.title || "Service event"}`
+  ? `${lastDate || "Recent"} · ${asText(lastRecord.title) || "Service event"}`
     : "No service history yet.";
 
   // ---- loading / error ----
@@ -1137,7 +1160,8 @@ const handlePrint = useCallback(async () => {
                 contentContainerStyle={{ paddingTop: spacing.sm, paddingRight: spacing.md }}
               >
                 {attachmentPreview.slice(0, 12).map((att, idx) => {
-                  const label = att.title || att.fileName || att.name || "Attachment";
+                  const label =
+                      asText(att.title) || asText(att.fileName) || asText(att.name) || "Attachment";
                   const key = att._id || att.attachment_id || `${idx}`;
 
                   const heroId = system?.hero_attachment_id || null;

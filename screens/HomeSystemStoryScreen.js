@@ -120,6 +120,14 @@ function getStandardMeta(systemRow) {
   };
 }
 
+function asText(v) {
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "number") return String(v);
+  if (typeof v === "object") return v.content || "";
+  return "";
+}
+
 function parseDate(value) {
   if (!value) return null;
   const d = new Date(value);
@@ -399,7 +407,18 @@ useFocusEffect(
 
       for (const row of systemPlacementRows) {
         const fileName =
-          row.file_name || row.fileName || row.name || "Attachment";
+        asText(row.file_name) ||
+        asText(row.fileName) ||
+        asText(row.name) ||
+        asText(row.title) ||
+        "Attachment";
+
+      const safeTitle =
+        asText(row.title) ||
+        fileName ||
+        "Attachment";
+
+      const safeUrl = asText(row.url);
         const ext = getExt(fileName);
         const mime = row.mime_type || row.mimeType || "";
 
@@ -410,7 +429,7 @@ useFocusEffect(
 
         const isPdf = isPdfMime(mime) || ext === "pdf";
 
-        let previewUrl = row.url || null;
+       let previewUrl = safeUrl || null;
 
         if (!previewUrl && row.storage_path) {
           try {
@@ -427,11 +446,14 @@ useFocusEffect(
             );
           }
         }
-
         rows.push({
           ...row,
-          _id: row.attachment_id || row.id || row.storage_path || row.url,
+          title: safeTitle,
+          name: asText(row.name),
+          file_name: fileName,
           fileName,
+          url: safeUrl,
+          _id: row.attachment_id || row.id || row.storage_path || row.url,
           isPhoto,
           isPdf,
           previewUrl,
@@ -781,9 +803,7 @@ const warrantyStarts = warrantyMeta?.starts_on || warrantyMeta?.start_on || warr
     lastRecord?.performed_at || lastRecord?.service_date || null;
 
   const lastServiceLabel = lastRecord
-    ? `${lastDate || "Recent"} · ${
-        lastRecord.title || "Service event"
-      }`
+  ? `${lastDate || "Recent"} · ${asText(lastRecord.title) || "Service event"}`
     : "No service history yet.";
 
   // ---- loading / error ----
@@ -1420,7 +1440,7 @@ const warrantyStarts = warrantyMeta?.starts_on || warrantyMeta?.start_on || warr
               >
                 {attachmentPreview.slice(0, 12).map((att, idx) => {
                   const label =
-                    att.title || att.fileName || att.name || "Attachment";
+                    asText(att.title) || asText(att.fileName) || asText(att.name) || "Attachment";
                   const key =
                     att._id || att.attachment_id || `${idx}`;
 
@@ -1559,8 +1579,8 @@ const warrantyStarts = warrantyMeta?.starts_on || warrantyMeta?.start_on || warr
                 {records.map((rec) => {
                   const date =
                     rec.performed_at || rec.service_date || "";
-                  const title = rec.title || "Service event";
-                  const notes = rec.notes || "";
+                  const title = asText(rec.title) || "Service event";
+                  const notes = asText(rec.notes);
                   const thumbs = (rec.photos || []).slice(0, 6);
 
                   return (

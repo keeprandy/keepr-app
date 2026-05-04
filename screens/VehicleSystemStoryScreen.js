@@ -284,7 +284,19 @@ export default function VehicleSystemStoryScreen(props) {
       const rows = [];
 
       for (const row of systemPlacementRows) {
-        const fileName = row.file_name || row.fileName || row.name || "Attachment";
+        const fileName =
+        asText(row.file_name) ||
+        asText(row.fileName) ||
+        asText(row.name) ||
+        asText(row.title) ||
+        "Attachment";
+
+      const safeTitle =
+        asText(row.title) ||
+        fileName ||
+        "Attachment";
+
+      const safeUrl = asText(row.url);
         const ext = getExt(fileName);
         const mime = row.mime_type || row.mimeType || "";
 
@@ -293,7 +305,7 @@ export default function VehicleSystemStoryScreen(props) {
 
         const isPdf = isPdfMime(mime) || ext === "pdf";
 
-        let previewUrl = row.url || null;
+        let previewUrl = safeUrl || null;
 
         if (!previewUrl && row.storage_path) {
           try {
@@ -310,8 +322,12 @@ export default function VehicleSystemStoryScreen(props) {
 
         rows.push({
           ...row,
-          _id: row.attachment_id || row.id || row.storage_path || row.url,
+          title: safeTitle,
+          name: asText(row.name),
+          file_name: fileName,
           fileName,
+          url: safeUrl,
+          _id: row.attachment_id || row.id || row.storage_path || row.url,
           isPhoto,
           isPdf,
           previewUrl,
@@ -621,8 +637,8 @@ export default function VehicleSystemStoryScreen(props) {
   const lastDate = lastRecord?.performed_at || lastRecord?.service_date || null;
 
   const lastServiceLabel = lastRecord
-    ? `${lastDate || "Recent"} · ${lastRecord.title || "Service event"}`
-    : "No service history yet.";
+  ? `${lastDate || "Recent"} · ${asText(lastRecord.title) || "Service event"}`
+  : "No service history yet.";
 
   // ---- loading / error ----
   if (loading) {
