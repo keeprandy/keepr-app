@@ -1052,12 +1052,18 @@ function Root({ onRouteChange, setCurrentRouteName, currentRouteName }) {
     });
   }, [user?.id]);
 
+// Web navigation state persistence (prevents tab-switch / refresh from dumping to Dashboard)
+const NAV_PERSIST_KEY = "keepr.nav.state.v1";
+const [initialNavState, setInitialNavState] = React.useState(undefined);
+const [isNavReady, setIsNavReady] = React.useState(Platform.OS !== "web");
+
 const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntent();
+
+const pendingShareRef = React.useRef(null);
 
 React.useEffect(() => {
   if (!user?.id) return;
   if (!hasShareIntent || !shareIntent) return;
-  if (!navigationRef?.isReady?.()) return;
 
   const file = shareIntent?.files?.[0] || null;
   const text = shareIntent?.text || null;
@@ -1073,21 +1079,29 @@ React.useEffect(() => {
   console.log("📥 RAW shareIntent:", JSON.stringify(shareIntent, null, 2));
   console.log("📥 Normalized payload:", JSON.stringify(payload, null, 2));
 
-setTimeout(() => {
-  navigationRef.current?.navigate("SendToKeeprAssetPicker", {
-    incomingShare: payload,
-  });
-
-  resetShareIntent();
-}, 0);
+  pendingShareRef.current = payload;
 
   resetShareIntent();
 }, [user?.id, hasShareIntent, shareIntent, resetShareIntent]);
 
-// Web navigation state persistence (prevents tab-switch / refresh from dumping to Dashboard)
-const NAV_PERSIST_KEY = "keepr.nav.state.v1";
-const [initialNavState, setInitialNavState] = React.useState(undefined);
-const [isNavReady, setIsNavReady] = React.useState(Platform.OS !== "web");
+React.useEffect(() => {
+  if (!user?.id) return;
+  if (!pendingShareRef.current) return;
+
+  const timer = setTimeout(() => {
+    if (!navigationRef?.isReady?.()) return;
+    if (!pendingShareRef.current) return;
+
+    const payload = pendingShareRef.current;
+    pendingShareRef.current = null;
+
+    navigationRef.current?.navigate("SendToKeeprAssetPicker", {
+      incomingShare: payload,
+    });
+  }, 300);
+
+  return () => clearTimeout(timer);
+}, [user?.id, hasShareIntent, shareIntent]);
 
 React.useEffect(() => {
   if (Platform.OS !== "web") return;
