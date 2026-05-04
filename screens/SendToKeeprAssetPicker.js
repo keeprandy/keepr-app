@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import {
   View,
   Text,
   TouchableOpacity,
   FlatList,
   ActivityIndicator,
+  TextInput,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../lib/supabaseClient";
@@ -13,15 +14,18 @@ import { navigationRef } from "../navigationRoot";
 export default function SendToKeeprAssetPicker({ route }) {
   const incomingShare = route?.params?.incomingShare;
 
-if (!incomingShare) {
-  console.log("⚠️ No incoming share payload on AssetPicker");
-} else {
-  console.log("📦 incomingShare received:", incomingShare);
-}
-
   const [assets, setAssets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [lastAssetId, setLastAssetId] = useState(null);
+  const [search, setSearch] = useState("");
+  const [ready, setReady] = useState(false);
+
+  // 🔐 Cold start guard
+  useEffect(() => {
+    if (incomingShare) {
+      setReady(true);
+    }
+  }, [incomingShare]);
 
   useEffect(() => {
     loadAssets();
@@ -32,7 +36,7 @@ if (!incomingShare) {
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData?.user?.id;
 
-        const { data } = await supabase
+      const { data } = await supabase
         .from("assets")
         .select("id,name,status,deleted_at")
         .eq("owner_id", userId)
@@ -40,24 +44,26 @@ if (!incomingShare) {
         .eq("status", "active")
         .order("name", { ascending: true });
 
-      setAssets(data || []);
+      const clean = data || [];
+      setAssets(clean);
 
       const last = await AsyncStorage.getItem(`lastCaptureAsset:${userId}`);
-        const stillExists = (data || []).some((a) => a.id === last);
-        if (!stillExists) {
+      const lastId = last ? String(last) : null;
+
+      const stillExists = clean.some((a) => a.id === lastId);
+
+      if (!stillExists) {
         await AsyncStorage.removeItem(`lastCaptureAsset:${userId}`);
         setLastAssetId(null);
-        } else {
-        setLastAssetId(last);
-        }
-        
+      } else {
+        setLastAssetId(lastId);
+      }
     } catch (e) {
       console.log("Asset load failed", e);
     } finally {
       setLoading(false);
     }
   };
-
 
   const handleSelect = async (asset) => {
     try {
@@ -69,11 +75,10 @@ if (!incomingShare) {
         asset.id
       );
 
-      // ✅ copy payload so it can't mutate
       const payload = incomingShare ? { ...incomingShare } : null;
 
-      // ✅ immediately clear route param (prevents reuse)
-      route.params.incomingShare = null;
+      // 🔥 SAFE param clear (no mutation)
+      navigationRef.setParams({ incomingShare: null });
 
       navigationRef.navigate("AssetAttachmentsMobile", {
         assetId: asset.id,
@@ -85,7 +90,25 @@ if (!incomingShare) {
     }
   };
 
-  if (loading) {
+  // 🔍 Search + sort
+  const filtered = useMemo(() => {
+    const list = [...assets];
+
+    list.sort((a, b) => {
+      if (a.id === lastAssetId) return -1;
+      if (b.id === lastAssetId) return 1;
+      return a.name.localeCompare(b.name);
+    });
+
+    if (!search.trim()) return list;
+
+    return list.filter((a) =>
+      a.name.toLowerCase().includes(search.toLowerCase())
+    );
+  }, [assets, lastAssetId, search]);
+
+  // ⏳ Loading
+  if (loading || !ready) {
     return (
       <View style={{ flex: 1, justifyContent: "center" }}>
         <ActivityIndicator />
@@ -93,34 +116,74 @@ if (!incomingShare) {
     );
   }
 
-  // Put last asset at top
-  const sorted = [...assets].sort((a, b) => {
-    if (a.id === lastAssetId) return -1;
-    if (b.id === lastAssetId) return 1;
-    return a.name.localeCompare(b.name);
-  });
+  // 🧾 Share Preview Block
+  const renderPreview = () => {
+    if (!incomingShare) return null;
+
+    return (
+      <View
+        style={{
+          padding: 12,
+          borderRadius: 10,
+          backgroundColor: "#F3F4F6",
+          marginBottom: 12,
+        }}
+      >
+        {incomingShare?.file && (
+          <Text style={{ fontSize: 13 }}>
+            📎 {incomingShare.file.fileName || "File"}
+          </Text>
+        )}
+
+        {incomingShare?.url && (
+          <Text style={{ fontSize: 13 }}>
+            🔗 {incomingShare.url}
+          </Text>
+        )}
+
+        {incomingShare?.text &&
+          !incomingShare?.url && (
+            <Text style={{ fontSize: 13 }}>
+              📝 {incomingShare.text.slice(0, 80)}
+            </Text>
+          )}
+      </View>
+    );
+  };
 
   return (
     <View style={{ flex: 1, padding: 20 }}>
-      <Text style={{ fontSize: 18, fontWeight: "700", marginBottom: 10 }}>
-        Send to Keepr
+      {/* Header */}
+      <Text style={{ fontSize: 18, fontWeight: "700", marginBottom: 4 }}>
+        Add to Keepr
       </Text>
 
-      {incomingShare?.file && (
-        <Text style={{ marginBottom: 10 }}>
-          📎 {incomingShare.file.fileName || "Shared file"}
-        </Text>
-      )}
+      <Text style={{ fontSize: 13, color: "#6B7280", marginBottom: 12 }}>
+        Choose where this belongs
+      </Text>
 
-      {incomingShare?.url && (
-        <Text style={{ marginBottom: 10 }}>
-          🔗 {incomingShare.url}
-        </Text>
-      )}
+      {/* Preview */}
+      {renderPreview()}
 
+      {/* Search */}
+      <TextInput
+        placeholder="Search assets..."
+        value={search}
+        onChangeText={setSearch}
+        style={{
+          padding: 10,
+          borderRadius: 8,
+          borderWidth: 1,
+          borderColor: "#E5E7EB",
+          marginBottom: 12,
+        }}
+      />
+
+      {/* Asset List */}
       <FlatList
-        data={sorted}
+        data={filtered}
         keyExtractor={(item) => item.id}
+        keyboardShouldPersistTaps="handled"
         renderItem={({ item }) => (
           <TouchableOpacity
             onPress={() => handleSelect(item)}
@@ -130,15 +193,25 @@ if (!incomingShare) {
               borderColor: "#eee",
             }}
           >
-            <Text>{item.name}</Text>
+            <Text style={{ fontSize: 15 }}>{item.name}</Text>
+
             {item.id === lastAssetId && (
-              <Text style={{ fontSize: 12, color: "#888" }}>
+              <Text style={{ fontSize: 12, color: "#6B7280" }}>
                 Last used
               </Text>
             )}
           </TouchableOpacity>
         )}
       />
+
+      {/* Empty state */}
+      {filtered.length === 0 && (
+        <View style={{ marginTop: 40, alignItems: "center" }}>
+          <Text style={{ color: "#6B7280" }}>
+            No assets found
+          </Text>
+        </View>
+      )}
     </View>
   );
 }

@@ -1059,7 +1059,7 @@ const [isNavReady, setIsNavReady] = React.useState(Platform.OS !== "web");
 
 const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntent();
 
-const pendingShareRef = React.useRef(null);
+const [pendingShare, setPendingShare] = React.useState(null);
 
 React.useEffect(() => {
   if (!user?.id) return;
@@ -1079,29 +1079,41 @@ React.useEffect(() => {
   console.log("📥 RAW shareIntent:", JSON.stringify(shareIntent, null, 2));
   console.log("📥 Normalized payload:", JSON.stringify(payload, null, 2));
 
-  pendingShareRef.current = payload;
+  setPendingShare(payload);
 
   resetShareIntent();
 }, [user?.id, hasShareIntent, shareIntent, resetShareIntent]);
 
 React.useEffect(() => {
   if (!user?.id) return;
-  if (!pendingShareRef.current) return;
+  if (!pendingShare) return;
+  if (loadingRole) return;
+  if (!targetRoute) return;
+  if (!didInitialNavResolve.current) return;
+  if (!navigationRef?.isReady?.()) return;
 
   const timer = setTimeout(() => {
-    if (!navigationRef?.isReady?.()) return;
-    if (!pendingShareRef.current) return;
-
-    const payload = pendingShareRef.current;
-    pendingShareRef.current = null;
-
     navigationRef.current?.navigate("SendToKeeprAssetPicker", {
-      incomingShare: payload,
+      incomingShare: pendingShare,
     });
-  }, 300);
+
+    setPendingShare(null);
+  }, 250);
 
   return () => clearTimeout(timer);
-}, [user?.id, hasShareIntent, shareIntent]);
+}, [user?.id, pendingShare, loadingRole, targetRoute]);
+
+  React.useEffect(() => {
+  if (!pendingShare) return;
+  if (!navigationRef?.isReady?.()) return;
+
+  // force retry once nav becomes ready
+  navigationRef.current?.navigate("SendToKeeprAssetPicker", {
+    incomingShare: pendingShare,
+  });
+
+  setPendingShare(null);
+}, [pendingShare]);
 
 React.useEffect(() => {
   if (Platform.OS !== "web") return;
