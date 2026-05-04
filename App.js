@@ -63,7 +63,6 @@ import KeeprStoryScreen from "./screens/KeeprStoryScreen";
 
 // Public Action Screen Launched from QR Code or Direct Link
 import PublicActionScreen from "./screens/PublicActionScreen";
-import SendToKeeprScreen from "./screens/SendToKeeprScreen";
 import SendToKeeprAssetPicker from "./screens/SendToKeeprAssetPicker";
 
 // Screens
@@ -1074,9 +1073,13 @@ React.useEffect(() => {
   console.log("📥 RAW shareIntent:", JSON.stringify(shareIntent, null, 2));
   console.log("📥 Normalized payload:", JSON.stringify(payload, null, 2));
 
+setTimeout(() => {
   navigationRef.current?.navigate("SendToKeeprAssetPicker", {
     incomingShare: payload,
   });
+
+  resetShareIntent();
+}, 0);
 
   resetShareIntent();
 }, [user?.id, hasShareIntent, shareIntent, resetShareIntent]);
@@ -1455,11 +1458,6 @@ const initialRouteName = isResetLink
           <RootStack.Screen
             name="SendToKeeprAssetPicker"
             component={SendToKeeprAssetPicker}
-          />
-          {/* Mobile Send to Keepr Function */}
-          <RootStack.Screen
-            name="SendToKeepr"
-            component={SendToKeeprScreen}
           />
 
           {/* Boats */}
