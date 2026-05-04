@@ -392,11 +392,7 @@ export default function AttachmentViewerModal({
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <View style={styles.card}>
-          {IS_WEB ? (
-            content
-          ) : (
-            {content}
-          )}
+          {content}
         </View>
       </View>
     </Modal>
