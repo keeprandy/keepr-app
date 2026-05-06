@@ -3361,21 +3361,7 @@ return (
                             {/* ✅ Proof Builder and Keepr Intelligence entry point */}
                             <View style={styles.rowRight}>
                               {/* Keepr Intelligence */}
-                            <TouchableOpacity
-                              style={styles.eyeBtn}
-                              onPress={() => {
-                                const systemId =
-                                  effectiveScopeType === "system" ? effectiveScopeId : null;
 
-                                const attachmentId = row.attachment_id || row.id;
-
-                                navigation.navigate("KeeprIntelligence", { assetId, systemId, attachmentId });
-                              }}
-                              accessibilityLabel="Intelligence"
-                            >
-                              <Ionicons name="sparkles-outline" size={18} color={colors.textSecondary} />
-                              
-                            </TouchableOpacity>
                               {/* Proof Builder */}
                               <TouchableOpacity
                                 style={styles.eyeBtn}
