@@ -4,6 +4,7 @@ import { View, Text, TouchableOpacity, Share, StyleSheet } from "react-native";
 import QRCode from "react-native-qrcode-svg";
 import * as Clipboard from "expo-clipboard";
 import { supabase } from "../lib/supabaseClient";
+import { track } from "../lib/analytics";
 
 export default function ShareKeeprScreen({ navigation }) {
   const [inviteUrl, setInviteUrl] = useState("");
@@ -45,6 +46,11 @@ export default function ShareKeeprScreen({ navigation }) {
 
   setInviteUrl(url);
 
+  track("share_keepr_qr_viewed", {
+  invite_url: url,
+  source_slug: slug,
+});
+
   const { data: events, error: statsError } = await supabase
   .from("invite_events")
   .select("event_type")
@@ -69,13 +75,17 @@ if (statsError) {
 }
 };
 
-  const handleShare = async () => {
-    if (!inviteUrl) return;
+const handleShare = async () => {
+  if (!inviteUrl) return;
 
-    await Share.share({
-      message: `I’m a keepr. You should be too.\n\n${inviteUrl}`,
-    });
-  };
+  track("share_keepr_share_clicked", {
+    invite_url: inviteUrl,
+  });
+
+  await Share.share({
+    message: `I’m a keepr. You should be too.\n\n${inviteUrl}`,
+  });
+};
 
   const [inviteStats, setInviteStats] = useState({
   views: 0,
@@ -84,6 +94,12 @@ if (statsError) {
 });
 
   const handleCopy = async () => {
+    if (!inviteUrl) return;
+
+    track("share_keepr_copy_link_clicked", {
+      invite_url: inviteUrl,
+    });
+
     await Clipboard.setStringAsync(inviteUrl);
   };
 

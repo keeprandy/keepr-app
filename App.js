@@ -24,7 +24,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import GlassFooter from "./components/navigation/GlassFooter";
 import MoreScreen from "./screens/MoreScreen";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-
+import * as ExpoLinking from "expo-linking";
 
 import ManageTeamScreen from "./screens/ManageTeamScreen";
 import PrivacyTrustScreen from "./screens/PrivacyTrustScreen";
@@ -214,6 +214,7 @@ const linking = {
   screens: {
     ResetPassword: "reset",
     Auth: "auth",
+    
     KacResolve: "k/:kac",
     PublicAction: "k/:kac/actions",
     RootTabs: {
@@ -1040,7 +1041,54 @@ function KeeprIntelligenceWrapper(props) {
 
 console.log("✅ Enhance configured: ASSURANCE (no edge functions)");
 
+function InviteRedirectScreen() {
+  return <SplashIntroScreen />;
+}
+
 /* ----------------- ROOT WITH AUTH + ROLE GATE ----------------- */
+
+function extractInviteSlugFromUrl(url) {
+  if (!url || typeof url !== "string") return null;
+
+  try {
+    const parsed = ExpoLinking.parse(url);
+    const path = parsed?.path || "";
+
+    const querySlug =
+      parsed?.queryParams?.slug ||
+      parsed?.queryParams?.source ||
+      parsed?.queryParams?.ref ||
+      null;
+
+    if (querySlug) return String(querySlug);
+
+    const parts = path.split("/").filter(Boolean);
+    const inviteIndex = parts.indexOf("invite");
+
+    if (inviteIndex >= 0 && parts[inviteIndex + 1]) {
+      return parts[inviteIndex + 1];
+    }
+
+    return null;
+  } catch (e) {
+    console.log("Invite slug parse failed:", e?.message || e);
+    return null;
+  }
+}
+
+async function captureInviteSourceFromUrl(url) {
+  const slug = extractInviteSlugFromUrl(url);
+  if (!slug) return;
+  
+
+  try {
+    await AsyncStorage.setItem("keepr_acquisition_source_slug", slug);
+    await AsyncStorage.setItem("keepr_invite_slug", slug);
+    console.log("✅ Captured invite source:", slug);
+  } catch (e) {
+    console.log("Failed to save invite source:", e?.message || e);
+  }
+}
 
 function Root({ onRouteChange, setCurrentRouteName, currentRouteName }) {
   const { initializing, user } = useAuth();
@@ -1346,7 +1394,7 @@ if (!user) {
           <RootStack.Screen name="PublicAction" component={PublicActionScreen} />
           <RootStack.Screen name="KacResolve" component={KacResolveScreen} />
           
-
+          <RootStack.Screen name="Invite" component={InviteRedirectScreen} />
           <RootStack.Screen name="Auth" component={AuthScreen} />
           <RootStack.Screen name="ResetPassword" component={ResetPasswordScreen} />
         </RootStack.Navigator>
@@ -1380,6 +1428,7 @@ const initialRouteName = isResetLink
             screenOptions={{ headerShown: false }}
             initialRouteName={initialRouteName}
           >
+          <RootStack.Screen name="Invite" component={InviteRedirectScreen} />
           <RootStack.Screen name="Auth" component={AuthScreen} />
           <RootStack.Screen name="ResetPassword" component={ResetPasswordScreen} />
 
@@ -1752,6 +1801,32 @@ export default function App() {
   const isWebShell = Platform.OS === "web";
   const [currentRouteName, setCurrentRouteName] = React.useState("SplashIntro");
   const hideSidebarRoutes = ["StoryPrint", "Auth", "ResetPassword"];
+
+  React.useEffect(() => {
+  let mounted = true;
+
+  const captureInitialInvite = async () => {
+    try {
+      const initialUrl = await ExpoLinking.getInitialURL();
+      if (!mounted) return;
+      await captureInviteSourceFromUrl(initialUrl);
+    } catch (e) {
+      console.log("Initial invite link capture failed:", e?.message || e);
+    }
+  };
+
+  captureInitialInvite();
+
+const subscription = ExpoLinking.addEventListener("url", ({ url }) => {
+  console.log("🔥 URL RECEIVED:", url);
+  captureInviteSourceFromUrl(url);
+});
+
+  return () => {
+    mounted = false;
+    subscription?.remove?.();
+  };
+}, []);
 
   /* Global handler for tapping push/local notifications
   React.useEffect(() => {

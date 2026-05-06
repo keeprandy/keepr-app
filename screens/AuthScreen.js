@@ -1,7 +1,7 @@
 // screens/AuthScreen.js
 
 import { Ionicons } from "@expo/vector-icons";
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -20,6 +20,8 @@ import { Image } from "react-native";
 import { supabase } from "../lib/supabaseClient";
 import { layoutStyles } from "../styles/layout";
 import { colors, radius, spacing, typography } from "../styles/theme";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { track, identifyUser } from "../lib/analytics";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -79,6 +81,7 @@ export default function AuthScreen() {
     displayName: false,
   });
   const [formError, setFormError] = useState("");
+
 
   const { width } = useWindowDimensions();
 
@@ -247,10 +250,54 @@ export default function AuthScreen() {
         return;
       }
 
-      const sessionUserId = data?.session?.user?.id || null;
-      if (sessionUserId) {
-        await ensureProfile(sessionUserId);
-      }
+      const user = data?.session?.user || null;
+const sessionUserId = user?.id || null;
+
+if (sessionUserId) {
+  await ensureProfile(sessionUserId);
+
+  // 🔥 Attribution capture
+  let sourceSlug = null;
+
+  try {
+    sourceSlug =
+      (await AsyncStorage.getItem("keepr_acquisition_source_slug")) ||
+      (await AsyncStorage.getItem("keepr_invite_slug")) ||
+      null;
+  } catch (e) {
+    console.log("[AuthScreen] attribution read failed:", e?.message || e);
+  }
+
+  // 🔥 Persist to profile
+  if (sourceSlug) {
+    try {
+      await supabase
+        .from("profiles")
+        .update({
+          acquisition_source_slug: sourceSlug,
+        })
+        .eq("id", sessionUserId);
+    } catch (e) {
+      console.log("[AuthScreen] attribution save failed:", e?.message || e);
+    }
+  }
+
+  // 🔥 Identify + track
+  try {
+    identifyUser(sessionUserId, {
+      email: user?.email || null,
+      acquisition_source_slug: sourceSlug,
+    });
+
+    track("user_signed_up", {
+      source_slug: sourceSlug,
+      has_attribution: !!sourceSlug,
+      platform: Platform.OS,
+    });
+  } catch (e) {
+    console.log("[AuthScreen] posthog failed:", e?.message || e);
+  }
+}
 
       Alert.alert(
         "Account created",

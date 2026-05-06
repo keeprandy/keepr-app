@@ -5,6 +5,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  KeyboardAvoidingView,
   Linking,
   Modal,
   Platform,
@@ -1070,6 +1071,10 @@ const goToCreateRecord = useCallback(() => {
       await hydrateFromDb();
 
       showToast("Saved", isWarranty ? "Warranty enabled." : "Attachment saved.");
+      
+      setTimeout(() => {
+      navigation.goBack();
+    }, 700);
     } catch (e) {
       Alert.alert("Save failed", e?.message || "Could not save.");
     } finally {
@@ -1129,30 +1134,47 @@ const androidPdfViewerUrl =
   if (loading) {
     return (
       <SafeAreaView style={styles.screen}>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          keyboardVerticalOffset={50}
+        >
         <View style={styles.center}>
           <ActivityIndicator />
           <Text style={styles.mutedText}>Loading…</Text>
         </View>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     );
   }
 
   if (loadError) {
     return (
-      <SafeAreaView style={styles.screen}>
+       <SafeAreaView style={styles.screen}>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          keyboardVerticalOffset={50}
+        >
         <View style={styles.center}>
           <Text style={styles.errorText}>{loadError}</Text>
           <TouchableOpacity style={[styles.primaryBtn, { marginTop: 12 }]} onPress={hydrateFromDb}>
             <Text style={styles.primaryBtnText}>Retry</Text>
           </TouchableOpacity>
         </View>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     );
   }
 
   return (
     
-    <SafeAreaView style={styles.screen}>
+     <SafeAreaView style={styles.screen}>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          keyboardVerticalOffset={50}
+        >
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="chevron-back" size={20} color={colors.textPrimary} />
@@ -1170,10 +1192,13 @@ const androidPdfViewerUrl =
       </View>
 
       <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={{ paddingBottom: 120 }}
-          keyboardShouldPersistTaps="handled"
-        >
+        style={{ flex: 1 }}
+        contentContainerStyle={{
+          paddingBottom: 220,
+        }}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+      >
         {/* Evidence */}
         <View style={styles.card}>
           <View style={styles.sectionHeaderRow}>
@@ -1611,6 +1636,7 @@ const androidPdfViewerUrl =
           }
         }}
       />
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -1769,12 +1795,6 @@ systemRow: {
   systemMeta: { marginTop: 2, fontSize: 12, color: colors.textMuted },
 
   stickyBar: {
-    position: "absolute",
-    zIndex: 50,
-    elevation: 10,
-    left: 0,
-    right: 0,
-    bottom: 0,
     padding: spacing.md,
     borderTopWidth: 1,
     borderTopColor: colors.border,

@@ -27,6 +27,7 @@ import { layoutStyles } from "../styles/layout";
 import { colors, radius, spacing, typography } from "../styles/theme";
 import KeeprProgressCard, { buildKeeprProgressModel } from "../components/KeeprProgressCard";
 import { useFocusEffect } from "@react-navigation/native";
+import { track } from "../lib/analytics";
 
 /**
  * Sort helper: prefers explicit sort_rank, then "primary", then created_at, then name.
@@ -899,11 +900,16 @@ if (Platform.OS !== "ios") {
                     </View>
 
                     <ModeWidget
-                      icon="share-social-outline"
-                      title="Help Grow Keepr"
-                      subtitle="Share Keepr with a link or QR code"
-                      onPress={() => navigation.navigate("ShareKeepr")}
-                    />
+                        icon="share-social-outline"
+                        title="Help Grow Keepr"
+                        subtitle="Share Keepr with a link or QR code"
+                        onPress={() => {
+                          track("share_keepr_opened", {
+                            source: "dashboard",
+                          });
+                          navigation.navigate("ShareKeepr");
+                        }}
+                      />
 
                     {shouldShowKeeprProgress ? (
                     <View style={{ marginTop: spacing.md, maxWidth: 640 }}>
