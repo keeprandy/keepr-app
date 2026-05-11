@@ -20,6 +20,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { layoutStyles } from "../styles/layout";
 import { colors, spacing, radius, typography } from "../styles/theme";
 import { supabase } from "../lib/supabaseClient";
+import { posthog } from "../lib/posthog";
 import { createAssetWithDefaults } from "../lib/assetsService";
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import * as DocumentPicker from "expo-document-picker";
@@ -226,6 +227,10 @@ async function pickPhotoFromLibrary() {
   async function handleSave() {
     setError(null);
 
+    posthog.capture("asset_creation_started", {
+  asset_type: "vehicle",
+});
+
     const v = validate();
     if (!v.ok) {
       openModal(v.title, v.message);
@@ -274,12 +279,29 @@ async function pickPhotoFromLibrary() {
       const assetId = created?.id;
       if (!assetId) throw new Error("Asset create did not return an id.");
 
+      posthog.capture("asset_created", {
+      asset_id: assetId,
+      asset_type: "vehicle",
+      make: trimmedMake,
+      model: trimmedModel,
+      year: yearNumber,
+      asset_mode: assetMode,
+      has_hero_photo: !!photoLocal?.uri,
+      source: "manual_creation",
+    });
+
       // 3) Upload hero photo using the SAME standard as AssetAttachmentsScreen (DB-backed upload)
 let heroUrl = null;
 let heroPlacementId = null;
 
 if (photoLocal?.uri) {
   setUploadingPhoto(true);
+
+  posthog.capture("hero_photo_uploaded", {
+  asset_id: assetId,
+  asset_type: "vehicle",
+  source_context: "add_vehicle_asset",
+});
 
   const receipt = await uploadAttachmentFromUri({
     userId,
@@ -317,7 +339,6 @@ if (photoLocal?.uri) {
 
   heroPlacementId = uploadedPlacement?.id || null;
 
-    heroPlacementId = uploadedPlacement?.id;
   }
   const updatePayload = {
     hero_placement_id: heroPlacementId,
@@ -352,9 +373,19 @@ if (photoLocal?.uri) {
       if (upErr) throw upErr;
 
       // 5) Navigate
+
+      posthog.capture("asset_story_opened", {
+        asset_id: assetId,
+        asset_type: "vehicle",
+      });
+
      navigation.replace("VehicleStory", { assetId });
     } catch (e) {
       console.log("AddVehicleAssetScreen save failed", e);
+      posthog.capture("asset_creation_failed", {
+      asset_type: "vehicle",
+      error: e?.message || "unknown_error",
+    });
       const msg = e?.message || "Could not save vehicle. Please try again.";
       setError(msg);
       openModal("Couldn’t save", msg);

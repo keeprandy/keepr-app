@@ -16,7 +16,6 @@
     <string>6.0</string>
     <key>CFBundlePackageType</key>
     <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
-
     <key>NSExtension</key>
     <dict>
       <key>NSExtensionAttributes</key>
@@ -37,15 +36,16 @@
         <key>NSExtensionJavaScriptPreprocessingFile</key>
         <string>ShareExtensionPreprocessor</string>
       </dict>
-
       <key>NSExtensionMainStoryboard</key>
       <string>MainInterface</string>
-
       <key>NSExtensionPointIdentifier</key>
       <string>com.apple.share-services</string>
     </dict>
-
     <key>AppGroupIdentifier</key>
     <string>group.com.keeprhome.app</string>
+    <key>CFBundleVersion</key>
+    <string>2</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.8</string>
   </dict>
 </plist>

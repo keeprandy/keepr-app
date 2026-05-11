@@ -21,6 +21,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { layoutStyles } from "../styles/layout";
 import { colors, spacing, radius, typography } from "../styles/theme";
 import { supabase } from "../lib/supabaseClient";
+import { posthog } from "../lib/posthog";
 import { createAssetWithDefaults } from "../lib/assetsService";
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 
@@ -248,6 +249,10 @@ export default function AddMarineAssetScreen({ navigation }) {
 async function handleSaveBoat() {
   setError(null);
 
+  posthog.capture("asset_creation_started", {
+  asset_type: "vehicle",
+});
+
   const v = validate();
   if (!v.ok) {
     openModal(v.title, v.message);
@@ -304,11 +309,29 @@ async function handleSaveBoat() {
     const assetId = created?.id;
     if (!assetId) throw new Error("Asset create did not return an id.");
 
+    posthog.capture("asset_created", {
+      asset_id: assetId,
+      asset_type: "boat",
+      make: trimmedMake,
+      model: trimmedModel,
+      year: yearNumber,
+      length_feet: lengthNumber,
+      asset_mode: assetMode,
+      has_hero_photo: !!photoLocal?.uri,
+      source: "manual_creation",
+    });
+
     let heroUrl = null;
     let heroPlacementId = null;
 
     if (photoLocal?.uri) {
       setUploadingPhoto(true);
+
+      posthog.capture("hero_photo_uploaded", {
+      asset_id: assetId,
+      asset_type: "boat",
+      source_context: "add_marine_asset",
+    });
 
       const receipt = await uploadAttachmentFromUri({
         userId,
@@ -370,9 +393,18 @@ async function handleSaveBoat() {
 
     if (upErr) throw upErr;
 
+    posthog.capture("asset_story_opened", {
+      asset_id: assetId,
+      asset_type: "boat",
+    });
+
     navigation.replace("BoatStory", { assetId });
   } catch (e) {
     console.log("AddMarineAssetScreen save failed", e);
+    posthog.capture("asset_creation_failed", {
+  asset_type: "vehicle",
+  error: e?.message || "unknown_error",
+});
     const msg = e?.message || "Could not save boat. Please try again.";
     setError(msg);
     openModal("Couldn’t save", msg);

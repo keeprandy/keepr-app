@@ -4,6 +4,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { DefaultTheme, NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import { PostHogProvider } from "posthog-react-native";
+import { posthog } from "./lib/posthog";
 
 
 // import * as Notifications from "expo-notifications";
@@ -1162,6 +1164,20 @@ const [onboardingState, setOnboardingState] = React.useState("not_started");
 const [assetCount, setAssetCount] = React.useState(0);
   const [loadingRole, setLoadingRole] = React.useState(false);
 
+  React.useEffect(() => {
+  if (!user?.id) {
+    posthog.reset();
+    return;
+  }
+
+  posthog.identify(user.id, {
+    email: user.email,
+    role,
+    onboarding_state: onboardingState,
+    asset_count: assetCount,
+  });
+}, [user?.id, role, onboardingState, assetCount]);
+
   const lastRoleLoadAtRef = React.useRef(0);
 
   // Normalize onboarding state (we've had both "complete" and "completed" in the DB)
@@ -1336,6 +1352,7 @@ React.useEffect(() => {
   });
 }, [isResetLink]);
 
+const lastTrackedScreen = React.useRef(null);
 
 const handleNavStateChange = React.useCallback(
   (state) => {
@@ -1347,6 +1364,18 @@ const handleNavStateChange = React.useCallback(
 
     const route = navigationRef.getCurrentRoute();
     if (!route) return;
+
+    if (lastTrackedScreen.current === route.name) {
+      return;
+    }
+
+    lastTrackedScreen.current = route.name;
+
+    posthog.capture("screen_viewed", {
+      screen: route.name,
+      params: route.params || {},
+      role,
+    });
 
     if (setCurrentRouteName) setCurrentRouteName(route.name);
 
@@ -1365,7 +1394,7 @@ const handleNavStateChange = React.useCallback(
       onRouteChange(normalizedName);
     }
   },
-  [onRouteChange, setCurrentRouteName]
+  [onRouteChange, setCurrentRouteName, role]
 );
 
 // Web: wait until persisted navigation state (if any) is restored before rendering.
@@ -1730,25 +1759,6 @@ return (
     </Text>
   </View>
 );
-
-    return (
-      <View style={boundaryStyles.container}>
-        <Text style={boundaryStyles.title}>Something went wrong.</Text>
-        <Text style={boundaryStyles.subtitle}>
-          The app hit an unexpected error. You can reload and continue.
-        </Text>
-
-        <TouchableOpacity style={boundaryStyles.button} onPress={this.handleReset}>
-          <Text style={boundaryStyles.buttonText}>Reload</Text>
-        </TouchableOpacity>
-
-        {__DEV__ && this.state.error ? (
-          <Text style={boundaryStyles.devError} numberOfLines={6}>
-            {String(this.state.error?.message || this.state.error)}
-          </Text>
-        ) : null}
-      </View>
-    );
   }
 }
 
@@ -1850,53 +1860,59 @@ const subscription = ExpoLinking.addEventListener("url", ({ url }) => {
   }, []);
   */
 
-  return (
-    <AppErrorBoundary>
+return (
+  <AppErrorBoundary>
+    <PostHogProvider client={posthog}>
       <SafeAreaProvider>
-      <OperationFeedbackProvider>
-      <AuthProvider>
-        <VehiclesProvider>
-          <HomeProvider>
-            <WorkspaceProvider>
-              <BoatsProvider>
-                <EnhanceProvider>
-                  <EnhanceBootstrap />
+        <OperationFeedbackProvider>
+          <AuthProvider>
+            <VehiclesProvider>
+              <HomeProvider>
+                <WorkspaceProvider>
+                  <BoatsProvider>
+                    <EnhanceProvider>
+                      <KaiProvider>
 
-                  {isWebShell ? (
-                      <View style={appStyles.webShell}>
-                        {hideSidebarRoutes.includes(currentRouteName) ? null : (
-                          <SidebarNav currentRouteName={currentRouteName} />
-                        )}
+                        <EnhanceBootstrap />
 
-                        <View style={appStyles.webMain}>
-                        <View style={appStyles.webMainInner}>
+                        {isWebShell ? (
+                          <View style={appStyles.webShell}>
+                            {hideSidebarRoutes.includes(currentRouteName) ? null : (
+                              <SidebarNav currentRouteName={currentRouteName} />
+                            )}
+
+                            <View style={appStyles.webMain}>
+                              <View style={appStyles.webMainInner}>
+                                <Root
+                                  onRouteChange={setCurrentRouteName}
+                                  setCurrentRouteName={setCurrentRouteName}
+                                  currentRouteName={currentRouteName}
+                                />
+                              </View>
+                            </View>
+                          </View>
+                        ) : (
                           <Root
                             onRouteChange={setCurrentRouteName}
                             setCurrentRouteName={setCurrentRouteName}
                             currentRouteName={currentRouteName}
                           />
-                        </View>
-                      </View>
-                    </View>
-                    ) : (
-                      <Root
-                        onRouteChange={setCurrentRouteName}
-                        setCurrentRouteName={setCurrentRouteName}
-                        currentRouteName={currentRouteName}
-                      />
-                    )
-                    }
-                </EnhanceProvider>
-              </BoatsProvider>
-            </WorkspaceProvider>
-          </HomeProvider>
-        </VehiclesProvider>
-      </AuthProvider>
-            <OperationFeedbackModal />
-      </OperationFeedbackProvider>
+                        )}
+
+                      </KaiProvider>
+                    </EnhanceProvider>
+                  </BoatsProvider>
+                </WorkspaceProvider>
+              </HomeProvider>
+            </VehiclesProvider>
+          </AuthProvider>
+
+          <OperationFeedbackModal />
+        </OperationFeedbackProvider>
       </SafeAreaProvider>
-    </AppErrorBoundary>
-  );
+    </PostHogProvider>
+  </AppErrorBoundary>
+);
 }
 
 const appStyles = StyleSheet.create({

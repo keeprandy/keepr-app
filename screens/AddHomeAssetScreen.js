@@ -21,6 +21,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { layoutStyles } from "../styles/layout";
 import { colors, spacing, radius, typography } from "../styles/theme";
 import { supabase } from "../lib/supabaseClient";
+import { posthog } from "../lib/posthog";
 import { createAssetWithDefaults } from "../lib/assetsService";
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 
@@ -207,6 +208,10 @@ export default function AddHomeAssetScreen({ navigation, route }) {
   async function handleSaveHome() {
     setError(null);
 
+    posthog.capture("asset_creation_started", {
+  asset_type: "vehicle",
+});
+
     const v = validate();
     if (!v.ok) {
       openModal(v.title, v.message);
@@ -256,12 +261,27 @@ export default function AddHomeAssetScreen({ navigation, route }) {
       const assetId = created?.id;
       if (!assetId) throw new Error("Asset create did not return an id.");
 
+      posthog.capture("asset_created", {
+  asset_id: assetId,
+  asset_type: "home",
+  asset_mode: assetMode,
+  has_hero_photo: !!photoLocal?.uri,
+  year_built: yearNumber,
+  source: "manual_creation",
+});
+
       // 2) Upload hero photo (DB-backed)
  let heroUrl = null;
 let heroPlacementId = null;
 
 if (photoLocal?.uri) {
   setUploadingPhoto(true);
+
+  posthog.capture("hero_photo_uploaded", {
+  asset_id: assetId,
+  asset_type: "home",
+  source_context: "add_home_asset",
+});
 
   const receipt = await uploadAttachmentFromUri({
     userId,
@@ -324,10 +344,19 @@ if (photoLocal?.uri) {
           .eq("id", userId);
       }
 
+    posthog.capture("asset_story_opened", {
+      asset_id: assetId,
+      asset_type: "home",
+    });
+
       // 5) Navigate (keep your existing route behavior)
      navigation.replace("HomeStory", { assetId });
     } catch (e) {
       console.log("AddHomeAssetScreen save failed", e);
+      posthog.capture("asset_creation_failed", {
+        asset_type: "vehicle",
+        error: e?.message || "unknown_error",
+      });
       const raw = String(e?.message || "");
       const isPlanLimit = raw.includes("plan_limit_assets") || raw.toLowerCase().includes("asset limit");
       const msg = isPlanLimit
