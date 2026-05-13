@@ -4,7 +4,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { DefaultTheme, NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { PostHogProvider } from "posthog-react-native";
 import { posthog } from "./lib/posthog";
 
 
@@ -1812,6 +1811,15 @@ export default function App() {
   const [currentRouteName, setCurrentRouteName] = React.useState("SplashIntro");
   const hideSidebarRoutes = ["StoryPrint", "Auth", "ResetPassword"];
 
+React.useEffect(() => {
+  console.log("POSTHOG TEST EVENT FIRING");
+
+  posthog.capture("debug_app_loaded", {
+    platform: Platform.OS,
+    timestamp: new Date().toISOString(),
+  });
+}, []);
+
   React.useEffect(() => {
   let mounted = true;
 
@@ -1862,7 +1870,6 @@ const subscription = ExpoLinking.addEventListener("url", ({ url }) => {
 
 return (
   <AppErrorBoundary>
-    <PostHogProvider client={posthog}>
       <SafeAreaProvider>
         <OperationFeedbackProvider>
           <AuthProvider>
@@ -1910,7 +1917,6 @@ return (
           <OperationFeedbackModal />
         </OperationFeedbackProvider>
       </SafeAreaProvider>
-    </PostHogProvider>
   </AppErrorBoundary>
 );
 }
