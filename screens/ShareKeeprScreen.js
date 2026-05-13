@@ -45,6 +45,7 @@ export default function ShareKeeprScreen({ navigation }) {
   const url = `https://www.keeprhome.com/invite/${slug}`;
 
   setInviteUrl(url);
+  setSourceSlug(slug);
 
   track("share_keepr_qr_viewed", {
   invite_url: url,
@@ -79,8 +80,9 @@ const handleShare = async () => {
   if (!inviteUrl) return;
 
   track("share_keepr_share_clicked", {
-    invite_url: inviteUrl,
-  });
+  invite_url: inviteUrl,
+  source_slug: sourceSlug,
+});
 
   await Share.share({
     message: `I’m a keepr. You should be too.\n\n${inviteUrl}`,
@@ -93,15 +95,24 @@ const handleShare = async () => {
   accepted: 0,
 });
 
+const [sourceSlug, setSourceSlug] = useState("");
+const [showCopied, setShowCopied] = useState(false);
+
   const handleCopy = async () => {
     if (!inviteUrl) return;
 
-    track("share_keepr_copy_link_clicked", {
-      invite_url: inviteUrl,
-    });
+   track("share_keepr_copy_link_clicked", {
+  invite_url: inviteUrl,
+  source_slug: sourceSlug,
+});
 
     await Clipboard.setStringAsync(inviteUrl);
-  };
+    setShowCopied(true);
+
+    setTimeout(() => {
+      setShowCopied(false);
+    }, 2000);
+      };
 
 
   return (
@@ -149,6 +160,12 @@ const handleShare = async () => {
 
   </View>
 </View>
+
+{showCopied && (
+  <View style={styles.toast}>
+    <Text style={styles.toastText}>Copied to clipboard</Text>
+  </View>
+)}
     </View>
     
   );
@@ -180,6 +197,27 @@ const styles = StyleSheet.create({
     color: "#6B7280",
     marginBottom: 20,
   },
+
+  toast: {
+  position: "absolute",
+  bottom: 110,
+  backgroundColor: "#111827",
+  paddingHorizontal: 18,
+  paddingVertical: 10,
+  borderRadius: 999,
+  shadowColor: "#000",
+  shadowOpacity: 0.2,
+  shadowRadius: 8,
+  shadowOffset: { width: 0, height: 2 },
+  elevation: 4,
+},
+
+toastText: {
+  color: "#fff",
+  fontWeight: "700",
+  fontSize: 13,
+},
+
   backButton: {
   position: "absolute",
   top: 54,
