@@ -1169,12 +1169,30 @@ const [assetCount, setAssetCount] = React.useState(0);
     return;
   }
 
+  const identifyUser = async () => {
+  let sourceSlug = null;
+
+  try {
+    sourceSlug = await AsyncStorage.getItem(
+      "keepr_acquisition_source_slug"
+    );
+  } catch (e) {
+    console.log("Failed to load acquisition source slug", e);
+  }
+
   posthog.identify(user.id, {
     email: user.email,
     role,
     onboarding_state: onboardingState,
     asset_count: assetCount,
+    source_slug: sourceSlug || null,
+    is_internal_user:
+      user.email?.includes("@keeprhome.com"),
   });
+};
+
+identifyUser();
+
 }, [user?.id, role, onboardingState, assetCount]);
 
   const lastRoleLoadAtRef = React.useRef(0);
