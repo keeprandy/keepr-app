@@ -2,7 +2,16 @@
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+  Alert,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  Image,
+} from "react-native";
 import QRCode from "react-native-qrcode-svg";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -10,6 +19,9 @@ import { supabase } from "../lib/supabaseClient";
 import { colors, radius, shadows, spacing } from "../styles/theme";
 import * as Clipboard from "expo-clipboard";
 import { Share } from "react-native";
+import { Asset } from "expo-asset";
+
+const qrFrame = require("../assets/public/keepr-enabled-band-500.png");
 
 function genKac() {
   // Simple, stable-ish V1 generator (we can improve format later)
@@ -18,14 +30,19 @@ function genKac() {
 }
 
 function getBaseUrl() {
-  // V1: keep this simple. For production you’ll use https://app.keeprhome.com
-  // If you want local QR codes while testing, set EXPO_PUBLIC_KEEPR_BASE_URL in .env.
-  return process.env.EXPO_PUBLIC_KEEPR_BASE_URL || "https://app.keeprhome.com";
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    return window.location.origin;
+  }
+
+  return (
+    process.env.EXPO_PUBLIC_KEEPR_BASE_URL ||
+    process.env.PUBLIC_KEEPR_BASE_URL ||
+    "https://app.keeprhome.com"
+  );
 }
 
-function htmlForSticker({ assetName, kac, qrDataUrl, url }) {
-  // 50x30mm-ish sticker: keep it compact; printers vary.
-  // You can tune sizing once you test your label printer.
+function htmlForSticker({ assetName, kac, qrDataUrl, frameUri, url }) {
+
   return `<!doctype html>
 <html>
   <head>
@@ -36,8 +53,31 @@ function htmlForSticker({ assetName, kac, qrDataUrl, url }) {
       .title { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
       .kac { font-size: 12px; color: #444; margin-bottom: 8px; }
       .row { display: flex; gap: 10px; align-items: center; }
-      img { width: 140px; height: 140px; }
       .url { font-size: 10px; color: #666; margin-top: 6px; word-break: break-all; }
+      .brandedQr {
+        width: 500px;
+        height: 500px;
+        position: relative;
+        margin: 24px auto;
+      }
+      .qrFrame {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 500px;
+          height: auto;
+          z-index: 2;
+        }
+
+        .qrCode {
+          position: absolute;
+          top: 70px;
+          left: 115px;
+          width: 270px;
+          height: 270px;
+          z-index: 1;
+        }
+
     </style>
   </head>
   <body>
@@ -45,7 +85,7 @@ function htmlForSticker({ assetName, kac, qrDataUrl, url }) {
       <div class="title">${escapeHtml(assetName || "Asset")}</div>
       <div class="kac">${escapeHtml(kac || "")}</div>
       <div class="row">
-        <img id="keepr-qr-image" src="${qrDataUrl}" />
+        ${htmlForBrandedQr({ qrDataUrl, frameUri })}
       </div>
       <div class="url">${escapeHtml(url)}</div>
     </div>
@@ -53,7 +93,16 @@ function htmlForSticker({ assetName, kac, qrDataUrl, url }) {
 </html>`;
 }
 
-function htmlForPdfSheet({ assetName, kac, qrDataUrl, url }) {
+function htmlForBrandedQr({ qrDataUrl, frameUri }) {
+  return `
+    <div class="brandedQr">
+      <img id="keepr-qr-image" class="qrCode" src="${qrDataUrl}" />
+      <img id="keepr-qr-frame" class="qrFrame" src="${frameUri}" />
+    </div>
+  `;
+}
+
+function htmlForPdfSheet({ assetName, kac, qrDataUrl, frameUri, url }) {
   return `<!doctype html>
 <html>
   <head>
@@ -94,10 +143,7 @@ function htmlForPdfSheet({ assetName, kac, qrDataUrl, url }) {
         justify-content: center;
         margin: 24px 0;
       }
-      .qrWrap img {
-        width: 280px;
-        height: 280px;
-      }
+      
       .urlLabel {
         font-size: 12px;
         font-weight: 700;
@@ -124,6 +170,29 @@ function htmlForPdfSheet({ assetName, kac, qrDataUrl, url }) {
         font-size: 12px;
         color: #6B7280;
       }
+        .brandedQr {
+        width: 500px;
+        height: 500px;
+        position: relative;
+        margin: 24px auto;
+      }
+      .qrFrame {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 500px;
+        height: auto;
+        z-index: 2;
+      }
+
+      .qrCode {
+        position: absolute;
+        top: 70px;
+        left: 115px;
+        width: 270px;
+        height: 270px;
+        z-index: 1;
+      }
     </style>
   </head>
   <body>
@@ -133,7 +202,7 @@ function htmlForPdfSheet({ assetName, kac, qrDataUrl, url }) {
       <div class="kac">KAC: ${escapeHtml(kac || "")}</div>
 
       <div class="qrWrap">
-        <img id="keepr-qr-image" src="${qrDataUrl}" />
+        ${htmlForBrandedQr({ qrDataUrl, frameUri })}
       </div>
 
       <div class="urlLabel">Public link</div>
@@ -208,7 +277,7 @@ export default function AssetQRCodesScreen({ route, navigation }) {
   const baseUrl = useMemo(() => getBaseUrl(), []);
   const kac = asset?.kac_id || null;
   const url = useMemo(
-  () => (kac ? `${baseUrl}/k/${encodeURIComponent(kac)}/actions` : null),
+  () => (kac ? `${baseUrl}/k/${encodeURIComponent(kac)}` : null),
   [baseUrl, kac]
 );
 
@@ -299,7 +368,7 @@ export default function AssetQRCodesScreen({ route, navigation }) {
 
   const nextKac = nextAsset?.kac_id || null;
   const nextUrl = nextKac
-    ? `${baseUrl}/k/${encodeURIComponent(nextKac)}/actions`
+    ? `${baseUrl}/k/${encodeURIComponent(nextKac)}`
     : null;
 
   return { nextAsset, nextKac, nextUrl };
@@ -319,51 +388,39 @@ export default function AssetQRCodesScreen({ route, navigation }) {
     });
   };
 
-async function openPrintWindowAndWait(html) {
-  const w = window.open("", "_blank");
-  if (!w) throw new Error("Popup blocked. Allow popups to print.");
+async function openPrintWindowAndWait(w, html) {
+  if (!w) {
+    Alert.alert("Popup blocked", "Allow popups to print this badge.");
+    return;
+  }
+
+  const htmlWithPrintScript = html.replace(
+    "</body>",
+    `
+      <script>
+        window.onload = function () {
+          setTimeout(function () {
+            window.focus();
+            window.print();
+          }, 800);
+        };
+      </script>
+    </body>`
+  );
 
   w.document.open();
-  w.document.write(html);
+  w.document.write(htmlWithPrintScript);
   w.document.close();
-
-  await new Promise((resolve, reject) => {
-    const done = () => {
-      try {
-        const img = w.document.getElementById("keepr-qr-image");
-
-        if (!img) {
-          resolve();
-          return;
-        }
-
-        if (img.complete) {
-          resolve();
-          return;
-        }
-
-        img.onload = () => resolve();
-        img.onerror = () => reject(new Error("QR image failed to load."));
-      } catch (e) {
-        reject(e);
-      }
-    };
-
-    if (w.document.readyState === "complete") {
-      done();
-    } else {
-      w.onload = done;
-    }
-  });
-
-  // tiny delay so Chrome fully paints before print preview
-  await new Promise((r) => setTimeout(r, 150));
-
-  w.focus();
-  w.print();
 }
 
 const onPrintSticker = async () => {
+  const printWindow = Platform.OS === "web" ? window.open("", "_blank") : null;
+
+  if (Platform.OS === "web" && printWindow) {
+    printWindow.document.write("<p style='font-family:sans-serif;padding:24px;'>Preparing Keepr badge…</p>");
+    printWindow.document.close();
+  }
+
   try {
     const { nextAsset, nextKac, nextUrl } = await ensureKacAndUrl();
     if (!nextUrl) throw new Error("Missing KAC URL");
@@ -371,20 +428,31 @@ const onPrintSticker = async () => {
     setBusy(true);
 
     const qrDataUrl = await getQrPngDataUrl();
+    const frameUri = Asset.fromModule(qrFrame).uri;
+
     const html = htmlForSticker({
       assetName: nextAsset?.name,
       kac: nextKac,
       qrDataUrl,
+      frameUri,
       url: nextUrl,
     });
 
     if (Platform.OS === "web") {
-  await openPrintWindowAndWait(html);
-  return;
-}
+      await openPrintWindowAndWait(printWindow, html);
+      return;
+    }
 
     await Print.printAsync({ html });
   } catch (e) {
+    if (Platform.OS === "web" && printWindow) {
+      printWindow.document.open();
+      printWindow.document.write(
+        `<pre style="font-family:monospace;padding:24px;white-space:pre-wrap;">Print failed:\n${String(e?.message || e)}</pre>`
+      );
+      printWindow.document.close();
+    }
+
     Alert.alert("Print failed", e?.message || "Unable to print.");
   } finally {
     setBusy(false);
@@ -393,21 +461,24 @@ const onPrintSticker = async () => {
 
 const onPrintPdf = async () => {
   try {
+    const printWindow = Platform.OS === "web" ? window.open("", "_blank") : null;
     const { nextAsset, nextKac, nextUrl } = await ensureKacAndUrl();
     if (!nextUrl) throw new Error("Missing public URL");
 
     setBusy(true);
 
     const qrDataUrl = await getQrPngDataUrl();
+    const frameUri = Asset.fromModule(qrFrame).uri;
     const html = htmlForPdfSheet({
       assetName: nextAsset?.name,
       kac: nextKac,
       qrDataUrl,
+      frameUri,
       url: nextUrl,
     });
 
     if (Platform.OS === "web") {
-  await openPrintWindowAndWait(html);
+  await openPrintWindowAndWait(printWindow, html);
   return;
 }
 
@@ -485,13 +556,23 @@ const onShareLink = async () => {
            <View style={styles.card}>
           <Text style={styles.kicker}>Sticker QR</Text>
 
-          <View style={styles.qrWrap}>
+          <View style={styles.brandedQrWrap}>
+          <View style={styles.qrCodePositioner}>
             <QRCode
-              value={url || `${baseUrl}/k/unknown/actions`}
-              size={220}
-              getRef={(c) => (qrRef.current = c)}
-            />
+            value={url || `${baseUrl}/k/unknown`}
+            size={270}
+            getRef={(c) => (qrRef.current = c)}
+          />
           </View>
+
+
+          <Image
+            source={qrFrame}
+            style={styles.qrFrameOverlay}
+            resizeMode="contain"
+            pointerEvents="none"
+          />
+        </View>
 
           <Text style={styles.smallMuted}>
             {url || "Generate KAC to create a QR URL."}
@@ -548,8 +629,17 @@ const onShareLink = async () => {
     }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
-  container: { padding: spacing.lg, gap: spacing.md },
+  container: {
+  width: "100%",
+  maxWidth: 1280,
+  alignSelf: "center",
+  paddingHorizontal: spacing.lg,
+  paddingTop: spacing.lg,
+  paddingBottom: spacing.xl * 2,
+  gap: spacing.md,
+},
+
+safe: { flex: 1, backgroundColor: "#f5f7fb" },
 
   backRow: { paddingVertical: spacing.sm },
   backText: { color: colors.muted, fontSize: 14, fontWeight: "600" },
@@ -563,6 +653,26 @@ const styles = StyleSheet.create({
     ...shadows.card,
     gap: spacing.sm,
   },
+
+  brandedQrWrap: {
+  width: 500,
+  height: 500,
+  alignItems: "center",
+  justifyContent: "center",
+  position: "relative",
+  alignSelf: "center",
+},
+
+qrCodePositioner: {
+  position: "absolute",
+  top: 70,
+  left: 115,
+},
+
+qrFrameOverlay: {
+  position: "absolute",
+  width: 500,
+},
 
   copySuccessText: {
   marginTop: 8,

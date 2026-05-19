@@ -7,6 +7,7 @@ import {
   Alert,
   Image,
   LayoutAnimation,
+  Linking,
   Modal,
   Platform,
   ScrollView,
@@ -29,6 +30,7 @@ import * as ImagePicker from "expo-image-picker";
 import KeeprProgressCard, {
   buildKeeprProgressModel,
 } from "../components/KeeprProgressCard";
+import PublicStoryCard from "../components/PublicStoryCard";
 
 // ✅ low-level upload helper (NOT a hook)
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
@@ -771,39 +773,54 @@ const handleAddVehicleChat = () => {
   });
 };
 
-const goToPublicView = () => {
-  if (!vehicle?.id) return;
-
-  const kacFromRoute =
-    route?.params?.kac ||
-    route?.params?.kacId ||
-    route?.params?.kac_id ||
-    null;
-
-  const kacFromAsset =
+const getAssetKac = () => {
+  return (
     vehicle?.kac ||
     vehicle?.kac_code ||
     vehicle?.kac_id ||
     vehicle?.kacId ||
-    null;
-
-  const kac = (kacFromRoute || kacFromAsset || "").toString().trim();
-
-  if (kac) {
-    navigation.navigate("PublicAction", { kac });
-    return;
-  }
-
-  // Fallback for now (until per-asset public link tokens are stored/generated)
-  if (PUBLIC_QR_TEST_TOKEN) {
-    navigation.navigate("PublicAction", { token: PUBLIC_QR_TEST_TOKEN });
-    return;
-  }
-
-  Alert.alert(
-    "Public view not ready",
-    "No KAC or public token was found for this vehicle yet."
+    route?.params?.kac ||
+    route?.params?.kacId ||
+    route?.params?.kac_id ||
+    null
   );
+};
+
+const goToPublicStory = () => {
+  if (!vehicle?.id) return;
+
+  const kac = String(getAssetKac() || "").trim();
+
+  if (!kac) {
+    Alert.alert(
+      "Public story unavailable",
+      "This asset does not yet have a Keepr Asset Code."
+    );
+    return;
+  }
+
+  const publicBase =
+  Platform.OS === "web" && typeof window !== "undefined"
+    ? window.location.origin
+    : "https://app.keeprhome.com";
+
+const publicUrl = `${publicBase}/k/${kac}`;
+
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    window.open(publicUrl, "_blank", "noopener,noreferrer");
+    return;
+  }
+
+  Linking.openURL(publicUrl);
+};
+
+const goToPublicStorySettings = () => {
+  if (!vehicle?.id) return;
+
+  navigation.navigate("PublicConfig", {
+    assetId: vehicle.id,
+    assetName: vehicle.name || vehicleDisplayName,
+  });
 };
 
 
@@ -1399,6 +1416,11 @@ const meta = {
               Add receipts, warranties, docs
             </Text>
           </TouchableOpacity>
+          <PublicStoryCard
+                asset={vehicle}
+                assetName={vehicleName}
+                onOpenSettings={goToPublicStorySettings}
+              />
           </View>
 
         </View>

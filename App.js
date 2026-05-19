@@ -6,6 +6,26 @@ import { DefaultTheme, NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { posthog } from "./lib/posthog";
 
+function safeParseStoredAsset(value) {
+  if (!value || typeof value !== "string") return null;
+
+  try {
+    const parsed = JSON.parse(value);
+
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      parsed.id &&
+      parsed.name
+    ) {
+      return parsed;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 // import * as Notifications from "expo-notifications";
 import React from "react";
@@ -66,6 +86,7 @@ import KeeprStoryScreen from "./screens/KeeprStoryScreen";
 import PublicActionScreen from "./screens/PublicActionScreen";
 import SendToKeeprScreen from "./screens/SendToKeeprScreen";
 import SendToKeeprAssetPicker from "./screens/SendToKeeprAssetPicker";
+import PublicKeeprStoryScreen from "./screens/PublicKeeprStoryScreen";
 
 // Screens
 import AssetGroupDashboardScreen from "./screens/AssetGroupDashboardScreen";
@@ -216,8 +237,9 @@ const linking = {
     ResetPassword: "reset",
     Auth: "auth",
     
-    KacResolve: "k/:kac",
+    PublicKeeprStory: "k/:kac",
     PublicAction: "k/:kac/actions",
+    KacResolve: "resolve/:kac",
     RootTabs: {
       screens: {
         Dashboard: "dashboard",
@@ -322,7 +344,19 @@ function MainTabs() {
           if (!active) return;
 
           if (stored) {
-            setSelectedCaptureAsset(JSON.parse(stored));
+            const parsed = safeParseStoredAsset(stored);
+
+            if (parsed) {
+              setSelectedCaptureAsset(parsed);
+            } else {
+              setSelectedCaptureAsset(null);
+
+              if (Platform.OS === "web") {
+                window?.localStorage?.removeItem(scopedKey);
+              } else {
+                await AsyncStorage.removeItem(scopedKey);
+              }
+            }
           } else {
             setSelectedCaptureAsset(null);
           }
@@ -337,10 +371,22 @@ function MainTabs() {
         if (!active) return;
 
         if (stored) {
-          setSelectedCaptureAsset(JSON.parse(stored));
+        const parsed = safeParseStoredAsset(stored);
+
+        if (parsed) {
+          setSelectedCaptureAsset(parsed);
         } else {
           setSelectedCaptureAsset(null);
+
+          if (Platform.OS === "web") {
+            window?.localStorage?.removeItem(scopedKey);
+          } else {
+            await AsyncStorage.removeItem(scopedKey);
+          }
         }
+      } else {
+        setSelectedCaptureAsset(null);
+      }
       } catch (e) {
         console.log("Failed to load last asset", e);
         if (active) setSelectedCaptureAsset(null);
@@ -371,7 +417,7 @@ function MainTabs() {
           : await AsyncStorage.getItem(scopedKey);
 
       if (stored) {
-        setSelectedCaptureAsset(JSON.parse(stored));
+        setSelectedCaptureAsset(safeParseStoredAsset(stored));
       } else {
         setSelectedCaptureAsset(null);
       }
@@ -1011,6 +1057,7 @@ function GlobalEventFab({ currentRouteName, role }) {
   "Reports",
   "PrintView",
   "PublicAction",
+  "PublicKeeprStory",
   "KeeprStory",
   "PublicConfig",
   ];
@@ -1243,8 +1290,19 @@ identifyUser();
 React.useEffect(() => {
   if (!targetRoute) return;
   if (!navigationRef?.isReady?.()) return;
-
   if (isResetLink) return;
+
+  if (Platform.OS === "web") {
+    const path = window.location.pathname || "";
+
+    if (
+      path.startsWith("/k/") ||
+      path.startsWith("/resolve/")
+    ) {
+      didInitialNavResolve.current = true;
+      return;
+    }
+  }
 
   const current = navigationRef.getCurrentRoute()?.name;
 
@@ -1439,6 +1497,10 @@ if (!user) {
           <RootStack.Screen name="KacRoute" component={KacRouteScreen} />
           <RootStack.Screen name="PublicAction" component={PublicActionScreen} />
           <RootStack.Screen name="KacResolve" component={KacResolveScreen} />
+          <RootStack.Screen
+          name="PublicKeeprStory"
+          component={PublicKeeprStoryScreen}
+          />
           
           <RootStack.Screen name="Invite" component={InviteRedirectScreen} />
           <RootStack.Screen name="Auth" component={AuthScreen} />
@@ -1466,7 +1528,13 @@ const initialRouteName = isResetLink
         theme={navTheme}
         ref={navigationRef}
         linking={linking}
-        initialState={Platform.OS === "web" ? initialNavState : undefined}
+        initialState={
+          Platform.OS === "web" &&
+          !window.location.pathname.startsWith("/k/") &&
+          !window.location.pathname.startsWith("/resolve/")
+            ? initialNavState
+            : undefined
+        }
         onReady={() => setIsNavReady(true)}
         onStateChange={handleNavStateChange}
       >
@@ -1496,7 +1564,8 @@ const initialRouteName = isResetLink
           <RootStack.Screen name="ManageTeam" component={ManageTeamScreen} />
           <RootStack.Screen name="PublicConfig" component={PublicConfigScreen} />
           <RootStack.Screen name="PublicConfigAssetPicker" component={PublicConfigAssetPickerScreen} />
-
+          <RootStack.Screen name="PublicKeeprStory" component={PublicKeeprStoryScreen} />
+          
           <RootStack.Screen name="UploadLab" component={UploadLabScreen} />
 
           <RootStack.Screen
@@ -1822,12 +1891,37 @@ const boundaryStyles = StyleSheet.create({
 });
 
 
+
 /* ----------------- APP ROOT ----------------- */
 
 export default function App() {
   const isWebShell = Platform.OS === "web";
   const [currentRouteName, setCurrentRouteName] = React.useState("SplashIntro");
-  const hideSidebarRoutes = ["StoryPrint", "Auth", "ResetPassword"];
+
+const isPublicPath =
+  Platform.OS === "web" &&
+  typeof window !== "undefined" &&
+  (
+    window.location.pathname.startsWith("/k/") ||
+    window.location.pathname.startsWith("/resolve/")
+  );
+
+const isPublicWebRoute =
+  isPublicPath ||
+  currentRouteName === "PublicKeeprStory" ||
+  currentRouteName === "PublicAction" ||
+  currentRouteName === "KacRoute" ||
+  currentRouteName === "KacResolve";
+
+const hideSidebarRoutes = [
+  "StoryPrint", 
+  "Auth", 
+  "ResetPassword",
+  "PublicKeeprStory",
+  "PublicAction",
+  "KacRoute",
+  "KacResolve",
+];
 
 React.useEffect(() => {
   console.log("POSTHOG TEST EVENT FIRING");
@@ -1901,6 +1995,13 @@ return (
                         <EnhanceBootstrap />
 
                         {isWebShell ? (
+                        isPublicWebRoute ? (
+                          <Root
+                            onRouteChange={setCurrentRouteName}
+                            setCurrentRouteName={setCurrentRouteName}
+                            currentRouteName={currentRouteName}
+                          />
+                        ) : (
                           <View style={appStyles.webShell}>
                             {hideSidebarRoutes.includes(currentRouteName) ? null : (
                               <SidebarNav currentRouteName={currentRouteName} />
@@ -1916,13 +2017,14 @@ return (
                               </View>
                             </View>
                           </View>
-                        ) : (
-                          <Root
-                            onRouteChange={setCurrentRouteName}
-                            setCurrentRouteName={setCurrentRouteName}
-                            currentRouteName={currentRouteName}
-                          />
-                        )}
+                        )
+                      ) : (
+                        <Root
+                          onRouteChange={setCurrentRouteName}
+                          setCurrentRouteName={setCurrentRouteName}
+                          currentRouteName={currentRouteName}
+                        />
+                      )}
 
                       </KaiProvider>
                     </EnhanceProvider>

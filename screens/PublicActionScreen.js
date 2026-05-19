@@ -8,7 +8,6 @@ import {
   Alert,
   Linking,
   Platform,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -20,6 +19,7 @@ import {
 import { colors, spacing, radius } from "../styles/theme";
 import { supabase } from "../lib/supabaseClient";
 import { useFocusEffect } from "@react-navigation/native";
+import PublicShell from "../components/public/PublicShell";
 
 const PROJECT_REF = "jjzjuqxysucqutgjnrkk";
 const FUNCTIONS_BASE = `https://${PROJECT_REF}.supabase.co/functions/v1`;
@@ -611,75 +611,46 @@ useEffect(() => {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.screen}>
+      <PublicShell kac={kac}>
         <View style={styles.centerFill}>
           <ActivityIndicator />
         </View>
-      </SafeAreaView>
+      </PublicShell>
     );
   }
 
   if (!kac && !token) {
     return (
-      <SafeAreaView style={styles.screen}>
+      <PublicShell kac={kac}>
         <View style={styles.centerFill}>
           <Text style={styles.errorText}>Missing KAC.</Text>
-          {IS_WEB ? (
-            <Text style={styles.metaText}>
-              Try /k/KPR-XXXX-YYYY/actions or ?kac=KPR-XXXX-YYYY or ?token=...
-            </Text>
-          ) : null}
         </View>
-      </SafeAreaView>
+      </PublicShell>
     );
   }
 
   return (
-    <SafeAreaView style={styles.screen}>
-      <View style={styles.headerBar}>
-      <View style={{ flexDirection: "row", alignItems: "center", flex: 1 }}>
-        {navigation?.canGoBack?.() ? (
-          <TouchableOpacity
-            onPress={() => navigation.goBack()}
-            style={styles.headerBackBtn}
-          >
-            <Text style={styles.headerBackText}>‹</Text>
-          </TouchableOpacity>
-        ) : null}
+  <PublicShell kac={resolved?.kac || kac}>
 
-        <View>
-          <Text style={styles.headerTitle}>
-            {asset?.name ? asset.name : "Keepr"}
-          </Text>
-          <Text style={styles.headerSub}>{headerSubtitle}</Text>
-        </View>
-      </View>
+      <View style={styles.actionsTopRow}>
+  <TouchableOpacity
+    onPress={() => navigation.navigate("PublicKeeprStory", { kac })}
+    style={styles.backToStoryBtn}
+    activeOpacity={0.85}
+  >
+    <Text style={styles.backToStoryText}>← Back to story</Text>
+  </TouchableOpacity>
 
-      <View style={styles.headerChips}>
-        {resolved?.kac ? (
-          <View style={styles.chip}>
-            <Text style={styles.chipLabel}>KAC</Text>
-            <Text style={styles.chipValue}>{shortId(resolved.kac)}</Text>
-          </View>
-        ) : null}
-
-        <View style={[styles.chip, styles.chipAccessNo]}>
-          <Text style={styles.chipLabel}>Access</Text>
-          <Text style={styles.chipValue}>public</Text>
-        </View>
-
-        {canConfigurePublicView ? (
-          <TouchableOpacity
-            onPress={handleOpenPublicConfig}
-            style={styles.configureBtn}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.configureBtnText}>Configure</Text>
-          </TouchableOpacity>
-        ) : null}
-      </View>
-    </View>
-      
+  {canConfigurePublicView ? (
+    <TouchableOpacity
+      onPress={handleOpenPublicConfig}
+      style={styles.configureBtn}
+      activeOpacity={0.85}
+    >
+      <Text style={styles.configureBtnText}>Configure</Text>
+    </TouchableOpacity>
+  ) : null}
+</View>
 
       {!!error ? (
         <View style={styles.errorBanner}>
@@ -687,17 +658,13 @@ useEffect(() => {
         </View>
       ) : null}
 
-      <ScrollView
-        style={styles.body}
-        contentContainerStyle={styles.bodyContent}
-        keyboardShouldPersistTaps="handled"
-      >
+      <View style={styles.bodyContent}>
         <View style={styles.portalIntroCard}>
-  <Text style={styles.portalIntroTitle}>Take Action</Text>
-  <Text style={styles.portalIntroText}>
-    This asset can accept structured requests through Keepr. Choose what you want to do below.
-  </Text>
-</View>
+          <Text style={styles.portalIntroTitle}>Take Action</Text>
+          <Text style={styles.portalIntroText}>
+            This asset can accept structured requests through Keepr. Choose what you want to do below.
+          </Text>
+        </View>
 
 {actionConfig.enabled !== false ? (
   <>
@@ -862,13 +829,13 @@ useEffect(() => {
             Public view: actions and emails create Event Inbox drafts for the owner.
           </Text>
         </View>
-      </ScrollView>
-    </SafeAreaView>
+      </View>
+    </PublicShell>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.background },
+
   centerFill: {
     flex: 1,
     alignItems: "center",
@@ -877,7 +844,6 @@ const styles = StyleSheet.create({
   },
 
   configureBtn: {
-  marginLeft: spacing.sm,
   flexDirection: "row",
   alignItems: "center",
   gap: 6,
@@ -893,34 +859,27 @@ configureBtnText: {
   fontWeight: "900",
 },
 
-  headerBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-    borderColor: "#11182722",
-    backgroundColor: colors.surface,
-  },
-  headerBackBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: spacing.sm,
-    backgroundColor: "#F3F4F680",
-  },
-  headerBackText: {
-    fontSize: 22,
-    fontWeight: "900",
-    color: colors.textPrimary,
-    marginTop: -2,
-  },
-  headerTitle: { fontSize: 16, fontWeight: "900", color: colors.textPrimary },
-  headerSub: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
-  headerChips: { flexDirection: "row", alignItems: "center" },
+actionsTopRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "space-between",
+  marginBottom: spacing.lg,
+},
+
+backToStoryBtn: {
+  paddingHorizontal: 12,
+  paddingVertical: 8,
+  borderRadius: 999,
+  backgroundColor: colors.surface,
+  borderWidth: 1,
+  borderColor: "#11182722",
+},
+
+backToStoryText: {
+  fontSize: 12,
+  fontWeight: "900",
+  color: colors.textPrimary,
+},
 
 actionGrid: {
   flexDirection: "row",
@@ -952,22 +911,6 @@ actionPillTextActive: {
   color: "#FFFFFF",
 },
 
-  chip: {
-    marginLeft: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "#11182722",
-    backgroundColor: colors.background,
-  },
-  chipLabel: { fontSize: 9, textTransform: "uppercase", color: colors.textMuted },
-  chipValue: { fontSize: 11, fontWeight: "800", color: colors.textPrimary },
-  chipAccessNo: {
-    borderColor: "#11182722",
-    backgroundColor: colors.background,
-  },
-
   errorBanner: {
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
@@ -983,8 +926,15 @@ actionPillTextActive: {
     textAlign: "center",
   },
 
-  body: { flex: 1 },
-  bodyContent: { padding: spacing.lg, paddingBottom: spacing.xl * 2 },
+
+  bodyContent: {
+  width: "100%",
+  maxWidth: 1280,
+  alignSelf: "center",
+  paddingHorizontal: spacing.lg,
+  paddingTop: spacing.lg,
+  paddingBottom: spacing.xl * 2,
+},
 
   portalIntroCard: {
     marginBottom: spacing.lg,

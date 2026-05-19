@@ -31,6 +31,8 @@ import KeeprProgressCard, {
 } from "../components/KeeprProgressCard";
 import { buildHighlights } from "../lib/storyHighlightEngine";
 
+import PublicStoryCard from "../components/PublicStoryCard";
+
 // ✅ low-level upload helper (NOT a hook)
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 
@@ -569,6 +571,16 @@ try {
       initialTab: "file",
     });
   };
+
+ const goToPublicStorySettings = () => {
+  if (!home?.id) return;
+
+  navigation.navigate("PublicConfig", {
+    assetId: home.id,
+    assetName: homeName || home?.name || "Home",
+  });
+};
+
   const goToAttachmentsMobile = () => {
   navigation.navigate("AssetAttachmentsMobile", {
     assetId: currentHome?.id,
@@ -1521,6 +1533,11 @@ try {
               Add receipts, warranties, docs
             </Text>
           </TouchableOpacity>
+          <PublicStoryCard
+            asset={home}
+            assetName={homeName || home?.name || "this home"}
+            onOpenSettings={goToPublicStorySettings}
+          />
           </View>
 
         </View>

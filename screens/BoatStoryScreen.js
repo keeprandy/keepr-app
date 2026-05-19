@@ -30,6 +30,7 @@ import KeeprProgressCard, {
   buildKeeprProgressModel,
 } from "../components/KeeprProgressCard";
 import { buildBoatStory } from "../lib/storyBuilders";
+import PublicStoryCard from "../components/PublicStoryCard";
 
 // ✅ low-level upload helper (NOT a hook)
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
@@ -565,6 +566,16 @@ try {
       initialTab: "file",
     });
   };
+
+const goToPublicStorySettings = () => {
+  if (!boat?.id) return;
+
+  navigation.navigate("PublicConfig", {
+    assetId: boat.id,
+    assetName: boatName || boat?.name || "Boat",
+  });
+};
+
   const goToAttachmentsMobile = () => {
   navigation.navigate("AssetAttachmentsMobile", {
     assetId: currentBoat?.id,
@@ -1412,8 +1423,12 @@ const meta = {
               Add receipts, warranties, docs
             </Text>
           </TouchableOpacity>
+            <PublicStoryCard
+            asset={boat}
+            assetName={boatName}
+            onOpenSettings={goToPublicStorySettings}
+          />
           </View>
-
         </View>
 
         {/* Timeline */}

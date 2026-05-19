@@ -74,18 +74,30 @@ function ToggleRow({ title, subtitle, value, onValueChange }) {
 
 function getDefaultPublicConfig() {
   return {
+    story: {
+      enabled: true,
+      showHero: true,
+      showGallery: true,
+      showSystems: true,
+      showProof: true,
+      showProofBadges: true,
+      showTimeline: "highlights_only",
+      showQrShare: true,
+      showFooterCta: true,
+      showLocation: true,
+      showFinancials: false,
+    },
     actions: {
       enabled: true,
       mode: "inquiry",
       actionsEnabled: getDefaultActionsForMode("inquiry"),
     },
-    story: {
+    sharing: {
       enabled: true,
-      showLocation: true,
-      showFinancials: true,
-      showSystems: true,
-      showProof: true,
-      showTimeline: "highlights_only",
+      showQrBadge: true,
+      allowPrintSticker: true,
+      allowCopyLink: true,
+      allowShareLink: true,
     },
   };
 }
@@ -109,6 +121,17 @@ export default function PublicConfigScreen({ navigation, route }) {
   const [showSystems, setShowSystems] = React.useState(true);
   const [showProof, setShowProof] = React.useState(true);
   const [showTimelineHighlights, setShowTimelineHighlights] = React.useState(true);
+
+  const [showHero, setShowHero] = React.useState(true);
+const [showGallery, setShowGallery] = React.useState(true);
+const [showProofBadges, setShowProofBadges] = React.useState(true);
+const [showQrShare, setShowQrShare] = React.useState(true);
+const [showFooterCta, setShowFooterCta] = React.useState(true);
+
+const [sharingEnabled, setSharingEnabled] = React.useState(true);
+const [allowPrintSticker, setAllowPrintSticker] = React.useState(true);
+const [allowCopyLink, setAllowCopyLink] = React.useState(true);
+const [allowShareLink, setAllowShareLink] = React.useState(true);
 
   const loadAssetConfig = React.useCallback(async () => {
     if (!assetId) {
@@ -135,6 +158,8 @@ export default function PublicConfigScreen({ navigation, route }) {
 
 const actionConfig = existing.actions || getDefaultPublicConfig().actions;
 const storyConfig = existing.story || getDefaultPublicConfig().story;
+const sharingConfig = existing.sharing || getDefaultPublicConfig().sharing;
+
 
 setEnabled(!!actionConfig.enabled);
 setMode(actionConfig.mode || "inquiry");
@@ -166,7 +191,19 @@ setShowTimelineHighlights(
     const applyModeDefaults = (nextMode) => {
     setMode(nextMode);
     setActionsEnabled(getDefaultActionsForMode(nextMode));
+      setShowHero(storyConfig.showHero !== false);
+setShowGallery(storyConfig.showGallery !== false);
+setShowProofBadges(storyConfig.showProofBadges !== false);
+setShowQrShare(storyConfig.showQrShare !== false);
+setShowFooterCta(storyConfig.showFooterCta !== false);
+
+setSharingEnabled(sharingConfig.enabled !== false);
+setAllowPrintSticker(sharingConfig.allowPrintSticker !== false);
+setAllowCopyLink(sharingConfig.allowCopyLink !== false);
+setAllowShareLink(sharingConfig.allowShareLink !== false);
   };
+
+
 
   const toggleAction = (key) => {
     setActionsEnabled((prev) =>
@@ -213,7 +250,20 @@ const handleSave = async () => {
         showTimeline: showTimelineHighlights
           ? "highlights_only"
           : "hidden",
+          showHero,
+          showGallery,
+          showProofBadges,
+          showQrShare,
+          showFooterCta,
       },
+      sharing: {
+      ...(existingPublicConfig.sharing || getDefaultPublicConfig().sharing),
+      enabled: sharingEnabled,
+      showQrBadge: true,
+      allowPrintSticker,
+      allowCopyLink,
+      allowShareLink,
+    },
     };
 
     const updatedMetadata = {
@@ -323,6 +373,85 @@ const handleSave = async () => {
                 />
               ))}
             </View>
+          </View>
+        </View>
+<View style={styles.section}>
+  <Text style={styles.sectionLabel}>Public Story</Text>
+  <View style={styles.card}>
+    <ToggleRow
+      title="Show hero"
+      subtitle="Display the main public story hero image and asset summary."
+      value={showHero}
+      onValueChange={setShowHero}
+    />
+    <View style={styles.divider} />
+
+    <ToggleRow
+      title="Show gallery"
+      subtitle="Display public photos and visual proof."
+      value={showGallery}
+      onValueChange={setShowGallery}
+    />
+    <View style={styles.divider} />
+
+    <ToggleRow
+      title="Show proof badges"
+      subtitle="Show document, photo, and verified proof indicators."
+      value={showProofBadges}
+      onValueChange={setShowProofBadges}
+    />
+    <View style={styles.divider} />
+
+    <ToggleRow
+      title="Show Share / QR"
+      subtitle="Display the Share / QR Code button on the public story."
+      value={showQrShare}
+      onValueChange={setShowQrShare}
+    />
+    <View style={styles.divider} />
+
+    <ToggleRow
+      title="Show footer CTA"
+      subtitle="Show a lightweight Keepr call-to-action at the bottom of the public story."
+      value={showFooterCta}
+      onValueChange={setShowFooterCta}
+    />
+  </View>
+</View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Public Sharing</Text>
+          <View style={styles.card}>
+            <ToggleRow
+              title="Enable sharing tools"
+              subtitle="Allow this asset to generate QR, print, copy, and share surfaces."
+              value={sharingEnabled}
+              onValueChange={setSharingEnabled}
+            />
+            <View style={styles.divider} />
+
+            <ToggleRow
+              title="Allow print sticker"
+              subtitle="Allow printable keepr enabled QR stickers."
+              value={allowPrintSticker}
+              onValueChange={setAllowPrintSticker}
+            />
+            <View style={styles.divider} />
+
+            <ToggleRow
+              title="Allow copy link"
+              subtitle="Allow the public story URL to be copied."
+              value={allowCopyLink}
+              onValueChange={setAllowCopyLink}
+            />
+            <View style={styles.divider} />
+
+            <ToggleRow
+              title="Allow share link"
+              subtitle="Allow native link sharing."
+              value={allowShareLink}
+              onValueChange={setAllowShareLink}
+            />
           </View>
         </View>
 

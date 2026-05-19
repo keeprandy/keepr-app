@@ -53,3 +53,4 @@ app-example
 
 # Supabase CLI local temp
 supabase/.temp/.tmp.drivedownload/
+supabase/.temp/
