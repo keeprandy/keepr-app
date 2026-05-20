@@ -396,6 +396,13 @@ useEffect(() => {
     }, [refreshBoat, resolveHeroFromPlacement])
   );
 
+  useFocusEffect(
+    useCallback(() => {
+      refreshBoat();
+      resolveHeroFromPlacement();
+    }, [refreshBoat, resolveHeroFromPlacement])
+  );
+
   // Also re-resolve if asset changes in-place
   useEffect(() => {
     refreshBoat();

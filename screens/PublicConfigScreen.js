@@ -112,12 +112,15 @@ export default function PublicConfigScreen({ navigation, route }) {
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
   const [assetName, setAssetName] = React.useState(assetNameFromRoute);
+  const [saveError, setSaveError] = React.useState(null);
+  const [lastSavedAt, setLastSavedAt] = React.useState(null);
 
   const [enabled, setEnabled] = React.useState(false);
   const [mode, setMode] = React.useState("inquiry");
   const [actionsEnabled, setActionsEnabled] = React.useState(
     getDefaultActionsForMode("inquiry")
   );
+
 
   const [showLocation, setShowLocation] = React.useState(false);
   const [showFinancials, setShowFinancials] = React.useState(false);
@@ -191,7 +194,7 @@ const storyConfig = existing.story || getDefaultPublicConfig().story;
 const sharingConfig = existing.sharing || getDefaultPublicConfig().sharing;
 
 
-setEnabled(!!actionConfig.enabled);
+setEnabled(storyConfig.enabled === true);
 setMode(actionConfig.mode || "inquiry");
 setActionsEnabled(
   Array.isArray(actionConfig.actionsEnabled) && actionConfig.actionsEnabled.length
@@ -242,14 +245,16 @@ setShowTimelineHighlights(
     );
   };
 
-const handleSave = async () => {
+const saveConfig = React.useCallback(async () => {
   if (!assetId) {
-    Alert.alert("Missing asset", "No asset was passed into Public Config.");
-    return;
-  }
+  setSaving(false);
+  Alert.alert("Missing asset", "No asset was passed into Public Config.");
+  return;
+}
 
   try {
     setSaving(true);
+    setSaveError(null);
 
     // fetch current metadata FIRST
     const { data: current, error: fetchErr } = await supabase
@@ -265,6 +270,7 @@ const handleSave = async () => {
 
     const publicConfig = {
       ...existingPublicConfig,
+      
       actions: {
         enabled,
         mode,
@@ -272,6 +278,7 @@ const handleSave = async () => {
       },
       story: {
         ...(existingPublicConfig.story || getDefaultPublicConfig().story),
+        enabled,
         showLocation,
         showFinancials,
         showSystems,
@@ -310,15 +317,71 @@ const handleSave = async () => {
     if (updateErr) throw updateErr;
 
     console.log("SAVED CONFIG:", publicConfig);
+    setLastSavedAt(Date.now());
 
-    Alert.alert("Saved", "Public view settings updated.");
   } catch (e) {
     console.log("SAVE ERROR:", e);
     Alert.alert("Could not save", e?.message || "Try again.");
   } finally {
     setSaving(false);
   }
-};
+}, [
+  assetId,
+  enabled,
+  mode,
+  actionsEnabled,
+  showLocation,
+  showFinancials,
+  showSystems,
+  showProof,
+  showTimelineHighlights,
+  showHero,
+  showGallery,
+  showProofBadges,
+  showQrShare,
+  showFooterCta,
+  sharingEnabled,
+  allowPrintSticker,
+  allowCopyLink,
+  allowShareLink,
+]);
+
+const initialLoadComplete = React.useRef(false);
+
+React.useEffect(() => {
+  if (!assetId) return;
+
+  if (!initialLoadComplete.current) {
+    initialLoadComplete.current = true;
+    return;
+  }
+
+  const timeout = setTimeout(() => {
+    saveConfig();
+  }, 700);
+
+  return () => clearTimeout(timeout);
+}, [
+  enabled,
+  mode,
+  actionsEnabled,
+  showLocation,
+  showFinancials,
+  showSystems,
+  showProof,
+  showTimelineHighlights,
+  showHero,
+  showGallery,
+  showProofBadges,
+  showQrShare,
+  showFooterCta,
+  sharingEnabled,
+  allowPrintSticker,
+  allowCopyLink,
+  allowShareLink,
+  saveConfig,
+  assetId,
+]);
 
     if (loading) {
     return (
@@ -374,6 +437,18 @@ const handleSave = async () => {
       </Text>
     </View>
   </View>
+
+  {!!lastSavedAt && !saving && (
+  <Text style={styles.savedText}>
+    Saved
+  </Text>
+)}
+
+{saving && (
+  <Text style={styles.savedText}>
+    Saving...
+  </Text>
+)}
 
   <View style={styles.statusActions}>
     <TouchableOpacity
@@ -576,14 +651,20 @@ const handleSave = async () => {
           <View style={styles.card}>
             <TouchableOpacity
             style={[styles.primaryBtn, saving && { opacity: 0.6 }]}
-            onPress={handleSave}
+            onPress={saveConfig}
             activeOpacity={0.9}
             disabled={saving}
             >
             {saving ? (
                 <ActivityIndicator color="#FFFFFF" />
             ) : (
-                <Text style={styles.primaryBtnText}>Save public settings</Text>
+                <Text style={styles.saveButtonText}>
+                {saving
+                  ? "Saving..."
+                  : saveError
+                  ? "Save Failed"
+                  : "Saved"}
+              </Text>
             )}
             </TouchableOpacity>
             <Text style={styles.footerHint}>
@@ -614,6 +695,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: spacing.lg,
   },
+
+  savedText: {
+  marginTop: 6,
+  fontSize: 11,
+  fontWeight: "700",
+  color: colors.textMuted,
+},
 
   statusCard: {
   flexDirection: "row",

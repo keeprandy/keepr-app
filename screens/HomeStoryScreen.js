@@ -396,6 +396,7 @@ useEffect(() => {
     }, [refreshHome, resolveHeroFromPlacement])
   );
 
+
   // Also re-resolve if asset changes in-place
   useEffect(() => {
     refreshHome();
@@ -549,6 +550,13 @@ try {
       if (home?.id) loadHomeData();
     }, [home?.id, loadHomeData])
   );
+
+  useFocusEffect(
+  useCallback(() => {
+    refreshHome();
+    resolveHeroFromPlacement();
+  }, [refreshHome, resolveHeroFromPlacement])
+);
 
   /* --------------------------- NAV + ACTIONS --------------------------- */
 

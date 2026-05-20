@@ -178,7 +178,7 @@ const assetId = route?.params?.assetId || null;
   const actionConfig = publicConfig.actions || {};
   const sharingConfig = publicConfig.sharing || {};
 
-  const publicEnabled = actionConfig.enabled === true;
+ const publicEnabled = storyConfig.enabled === true;
 
   const showHero = storyConfig.showHero !== false;
   const showGallery = storyConfig.showGallery !== false;

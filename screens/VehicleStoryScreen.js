@@ -96,12 +96,6 @@ function TimelineFilterChip({ label, active, onPress }) {
     </TouchableOpacity>
   );
 }
-// TEMP: Public QR test token (replace later with per-asset QR management)
-const PUBLIC_QR_TEST_TOKEN = "xMgfiowNQ6g0ovLjheBnnufFwsRwXS2YdW3_YXAuRU4";
-
-// TEMP: Status of Completion for an Asset)
-
-
 /* --------------------------- TIMELINE ROW --------------------------- */
 
 function TimelineRow({ item, onPress, hasAttachment }) {
@@ -411,6 +405,7 @@ useEffect(() => {
       resolveHeroFromPlacement();
     }, [refreshVehicle, resolveHeroFromPlacement])
   );
+
 
   // Also re-resolve if asset changes in-place
   useEffect(() => {
