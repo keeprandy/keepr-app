@@ -32,7 +32,12 @@ const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 /*                              TIMELINE COMPONENT                            */
 /* -------------------------------------------------------------------------- */
 
-function TimelineRow({ item, expanded, onPress }) {
+function TimelineRow({
+  item,
+  expanded,
+  onPress,
+  showProofBadges,
+}) {
   const isService = item.kind === "service";
 
   return (
@@ -70,7 +75,7 @@ function TimelineRow({ item, expanded, onPress }) {
         )}
 
         <View style={styles.timelineMetaRow}>
-          {!!item.documentCount && (
+          {showProofBadges && !!item.documentCount && (
             <View style={styles.metaPill}>
               <Ionicons
                 name="document-text-outline"
@@ -83,7 +88,7 @@ function TimelineRow({ item, expanded, onPress }) {
             </View>
           )}
 
-          {!!item.photoCount && (
+          {showProofBadges && !!item.photoCount && (
             <View style={styles.metaPill}>
               <Ionicons
                 name="images-outline"
@@ -96,7 +101,7 @@ function TimelineRow({ item, expanded, onPress }) {
             </View>
           )}
 
-          {!!item.verified && (
+          {showProofBadges && !!item.verified && (
             <View style={styles.metaPill}>
               <Ionicons
                 name="shield-checkmark-outline"
@@ -163,6 +168,29 @@ const assetId = route?.params?.assetId || null;
   const [lightboxIndex, setLightboxIndex] = useState(null);
   const [swipeStartX, setSwipeStartX] = useState(null);
   const [expandedTimelineId, setExpandedTimelineId] = useState(null);
+
+  const publicConfig =
+  asset?.public_config ||
+  asset?.extra_metadata?.publicConfig ||
+  {};
+
+  const storyConfig = publicConfig.story || {};
+  const actionConfig = publicConfig.actions || {};
+  const sharingConfig = publicConfig.sharing || {};
+
+  const publicEnabled = actionConfig.enabled === true;
+
+  const showHero = storyConfig.showHero !== false;
+  const showGallery = storyConfig.showGallery !== false;
+  const showSystems = storyConfig.showSystems !== false;
+  const showProof = storyConfig.showProof !== false;
+  const showProofBadges = storyConfig.showProofBadges !== false;
+  const showQrShare = storyConfig.showQrShare !== false;
+  const showFooterCta = storyConfig.showFooterCta !== false;
+  const showLocation = storyConfig.showLocation === true;
+  const showFinancials = storyConfig.showFinancials === true;
+
+  const timelineMode = storyConfig.showTimeline || "highlights_only";
 
   const scrollRef = useRef(null);
 
@@ -332,7 +360,7 @@ if (kac) {
   );
 }
 
-if (!asset) {
+if (!asset || !publicEnabled) {
   return (
     <PublicShell kac={kac}>
       <View style={styles.centered}>
@@ -354,7 +382,7 @@ return (
   <PublicShell kac={kac || asset?.kac_id}>
 
         {/* HERO */}
-
+        {showHero && (
         <View style={[styles.heroCard, isWide && styles.heroCardWide]}>
           <View style={[styles.heroImageWrap, isWide && styles.heroImageWrapWide]}>
             {!!heroUri ? (
@@ -516,7 +544,7 @@ return (
                 )}
               </>
             )}
-            
+            {showQrShare && (
             <TouchableOpacity
               style={styles.shareStoryButton}
               onPress={() => {
@@ -531,14 +559,16 @@ return (
               <Ionicons name="qr-code-outline" size={16} color="white" />
               <Text style={styles.shareStoryButtonText}>Share / QR Code</Text>
             </TouchableOpacity>
-            
+            )}
           </View>
           </View>
         </View>
-
+        )}
+        
         {/* PUBLIC TABS */}
 
         <View style={styles.tabsRow}>
+          {timelineMode !== "hidden" && (
           <TouchableOpacity
             style={[
               styles.tabButton,
@@ -555,7 +585,9 @@ return (
               Timeline
             </Text>
           </TouchableOpacity>
-
+          )}
+          
+          {showGallery && (
           <TouchableOpacity
             style={[
               styles.tabButton,
@@ -572,7 +604,9 @@ return (
               Gallery
             </Text>
           </TouchableOpacity>
+          )}
 
+          {actionConfig.actionsEnabled?.length > 0 && (
           <TouchableOpacity
             style={[
               styles.tabButton,
@@ -580,38 +614,51 @@ return (
             ]}
             onPress={() => navigation.navigate("PublicAction", { kac })}
           >
-            <Text style={styles.tabLabel}>Actions</Text>
+              <Text
+              style={[
+                styles.tabLabel,
+                activeTab === "actions" && styles.tabLabelActive,
+              ]}
+            >
+              Actions
+            </Text>
           </TouchableOpacity>
+          )}
+
         </View>
 
         {/* STORY TAB */}
 
-        {activeTab === "story" && (
-          <>
-            {/* TIMELINE */}
+        {/* TIMELINE */}
 
+        {timelineMode !== "hidden" && activeTab === "story" && (
+          <>
             <View style={styles.sectionCard}>
               <View style={styles.sectionHeader}>
                 <Text style={styles.sectionTitle}>Ownership Timeline</Text>
               </View>
 
-              {timeline.map((item) => (
+              {(timelineMode === "highlights_only"
+                  ? timeline.slice(0, 5)
+                  : timeline
+                ).map((item) => (
                 <TimelineRow
-                    key={item.id}
-                    item={item}
-                    expanded={expandedTimelineId === item.id}
-                    onPress={() =>
-                        setExpandedTimelineId(
-                        expandedTimelineId === item.id ? null : item.id
-                        )
-                    }
-                    />
+                  key={item.id}
+                  item={item}
+                  expanded={expandedTimelineId === item.id}
+                  showProofBadges={showProofBadges}
+                  onPress={() =>
+                    setExpandedTimelineId(
+                      expandedTimelineId === item.id ? null : item.id
+                    )
+                  }
+                />
               ))}
             </View>
 
             {/* SYSTEMS */}
 
-            {!!systems.length && (
+            {showSystems && !!systems.length && (
               <View style={styles.sectionCard}>
                 <View style={styles.sectionHeader}>
                   <Text style={styles.sectionTitle}>Systems</Text>
@@ -637,7 +684,7 @@ return (
 
         {/* GALLERY TAB */}
 
-        {activeTab === "gallery" && (
+        {showGallery && activeTab === "gallery" && (
         <View style={styles.publicGalleryWrap}>
           {gallery.map((image, index) => (
             <TouchableOpacity

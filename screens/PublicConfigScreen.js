@@ -8,7 +8,10 @@ import {
   Switch,
   Alert,
   ActivityIndicator,
+  Linking,
+  Platform,
 } from "react-native";
+
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../lib/supabaseClient";
@@ -75,7 +78,7 @@ function ToggleRow({ title, subtitle, value, onValueChange }) {
 function getDefaultPublicConfig() {
   return {
     story: {
-      enabled: true,
+      enabled: false,
       showHero: true,
       showGallery: true,
       showSystems: true,
@@ -88,12 +91,12 @@ function getDefaultPublicConfig() {
       showFinancials: false,
     },
     actions: {
-      enabled: true,
+      enabled: false,
       mode: "inquiry",
       actionsEnabled: getDefaultActionsForMode("inquiry"),
     },
     sharing: {
-      enabled: true,
+      enabled: false,
       showQrBadge: true,
       allowPrintSticker: true,
       allowCopyLink: true,
@@ -123,15 +126,41 @@ export default function PublicConfigScreen({ navigation, route }) {
   const [showTimelineHighlights, setShowTimelineHighlights] = React.useState(true);
 
   const [showHero, setShowHero] = React.useState(true);
-const [showGallery, setShowGallery] = React.useState(true);
-const [showProofBadges, setShowProofBadges] = React.useState(true);
-const [showQrShare, setShowQrShare] = React.useState(true);
-const [showFooterCta, setShowFooterCta] = React.useState(true);
+  const [showGallery, setShowGallery] = React.useState(true);
+  const [showProofBadges, setShowProofBadges] = React.useState(true);
+  const [showQrShare, setShowQrShare] = React.useState(true);
+  const [showFooterCta, setShowFooterCta] = React.useState(true);
 
-const [sharingEnabled, setSharingEnabled] = React.useState(true);
-const [allowPrintSticker, setAllowPrintSticker] = React.useState(true);
-const [allowCopyLink, setAllowCopyLink] = React.useState(true);
-const [allowShareLink, setAllowShareLink] = React.useState(true);
+  const [sharingEnabled, setSharingEnabled] = React.useState(true);
+  const [allowPrintSticker, setAllowPrintSticker] = React.useState(true);
+  const [allowCopyLink, setAllowCopyLink] = React.useState(true);
+  const [allowShareLink, setAllowShareLink] = React.useState(true);
+  const [assetKac, setAssetKac] = React.useState(null);
+
+  const publicUrl = assetKac ? `https://app.keeprhome.com/k/${assetKac}` : null;
+
+const openPublicStory = () => {
+  if (!publicUrl) return;
+
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    window.open(publicUrl, "_blank", "noopener,noreferrer");
+    return;
+  }
+
+  Linking.openURL(publicUrl);
+};
+
+const copyPublicLink = async () => {
+  if (!publicUrl) return;
+
+  if (Platform.OS === "web" && navigator?.clipboard) {
+    await navigator.clipboard.writeText(publicUrl);
+    Alert.alert("Copied", "Public story link copied.");
+    return;
+  }
+
+  Alert.alert("Public Link", publicUrl);
+};
 
   const loadAssetConfig = React.useCallback(async () => {
     if (!assetId) {
@@ -145,7 +174,7 @@ const [allowShareLink, setAllowShareLink] = React.useState(true);
 
       const { data, error } = await supabase
         .from("assets")
-        .select("id, name, extra_metadata")
+        .select("id, name, kac_id, extra_metadata")
         .eq("id", assetId)
         .maybeSingle();
 
@@ -153,6 +182,7 @@ const [allowShareLink, setAllowShareLink] = React.useState(true);
       if (!data) throw new Error("Asset not found.");
 
       setAssetName(data?.name || assetNameFromRoute || "Asset");
+      setAssetKac(data?.kac_id || null);
 
       const existing = data?.extra_metadata?.publicConfig || getDefaultPublicConfig();
 
@@ -173,6 +203,16 @@ setShowLocation(!!storyConfig.showLocation);
 setShowFinancials(!!storyConfig.showFinancials);
 setShowSystems(storyConfig.showSystems !== false);
 setShowProof(storyConfig.showProof !== false);
+setShowHero(storyConfig.showHero !== false);
+setShowGallery(storyConfig.showGallery !== false);
+setShowProofBadges(storyConfig.showProofBadges !== false);
+setShowQrShare(storyConfig.showQrShare !== false);
+setShowFooterCta(storyConfig.showFooterCta !== false);
+
+setSharingEnabled(sharingConfig.enabled === true);
+setAllowPrintSticker(sharingConfig.allowPrintSticker !== false);
+setAllowCopyLink(sharingConfig.allowCopyLink !== false);
+setAllowShareLink(sharingConfig.allowShareLink !== false);
 setShowTimelineHighlights(
   (storyConfig.showTimeline || "highlights_only") === "highlights_only"
 );
@@ -191,19 +231,8 @@ setShowTimelineHighlights(
     const applyModeDefaults = (nextMode) => {
     setMode(nextMode);
     setActionsEnabled(getDefaultActionsForMode(nextMode));
-      setShowHero(storyConfig.showHero !== false);
-setShowGallery(storyConfig.showGallery !== false);
-setShowProofBadges(storyConfig.showProofBadges !== false);
-setShowQrShare(storyConfig.showQrShare !== false);
-setShowFooterCta(storyConfig.showFooterCta !== false);
-
-setSharingEnabled(sharingConfig.enabled !== false);
-setAllowPrintSticker(sharingConfig.allowPrintSticker !== false);
-setAllowCopyLink(sharingConfig.allowCopyLink !== false);
-setAllowShareLink(sharingConfig.allowShareLink !== false);
+     
   };
-
-
 
   const toggleAction = (key) => {
     setActionsEnabled((prev) =>
@@ -323,6 +352,49 @@ const handleSave = async () => {
             </Text>
           </View>
         </View>
+
+        <View style={styles.statusCard}>
+  <View style={{ flex: 1 }}>
+    <Text style={styles.statusEyebrow}>Public Story Status</Text>
+    <Text style={styles.statusTitle}>{assetName || "Asset"}</Text>
+
+    <Text style={styles.statusMeta}>
+      {assetKac ? `KAC ${assetKac}` : "No KAC assigned"}
+    </Text>
+
+    <View style={styles.statusBadge}>
+      <View
+        style={[
+          styles.statusDot,
+          enabled ? styles.statusDotLive : styles.statusDotPrivate,
+        ]}
+      />
+      <Text style={styles.statusBadgeText}>
+        {enabled ? "Public view enabled" : "Private until enabled"}
+      </Text>
+    </View>
+  </View>
+
+  <View style={styles.statusActions}>
+    <TouchableOpacity
+      style={[styles.statusButton, !publicUrl && styles.disabledButton]}
+      onPress={openPublicStory}
+      disabled={!publicUrl}
+    >
+      <Ionicons name="open-outline" size={15} color={colors.textPrimary} />
+      <Text style={styles.statusButtonText}>Open</Text>
+    </TouchableOpacity>
+
+    <TouchableOpacity
+      style={[styles.statusButton, !publicUrl && styles.disabledButton]}
+      onPress={copyPublicLink}
+      disabled={!publicUrl}
+    >
+      <Ionicons name="copy-outline" size={15} color={colors.textPrimary} />
+      <Text style={styles.statusButtonText}>Copy</Text>
+    </TouchableOpacity>
+  </View>
+</View>
 
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Public access</Text>
@@ -542,6 +614,96 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: spacing.lg,
   },
+
+  statusCard: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 12,
+  backgroundColor: colors.surface,
+  borderRadius: radius?.lg ?? 16,
+  padding: 14,
+  borderWidth: 1,
+  borderColor: colors.borderSubtle || "#E5E7EB",
+  ...(shadows?.subtle || {}),
+  marginBottom: 12,
+  },
+
+  statusEyebrow: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: colors.textMuted,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+
+  statusTitle: {
+    marginTop: 4,
+    fontSize: 16,
+    fontWeight: "900",
+    color: colors.textPrimary,
+  },
+
+  statusMeta: {
+    marginTop: 2,
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.textSecondary,
+  },
+
+  statusBadge: {
+    marginTop: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+  },
+
+  statusDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 999,
+  },
+
+  statusDotLive: {
+    backgroundColor: "#059669",
+  },
+
+  statusDotPrivate: {
+    backgroundColor: "#9CA3AF",
+  },
+
+  statusBadgeText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: colors.textPrimary,
+  },
+
+  statusActions: {
+    flexDirection: "row",
+    gap: 8,
+  },
+
+  statusButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle || "#E5E7EB",
+    backgroundColor: colors.surfaceSubtle,
+  },
+
+  statusButtonText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: colors.textPrimary,
+  },
+
+  disabledButton: {
+    opacity: 0.45,
+  },
+
     loadingWrap: {
     flex: 1,
     minHeight: 240,
