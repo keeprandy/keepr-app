@@ -227,15 +227,21 @@ export default function DashboardScreen({ navigation }) {
     refetch: refetchBoats,
   } = useAssets("boat");
 
-  
+      const {
+        assets: rawOtherAssets = [],
+        loading: lo,
+        error: eo,
+        refetch: refetchOtherAssets,
+      } = useAssets("other");
 
-  const loading = lh || lv || lb;
-  const anyError = eh || ev || eb;
+  const loading = lh || lv || lb || lo;
+  const anyError = eh || ev || eb || eo;
 
   // Base sorted lists from DB
   const homesSorted = useMemo(() => sortAssets(rawHomes), [rawHomes]);
   const vehiclesSorted = useMemo(() => sortAssets(rawVehicles), [rawVehicles]);
   const boatsSorted = useMemo(() => sortAssets(rawBoats), [rawBoats]);
+  const otherSorted = useMemo(() => sortAssets(rawOtherAssets), [rawOtherAssets]);
 
   // Local ordering state (used only while reorderMode is on; kept in sync otherwise)
   const [reorderMode, setReorderMode] = useState(false);
@@ -243,6 +249,7 @@ export default function DashboardScreen({ navigation }) {
   const [homeOrder, setHomeOrder] = useState([]);
   const [vehicleOrder, setVehicleOrder] = useState([]);
   const [boatOrder, setBoatOrder] = useState([]);
+  const [otherOrder, setOtherOrder] = useState([]);
 
   // Hero images
   const [heroUriByPlacementId, setHeroUriByPlacementId] = useState({});
@@ -365,9 +372,10 @@ return (
   const [addPickerVisible, setAddPickerVisible] = useState(false);
 
   const allAssets = useMemo(
-    () => [...homesSorted, ...vehiclesSorted, ...boatsSorted],
-    [homesSorted, vehiclesSorted, boatsSorted]
-  );
+  () => [...homesSorted, ...vehiclesSorted, ...boatsSorted, ...otherSorted],
+  [homesSorted, vehiclesSorted, boatsSorted, otherSorted]
+);
+
   const hasVisibleAssets = allAssets.length > 0;
 
 const shouldShowKeeprProgress =
@@ -380,12 +388,15 @@ const shouldShowKeeprProgress =
       setHomeOrder(homesSorted);
       setVehicleOrder(vehiclesSorted);
       setBoatOrder(boatsSorted);
+      setOtherOrder(otherSorted);
     }
-  }, [homesSorted, vehiclesSorted, boatsSorted, reorderMode]);
+  }, [homesSorted, vehiclesSorted, boatsSorted, otherSorted, reorderMode]);
 
   const homes = reorderMode ? homeOrder : homesSorted;
   const vehicles = reorderMode ? vehicleOrder : vehiclesSorted;
   const boats = reorderMode ? boatOrder : boatsSorted;
+  const otherAssets = reorderMode ? otherOrder : otherSorted;
+
 
   
   // Hero resolution
@@ -554,6 +565,7 @@ const reloadDashboard = useCallback(async () => {
       refetchHomes?.(),
       refetchVehicles?.(),
       refetchBoats?.(),
+      refetchOtherAssets?.(),
       loadIdentityAndAchievements?.(),
       loadSystemModeSummary?.(),
     ]);
@@ -564,6 +576,7 @@ const reloadDashboard = useCallback(async () => {
   refetchHomes,
   refetchVehicles,
   refetchBoats,
+  refetchOtherAssets,
   loadIdentityAndAchievements,
   loadSystemModeSummary,
 ]);
@@ -578,15 +591,39 @@ useFocusEffect(
   }, [navigation]);
 
   const goStory = (type, asset) => {
-    if (!asset?.id) return;
-    navigation.navigate(
-      type === "home" ? "HomeStory" : type === "vehicle" ? "VehicleStory" : "BoatStory",
-      {
-        [`${type}Id`]: asset.id,
-        [`${type}Name`]: asset.name,
-      }
-    );
-  };
+  if (!asset?.id) return;
+
+  if (type === "home") {
+    navigation.navigate("HomeStory", {
+      homeId: asset.id,
+      homeName: asset.name,
+    });
+    return;
+  }
+
+  if (type === "vehicle") {
+    navigation.navigate("VehicleStory", {
+      vehicleId: asset.id,
+      vehicleName: asset.name,
+    });
+    return;
+  }
+
+  if (type === "boat") {
+    navigation.navigate("BoatStory", {
+      boatId: asset.id,
+      boatName: asset.name,
+    });
+    return;
+  }
+
+  if (type === "other") {
+    navigation.navigate("OtherAssetStory", {
+      assetId: asset.id,
+      assetName: asset.name,
+    });
+  }
+};
 
   const goGroup = useCallback(
     (assetType) => navigation.navigate("AssetGroupDashboard", { assetType }),
@@ -622,14 +659,19 @@ useFocusEffect(
     if (!ok) goBoats();
   }, [navigation]);
 
+  const goAddOtherAsset = useCallback(() => {
+  navigation.navigate("AddAsset", { assetType: "other" });
+}, [navigation]);
+
   const openAddAssetPicker = useCallback(() => {
-    const options = ["Home", "Vehicle", "Boat", "Cancel"];
-    const cancelButtonIndex = 3;
+    const options = ["Home", "Vehicle", "Boat", "Other Asset", "Cancel"];
+    const cancelButtonIndex = 4;
 
     const go = (idx) => {
       if (idx === 0) return goAddHome();
       if (idx === 1) return goAddVehicle();
       if (idx === 2) return goAddBoat();
+      if (idx === 3) return goAddOtherAsset();
     };
 
     if (Platform.OS === "ios") {
@@ -725,6 +767,9 @@ if (Platform.OS !== "ios") {
       } else if (type === "boat") {
         setBoatOrder((prev) => move(prev));
       }
+      else if (type === "other") {
+        setOtherOrder((prev) => move(prev));
+      }
     },
     [reorderMode]
   );
@@ -733,8 +778,9 @@ if (Platform.OS !== "ios") {
     setHomeOrder(homesSorted);
     setVehicleOrder(vehiclesSorted);
     setBoatOrder(boatsSorted);
+    setOtherOrder(otherSorted);
     setReorderMode(true);
-  }, [homesSorted, vehiclesSorted, boatsSorted]);
+  }, [homesSorted, vehiclesSorted, boatsSorted, otherSorted]);
 
   const cancelReorder = useCallback(() => {
     // Just exit the mode; the DB order stays as last saved
@@ -755,6 +801,7 @@ if (Platform.OS !== "ios") {
         ...makeUpdates(homeOrder),
         ...makeUpdates(vehicleOrder),
         ...makeUpdates(boatOrder),
+        ...makeUpdates(otherOrder),
       ];
 
       if (!updates.length) {
@@ -774,7 +821,12 @@ if (Platform.OS !== "ios") {
       }
 
       // 🔁 Refetch so Dashboard sees the new order immediately
-      await Promise.all([refetchHomes?.(), refetchVehicles?.(), refetchBoats?.()]);
+      await Promise.all([
+        refetchHomes?.(),
+        refetchVehicles?.(),
+        refetchBoats?.(),
+        refetchOtherAssets?.(),
+      ]);
     } catch (e) {
       console.log("Save asset order error", e);
       Alert.alert("Couldn't save order", "Please try again.");
@@ -783,7 +835,7 @@ if (Platform.OS !== "ios") {
       // ✅ Leave reorder mode after save
       setReorderMode(false);
     }
-  }, [homeOrder, vehicleOrder, boatOrder, refetchHomes, refetchVehicles, refetchBoats]);
+  }, [homeOrder, vehicleOrder, boatOrder, refetchHomes, refetchVehicles, refetchBoats, refetchOtherAssets]);
 
   /* ---- Circle strip model ---- */
 
@@ -801,16 +853,19 @@ if (Platform.OS !== "ios") {
       });
     };
 
+
     homesSorted.forEach((h) => pushAsset(h, "home"));
     vehiclesSorted.forEach((v) => pushAsset(v, "vehicle"));
     boatsSorted.forEach((b) => pushAsset(b, "boat"));
+    otherSorted.forEach((o) => pushAsset(o, "other"));
 
     return items;
-  }, [homesSorted, vehiclesSorted, boatsSorted]);
+  }, [homesSorted, vehiclesSorted, boatsSorted, otherSorted, reorderMode]);
 
   const MAX_PREVIEW_WEB = 20;
   const MAX_PREVIEW_NATIVE = 10;
   const MAX_PREVIEW = Platform.OS === "web" ? MAX_PREVIEW_WEB : MAX_PREVIEW_NATIVE;
+  const topOtherAssets = otherAssets.slice(0, MAX_PREVIEW);
 
   const topHomes = homes.slice(0, MAX_PREVIEW);
   const topVehicles = vehicles.slice(0, MAX_PREVIEW);
@@ -1094,7 +1149,14 @@ if (Platform.OS !== "ios") {
                   }
 
                   const uri = getAssetHeroImage(c.asset);
-                  const badgeIcon = c.type === "home" ? "home" : c.type === "vehicle" ? "car" : "boat";
+                  const badgeIcon =
+                  c.type === "home"
+                    ? "home"
+                    : c.type === "vehicle"
+                    ? "car"
+                    : c.type === "boat"
+                    ? "boat"
+                    : "cube";
                   const showBiz = isCommercial(c.asset);
                   const { isOwner, isShared } = getOwnershipBadges(c.asset);
 
@@ -1117,7 +1179,9 @@ if (Platform.OS !== "ios") {
                                     ? "home-outline"
                                     : c.type === "vehicle"
                                     ? "car-outline"
-                                    : "boat-outline"
+                                    : c.type === "boat"
+                                    ? "boat-outline"
+                                    : "cube-outline"
                                 }
                                 size={48}
                                 color="#fff"
@@ -1274,6 +1338,39 @@ if (Platform.OS !== "ios") {
                 })()
               )}
             />
+            <Text style={styles.cardTitle}>Other Assets</Text>
+
+            <AssetSection
+              label="Personal Property"
+              hint="Instruments, collectibles, gear, tools, cameras, and more"
+              icon="cube-outline"
+              onViewAll={() => goGroup("other")}
+              items={topOtherAssets}
+              emptyText="Add the things you care about: instruments, gear, collectibles, tools, and personal property."
+              renderItem={(a, index) => {
+                const { isOwner, isShared } = getOwnershipBadges(a);
+                return (
+                  <AssetRowCard
+                    key={a.id}
+                    title={a?.name || "Asset"}
+                    subtitle={a?.asset_subtype || a?.make || a?.model || "Open story"}
+                    modeLine={commercialLabel(a)}
+                    icon="cube-outline"
+                    image={getAssetHeroImage(a)}
+                    isOwner={isOwner}
+                    isShared={isShared}
+                    onPress={() => goStory("other", a)}
+                    reorderMode={reorderMode}
+                    onMoveUp={reorderMode && index > 0 ? () => moveAsset("other", index, -1) : null}
+                    onMoveDown={
+                      reorderMode && index < topOtherAssets.length - 1
+                        ? () => moveAsset("other", index, 1)
+                        : null
+                    }
+                  />
+                );
+              }}
+            />
 
             {/* Pros */}
             <View style={styles.section}>
@@ -1336,6 +1433,17 @@ if (Platform.OS !== "ios") {
                 >
                   <Ionicons name="boat-outline" size={18} color={colors.textPrimary} />
                   <Text style={styles.modalBtnText}>Boat</Text>
+                </Pressable>
+
+                <Pressable
+                  style={styles.modalBtn}
+                  onPress={() => {
+                    setAddPickerVisible(false);
+                    goAddOtherAsset();
+                  }}
+                >
+                  <Ionicons name="cube-outline" size={24} color={colors.textPrimary} />
+                  <Text style={styles.modalBtnText}>Other Asset</Text>
                 </Pressable>
 
                 <Pressable style={[styles.modalBtn, styles.modalCancel]} onPress={() => setAddPickerVisible(false)}>

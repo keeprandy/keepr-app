@@ -123,6 +123,10 @@ import BoatStoryScreen from "./screens/BoatStoryScreen";
 import BoatSystemsScreen from "./screens/BoatSystemsScreen";
 import BoatSystemStoryScreen from "./screens/BoatSystemStoryScreen";
 
+// Other Assets
+import OtherAssetStoryScreen from "./screens/OtherAssetStoryScreen";
+import OtherAssetShowcaseScreen from "./screens/OtherAssetShowcaseScreen";
+
 // Keepr Pros
 import KeeprProAddServiceScreen from "./screens/KeeprProAddServiceScreen";
 import KeeprProDetailScreen from "./screens/KeeprProDetailScreen";
@@ -1694,6 +1698,18 @@ const initialRouteName = isResetLink
           <RootStack.Screen
             name="AddVehicleAsset"
             component={AddVehicleAssetScreen}
+          />
+
+          {/* Other Assets */}
+          <RootStack.Screen
+            name="OtherAssetStory"
+            component={OtherAssetStoryScreen}
+            options={{ headerShown: false }}
+          />
+          <RootStack.Screen
+            name="OtherAssetShowcase"
+            component={OtherAssetShowcaseScreen}
+            options={{ headerShown: false }}
           />
 
           {/* Misc */}

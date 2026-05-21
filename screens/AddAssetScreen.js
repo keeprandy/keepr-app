@@ -121,6 +121,14 @@ const ASSET_TYPE_CONFIGS = {
     namePlaceholder: "My 2013 Triumph Trophy",
     successRoute: "VehicleStory", // if you use a different route, change it here
   },
+  other: {
+  id: "other",
+  label: "Other Asset",
+  requiresHeroPhoto: false,
+  heroLabel: "Add a photo to start",
+  namePlaceholder: "Fender Stratocaster, Leica Q3, Rolex Submariner...",
+  successRoute: "OtherAssetStory",
+},
 };
 
 function safeInt(s) {
@@ -171,10 +179,9 @@ function pickBlobUrlOnWeb({ accept = "image/*" } = {}) {
 export default function AddAssetScreen({ navigation, route }) {
   const { user } = useAuth();
   const ownerId = user?.id || null;
-
-  const initialType = route?.params?.assetType ?? "boat";
+  const initialType = route?.params?.assetType ?? "other";
   const typeConfig = useMemo(
-    () => ASSET_TYPE_CONFIGS[initialType] || ASSET_TYPE_CONFIGS.boat,
+    () => ASSET_TYPE_CONFIGS[initialType] || ASSET_TYPE_CONFIGS.other,
     [initialType]
   );
 
@@ -184,8 +191,9 @@ export default function AddAssetScreen({ navigation, route }) {
   const [model, setModel] = useState("");
   const [year, setYear] = useState("");
   const [serialNumber, setSerialNumber] = useState("");
-  const [engineHours, setEngineHours] = useState("");
+  const [condition, setCondition] = useState("");
   const [assetMode, setAssetMode] = useState("personal");
+  const [assetSubtype, setAssetSubtype] = useState("");
 
   // Hero photo: select locally, upload on save
   const [heroLocalUri, setHeroLocalUri] = useState(null);
@@ -328,14 +336,15 @@ export default function AddAssetScreen({ navigation, route }) {
       const payload = {
         ownerId,
         name: name?.trim() || null,
-        type: typeConfig.id,
+        type: "other",
         make: make?.trim() || null,
         model: model?.trim() || null,
         year: safeInt(year),
         serialNumber: serialNumber?.trim() || null,
-        engineHours: safeFloat(engineHours),
+        condition: condition?.trim() || null,
         assetMode,
         primaryPhotoUrl: null,
+        assetSubtype: assetSubtype?.trim() || null,
       };
 
       const asset = await createAssetWithDefaults(payload);
@@ -345,33 +354,40 @@ export default function AddAssetScreen({ navigation, route }) {
       let heroPublicUrl = null;
       let attachmentId = null;
 
-      try {
-        const att = await uploadAttachmentFromUri({
-          userId: ownerId,
-          assetId: asset.id,
-          kind: "photo",
-          fileUri: heroPending.uri,
-          fileName: heroPending.fileName || `hero-${asset.id}.jpg`,
-          mimeType: heroPending.mimeType || "image/jpeg",
-          sizeBytes: null,
-          placements: [{ target_type: "asset", target_id: asset.id, role: "hero" }],
-        });
+      await supabase
+      .from("assets")
+      .update({ asset_subtype: assetSubtype?.trim() || null })
+      .eq("id", asset.id);
 
-        attachmentId = att?.id || null;
-        heroPublicUrl = att?.public_url || att?.publicUrl || att?.url || att?.urls?.public || null;
+if (heroPending?.uri) {
+  try {
+    const att = await uploadAttachmentFromUri({
+      userId: ownerId,
+      assetId: asset.id,
+      kind: "photo",
+      fileUri: heroPending.uri,
+      fileName: heroPending.fileName || `hero-${asset.id}.jpg`,
+      mimeType: heroPending.mimeType || "image/jpeg",
+      sizeBytes: null,
+      placements: [{ target_type: "asset", target_id: asset.id, role: "hero" }],
+    });
 
-        console.log("AddAssetScreen: hero uploaded via uploadAttachmentFromUri", {
-          attachmentId,
-          heroPublicUrl,
-        });
-      } catch (e) {
-        console.warn("AddAssetScreen: hero upload failed", e);
-        throw new Error("Photo upload failed. Please try again.");
-      } finally {
-        try {
-          heroPending?.revoke?.();
-        } catch {}
-      }
+    attachmentId = att?.id || null;
+    heroPublicUrl =
+      att?.public_url ||
+      att?.publicUrl ||
+      att?.url ||
+      att?.urls?.public ||
+      null;
+  } catch (e) {
+    console.warn("AddAssetScreen: hero upload failed", e);
+    throw new Error("Photo upload failed. Please try again.");
+  } finally {
+    try {
+      heroPending?.revoke?.();
+    } catch {}
+  }
+}
 
       // 3) Update asset hero urls (for existing UI)
       if (heroPublicUrl) {
@@ -408,7 +424,7 @@ export default function AddAssetScreen({ navigation, route }) {
   );
 
   return (
-    <SafeAreaView style={layoutStyles.safeArea}>
+    <SafeAreaView style={layoutStyles.screen}>
       <KeeprAlert
         open={alertState.open}
         title={alertState.title}
@@ -416,37 +432,17 @@ export default function AddAssetScreen({ navigation, route }) {
         onClose={closeAlert}
       />
 
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+      <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={styles.container}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator
+        >
         <View style={styles.header}>
           <Text style={styles.title}>Add asset</Text>
           <Text style={styles.subtitle}>
-            Start with one photo and the basics. Add documents after you save.
+            Add the basics now. Photos and documents can come later.
           </Text>
-        </View>
-
-        {/* Photo */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>{typeConfig.heroLabel}</Text>
-
-          <View style={styles.photoRow}>
-            <TouchableOpacity style={styles.photoBtnPrimary} onPress={takePhoto} disabled={busy}>
-              {pickingPhoto ? (
-                <ActivityIndicator color={colors.white} size="small" />
-              ) : (
-                <>
-                  <Ionicons name="camera-outline" size={18} color={colors.white} />
-                  <Text style={styles.photoBtnPrimaryText}>Take photo</Text>
-                </>
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.photoBtnSecondary} onPress={choosePhoto} disabled={busy}>
-              <Ionicons name="images-outline" size={18} color={colors.textPrimary} />
-              <Text style={styles.photoBtnSecondaryText}>Choose</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={{ marginTop: spacing.md }}>{heroBlock}</View>
         </View>
 
         {/* Details */}
@@ -478,6 +474,14 @@ export default function AddAssetScreen({ navigation, route }) {
           </View>
           <Text style={styles.modeHint}>Used for reporting and future business features.</Text>
 
+          <Text style={styles.label}>Asset type</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Guitar, camera, watch, collectible, tool..."
+            placeholderTextColor={colors.textMuted}
+            value={assetSubtype}
+            onChangeText={setAssetSubtype}
+          />
           <Text style={styles.label}>Name</Text>
           <TextInput
             style={styles.input}
@@ -492,7 +496,7 @@ export default function AddAssetScreen({ navigation, route }) {
               <Text style={styles.label}>Make</Text>
               <TextInput
                 style={styles.input}
-                placeholder="Triumph"
+                placeholder="Steinway"
                 placeholderTextColor={colors.textMuted}
                 value={make}
                 onChangeText={setMake}
@@ -502,7 +506,7 @@ export default function AddAssetScreen({ navigation, route }) {
               <Text style={styles.label}>Model</Text>
               <TextInput
                 style={styles.input}
-                placeholder="Trophy SE"
+                placeholder="Model B"
                 placeholderTextColor={colors.textMuted}
                 value={model}
                 onChangeText={setModel}
@@ -511,31 +515,31 @@ export default function AddAssetScreen({ navigation, route }) {
           </View>
 
           <View style={styles.twoCol}>
-            <View style={styles.col}>
-              <Text style={styles.label}>Year</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="2013"
-                placeholderTextColor={colors.textMuted}
-                keyboardType="numeric"
-                value={year}
-                onChangeText={setYear}
-              />
-            </View>
-            <View style={styles.col}>
-              <Text style={styles.label}>Engine hours (optional)</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="125"
-                placeholderTextColor={colors.textMuted}
-                keyboardType="numeric"
-                value={engineHours}
-                onChangeText={setEngineHours}
-              />
-            </View>
+          <View style={styles.col}>
+            <Text style={styles.label}>Year</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="2013"
+              placeholderTextColor={colors.textMuted}
+              keyboardType="numeric"
+              value={year}
+              onChangeText={setYear}
+            />
           </View>
 
-          <Text style={styles.label}>Serial / VIN / HIN (optional)</Text>
+          <View style={styles.col}>
+            <Text style={styles.label}>Condition</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Excellent, good, fair..."
+              placeholderTextColor={colors.textMuted}
+              value={condition}
+              onChangeText={setCondition}
+            />
+          </View>
+        </View>
+
+          <Text style={styles.label}>Serial / or Unique Identifier (optional)</Text>
           <TextInput
             style={styles.input}
             placeholder="ABC123..."
@@ -543,6 +547,32 @@ export default function AddAssetScreen({ navigation, route }) {
             value={serialNumber}
             onChangeText={setSerialNumber}
           />
+        </View>
+
+                {/* Photo */}
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Photo optional</Text>
+          <Text style={styles.photoHint}>Add one now, or add photos later from the asset story.</Text>
+
+          <View style={styles.photoRow}>
+            <TouchableOpacity style={styles.photoBtnPrimary} onPress={takePhoto} disabled={busy}>
+              {pickingPhoto ? (
+                <ActivityIndicator color={colors.white} size="small" />
+              ) : (
+                <>
+                  <Ionicons name="camera-outline" size={18} color={colors.white} />
+                  <Text style={styles.photoBtnPrimaryText}>Take photo</Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.photoBtnSecondary} onPress={choosePhoto} disabled={busy}>
+              <Ionicons name="images-outline" size={18} color={colors.textPrimary} />
+              <Text style={styles.photoBtnSecondaryText}>Choose</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={{ marginTop: spacing.md }}>{heroBlock}</View>
         </View>
 
         {/* Inline error banner near CTA */}
@@ -585,13 +615,63 @@ export default function AddAssetScreen({ navigation, route }) {
 }
 
 const styles = StyleSheet.create({
-  container: { padding: spacing.lg },
+  container: {
+  padding: spacing.lg,
+  paddingBottom: 120,
+  width: "100%",
+  maxWidth: 900,
+  alignSelf: "center",
+},
   header: { marginBottom: spacing.md },
   title: { ...typography.title },
   subtitle: { ...typography.subtitle, marginTop: 2 },
 
   section: { marginTop: spacing.lg },
   sectionLabel: { ...typography.sectionLabel, marginBottom: spacing.xs },
+
+  modeRow: {
+  flexDirection: "row",
+  gap: spacing.sm,
+  marginTop: 6,
+},
+
+  modeBtn: {
+    paddingVertical: 9,
+    paddingHorizontal: 16,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    backgroundColor: colors.surface,
+  },
+
+  modeBtnActive: {
+    backgroundColor: colors.brandBlue || colors.primary,
+    borderColor: colors.brandBlue || colors.primary,
+  },
+
+  modeBtnText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: colors.textSecondary,
+  },
+
+  modeBtnTextActive: {
+    color: colors.white,
+  },
+
+  modeHint: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginTop: 6,
+    lineHeight: 16,
+  },
+
+  photoHint: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 2,
+    marginBottom: spacing.sm,
+  },
 
   photoRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginTop: spacing.xs },
 
@@ -644,19 +724,28 @@ const styles = StyleSheet.create({
   heroPlaceholderBody: { marginTop: 4, fontSize: 13, color: colors.textSecondary, textAlign: "center", lineHeight: 18 },
 
   label: { fontSize: 12, fontWeight: "800", color: colors.textSecondary, marginTop: spacing.md, marginBottom: 6 },
+ 
   input: {
-    borderWidth: 1,
-    borderColor: "rgba(148,163,184,0.25)",
-    borderRadius: radius.lg,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 11,
-    fontSize: 14,
-    color: colors.textPrimary,
-    backgroundColor: "rgba(15,23,42,0.9)",
-  },
+  borderWidth: 1,
+  borderColor: colors.borderSubtle,
+  borderRadius: radius.lg,
+  paddingHorizontal: spacing.md,
+  paddingVertical: 12,
+  fontSize: 14,
+  color: colors.textPrimary,
+  backgroundColor: colors.surface,
+},
 
-  twoCol: { flexDirection: IS_WEB ? "row" : "column", gap: spacing.md },
-  col: { flex: 1 },
+ twoCol: {
+  flexDirection: IS_WEB ? "row" : "column",
+  gap: spacing.md,
+  width: "100%",
+},
+
+col: {
+  flex: 1,
+  minWidth: IS_WEB ? 260 : "100%",
+},
 
   errorBanner: {
     marginTop: spacing.lg,

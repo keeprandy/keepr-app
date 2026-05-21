@@ -127,18 +127,22 @@ function buildSummary(photos, files, links) {
 }
 
 export default function TimelineRecordScreen({ route, navigation }) {
+  const sourceType = route?.params?.sourceType;
+  const storyEventId = route?.params?.storyEventId;
   const recordId =
-    route?.params?.timelineRecordId ||
-    route?.params?.recordId ||
-    route?.params?.serviceRecordId ||
-    route?.params?.id ||
-    null;
+    sourceType === "story_event"
+      ? storyEventId || null
+      : route?.params?.timelineRecordId ||
+        route?.params?.recordId ||
+        route?.params?.serviceRecordId ||
+        route?.params?.id ||
+        null;
 
   // Core data
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [record, setRecord] = useState(null);
-  const [recordSource, setRecordSource] = useState(null); // "service_records" | "timeline_records" | null
+  const [recordSource, setRecordSource] = useState(null); // "service_records" | "timeline_records" | "story_events" | null
 
   // Proof
   const [attachments, setAttachments] = useState([]); // [{id, kind:"photo"|"file", url, title, contentType, created_at}]
@@ -316,25 +320,49 @@ useEffect(() => {
         let rec = null;
         let source = null;
 
-        const { data: sr, error: srErr } = await supabase
-          .from("service_records")
-          .select("*")
-          .eq("id", recordId)
-          .maybeSingle();
+        if (sourceType === "story_event") {
+          const { data: storyEvent, error: storyErr } = await supabase
+            .from("story_events")
+            .select(
+              "id,title,description,occurred_at,created_at,event_type,asset_id,system_id"
+            )
+            .eq("id", storyEventId || recordId)
+            .maybeSingle();
 
-        if (!srErr && sr) {
-          rec = sr;
-          source = "service_records";
+          if (!storyErr && storyEvent) {
+            const description = storyEvent.description || storyEvent.notes || "";
+
+            rec = {
+              ...storyEvent,
+              title: storyEvent.title || "Story update",
+              description,
+              notes: description,
+              occurred_at: storyEvent.occurred_at || storyEvent.created_at || null,
+              source_type: storyEvent.event_type || "story_event",
+            };
+            source = "story_events";
+          }
         } else {
-          const { data: tr, error: trErr } = await supabase
-            .from("timeline_records")
+          const { data: sr, error: srErr } = await supabase
+            .from("service_records")
             .select("*")
             .eq("id", recordId)
             .maybeSingle();
 
-          if (!trErr && tr) {
-            rec = tr;
-            source = "timeline_records";
+          if (!srErr && sr) {
+            rec = sr;
+            source = "service_records";
+          } else {
+            const { data: tr, error: trErr } = await supabase
+              .from("timeline_records")
+              .select("*")
+              .eq("id", recordId)
+              .maybeSingle();
+
+            if (!trErr && tr) {
+              rec = tr;
+              source = "timeline_records";
+            }
           }
         }
 
@@ -348,10 +376,10 @@ useEffect(() => {
         }
 
         // 2) Load proof from the NEW attachments model only
-const newRows = await listAttachmentsForTarget(
-  "service_record",
-  recordId
-);
+        const newRows = await listAttachmentsForTarget(
+          source === "story_events" ? "story_event" : "service_record",
+          recordId
+        );
 
         const normalized = [];
         const linkRows = [];
@@ -437,7 +465,7 @@ const newRows = await listAttachmentsForTarget(
         setLoading(false);
       }
     },
-    [recordId]
+    [recordId, sourceType, storyEventId]
   );
 
   // Initial load + refresh

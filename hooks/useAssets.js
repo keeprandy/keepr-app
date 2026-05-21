@@ -28,9 +28,9 @@ export function useAssets(type, options = {}) {
   const [error, setError] = useState(null);
 
   const typeFilter = useMemo(() => {
-    if (type === "home" || type === "vehicle" || type === "boat") return type;
-    return null;
-  }, [type]);
+  if (!type) return null;
+  return type;
+}, [type]);
 
   const ownerId = user?.id || null;
 

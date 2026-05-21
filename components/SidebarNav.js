@@ -15,6 +15,7 @@ const CONSUMER_ITEMS = [
   { key: "MyHome", label: "Homes", icon: "home-outline" },
   { key: "Garage", label: "Garage", icon: "car-outline" },
   { key: "Boats", label: "Boats", icon: "boat-outline" },
+  { key: "OtherAssets", label: "Other Assets", icon: "cube-outline" },
   { key: "Notifications", label: "Actions Inbox", icon: "notifications-outline" },
   { key: "KeeprPros", label: "Keepr™ Pros", icon: "construct-outline" },
   { key: "PlanUpgrade", label: "Plan & Upgrade", icon: "pricetag-outline" },
@@ -96,6 +97,16 @@ if (routeName === "SuperKeeprDashboard" || routeName === "SuperKeeprStack") {
   ) {
     return "Boats";
   }
+
+  if (
+  routeName === "OtherAssets" ||
+  routeName === "OtherAssetStory" ||
+  routeName === "OtherAssetShowcase" ||
+  routeName === "AddAsset" ||
+  routeName === "AssetGroupDashboard"
+) {
+  return "OtherAssets";
+}
 
 if (
   routeName === "Notifications" ||
@@ -318,6 +329,11 @@ const navItems = useMemo(() => {
       navigationRef.navigate("SuperKeeprStack", { screen: key });
       return;
     }
+
+    if (key === "OtherAssets") {
+  navigationRef.navigate("AssetGroupDashboard", { assetType: "other" });
+  return;
+}
 
     navigationRef.navigate("RootTabs", { screen: key });
   } catch {

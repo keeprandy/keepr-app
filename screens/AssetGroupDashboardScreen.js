@@ -91,6 +91,21 @@ function getConfig(assetType) {
     };
   }
 
+  if (assetType === "other") {
+  return {
+    title: "Other Assets",
+    subtitle: "Personal property, instruments, collectibles, gear, tools, and more.",
+    icon: "cube-outline",
+    emptyTitle: "Add your first asset",
+    emptyBody:
+      "Start with something you care about. Add photos, proof, and records to build its ownership story.",
+    addLabel: "Add asset",
+    addRoutes: ["AddAsset"],
+    storyRoute: "OtherAssetStory",
+    storyParamKeys: { id: "assetId", name: "assetName" },
+  };
+}
+
   // boat
   return {
     title: "On the water",
@@ -240,11 +255,16 @@ useEffect(() => {
 }, [groupAssets]);
 
   const goAdd = useCallback(() => {
+  if (assetType === "other") {
+    navigation.navigate("AddAsset", { assetType: "other" });
+    return;
+  }
+
     const ok = tryNavigateFirst(navigation.getParent?.() || navigation, cfg.addRoutes, {});
     if (!ok) {
       // fallback: no-op
     }
-  }, [navigation, cfg]);
+  }, [navigation, cfg, assetType]);
 
   const goStory = useCallback(
     (asset) => {
@@ -385,6 +405,26 @@ useEffect(() => {
               ]}
             >
               Garage
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.topNavPill, assetType === "other" && styles.topNavPillActive]}
+            onPress={() => goType("other")}
+            activeOpacity={0.9}
+          >
+            <Ionicons
+              name="cube-outline"
+              size={16}
+              color={assetType === "other" ? colors.brandWhite : colors.textPrimary}
+            />
+            <Text
+              style={[
+                styles.topNavPillText,
+                assetType === "other" && styles.topNavPillTextActive,
+              ]}
+            >
+              Other Assets
             </Text>
           </TouchableOpacity>
         </View>

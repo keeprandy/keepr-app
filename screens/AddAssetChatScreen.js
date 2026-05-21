@@ -142,7 +142,41 @@ function chatConfigForAssetType(assetTypeRaw) {
       ],
     };
   }
-
+  if (assetType === "other") {
+  return {
+    assetType: "other",
+    title: "Add Asset with Kai",
+    subtitle: "Kai will help you add anything you want to keep track of.",
+    intro: "Let’s add this asset.",
+    questions: [
+      {
+        key: "assetSubtype",
+        label: "Asset Type",
+        prompt: "What type of asset is it? For example: piano, guitar, camera, watch, collectible, tool.",
+      },
+      {
+        key: "name",
+        label: "Name",
+        prompt: "What should we call it?",
+      },
+      {
+        key: "make",
+        label: "Make or Brand",
+        prompt: "What’s the make or brand?",
+      },
+      {
+        key: "model",
+        label: "Model",
+        prompt: "What’s the model?",
+      },
+      {
+        key: "condition",
+        label: "Condition",
+        prompt: "What condition is it in?",
+      },
+    ],
+  };
+}
   return {
     assetType: "vehicle",
     title: "Add Asset with Kai",
@@ -166,6 +200,7 @@ function chatConfigForAssetType(assetTypeRaw) {
       },
     ],
   };
+
 }
 
 function validateAnswer(fieldKey, value) {
@@ -304,12 +339,23 @@ const config = useMemo(
         answers.lengthFeet ? `Length: ${answers.lengthFeet} ft` : null,
       ].filter(Boolean);
     }
+        if (assetType === "other") {
+        return [
+          answers.assetSubtype ? `Type: ${answers.assetSubtype}` : null,
+          answers.name ? `Name: ${answers.name}` : null,
+          answers.make ? `Make/Brand: ${answers.make}` : null,
+          answers.model ? `Model: ${answers.model}` : null,
+          answers.condition ? `Condition: ${answers.condition}` : null,
+        ].filter(Boolean);
+      }
 
     return [
       answers.make ? `Make: ${answers.make}` : null,
       answers.model ? `Model: ${answers.model}` : null,
       answers.year ? `Year: ${answers.year}` : null,
     ].filter(Boolean);
+
+
   }, [allQuestionsAnswered, answers, assetType]);
 
   const appendMessage = (role, text) => {
@@ -455,8 +501,16 @@ const config = useMemo(
         .filter(Boolean)
         .join(", ");
     }
-
+    if (assetType === "other") {
+      return (
+        answers.name ||
+        [answers.make, answers.model].filter(Boolean).join(" ") ||
+        answers.assetSubtype ||
+        "Asset"
+      );
+    }
     return `${answers.year || ""} ${answers.make || ""} ${answers.model || ""}`.trim();
+
   };
 
   const buildLocationString = () => {
@@ -522,6 +576,19 @@ const config = useMemo(
           engineHours: null,
           primaryPhotoUrl: null,
         });
+        } else if (assetType === "other") {
+          created = await createAssetWithDefaults({
+            ownerId: userId,
+            name: displayName,
+            type: "other",
+            make: answers.make || null,
+            model: answers.model || null,
+            year: null,
+            serialNumber: null,
+            engineHours: null,
+            primaryPhotoUrl: null,
+            assetSubtype: answers.assetSubtype || null,
+          });
       } else {
         created = await createAssetWithDefaults({
           ownerId: userId,
@@ -534,6 +601,7 @@ const config = useMemo(
           engineHours: null,
           primaryPhotoUrl: null,
         });
+        
       }
 
       const assetId = created?.id;
@@ -597,6 +665,13 @@ const config = useMemo(
         updatePayload.length_feet = parseFloat(answers.lengthFeet);
       }
 
+      if (assetType === "other") {
+          updatePayload.asset_subtype = answers.assetSubtype || null;
+          updatePayload.extra_metadata = {
+            condition: answers.condition || null,
+          };
+        }
+
       const { error: upErr } = await supabase
         .from("assets")
         .update(updatePayload)
@@ -611,6 +686,11 @@ const config = useMemo(
 
       if (assetType === "boat") {
         navigation.replace("BoatStory", { assetId });
+        return;
+      }
+
+      if (assetType === "other") {
+        navigation.replace("OtherAssetStory", { assetId });
         return;
       }
 
@@ -714,6 +794,12 @@ const config = useMemo(
           value: "boat",
           icon: "boat-outline",
           hint: "Make, model, year, and length",
+        },
+        {
+          label: "Other Asset",
+          value: "other",
+          icon: "cube-outline",
+          hint: "Instruments, collectibles, cameras, gear, tools, and more",
         },
       ].map((option) => (
         <TouchableOpacity
