@@ -37,7 +37,13 @@ const IS_WEB = Platform.OS === "web";
 const PROJECT_REF = "jjzjuqxysucqutgjnrkk";
 const FUNCTIONS_BASE = `https://${PROJECT_REF}.supabase.co/functions/v1`;
 const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+const DEBUG_PUBLIC_STORY_LOAD = false;
 
+function logPublicStoryLoad(...args) {
+  if (DEBUG_PUBLIC_STORY_LOAD) {
+    console.log(...args);
+  }
+}
 
 function getPublicStoryBaseUrl() {
   if (Platform.OS === "web" && typeof window !== "undefined") {
@@ -205,7 +211,7 @@ async function fetchPublicStoryMedia(kac) {
   const json = await res.json();
 
   if (!res.ok) {
-    console.log("PUBLIC STORY MEDIA ERROR:", json);
+    logPublicStoryLoad("PUBLIC STORY MEDIA ERROR:", json);
     return [];
   }
 
@@ -383,9 +389,7 @@ if (kac) {
     .eq("kac_id", cleanKac)
     .maybeSingle();
 
-  if (summaryError) {
-    console.log("Public story summary load failed", summaryError);
-  }
+  logPublicStoryLoad("Public story summary load failed", summaryError);
 
   if (summaryRow) {
   assetRow = {
@@ -403,9 +407,7 @@ if (kac) {
         .eq("id", assetId)
         .maybeSingle();
 
-      if (error) {
-        console.log("Public preview asset load failed", error);
-      }
+      logPublicStoryLoad("Public preview asset load failed", error);
 
       assetRow = data || null;
     }
@@ -418,22 +420,35 @@ if (kac) {
     const publicAssetId = assetRow.asset_id || assetRow.id;
     const publicKac = assetRow.kac_id || kac;
 
-      console.log("PUBLIC STORY ASSET ROW:", assetRow);
-      console.log("PUBLIC STORY HERO IMAGE URL:", assetRow?.hero_image_url);
-      console.log("PUBLIC STORY HERO PLACEMENT ID:", assetRow?.hero_placement_id);
-      console.log("PUBLIC STORY PUBLIC ASSET ID:", publicAssetId);
+      logPublicStoryLoad("PUBLIC STORY ASSET ROW:", assetRow);
+      logPublicStoryLoad("PUBLIC STORY HERO IMAGE URL:", assetRow?.hero_image_url);
+      logPublicStoryLoad("PUBLIC STORY HERO PLACEMENT ID:", assetRow?.hero_placement_id);
+      logPublicStoryLoad("PUBLIC STORY PUBLIC ASSET ID:", publicAssetId);
 
   
-      /* ------------------------------- TIMELINE ------------------------------ */
+      /* ----------------------- TIMELINE / SYSTEMS / MEDIA -------------------- */
 
-      const { data: serviceRows, error: timelineError } = await supabase
-        .from("public_asset_story_timeline")
-        .select("*")
-        .eq("kac_id", publicKac)
-        .order("performed_at", { ascending: false });
+      const [
+        { data: serviceRows, error: timelineError },
+        { data: systemRows },
+        mediaRows,
+      ] = await Promise.all([
+        supabase
+          .from("public_asset_story_timeline")
+          .select("*")
+          .eq("kac_id", publicKac)
+          .order("performed_at", { ascending: false }),
+        supabase
+          .from("systems")
+          .select("id, name")
+          .eq("asset_id", publicAssetId)
+          .order("name", { ascending: true }),
+        fetchPublicStoryMedia(publicKac),
+      ]);
 
-      console.log("PUBLIC TIMELINE:", serviceRows);
-      console.log("PUBLIC TIMELINE ERROR:", timelineError);
+      logPublicStoryLoad("PUBLIC TIMELINE:", serviceRows);
+      logPublicStoryLoad("PUBLIC TIMELINE ERROR:", timelineError);
+      logPublicStoryLoad("PUBLIC STORY MEDIA:", mediaRows);
 
       const publicTimeline = (serviceRows || []).map((row) => ({
         id: row.id,
@@ -448,21 +463,7 @@ if (kac) {
 
       setTimeline(publicTimeline);
 
-      /* -------------------------------- SYSTEMS ----------------------------- */
-
-      const { data: systemRows } = await supabase
-        .from("systems")
-        .select("id, name")
-        .eq("asset_id", publicAssetId)
-        .order("name", { ascending: true });
-
       setSystems(systemRows || []);
-
-      /* -------------------------------- GALLERY ----------------------------- */
-
-      const mediaRows = await fetchPublicStoryMedia(publicKac);
-
-      console.log("PUBLIC STORY MEDIA:", mediaRows);
 
       /* ------------------------------ HERO IMAGE ----------------------------- */
 
@@ -473,7 +474,7 @@ if (kac) {
         mediaRows.find((x) => x.role === "hero") ||
         null;
 
-      console.log("PUBLIC HERO PLACEMENT:", heroPlacement);
+      logPublicStoryLoad("PUBLIC HERO PLACEMENT:", heroPlacement);
 
       setHeroUri(heroPlacement?.image_url || null);
 
@@ -502,7 +503,7 @@ if (kac) {
       );
 
     } catch (e) {
-      console.log("Public story load error", e);
+      logPublicStoryLoad("Public story load error", e);
     } finally {
       setLoading(false);
     }

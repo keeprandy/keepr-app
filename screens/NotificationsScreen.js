@@ -568,62 +568,22 @@ const remindersByDate = useMemo(() => {
       if (!opts.silent) setLoading(true);
 
       try {
-        /* --------- 0. Profile (username for inbox email) --------- */
-try {
-  const { data: intake, error: intakeErr } = await supabase
-    .from("email_intake_addresses")
-    .select("token, owner_id")
-    .eq("owner_id", ownerId)
-    .limit(1)
-    .maybeSingle();
+        const intakePromise = supabase
+          .from("email_intake_addresses")
+          .select("token, owner_id")
+          .eq("owner_id", ownerId)
+          .limit(1)
+          .maybeSingle()
+          .then(({ data, error }) => (error ? null : data?.token || null))
+          .catch(() => null);
 
- 
-
-  if (intakeErr) {
-    setProfileUsername(null);
-  } else {
-    setProfileUsername(intake?.token || null);
-  }
-} catch (e) {
-  setProfileUsername(null);
-}
-
-        /* --------- 1. Event inbox (event_inbox + attachments) --------- */
-        const { data: evRows, error: evErr } = await supabase
+        const eventsPromise = supabase
           .from("event_inbox")
           .select("*")
           .eq("owner_id", ownerId)
           .order("created_at", { ascending: false });
 
-        if (evErr) throw evErr;
-
-        const evs = evRows || [];
-        setEvents(evs);
-
-        let attachmentsMap = {};
-        if (evs.length > 0) {
-          const eventIds = evs.map((e) => e.id);
-
-          const { data: attRows, error: attErr } = await supabase
-            .from("event_inbox_attachments")
-            .select("*")
-            .in("event_id", eventIds)
-            .order("created_at", { ascending: false });
-
-          if (attErr) throw attErr;
-
-          attachmentsMap = {};
-          (attRows || []).forEach((a) => {
-            if (!a?.event_id) return;
-            if (!attachmentsMap[a.event_id]) attachmentsMap[a.event_id] = [];
-            attachmentsMap[a.event_id].push(a);
-          });
-        }
-
-        setAttachmentsByEvent(attachmentsMap);
-
-        /* --------- 1b. Reminders (reminders) --------- */
-        const { data: remRows, error: remErr } = await supabase
+        const remindersPromise = supabase
           .from("reminders")
           .select("*")
           .eq("owner_id", ownerId)
@@ -633,9 +593,33 @@ try {
           )
           .order("due_at", { ascending: true });
 
+        const inboxPromise = supabase
+          .from("inbox_items")
+          .select("*")
+          .eq("to_user_id", ownerId)
+          .eq("status", "pending")
+          .order("created_at", { ascending: false });
+
+        const [
+          profileToken,
+          { data: evRows, error: evErr },
+          { data: remRows, error: remErr },
+          { data: inboxRows, error: inboxErr },
+        ] = await Promise.all([
+          intakePromise,
+          eventsPromise,
+          remindersPromise,
+          inboxPromise,
+        ]);
+
+        if (evErr) throw evErr;
         if (remErr) throw remErr;
+        if (inboxErr) throw inboxErr;
+
+        setProfileUsername(profileToken);
+
+        const evs = evRows || [];
         const rems = remRows || [];
-        setReminders(rems);
 
         // Lookups for asset / system labels
         const assetIds = Array.from(
@@ -658,69 +642,86 @@ try {
           new Set(evs.map((e) => e.home_system_id).filter(Boolean))
         );
 
-        if (assetIds.length > 0) {
-          const { data: aRows, error: aErr } = await supabase
+        const attachmentsPromise = evs.length > 0
+          ? supabase
+              .from("event_inbox_attachments")
+              .select("*")
+              .in("event_id", evs.map((e) => e.id))
+              .order("created_at", { ascending: false })
+          : Promise.resolve({ data: [], error: null });
+
+        const assetLookupPromise = assetIds.length > 0
+          ? supabase
             .from("assets")
             .select("id, name")
-            .in("id", assetIds);
+              .in("id", assetIds)
+          : Promise.resolve({ data: [], error: null });
 
-          if (!aErr) {
-            const m = {};
-            (aRows || []).forEach((r) => {
-              if (!r?.id) return;
-              m[r.id] = r.name || "Asset";
-            });
-            setAssetNameById(m);
-          }
-        } else {
-          setAssetNameById({});
+        const systemLookupPromise = systemIds.length > 0
+          ? supabase
+              .from("systems")
+              .select("id, name")
+              .in("id", systemIds)
+          : Promise.resolve({ data: [], error: null });
+
+        const homeSystemLookupPromise = homeSystemIds.length > 0
+          ? supabase
+              .from("home_systems")
+              .select("id, name")
+              .in("id", homeSystemIds)
+          : Promise.resolve({ data: [], error: null });
+
+        const [
+          { data: attRows, error: attErr },
+          { data: aRows, error: aErr },
+          { data: sRows, error: sErr },
+          { data: hsRows, error: hsErr },
+        ] = await Promise.all([
+          attachmentsPromise,
+          assetLookupPromise,
+          systemLookupPromise,
+          homeSystemLookupPromise,
+        ]);
+
+        if (attErr) throw attErr;
+
+        const attachmentsMap = {};
+        (attRows || []).forEach((a) => {
+          if (!a?.event_id) return;
+          if (!attachmentsMap[a.event_id]) attachmentsMap[a.event_id] = [];
+          attachmentsMap[a.event_id].push(a);
+        });
+
+        const assetMap = {};
+        if (!aErr) {
+          (aRows || []).forEach((r) => {
+            if (!r?.id) return;
+            assetMap[r.id] = r.name || "Asset";
+          });
         }
 
-        if (systemIds.length > 0) {
-          const { data: sRows, error: sErr } = await supabase
-            .from("systems")
-            .select("id, name")
-            .in("id", systemIds);
-
-          if (!sErr) {
-            const m = {};
-            (sRows || []).forEach((r) => {
-              if (!r?.id) return;
-              m[r.id] = r.name || "System";
-            });
-            setSystemNameById(m);
-          }
-        } else {
-          setSystemNameById({});
+        const systemMap = {};
+        if (!sErr) {
+          (sRows || []).forEach((r) => {
+            if (!r?.id) return;
+            systemMap[r.id] = r.name || "System";
+          });
         }
 
-        if (homeSystemIds.length > 0) {
-          const { data: hsRows, error: hsErr } = await supabase
-            .from("home_systems")
-            .select("id, name")
-            .in("id", homeSystemIds);
-
-          if (!hsErr) {
-            const m = {};
-            (hsRows || []).forEach((r) => {
-              if (!r?.id) return;
-              m[r.id] = r.name || "Home system";
-            });
-            setHomeSystemNameById(m);
-          }
-        } else {
-          setHomeSystemNameById({});
+        const homeSystemMap = {};
+        if (!hsErr) {
+          (hsRows || []).forEach((r) => {
+            if (!r?.id) return;
+            homeSystemMap[r.id] = r.name || "Home system";
+          });
         }
 
-        /* --------- 2. Transfer requests (inbox_items) --------- */
-        const { data: inboxRows, error: inboxErr } = await supabase
-          .from("inbox_items")
-          .select("*")
-          .eq("to_user_id", ownerId)
-          .eq("status", "pending")
-          .order("created_at", { ascending: false });
-
-        if (inboxErr) throw inboxErr;
+        setEvents(evs);
+        setAttachmentsByEvent(attachmentsMap);
+        setReminders(rems);
+        setAssetNameById(assetMap);
+        setSystemNameById(systemMap);
+        setHomeSystemNameById(homeSystemMap);
         setTransferItems(inboxRows || []);
       } catch (e) {
         console.log("Notifications load error:", e);

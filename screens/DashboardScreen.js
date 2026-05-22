@@ -124,11 +124,10 @@ async function resolveHeroUrisForAssets(allAssets) {
     return {};
   }
 
-  const map = {};
-  for (const row of data || []) {
+  const entries = await Promise.all((data || []).map(async (row) => {
     const placementId = row?.id;
     const a = row?.attachment;
-    if (!placementId || !a || a.deleted_at) continue;
+    if (!placementId || !a || a.deleted_at) return null;
 
     // Prefer storage_path-based signing (fresh, team-safe). Never trust persisted signed URLs.
     if (a.bucket && a.storage_path) {
@@ -144,8 +143,7 @@ async function resolveHeroUrisForAssets(allAssets) {
           },
         });
         if (signed) {
-          map[placementId] = signed;
-          continue;
+          return [placementId, signed];
         }
       } catch (e) {
         console.log("Dashboard hero signed URL error", {
@@ -159,10 +157,17 @@ async function resolveHeroUrisForAssets(allAssets) {
 
     // Legacy fallback (only if it does NOT look like a signed URL).
     if (a.url && !String(a.url).includes("token=") && !String(a.url).includes("/object/sign/")) {
-      map[placementId] = a.url;
+      return [placementId, a.url];
     }
-  }
+    return null;
+  }));
 
+  const map = {};
+  entries.forEach((entry) => {
+    if (!entry) return;
+    const [placementId, uri] = entry;
+    map[placementId] = uri;
+  });
   return map;
 }
 
