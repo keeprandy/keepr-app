@@ -20,6 +20,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Clipboard from "expo-clipboard";
+import * as MediaLibrary from "expo-media-library";
+import { captureRef } from "react-native-view-shot";
 import QRCode from "react-native-qrcode-svg";
 import PublicShell from "../components/public/PublicShell";
 import { colors, radius, shadows, spacing, typography } from "../styles/theme";
@@ -258,6 +260,7 @@ const assetId = route?.params?.assetId || null;
   const timelineMode = storyConfig.showTimeline || "highlights_only";
 
   const scrollRef = useRef(null);
+  const shareCardCaptureRef = useRef(null);
   const assetTitle =
     asset?.name || `${asset?.year || ""} ${asset?.make || ""} ${asset?.model || ""}`.trim() || "Keepr Story";
   const publicStoryUrl = useMemo(() => {
@@ -309,9 +312,54 @@ const assetId = route?.params?.assetId || null;
   }
 }, []);
 
-  const handleSaveQrImage = useCallback(() => {
-    Alert.alert("Save QR", "QR image saving is coming next. For now, use Share Story or Copy Link.");
-  }, []);
+  const handleSaveQrImage = useCallback(async () => {
+    if (!shareCardCaptureRef.current) {
+      Alert.alert("Save QR", "The QR card is not ready yet. Try again in a moment.");
+      return;
+    }
+
+    try {
+      if (Platform.OS === "web") {
+        if (typeof document === "undefined") {
+          Alert.alert("Save QR", "Download is not available here. Use Copy Link or Share Story.");
+          return;
+        }
+
+        const dataUri = await captureRef(shareCardCaptureRef.current, {
+          format: "png",
+          quality: 1,
+          result: "data-uri",
+        });
+
+        const link = document.createElement("a");
+        const safeKac = String(asset?.kac_id || kac || "keepr-story").replace(/[^a-z0-9_-]/gi, "-");
+        link.href = dataUri;
+        link.download = `${safeKac}-keepr-qr.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        return;
+      }
+
+      const permission = await MediaLibrary.requestPermissionsAsync();
+      if (!permission?.granted) {
+        Alert.alert("Permission needed", "Allow photo library access to save this QR card.");
+        return;
+      }
+
+      const uri = await captureRef(shareCardCaptureRef.current, {
+        format: "png",
+        quality: 1,
+        result: "tmpfile",
+      });
+
+      await MediaLibrary.saveToLibraryAsync(uri);
+      Alert.alert("Saved", "Keepr QR card saved to your photo library.");
+    } catch (e) {
+      console.log("Save public story QR failed:", e?.message || e);
+      Alert.alert("Save failed", e?.message || "Unable to save this QR card. Use Copy Link or Share Story.");
+    }
+  }, [asset?.kac_id, kac]);
 
   /* ------------------------------------------------------------------------ */
   /*                              LOAD PUBLIC STORY                           */
@@ -937,36 +985,59 @@ return (
             </TouchableOpacity>
           </View>
 
-          <View style={styles.shareHeroRow}>
-            <View style={styles.shareHeroThumbWrap}>
-              {!!heroUri ? (
-                <Image
-                  source={{ uri: heroUri }}
-                  style={styles.shareHeroThumb}
-                  resizeMode="cover"
-                />
-              ) : (
-                <View style={styles.shareHeroPlaceholder}>
-                  <Ionicons name="image-outline" size={24} color={colors.textMuted} />
-                </View>
-              )}
+          <View
+            ref={shareCardCaptureRef}
+            collapsable={false}
+            style={styles.shareCaptureCard}
+          >
+            <View style={styles.shareBrandedQrWrap}>
+              <View style={styles.shareQrPanel}>
+                <SafeShareQrCode value={publicStoryUrl} size={shareQrSize} />
+              </View>
+
+              <Image
+                source={keeprEnabledMark}
+                style={styles.shareCaptureKeeprMark}
+                resizeMode="contain"
+              />
             </View>
 
-            <View style={styles.shareHeroText}>
-              <Text style={styles.shareAssetTitle} numberOfLines={2}>
-                {assetTitle}
+            <Text style={styles.sharePublicUrl} numberOfLines={2}>
+              {publicStoryUrl}
+            </Text>
+
+            <View style={styles.shareCaptureHeroRow}>
+              <View style={styles.shareHeroThumbWrap}>
+                {!!heroUri ? (
+                  <Image
+                    source={{ uri: heroUri }}
+                    style={styles.shareHeroThumb}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={styles.shareHeroPlaceholder}>
+                    <Ionicons name="image-outline" size={24} color={colors.textMuted} />
+                  </View>
+                )}
+              </View>
+
+              <View style={styles.shareHeroText}>
+                <Text style={styles.shareAssetTitle} numberOfLines={2}>
+                  {assetTitle}
+                </Text>
+                <Text style={styles.shareAssetSubtitle}>Keepr Enabled public story</Text>
+                <Text style={styles.shareCaptureKac} numberOfLines={1}>
+                  KAC: {asset?.kac_id || kac || "public"}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.shareCaptureFooter}>
+              <Text style={styles.shareCaptureFooterText}>
+                Build a KeeprStory for the things you care about.
               </Text>
-              <Text style={styles.shareAssetSubtitle}>Keepr Enabled public story</Text>
             </View>
           </View>
-
-          <View style={styles.shareQrPanel}>
-            <SafeShareQrCode value={publicStoryUrl} size={shareQrSize} />
-          </View>
-
-          <Text style={styles.sharePublicUrl} numberOfLines={2}>
-            {publicStoryUrl}
-          </Text>
 
           <View style={styles.shareActionGrid}>
             <TouchableOpacity
@@ -1240,6 +1311,25 @@ shareHeroRow: {
   marginBottom: 20,
 },
 
+shareCaptureCard: {
+  width: "100%",
+  borderRadius: 24,
+  borderWidth: 1,
+  borderColor: colors.borderSubtle,
+  backgroundColor: colors.surface,
+  padding: 16,
+  alignItems: "center",
+  marginBottom: 18,
+},
+
+shareCaptureHeroRow: {
+  width: "100%",
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 14,
+  marginBottom: 16,
+},
+
 shareHeroThumbWrap: {
   width: 86,
   height: 86,
@@ -1277,6 +1367,19 @@ shareAssetSubtitle: {
   color: colors.textSecondary,
 },
 
+shareCaptureKac: {
+  marginTop: 6,
+  fontSize: 11,
+  fontWeight: "900",
+  color: colors.textMuted,
+  textTransform: "uppercase",
+},
+
+shareBrandedQrWrap: {
+  alignItems: "center",
+  justifyContent: "center",
+},
+
 shareQrPanel: {
   padding: 16,
   borderRadius: 24,
@@ -1286,6 +1389,12 @@ shareQrPanel: {
   alignItems: "center",
   justifyContent: "center",
   marginBottom: 14,
+},
+
+shareCaptureKeeprMark: {
+  width: 180,
+  height: 44,
+  marginBottom: 12,
 },
 
 shareQrFallback: {
@@ -1324,6 +1433,21 @@ sharePublicUrl: {
   color: colors.textSecondary,
   fontWeight: "700",
   marginBottom: 18,
+},
+
+shareCaptureFooter: {
+  width: "100%",
+  paddingTop: 14,
+  borderTopWidth: 1,
+  borderTopColor: colors.borderSubtle,
+},
+
+shareCaptureFooterText: {
+  textAlign: "center",
+  fontSize: 13,
+  lineHeight: 19,
+  fontWeight: "800",
+  color: colors.textSecondary,
 },
 
 shareActionGrid: {
