@@ -667,7 +667,13 @@ return (
             {showQrShare && (
             <TouchableOpacity
               style={styles.shareStoryButton}
-              onPress={() => setShareModalVisible(true)}
+              onPress={() => {
+                if (Platform.OS === "web") {
+                  setShareModalVisible(true);
+                } else {
+                  handleShareStory();
+                }
+              }}
               activeOpacity={0.9}
             >
               <Ionicons name="qr-code-outline" size={16} color="white" />
