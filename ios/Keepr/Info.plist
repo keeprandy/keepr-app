@@ -61,6 +61,8 @@
     <string>Contacts are used to associate service providers (KeeprPros) with assets, maintain service records, and invite them to participate in Keepr.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Allow $(PRODUCT_NAME) to access your microphone</string>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>Allow $(PRODUCT_NAME) to save photos</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>Upload photos and documents to your assets.</string>
     <key>RCTNewArchEnabled</key>
