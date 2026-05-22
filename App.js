@@ -1142,6 +1142,55 @@ async function captureInviteSourceFromUrl(url) {
   }
 }
 
+function isPasswordRecoveryUrl(url) {
+  if (!url || typeof url !== "string") return false;
+
+  try {
+    const parsed = ExpoLinking.parse(url);
+    const path = parsed?.path || "";
+    const query = parsed?.queryParams || {};
+
+    if (path === "reset" || path.startsWith("reset/")) return true;
+    if (query.type === "recovery") return true;
+    if (query.code) return true;
+    if (query.access_token && query.refresh_token) return true;
+    if (query.error || query.error_code || query.error_description) return true;
+  } catch (_) {}
+
+  try {
+    const u = new URL(url);
+    const hash = new URLSearchParams((u.hash || "").replace(/^#/, ""));
+    const query = new URLSearchParams(u.search || "");
+    const get = (key) => hash.get(key) || query.get(key) || "";
+    const target = `${u.hostname || ""}${u.pathname || ""}`;
+
+    if (target === "reset" || target.startsWith("reset/")) return true;
+    if (url.includes("/reset")) return true;
+    if (get("type") === "recovery") return true;
+    if (get("code")) return true;
+    if (get("access_token") && get("refresh_token")) return true;
+    if (get("error") || get("error_code") || get("error_description")) return true;
+  } catch (_) {
+    if (url.startsWith("keepr://reset")) return true;
+    if (url.includes("/reset")) return true;
+    if (url.includes("type=recovery")) return true;
+    if (url.includes("access_token=") && url.includes("refresh_token=")) return true;
+    if (url.includes("code=")) return true;
+  }
+
+  return false;
+}
+
+function getInitialWebPasswordRecoveryUrl() {
+  if (Platform.OS !== "web") return null;
+  try {
+    const href = window.location.href || "";
+    return isPasswordRecoveryUrl(href) ? href : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 function Root({ onRouteChange, setCurrentRouteName, currentRouteName }) {
   const { initializing, user } = useAuth();
 
@@ -1185,6 +1234,12 @@ React.useEffect(() => {
 const NAV_PERSIST_KEY = "keepr.nav.state.v1";
 const [initialNavState, setInitialNavState] = React.useState(undefined);
 const [isNavReady, setIsNavReady] = React.useState(Platform.OS !== "web");
+const [passwordRecoveryUrl, setPasswordRecoveryUrl] = React.useState(
+  getInitialWebPasswordRecoveryUrl
+);
+const [checkedInitialRecoveryUrl, setCheckedInitialRecoveryUrl] = React.useState(
+  Platform.OS === "web"
+);
 
 React.useEffect(() => {
   if (Platform.OS !== "web") return;
@@ -1193,6 +1248,38 @@ React.useEffect(() => {
     if (raw) setInitialNavState(JSON.parse(raw));
   } catch (_) {}
   setIsNavReady(true);
+}, []);
+
+React.useEffect(() => {
+  if (Platform.OS === "web") return;
+
+  let mounted = true;
+
+  const captureInitialResetLink = async () => {
+    try {
+      const initialUrl = await ExpoLinking.getInitialURL();
+      if (!mounted) return;
+      if (isPasswordRecoveryUrl(initialUrl)) {
+        setPasswordRecoveryUrl(initialUrl);
+      }
+    } catch (e) {
+      console.log("Initial password reset link capture failed:", e?.message || e);
+    } finally {
+      if (mounted) setCheckedInitialRecoveryUrl(true);
+    }
+  };
+
+  captureInitialResetLink();
+
+  const subscription = ExpoLinking.addEventListener("url", ({ url }) => {
+    if (!isPasswordRecoveryUrl(url)) return;
+    setPasswordRecoveryUrl(url);
+  });
+
+  return () => {
+    mounted = false;
+    subscription?.remove?.();
+  };
 }, []);
 
 // Clear persisted web nav state on sign-out so we do not restore stale routes
@@ -1273,6 +1360,7 @@ identifyUser();
   const lastResetRouteRef = React.useRef(null);
 
   const isResetLink = React.useMemo(() => {
+  if (passwordRecoveryUrl) return true;
   if (Platform.OS !== "web") return false;
   try {
     const href = window.location.href || "";
@@ -1289,7 +1377,7 @@ identifyUser();
   } catch (_) {
     return false;
   }
-}, []);
+}, [passwordRecoveryUrl]);
 
 React.useEffect(() => {
   if (!targetRoute) return;
@@ -1427,9 +1515,14 @@ React.useEffect(() => {
 
   navigationRef.reset({
     index: 0,
-    routes: [{ name: "ResetPassword" }],
+    routes: [
+      {
+        name: "ResetPassword",
+        params: passwordRecoveryUrl ? { recoveryUrl: passwordRecoveryUrl } : undefined,
+      },
+    ],
   });
-}, [isResetLink]);
+}, [isResetLink, passwordRecoveryUrl]);
 
 const lastTrackedScreen = React.useRef(null);
 
@@ -1479,6 +1572,8 @@ const handleNavStateChange = React.useCallback(
 // Web: wait until persisted navigation state (if any) is restored before rendering.
 if (Platform.OS === "web" && !isNavReady) return <SplashIntroScreen />;
 
+if (Platform.OS !== "web" && !checkedInitialRecoveryUrl) return <SplashIntroScreen />;
+
 if (initializing) return <SplashIntroScreen />;
 
 // Let password-reset links render ResetPassword even if there is no session yet.
@@ -1508,7 +1603,13 @@ if (!user) {
           
           <RootStack.Screen name="Invite" component={InviteRedirectScreen} />
           <RootStack.Screen name="Auth" component={AuthScreen} />
-          <RootStack.Screen name="ResetPassword" component={ResetPasswordScreen} />
+          <RootStack.Screen
+            name="ResetPassword"
+            component={ResetPasswordScreen}
+            initialParams={
+              passwordRecoveryUrl ? { recoveryUrl: passwordRecoveryUrl } : undefined
+            }
+          />
         </RootStack.Navigator>
       </NavigationContainer>
     </View>
@@ -1548,7 +1649,13 @@ const initialRouteName = isResetLink
           >
           <RootStack.Screen name="Invite" component={InviteRedirectScreen} />
           <RootStack.Screen name="Auth" component={AuthScreen} />
-          <RootStack.Screen name="ResetPassword" component={ResetPasswordScreen} />
+          <RootStack.Screen
+            name="ResetPassword"
+            component={ResetPasswordScreen}
+            initialParams={
+              passwordRecoveryUrl ? { recoveryUrl: passwordRecoveryUrl } : undefined
+            }
+          />
 
           <RootStack.Screen name="RootTabs" component={MainTabs} />
           <RootStack.Screen

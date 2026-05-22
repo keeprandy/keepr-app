@@ -23,10 +23,12 @@ function validatePassword(password) {
   return null;
 }
 
-export default function ResetPasswordScreen({ navigation }) {
-  const [booting, setBooting] = useState(Platform.OS === "web");
+export default function ResetPasswordScreen({ navigation, route }) {
+  const recoveryUrl = route?.params?.recoveryUrl || "";
+  const shouldBootstrapRecovery = Platform.OS === "web" || !!recoveryUrl;
+  const [booting, setBooting] = useState(shouldBootstrapRecovery);
   const [bootError, setBootError] = useState("");
-  const [recoveryReady, setRecoveryReady] = useState(Platform.OS !== "web");
+  const [recoveryReady, setRecoveryReady] = useState(!shouldBootstrapRecovery);
 
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -76,13 +78,21 @@ export default function ResetPasswordScreen({ navigation }) {
     };
 
     const bootstrapRecoverySession = async () => {
-      if (Platform.OS !== "web") {
+      if (!shouldBootstrapRecovery) {
         setRecoveryReady(true);
         return;
       }
 
+      setBooting(true);
+      setBootError("");
+      setRecoveryReady(false);
+
       try {
-        const href = window.location.href;
+        const href =
+          recoveryUrl ||
+          (Platform.OS === "web" && typeof window !== "undefined"
+            ? window.location.href
+            : "");
         const p = parseParams(href);
 
         if (p.error || p.error_code || p.error_description) {
@@ -133,9 +143,11 @@ export default function ResetPasswordScreen({ navigation }) {
           return;
         }
 
-        try {
-          window.history.replaceState(null, "", "/reset");
-        } catch {}
+        if (Platform.OS === "web") {
+          try {
+            window.history.replaceState(null, "", "/reset");
+          } catch {}
+        }
 
         const after = await supabase.auth.getSession();
         if (!after?.data?.session) {
@@ -162,7 +174,7 @@ export default function ResetPasswordScreen({ navigation }) {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [recoveryUrl, shouldBootstrapRecovery]);
 
   const handleExit = () => {
     if (navigation?.canGoBack?.()) {
