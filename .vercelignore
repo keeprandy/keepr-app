@@ -1,0 +1,10 @@
+node_modules
+ios
+android
+.expo
+.git
+*.zip
+*.ipa
+ipa_check
+_releases
+.tmp.*
