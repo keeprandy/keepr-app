@@ -4,15 +4,21 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Image,
+  Linking,
   Platform,
+  ScrollView,
   StyleSheet,
+  Share,
   Text,
   TouchableOpacity,
   useWindowDimensions,
   View,
   Modal,
 } from "react-native";
+import * as Clipboard from "expo-clipboard";
+import QRCode from "react-native-qrcode-svg";
 import PublicShell from "../components/public/PublicShell";
 import { colors, radius, shadows, spacing, typography } from "../styles/theme";
 
@@ -27,6 +33,19 @@ const IS_WEB = Platform.OS === "web";
 const PROJECT_REF = "jjzjuqxysucqutgjnrkk";
 const FUNCTIONS_BASE = `https://${PROJECT_REF}.supabase.co/functions/v1`;
 const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+
+
+function getPublicStoryBaseUrl() {
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    return window.location.origin;
+  }
+
+  return (
+    process.env.EXPO_PUBLIC_KEEPR_BASE_URL ||
+    process.env.PUBLIC_KEEPR_BASE_URL ||
+    "https://app.keeprhome.com"
+  );
+}
 
 /* -------------------------------------------------------------------------- */
 /*                              TIMELINE COMPONENT                            */
@@ -168,6 +187,8 @@ const assetId = route?.params?.assetId || null;
   const [lightboxIndex, setLightboxIndex] = useState(null);
   const [swipeStartX, setSwipeStartX] = useState(null);
   const [expandedTimelineId, setExpandedTimelineId] = useState(null);
+  const [shareModalVisible, setShareModalVisible] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const publicConfig =
   asset?.public_config ||
@@ -193,6 +214,59 @@ const assetId = route?.params?.assetId || null;
   const timelineMode = storyConfig.showTimeline || "highlights_only";
 
   const scrollRef = useRef(null);
+  const assetTitle =
+    asset?.name || `${asset?.year || ""} ${asset?.make || ""} ${asset?.model || ""}`.trim() || "Keepr Story";
+  const publicStoryUrl = useMemo(() => {
+    const publicKac = asset?.kac_id || kac;
+    if (!publicKac) return "";
+    return `${getPublicStoryBaseUrl()}/k/${publicKac}`;
+  }, [asset?.kac_id, kac]);
+  const shareQrSize = Math.min(260, Math.max(210, width - 112));
+
+  const handleShareStory = useCallback(async () => {
+    if (!publicStoryUrl) return;
+
+    try {
+      await Share.share({
+        title: assetTitle,
+        message: `${assetTitle} - view the public KeeprStory\n${publicStoryUrl}`,
+        url: publicStoryUrl,
+      });
+    } catch (e) {
+      Alert.alert("Share failed", e?.message || "Unable to open the share sheet.");
+    }
+  }, [assetTitle, publicStoryUrl]);
+
+  const handleCopyPublicLink = useCallback(async () => {
+    if (!publicStoryUrl) return;
+
+    try {
+      await Clipboard.setStringAsync(publicStoryUrl);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 1800);
+    } catch (e) {
+      Alert.alert("Copy failed", e?.message || "Unable to copy this link.");
+    }
+  }, [publicStoryUrl]);
+
+  const openUrl = useCallback(async (url) => {
+  if (!url) return;
+
+  try {
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      window.location.href = url;
+      return;
+    }
+
+    await Linking.openURL(url);
+  } catch (e) {
+    Alert.alert("Couldn’t open link", e?.message || "Please try again.");
+  }
+}, []);
+
+  const handleSaveQrImage = useCallback(() => {
+    Alert.alert("Save QR", "QR image saving is coming next. For now, use Share Story or Copy Link.");
+  }, []);
 
   /* ------------------------------------------------------------------------ */
   /*                              LOAD PUBLIC STORY                           */
@@ -547,13 +621,10 @@ return (
             {showQrShare && (
             <TouchableOpacity
               style={styles.shareStoryButton}
-              onPress={() => {
-                if (Platform.OS === "web" && typeof window !== "undefined") {
-                  window.alert(
-                    `Public Keepr Story:\n${window.location.origin}/k/${asset.kac_id || kac}`
-                  );
-                }
-              }}
+onPress={() => {
+  Alert.alert("Tapped", "Share modal button works");
+  setShareModalVisible(true);
+}}
               activeOpacity={0.9}
             >
               <Ionicons name="qr-code-outline" size={16} color="white" />
@@ -710,6 +781,128 @@ return (
           ))}
         </View>
       )}
+      <Modal
+          visible={shareModalVisible}
+          transparent
+          animationType="fade"
+          presentationStyle="overFullScreen"
+          statusBarTranslucent
+          hardwareAccelerated
+          onRequestClose={() => setShareModalVisible(false)}
+        >
+        <View style={styles.shareModalScrim}>
+          <TouchableOpacity
+            style={styles.shareModalDismissLayer}
+            activeOpacity={1}
+            onPress={() => setShareModalVisible(false)}
+          />
+
+          <View style={styles.shareModalCard}>
+            <ScrollView
+              contentContainerStyle={styles.shareModalScroll}
+              showsVerticalScrollIndicator={false}
+            >
+              <View style={styles.shareModalTopRow}>
+                <View style={styles.shareModalBrand}>
+                  <Image source={keeprLogo} style={styles.shareModalLogo} />
+                  <Text style={styles.shareModalKicker}>Keepr Enabled</Text>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.shareModalClose}
+                  onPress={() => setShareModalVisible(false)}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="close" size={22} color={colors.textPrimary} />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.shareHeroRow}>
+                <View style={styles.shareHeroThumbWrap}>
+                  {!!heroUri ? (
+                    <Image
+                      source={{ uri: heroUri }}
+                      style={styles.shareHeroThumb}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View style={styles.shareHeroPlaceholder}>
+                      <Ionicons name="image-outline" size={24} color={colors.textMuted} />
+                    </View>
+                  )}
+                </View>
+
+                <View style={styles.shareHeroText}>
+                  <Text style={styles.shareAssetTitle} numberOfLines={2}>
+                    {assetTitle}
+                  </Text>
+                  <Text style={styles.shareAssetSubtitle}>Keepr Enabled public story</Text>
+                </View>
+              </View>
+
+              <View style={styles.shareQrPanel}>
+                {!!publicStoryUrl && (
+                  <QRCode value={publicStoryUrl} size={shareQrSize} />
+                )}
+              </View>
+
+              <View style={styles.shareActionGrid}>
+                <TouchableOpacity
+                  style={[styles.shareModalButton, styles.shareModalPrimaryButton]}
+                  onPress={handleShareStory}
+                  activeOpacity={0.88}
+                >
+                  <Ionicons name="share-social-outline" size={18} color="white" />
+                  <Text style={styles.shareModalPrimaryText}>Share Story</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.shareModalButton}
+                  onPress={handleCopyPublicLink}
+                  activeOpacity={0.88}
+                >
+                  <Ionicons
+                    name={linkCopied ? "checkmark-circle-outline" : "link-outline"}
+                    size={18}
+                    color={colors.textPrimary}
+                  />
+                  <Text style={styles.shareModalButtonText}>
+                    {linkCopied ? "Copied" : "Copy Link"}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.shareModalButton}
+                  onPress={handleSaveQrImage}
+                  activeOpacity={0.88}
+                >
+                  <Ionicons name="download-outline" size={18} color={colors.textPrimary} />
+                  <Text style={styles.shareModalButtonText}>Save QR</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.shareModalFooter}>
+                <Text style={styles.shareModalFooterText}>
+                  Build a KeeprStory for the things you care about.
+                </Text>
+                <TouchableOpacity
+                  style={styles.createYoursButton}
+                  onPress={() => {
+                    const url = `${getPublicStoryBaseUrl()}/invite/keepr`;
+                    if (Platform.OS === "web" && typeof window !== "undefined") {
+                      window.location.href = url;
+                    }
+                  }}
+                  activeOpacity={0.88}
+                >
+                  <Text style={styles.createYoursButtonText}>Create yours</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       <Modal
         visible={lightboxIndex !== null}
         transparent
@@ -894,6 +1087,21 @@ publicGalleryImage: {
   height: "100%",
 },
 
+createYoursButton: {
+  marginTop: 12,
+  alignSelf: "center",
+  paddingHorizontal: 18,
+  paddingVertical: 10,
+  borderRadius: radius.pill,
+  backgroundColor: colors.brandBlue,
+},
+
+createYoursButtonText: {
+  color: "white",
+  fontSize: 13,
+  fontWeight: "900",
+},
+
 galleryScrim: {
   position: "absolute",
   left: 0,
@@ -901,6 +1109,188 @@ galleryScrim: {
   bottom: 0,
   height: 70,
   backgroundColor: "rgba(15,23,42,0.22)",
+},
+
+shareModalScrim: {
+  flex: 1,
+  backgroundColor: "rgba(6,10,18,0.76)",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 18,
+},
+
+shareModalDismissLayer: {
+  ...StyleSheet.absoluteFillObject,
+},
+
+shareModalCard: {
+  width: "100%",
+  maxWidth: 430,
+  maxHeight: "92%",
+  borderRadius: 28,
+  backgroundColor: colors.surface,
+  borderWidth: 1,
+  borderColor: "rgba(255,255,255,0.22)",
+  overflow: "hidden",
+  ...shadows.subtle,
+},
+
+shareModalScroll: {
+  padding: 20,
+  alignItems: "center",
+},
+
+shareModalTopRow: {
+  width: "100%",
+  flexDirection: "row",
+  justifyContent: "space-between",
+  alignItems: "center",
+  marginBottom: 18,
+},
+
+shareModalBrand: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 8,
+},
+
+shareModalLogo: {
+  width: 28,
+  height: 28,
+  borderRadius: 8,
+},
+
+shareModalKicker: {
+  fontSize: 12,
+  fontWeight: "900",
+  color: colors.textSecondary,
+  textTransform: "uppercase",
+},
+
+shareModalClose: {
+  width: 36,
+  height: 36,
+  borderRadius: 18,
+  alignItems: "center",
+  justifyContent: "center",
+  backgroundColor: colors.surfaceSubtle,
+},
+
+shareHeroRow: {
+  width: "100%",
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 14,
+  marginBottom: 20,
+},
+
+shareHeroThumbWrap: {
+  width: 86,
+  height: 86,
+  borderRadius: 20,
+  overflow: "hidden",
+  backgroundColor: colors.surfaceSubtle,
+},
+
+shareHeroThumb: {
+  width: "100%",
+  height: "100%",
+},
+
+shareHeroPlaceholder: {
+  flex: 1,
+  alignItems: "center",
+  justifyContent: "center",
+},
+
+shareHeroText: {
+  flex: 1,
+},
+
+shareAssetTitle: {
+  fontSize: 20,
+  lineHeight: 24,
+  fontWeight: "900",
+  color: colors.textPrimary,
+},
+
+shareAssetSubtitle: {
+  marginTop: 6,
+  fontSize: 13,
+  fontWeight: "800",
+  color: colors.textSecondary,
+},
+
+shareQrPanel: {
+  padding: 16,
+  borderRadius: 24,
+  backgroundColor: "white",
+  borderWidth: 1,
+  borderColor: colors.borderSubtle,
+  alignItems: "center",
+  justifyContent: "center",
+  marginBottom: 14,
+},
+
+sharePublicUrl: {
+  width: "100%",
+  textAlign: "center",
+  fontSize: 12,
+  lineHeight: 17,
+  color: colors.textSecondary,
+  fontWeight: "700",
+  marginBottom: 18,
+},
+
+shareActionGrid: {
+  width: "100%",
+  gap: 10,
+},
+
+shareModalButton: {
+  minHeight: 48,
+  borderRadius: 16,
+  borderWidth: 1,
+  borderColor: colors.borderSubtle,
+  backgroundColor: colors.surfaceSubtle,
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 8,
+  paddingHorizontal: 14,
+},
+
+shareModalPrimaryButton: {
+  backgroundColor: colors.brandBlue,
+  borderColor: colors.brandBlue,
+},
+
+shareModalPrimaryText: {
+  color: "white",
+  fontSize: 14,
+  fontWeight: "900",
+},
+
+shareModalButtonText: {
+  color: colors.textPrimary,
+  fontSize: 14,
+  fontWeight: "900",
+},
+
+shareModalFooter: {
+  width: "100%",
+  marginTop: 18,
+  paddingTop: 16,
+  borderTopWidth: 1,
+  borderTopColor: colors.borderSubtle,
+},
+
+shareModalFooterText: {
+  textAlign: "center",
+  fontSize: 13,
+  lineHeight: 19,
+  fontWeight: "800",
+  color: colors.textSecondary,
 },
 
 lightbox: {

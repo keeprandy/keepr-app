@@ -41,6 +41,18 @@ export default function PublicShell({
             <Text style={styles.subtitle}>Documented ownership continuity.</Text>
           </View>
         </TouchableOpacity>
+        <TouchableOpacity
+                  style={styles.createYoursButton}
+                  onPress={() => {
+                    const url = `${getPublicStoryBaseUrl()}/invite/keepr`;
+                    if (Platform.OS === "web" && typeof window !== "undefined") {
+                      window.location.href = url;
+                    }
+                  }}
+                  activeOpacity={0.88}
+                >
+                  <Text style={styles.createYoursButtonText}>Create yours</Text>
+                </TouchableOpacity>
 
         {!!kac && (
           <View style={styles.kacPill}>
@@ -110,6 +122,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 10,
   },
+  
 
   brandRow: {
     flexDirection: "row",
