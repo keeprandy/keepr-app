@@ -8,6 +8,7 @@ import {
   Image,
   Linking,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Share,
@@ -17,6 +18,7 @@ import {
   View,
   Modal,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import * as Clipboard from "expo-clipboard";
 import QRCode from "react-native-qrcode-svg";
 import PublicShell from "../components/public/PublicShell";
@@ -44,6 +46,48 @@ function getPublicStoryBaseUrl() {
     process.env.EXPO_PUBLIC_KEEPR_BASE_URL ||
     process.env.PUBLIC_KEEPR_BASE_URL ||
     "https://app.keeprhome.com"
+  );
+}
+
+class ShareQrBoundary extends React.Component {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidUpdate(prevProps) {
+    if (prevProps.value !== this.props.value && this.state.hasError) {
+      this.setState({ hasError: false });
+    }
+  }
+
+  componentDidCatch(error) {
+    console.log("Public Keepr Story QR render failed:", error?.message || error);
+  }
+
+  render() {
+    if (this.state.hasError || !this.props.value) {
+      return (
+        <View style={styles.shareQrFallback}>
+          <Ionicons name="qr-code-outline" size={34} color={colors.textMuted} />
+          <Text style={styles.shareQrFallbackTitle}>QR unavailable</Text>
+          <Text style={styles.shareQrFallbackText}>
+            Share Story and Copy Link still work.
+          </Text>
+        </View>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+function SafeShareQrCode({ value, size }) {
+  return (
+    <ShareQrBoundary value={value}>
+      <QRCode value={value || "https://app.keeprhome.com"} size={size} />
+    </ShareQrBoundary>
   );
 }
 
@@ -171,7 +215,7 @@ async function fetchPublicStoryMedia(kac) {
 /* -------------------------------------------------------------------------- */
 
 export default function PublicKeeprStoryScreen({ navigation, route }) {
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const isWide = IS_WEB && width >= 980;
 
   const kac = route?.params?.kac || null;
@@ -222,6 +266,7 @@ const assetId = route?.params?.assetId || null;
     return `${getPublicStoryBaseUrl()}/k/${publicKac}`;
   }, [asset?.kac_id, kac]);
   const shareQrSize = Math.min(260, Math.max(210, width - 112));
+  const shareModalMaxHeight = Math.max(320, height - 48);
 
   const handleShareStory = useCallback(async () => {
     if (!publicStoryUrl) return;
@@ -453,6 +498,7 @@ if (!asset || !publicEnabled) {
   /* ------------------------------------------------------------------------ */
 
 return (
+  <>
   <PublicShell kac={kac || asset?.kac_id}>
 
         {/* HERO */}
@@ -621,10 +667,7 @@ return (
             {showQrShare && (
             <TouchableOpacity
               style={styles.shareStoryButton}
-onPress={() => {
-  Alert.alert("Tapped", "Share modal button works");
-  setShareModalVisible(true);
-}}
+              onPress={() => setShareModalVisible(true)}
               activeOpacity={0.9}
             >
               <Ionicons name="qr-code-outline" size={16} color="white" />
@@ -782,128 +825,6 @@ onPress={() => {
         </View>
       )}
       <Modal
-          visible={shareModalVisible}
-          transparent
-          animationType="fade"
-          presentationStyle="overFullScreen"
-          statusBarTranslucent
-          hardwareAccelerated
-          onRequestClose={() => setShareModalVisible(false)}
-        >
-        <View style={styles.shareModalScrim}>
-          <TouchableOpacity
-            style={styles.shareModalDismissLayer}
-            activeOpacity={1}
-            onPress={() => setShareModalVisible(false)}
-          />
-
-          <View style={styles.shareModalCard}>
-            <ScrollView
-              contentContainerStyle={styles.shareModalScroll}
-              showsVerticalScrollIndicator={false}
-            >
-              <View style={styles.shareModalTopRow}>
-                <View style={styles.shareModalBrand}>
-                  <Image source={keeprLogo} style={styles.shareModalLogo} />
-                  <Text style={styles.shareModalKicker}>Keepr Enabled</Text>
-                </View>
-
-                <TouchableOpacity
-                  style={styles.shareModalClose}
-                  onPress={() => setShareModalVisible(false)}
-                  activeOpacity={0.8}
-                >
-                  <Ionicons name="close" size={22} color={colors.textPrimary} />
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.shareHeroRow}>
-                <View style={styles.shareHeroThumbWrap}>
-                  {!!heroUri ? (
-                    <Image
-                      source={{ uri: heroUri }}
-                      style={styles.shareHeroThumb}
-                      resizeMode="cover"
-                    />
-                  ) : (
-                    <View style={styles.shareHeroPlaceholder}>
-                      <Ionicons name="image-outline" size={24} color={colors.textMuted} />
-                    </View>
-                  )}
-                </View>
-
-                <View style={styles.shareHeroText}>
-                  <Text style={styles.shareAssetTitle} numberOfLines={2}>
-                    {assetTitle}
-                  </Text>
-                  <Text style={styles.shareAssetSubtitle}>Keepr Enabled public story</Text>
-                </View>
-              </View>
-
-              <View style={styles.shareQrPanel}>
-                {!!publicStoryUrl && (
-                  <QRCode value={publicStoryUrl} size={shareQrSize} />
-                )}
-              </View>
-
-              <View style={styles.shareActionGrid}>
-                <TouchableOpacity
-                  style={[styles.shareModalButton, styles.shareModalPrimaryButton]}
-                  onPress={handleShareStory}
-                  activeOpacity={0.88}
-                >
-                  <Ionicons name="share-social-outline" size={18} color="white" />
-                  <Text style={styles.shareModalPrimaryText}>Share Story</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.shareModalButton}
-                  onPress={handleCopyPublicLink}
-                  activeOpacity={0.88}
-                >
-                  <Ionicons
-                    name={linkCopied ? "checkmark-circle-outline" : "link-outline"}
-                    size={18}
-                    color={colors.textPrimary}
-                  />
-                  <Text style={styles.shareModalButtonText}>
-                    {linkCopied ? "Copied" : "Copy Link"}
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.shareModalButton}
-                  onPress={handleSaveQrImage}
-                  activeOpacity={0.88}
-                >
-                  <Ionicons name="download-outline" size={18} color={colors.textPrimary} />
-                  <Text style={styles.shareModalButtonText}>Save QR</Text>
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.shareModalFooter}>
-                <Text style={styles.shareModalFooterText}>
-                  Build a KeeprStory for the things you care about.
-                </Text>
-                <TouchableOpacity
-                  style={styles.createYoursButton}
-                  onPress={() => {
-                    const url = `${getPublicStoryBaseUrl()}/invite/keepr`;
-                    if (Platform.OS === "web" && typeof window !== "undefined") {
-                      window.location.href = url;
-                    }
-                  }}
-                  activeOpacity={0.88}
-                >
-                  <Text style={styles.createYoursButtonText}>Create yours</Text>
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
         visible={lightboxIndex !== null}
         transparent
         animationType="fade"
@@ -973,6 +894,127 @@ onPress={() => {
   </View>
 </Modal>
   </PublicShell>
+  <Modal
+    visible={shareModalVisible}
+    transparent
+    animationType="fade"
+    presentationStyle="overFullScreen"
+    statusBarTranslucent
+    hardwareAccelerated
+    onRequestClose={() => setShareModalVisible(false)}
+  >
+    <View style={styles.shareModalScrim}>
+      <Pressable
+        style={styles.shareModalBackdrop}
+        onPress={() => setShareModalVisible(false)}
+      />
+
+      <SafeAreaView style={styles.shareModalSafeArea} pointerEvents="box-none">
+      <View style={[styles.shareModalCard, { maxHeight: shareModalMaxHeight }]}>
+        <ScrollView
+          contentContainerStyle={styles.shareModalScroll}
+          showsVerticalScrollIndicator={false}
+          bounces={false}
+        >
+          <View style={styles.shareModalTopRow}>
+            <View style={styles.shareModalBrand}>
+              <Image source={keeprLogo} style={styles.shareModalLogo} />
+              <Text style={styles.shareModalKicker}>Keepr Enabled</Text>
+            </View>
+
+            <TouchableOpacity
+              style={styles.shareModalClose}
+              onPress={() => setShareModalVisible(false)}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="close" size={22} color={colors.textPrimary} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.shareHeroRow}>
+            <View style={styles.shareHeroThumbWrap}>
+              {!!heroUri ? (
+                <Image
+                  source={{ uri: heroUri }}
+                  style={styles.shareHeroThumb}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={styles.shareHeroPlaceholder}>
+                  <Ionicons name="image-outline" size={24} color={colors.textMuted} />
+                </View>
+              )}
+            </View>
+
+            <View style={styles.shareHeroText}>
+              <Text style={styles.shareAssetTitle} numberOfLines={2}>
+                {assetTitle}
+              </Text>
+              <Text style={styles.shareAssetSubtitle}>Keepr Enabled public story</Text>
+            </View>
+          </View>
+
+          <View style={styles.shareQrPanel}>
+            <SafeShareQrCode value={publicStoryUrl} size={shareQrSize} />
+          </View>
+
+          <Text style={styles.sharePublicUrl} numberOfLines={2}>
+            {publicStoryUrl}
+          </Text>
+
+          <View style={styles.shareActionGrid}>
+            <TouchableOpacity
+              style={[styles.shareModalButton, styles.shareModalPrimaryButton]}
+              onPress={handleShareStory}
+              activeOpacity={0.88}
+            >
+              <Ionicons name="share-social-outline" size={18} color="white" />
+              <Text style={styles.shareModalPrimaryText}>Share Story</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.shareModalButton}
+              onPress={handleCopyPublicLink}
+              activeOpacity={0.88}
+            >
+              <Ionicons
+                name={linkCopied ? "checkmark-circle-outline" : "link-outline"}
+                size={18}
+                color={colors.textPrimary}
+              />
+              <Text style={styles.shareModalButtonText}>
+                {linkCopied ? "Copied" : "Copy Link"}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.shareModalButton}
+              onPress={handleSaveQrImage}
+              activeOpacity={0.88}
+            >
+              <Ionicons name="download-outline" size={18} color={colors.textPrimary} />
+              <Text style={styles.shareModalButtonText}>Save QR</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.shareModalFooter}>
+            <Text style={styles.shareModalFooterText}>
+              Build a KeeprStory for the things you care about.
+            </Text>
+            <TouchableOpacity
+              style={styles.createYoursButton}
+              onPress={() => openUrl(`${getPublicStoryBaseUrl()}/invite/keepr`)}
+              activeOpacity={0.88}
+            >
+              <Text style={styles.createYoursButtonText}>Create yours</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </View>
+      </SafeAreaView>
+    </View>
+  </Modal>
+  </>
 );
 }
 
@@ -1119,19 +1161,27 @@ shareModalScrim: {
   padding: 18,
 },
 
-shareModalDismissLayer: {
+shareModalBackdrop: {
   ...StyleSheet.absoluteFillObject,
+},
+
+shareModalSafeArea: {
+  flex: 1,
+  width: "100%",
+  alignItems: "center",
+  justifyContent: "center",
 },
 
 shareModalCard: {
   width: "100%",
   maxWidth: 430,
-  maxHeight: "92%",
   borderRadius: 28,
   backgroundColor: colors.surface,
   borderWidth: 1,
   borderColor: "rgba(255,255,255,0.22)",
   overflow: "hidden",
+  zIndex: 2,
+  elevation: 12,
   ...shadows.subtle,
 },
 
@@ -1230,6 +1280,34 @@ shareQrPanel: {
   alignItems: "center",
   justifyContent: "center",
   marginBottom: 14,
+},
+
+shareQrFallback: {
+  width: 230,
+  minHeight: 230,
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 20,
+  borderRadius: 18,
+  borderWidth: 1,
+  borderColor: colors.borderSubtle,
+  backgroundColor: colors.surfaceSubtle,
+},
+
+shareQrFallbackTitle: {
+  marginTop: 10,
+  fontSize: 16,
+  fontWeight: "900",
+  color: colors.textPrimary,
+},
+
+shareQrFallbackText: {
+  marginTop: 6,
+  fontSize: 12,
+  lineHeight: 17,
+  fontWeight: "700",
+  textAlign: "center",
+  color: colors.textSecondary,
 },
 
 sharePublicUrl: {
