@@ -16,6 +16,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import * as Clipboard from "expo-clipboard";
 
 import LinkifiedText from "../components/links/LinkifiedText";
 import { tokenizeWithUrls } from "../components/links/linkUtils";
@@ -30,6 +31,28 @@ import { useWindowDimensions } from "react-native";
 import AttachmentViewerModal from "../components/AttachmentViewerModal";
 
 /* ---------------- helpers ---------------- */
+async function openContactUrl(url, fallbackMessage) {
+  if (!url) return;
+  try {
+    const canOpen = await Linking.canOpenURL(url);
+    if (!canOpen) {
+      Alert.alert("Can’t open", fallbackMessage || "Your device can’t open this action.");
+      return;
+    }
+    await Linking.openURL(url);
+  } catch (e) {
+    Alert.alert("Can’t open", e?.message || fallbackMessage || "Please try again.");
+  }
+}
+
+async function copyContact(source) {
+  const value = [source?.name, source?.email, source?.phone]
+    .filter(Boolean)
+    .join(" • ");
+  if (!value) return;
+  await Clipboard.setStringAsync(value);
+}
+
 function safeMoney(raw) {
   if (raw == null) return null;
   const cleaned = String(raw).replace(/[^0-9.,-]/g, "");
@@ -177,6 +200,7 @@ const {
   originalEmailText,
   originalEmailSubject,
   originalEmailFrom,
+  publicActionContext,
 } = route?.params || {};
 
 const { width } = useWindowDimensions();
@@ -362,6 +386,20 @@ const removeBackfillRow = (idx) => {
     if (systemName) return systemName;
     return "Asset";
   }, [assetName, systemName]);
+
+  const publicActionSource = useMemo(() => {
+    if (!publicActionContext?.isPublic) return null;
+    return {
+      name: publicActionContext.name || null,
+      email: publicActionContext.email || null,
+      phone: publicActionContext.phone || null,
+      actionType: publicActionContext.actionType || publicActionContext.type || null,
+      message: publicActionContext.message || null,
+      assetName: publicActionContext.assetName || assetName || null,
+      sourceUrl: publicActionContext.sourceUrl || null,
+      kac: publicActionContext.kac || null,
+    };
+  }, [assetName, publicActionContext]);
 
   const selectedSystem = useMemo(
     () => (selectedSystemId ? systems.find((s) => s.id === selectedSystemId) : null),
@@ -950,6 +988,107 @@ const deleteInboxAttachment = async (attachmentId) => {
         keyboardShouldPersistTaps="handled"
         onScrollBeginDrag={Keyboard.dismiss}
       >
+        {publicActionSource ? (
+          <View style={styles.sourceContextCard}>
+            <View style={styles.sourceContextIcon}>
+              <Ionicons name="globe-outline" size={18} color={colors.textPrimary} />
+            </View>
+
+            <View style={{ flex: 1 }}>
+              <Text style={styles.sourceContextKicker}>Public request</Text>
+              <Text style={styles.sourceContextTitle} numberOfLines={1}>
+                {publicActionSource.assetName || contextLabel}
+              </Text>
+              <Text style={styles.sourceContextText}>
+                From {publicActionSource.name || "Unknown"}
+                {publicActionSource.email ? ` <${publicActionSource.email}>` : ""}
+              </Text>
+              {publicActionSource.phone ? (
+                <Text style={styles.sourceContextText}>
+                  Phone: {publicActionSource.phone}
+                </Text>
+              ) : null}
+
+              <View style={styles.sourceActionRow}>
+                {publicActionSource.email ? (
+                  <TouchableOpacity
+                    style={styles.sourceActionChip}
+                    activeOpacity={0.85}
+                    onPress={() =>
+                      openContactUrl(
+                        `mailto:${publicActionSource.email}`,
+                        publicActionSource.email
+                      )
+                    }
+                  >
+                    <Ionicons name="mail-outline" size={13} color={colors.textSecondary} />
+                    <Text style={styles.sourceActionText}>Email</Text>
+                  </TouchableOpacity>
+                ) : null}
+
+                <TouchableOpacity
+                  style={styles.sourceActionChip}
+                  activeOpacity={0.85}
+                  onPress={async () => {
+                    try {
+                      await copyContact(publicActionSource);
+                      Alert.alert("Copied", "Requester contact copied.");
+                    } catch {
+                      Alert.alert("Copy failed", "Could not copy contact.");
+                    }
+                  }}
+                >
+                  <Ionicons name="copy-outline" size={13} color={colors.textSecondary} />
+                  <Text style={styles.sourceActionText}>Copy contact</Text>
+                </TouchableOpacity>
+              </View>
+
+              {publicActionSource.phone ? (
+                <View style={styles.sourceActionRow}>
+                  <TouchableOpacity
+                    style={styles.sourceActionChip}
+                    activeOpacity={0.85}
+                    onPress={() =>
+                      openContactUrl(
+                        `sms:${publicActionSource.phone}`,
+                        publicActionSource.phone
+                      )
+                    }
+                  >
+                    <Ionicons name="chatbubble-outline" size={13} color={colors.textSecondary} />
+                    <Text style={styles.sourceActionText}>Text</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.sourceActionChip}
+                    activeOpacity={0.85}
+                    onPress={() =>
+                      openContactUrl(
+                        `tel:${publicActionSource.phone}`,
+                        publicActionSource.phone
+                      )
+                    }
+                  >
+                    <Ionicons name="call-outline" size={13} color={colors.textSecondary} />
+                    <Text style={styles.sourceActionText}>Call</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+
+              {publicActionSource.sourceUrl ? (
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => Linking.openURL(publicActionSource.sourceUrl)}
+                >
+                  <Text style={styles.sourceContextLink} numberOfLines={1}>
+                    Open public source
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          </View>
+        ) : null}
+
 {originalEmailHtml ? (
   <View style={styles.emailProofCard}>
     <View style={styles.emailProofHeaderRow}>
@@ -2056,6 +2195,73 @@ modalOptionTextActive: {
     color: colors.textPrimary,
     lineHeight: 16,
     fontWeight: "700",
+  },
+  sourceContextCard: {
+    flexDirection: "row",
+    gap: 12,
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    backgroundColor: colors.surfaceSubtle,
+    marginBottom: spacing.md,
+  },
+  sourceContextIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+  },
+  sourceContextKicker: {
+    fontSize: 11,
+    fontWeight: "900",
+    color: colors.textMuted,
+    textTransform: "uppercase",
+  },
+  sourceContextTitle: {
+    marginTop: 2,
+    fontSize: 14,
+    fontWeight: "900",
+    color: colors.textPrimary,
+  },
+  sourceContextText: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.textSecondary,
+    fontWeight: "700",
+  },
+  sourceContextLink: {
+    marginTop: 6,
+    fontSize: 12,
+    color: colors.brandBlue,
+    fontWeight: "900",
+  },
+  sourceActionRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 10,
+  },
+  sourceActionChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    backgroundColor: colors.surface,
+  },
+  sourceActionText: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: colors.textSecondary,
   },
   quickAddButtonsRow: {
     flexDirection: "row",

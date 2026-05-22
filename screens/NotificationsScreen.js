@@ -276,6 +276,14 @@ function getSourceLabel(ev) {
       return "Quick Log";
     case "question":
       return "Question";
+    case "request_info":
+      return "Request Info";
+    case "request_service":
+      return "Request Service";
+    case "submit_quote":
+      return "Quote";
+    case "submit_proposal":
+      return "Proposal";
     case "manual_entry":
       return "Manual Entry";
     case "email":
@@ -291,6 +299,94 @@ function getSourceLabel(ev) {
     default:
       return null;
   }
+}
+
+function getPublicActionContact(ev) {
+  const ctx = ev?.context || {};
+  const publicAction = ctx?.public_action || {};
+  const contact = publicAction?.contact || ctx?.contact || {};
+
+  const name =
+    contact?.name ||
+    publicAction?.contact_name ||
+    ctx?.contact_name ||
+    null;
+  const email =
+    contact?.email ||
+    publicAction?.contact_email ||
+    ctx?.contact_email ||
+    null;
+  const phone =
+    contact?.phone ||
+    publicAction?.contact_phone ||
+    ctx?.contact_phone ||
+    null;
+
+  const isPublic =
+    ctx?.source?.channel === "public" ||
+    ctx?.origin === "public_action" ||
+    !!publicAction?.type ||
+    !!name ||
+    !!email ||
+    !!phone;
+
+  return {
+    isPublic: !!isPublic,
+    name,
+    email,
+    phone,
+    actionType: publicAction?.type || null,
+    message: publicAction?.message || ev?.notes || null,
+    assetName: publicAction?.asset_name || null,
+    assetId: publicAction?.asset_id || ev?.asset_id || null,
+    sourceUrl: publicAction?.source_url || null,
+    kac: publicAction?.kac || ctx?.kac || null,
+  };
+}
+
+function formatPublicSenderLine(sender) {
+  if (!sender?.isPublic) return "";
+  const bits = [sender.name, sender.email].filter(Boolean);
+  return bits.length ? `From ${bits.join(" • ")}` : "From public portal";
+}
+
+function buildPublicActionTimelineNotes(ev, fallbackNotes) {
+  const sender = getPublicActionContact(ev);
+  if (!sender?.isPublic) return fallbackNotes || "";
+
+  const identity = sender.name || sender.email || sender.phone || "Public requester";
+  const email = sender.email ? ` <${sender.email}>` : "";
+  const phone = sender.phone ? ` (${sender.phone})` : "";
+  const message = sender.message || fallbackNotes || ev?.notes || "";
+
+  return [
+    `Public request from ${identity}${email}${phone}`,
+    message ? `Message: ${message}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+async function openPublicContactUrl(url, fallbackMessage) {
+  if (!url) return;
+  try {
+    const canOpen = await Linking.canOpenURL(url);
+    if (!canOpen) {
+      Alert.alert("Can’t open", fallbackMessage || "Your device can’t open this action.");
+      return;
+    }
+    await Linking.openURL(url);
+  } catch (e) {
+    Alert.alert("Can’t open", e?.message || fallbackMessage || "Please try again.");
+  }
+}
+
+async function copyPublicContact(sender) {
+  const value = [sender?.name, sender?.email, sender?.phone]
+    .filter(Boolean)
+    .join(" • ");
+  if (!value) return;
+  await Clipboard.setStringAsync(value);
 }
 
 /**
@@ -377,39 +473,7 @@ const [loading, setLoading] = useState(true);
   }, [selectedEventId, attachmentsByEvent]);
 
   const selectedEventPublicSender = useMemo(() => {
-    const ctx = selectedEvent?.context || {};
-    const publicAction = ctx?.public_action || {};
-    const contact =
-      publicAction?.contact ||
-      ctx?.contact || {
-        name:
-          publicAction?.contact_name ||
-          ctx?.contact_name ||
-          null,
-        email:
-          publicAction?.contact_email ||
-          ctx?.contact_email ||
-          null,
-        phone:
-          publicAction?.contact_phone ||
-          ctx?.contact_phone ||
-          null,
-      };
-
-    const isPublic =
-      ctx?.source?.channel === "public" ||
-      !!publicAction?.type ||
-      !!contact?.name ||
-      !!contact?.email ||
-      !!contact?.phone;
-
-    return {
-      isPublic: !!isPublic,
-      name: contact?.name || null,
-      email: contact?.email || null,
-      phone: contact?.phone || null,
-      actionType: publicAction?.type || null,
-    };
+    return getPublicActionContact(selectedEvent);
   }, [selectedEvent]);
 
   const selectedAction = useMemo(() => {
@@ -1133,10 +1197,15 @@ try {
     const isSelected = ev?.id === selectedEventId;
     const attCount = (attachmentsByEvent[ev.id] || []).length;
     const action = resolveInboxAction(ev, attachmentsByEvent[ev.id] || []);
-    const assetName = ev.asset_id ? assetNameById[ev.asset_id] : null;
+    const publicSender = getPublicActionContact(ev);
+    const assetName =
+      (ev.asset_id ? assetNameById[ev.asset_id] : null) ||
+      publicSender.assetName ||
+      null;
     const originLabel = getOriginLabel(ev);
     const sourceLabel = getSourceLabel(ev);
     const intakeLine = [originLabel, sourceLabel].filter(Boolean).join(" • ");
+    const publicSenderLine = formatPublicSenderLine(publicSender);
 
     const ctxBits = [];
     if (assetName) ctxBits.push(assetName);
@@ -1162,6 +1231,8 @@ return (
   });
 
   const eventAttachments = attachmentsByEvent[ev.id] || [];
+  const basePrefillNotes = ev.context?.ki_summary || prefill.prefillNotes || ev.notes || "";
+  const publicActionNotes = buildPublicActionTimelineNotes(ev, basePrefillNotes);
 
   navigation.navigate("AddTimelineRecord", {
     eventId: ev.id,
@@ -1169,12 +1240,22 @@ return (
     systemId: ev.system_id || null,
 
     prefillTitle: prefill.prefillTitle,
-    prefillNotes: ev.context?.ki_summary || prefill.prefillNotes || ev.notes || "",
+    prefillNotes: publicActionNotes,
     prefillDate: prefill.prefillDate,
     prefillAmount: prefill.prefillAmount,
+    assetName:
+      ev.context?.public_action?.asset_name ||
+      (ev.asset_id ? assetNameById[ev.asset_id] : null) ||
+      null,
 
     existingAttachments: eventAttachments,
-    source: "email",
+    source: publicSender?.isPublic ? "public_action" : "email",
+    publicActionContext: publicSender?.isPublic
+      ? {
+          ...publicSender,
+          message: publicSender.message || ev.notes || "",
+        }
+      : null,
 
     originalEmailHtml: ev.context?.original_email?.raw_html || null,
     originalEmailText: ev.context?.original_email?.raw_text || ev.notes || null,
@@ -1202,6 +1283,84 @@ return (
               <Text style={styles.cardOriginLine} numberOfLines={1}>
                 {intakeLine}
               </Text>
+            ) : null}
+
+            {publicSenderLine ? (
+              <Text style={styles.cardSenderLine} numberOfLines={1}>
+                {publicSenderLine}
+              </Text>
+            ) : null}
+
+            {publicSender?.isPublic ? (
+              <View style={styles.contactActionRow}>
+                {publicSender.email ? (
+                  <TouchableOpacity
+                    style={styles.contactActionChip}
+                    activeOpacity={0.85}
+                    onPress={(e) => {
+                      e?.stopPropagation?.();
+                      openPublicContactUrl(
+                        `mailto:${publicSender.email}`,
+                        publicSender.email
+                      );
+                    }}
+                  >
+                    <Ionicons name="mail-outline" size={12} color={colors.textSecondary} />
+                    <Text style={styles.contactActionText}>Email</Text>
+                  </TouchableOpacity>
+                ) : null}
+
+                <TouchableOpacity
+                  style={styles.contactActionChip}
+                  activeOpacity={0.85}
+                  onPress={async (e) => {
+                    e?.stopPropagation?.();
+                    try {
+                      await copyPublicContact(publicSender);
+                      Alert.alert("Copied", "Requester contact copied.");
+                    } catch {
+                      Alert.alert("Copy failed", "Could not copy contact.");
+                    }
+                  }}
+                >
+                  <Ionicons name="copy-outline" size={12} color={colors.textSecondary} />
+                  <Text style={styles.contactActionText}>Copy</Text>
+                </TouchableOpacity>
+
+                {publicSender.phone ? (
+                  <>
+                    <TouchableOpacity
+                      style={styles.contactActionChip}
+                      activeOpacity={0.85}
+                      onPress={(e) => {
+                        e?.stopPropagation?.();
+                        openPublicContactUrl(
+                          `sms:${publicSender.phone}`,
+                          publicSender.phone
+                        );
+                      }}
+                    >
+                      <Ionicons name="chatbubble-outline" size={12} color={colors.textSecondary} />
+                      <Text style={styles.contactActionText}>Text</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.contactActionChip}
+                      activeOpacity={0.85}
+                      onPress={(e) => {
+                        e?.stopPropagation?.();
+                        openPublicContactUrl(
+                          `tel:${publicSender.phone}`,
+                          publicSender.phone
+                        );
+                      }}
+                    >
+                      <Ionicons name="call-outline" size={12} color={colors.textSecondary} />
+                      <Text style={styles.contactActionText}>Call</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : null}
+              </View>
             ) : null}
 
             <Text style={styles.cardMeta} numberOfLines={1}>
@@ -2686,6 +2845,34 @@ intakeSub: {
   marginTop: 3,
   fontSize: 11,
   fontWeight: "800",
+  color: colors.textSecondary,
+},
+  cardSenderLine: {
+  marginTop: 3,
+  fontSize: 12,
+  fontWeight: "900",
+  color: colors.textPrimary,
+},
+  contactActionRow: {
+  flexDirection: "row",
+  flexWrap: "wrap",
+  gap: 6,
+  marginTop: 8,
+},
+  contactActionChip: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 5,
+  paddingHorizontal: 9,
+  paddingVertical: 5,
+  borderRadius: radius.pill,
+  borderWidth: 1,
+  borderColor: colors.borderSubtle,
+  backgroundColor: colors.surfaceSubtle,
+},
+  contactActionText: {
+  fontSize: 11,
+  fontWeight: "900",
   color: colors.textSecondary,
 },
   cardMeta: {

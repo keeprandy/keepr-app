@@ -18,6 +18,12 @@ function safeStr(v: unknown) {
   return typeof v === "string" ? v : "";
 }
 
+function safeObj(v: unknown): Record<string, unknown> {
+  return v && typeof v === "object" && !Array.isArray(v)
+    ? v as Record<string, unknown>
+    : {};
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -64,6 +70,47 @@ Deno.serve(async (req) => {
 
       const title = safeStr(body?.payload?.title);
       const notes = safeStr(body?.payload?.notes);
+      const payload = safeObj(body?.payload);
+      const payloadContext = safeObj(payload.context);
+      const payloadPublicAction = safeObj(payloadContext.public_action);
+      const contact = safeObj(payloadPublicAction.contact);
+      const publicAction = {
+        type:
+          safeStr(payloadPublicAction.type) ||
+          safeStr(payload.type) ||
+          "public_action",
+        message:
+          safeStr(payloadPublicAction.message) ||
+          notes ||
+          null,
+        contact: {
+          name:
+            safeStr(contact.name) ||
+            safeStr(payload.contact_name) ||
+            null,
+          email:
+            safeStr(contact.email) ||
+            safeStr(payload.contact_email) ||
+            null,
+          phone:
+            safeStr(contact.phone) ||
+            safeStr(payload.contact_phone) ||
+            null,
+        },
+        kac,
+        asset_id:
+          safeStr(payloadPublicAction.asset_id) ||
+          safeStr(resolved.asset_id) ||
+          safeStr(resolved.master_asset_id) ||
+          null,
+        asset_name:
+          safeStr(payloadPublicAction.asset_name) ||
+          safeStr(resolved.asset_name) ||
+          null,
+        source_url:
+          safeStr(payloadPublicAction.source_url) ||
+          null,
+      };
 
       if (!title)
         return json(400, { error: "Missing title" });
@@ -74,11 +121,19 @@ Deno.serve(async (req) => {
           owner_id: user.id,
           asset_id: resolved.asset_id,
           status: "draft",
+          origin_type: "portal",
+          source_type: publicAction.type,
           title,
           notes,
           context: {
-            source: "qr_public_action",
+            ...payloadContext,
+            source: {
+              channel: "public",
+              type: "qr_public_action",
+            },
+            origin: "public_action",
             kac,
+            public_action: publicAction,
           },
         })
         .select("id,created_at,status")

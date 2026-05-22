@@ -75,6 +75,15 @@ function getTokenFromUrlFallback() {
   }
 }
 
+function getSourceUrl() {
+  try {
+    if (!IS_WEB || typeof window === "undefined") return null;
+    return window.location.href || null;
+  } catch {
+    return null;
+  }
+}
+
 async function postFunction(path, payload, accessToken) {
   if (!ANON_KEY) throw new Error("Missing EXPO_PUBLIC_SUPABASE_ANON_KEY");
 
@@ -325,6 +334,22 @@ const canLog = enabledActions.includes("request_service") || !!assetId;
     return true;
   }
 
+  function buildPublicActionContext(type, message) {
+    return {
+      type,
+      message: message || null,
+      contact: {
+        name: name.trim() || null,
+        email: email.trim() || null,
+        phone: phone.trim() || null,
+      },
+      kac: resolved?.kac || kac || null,
+      asset_id: assetId || resolved?.asset_id || null,
+      asset_name: asset?.name || resolved?.asset_name || resolved?.asset?.name || null,
+      source_url: getSourceUrl(),
+    };
+  }
+
   useFocusEffect(
   React.useCallback(() => {
     let cancelled = false;
@@ -483,6 +508,9 @@ useEffect(() => {
             contact_name: name,
             contact_email: email,
             contact_phone: phone || null,
+            context: {
+              public_action: buildPublicActionContext("quick_log", notes.trim() || null),
+            },
           },
         },
         null
@@ -523,6 +551,9 @@ useEffect(() => {
             contact_name: name,
             contact_email: email,
             contact_phone: phone || null,
+            context: {
+              public_action: buildPublicActionContext("question", q),
+            },
           },
         },
         null
@@ -575,6 +606,12 @@ useEffect(() => {
           contact_name: name,
           contact_email: email,
           contact_phone: phone || null,
+          context: {
+            public_action: buildPublicActionContext(
+              selectedActionMeta.intentType,
+              actionMessage.trim()
+            ),
+          },
         },
       },
       null
