@@ -28,6 +28,7 @@ import { colors, radius, spacing, typography } from "../styles/theme";
 import KeeprProgressCard, { buildKeeprProgressModel } from "../components/KeeprProgressCard";
 import { useFocusEffect } from "@react-navigation/native";
 import { track } from "../lib/analytics";
+import AddAssetTypeModal from "../components/AddAssetTypeModal";
 
 /**
  * Sort helper: prefers explicit sort_rank, then "primary", then created_at, then name.
@@ -73,13 +74,6 @@ function legacyHeroUrl(asset) {
   if (!url) return null;
 
   // Signed URLs expire. Treat any signed/object URLs as non-authoritative legacy.
-  if (
-    String(url).includes("/storage/v1/object/sign/") ||
-    String(url).includes("/storage/v1/render/image/sign/") ||
-    String(url).includes("token=")
-  ) {
-    return null;
-  }
 
   return url;
 }
@@ -99,68 +93,84 @@ function commercialLabel(asset) {
  */
 async function resolveHeroUrisForAssets(allAssets) {
   const placementIds = (allAssets || [])
-    .map((a) => a?.hero_placement_id)
-    .filter(Boolean);
+  .map((a) => a?.hero_placement_id)
+  .filter(Boolean);
+
   const uniqueIds = Array.from(new Set(placementIds));
   if (!uniqueIds.length) return {};
 
-  const { data, error } = await supabase
-    .from("attachment_placements")
-    .select(
-      `
-      id,
-      attachment:attachments (
-        url,
-        bucket,
-        storage_path,
-        deleted_at
-      )
-    `
-    )
-    .in("id", uniqueIds);
+const { data, error } = await supabase.rpc(
+  "get_dashboard_hero_attachments",
+  { placement_ids: uniqueIds }
+);
 
   if (error) {
-    console.log("Dashboard hero placement lookup error", error);
     return {};
   }
 
-  const entries = await Promise.all((data || []).map(async (row) => {
-    const placementId = row?.id;
-    const a = row?.attachment;
-    if (!placementId || !a || a.deleted_at) return null;
+const entries = await Promise.all((data || []).map(async (row) => {
+  const placementId = row?.placement_id;
+  const a = row;
+  if (!placementId || !a || a.deleted_at) return null;
 
-    // Prefer storage_path-based signing (fresh, team-safe). Never trust persisted signed URLs.
-    if (a.bucket && a.storage_path) {
-      try {
-        const signed = await getSignedUrl({
-          bucket: a.bucket,
-          path: a.storage_path,
-          transform: {
-            width: 320,
-            height: 320,
-            resize: "cover",
-            quality: 75,
-          },
-        });
-        if (signed) {
-          return [placementId, signed];
-        }
-      } catch (e) {
-        console.log("Dashboard hero signed URL error", {
-          placementId,
-          bucket: a.bucket,
-          path: a.storage_path,
-          e,
-        });
+if (a.thumb_320_url) {
+
+console.log("DASH THUMB", {
+  placementId,
+  thumb: a.thumb_320_url,
+});
+
+  return [placementId, a.thumb_320_url];
+}
+
+if (a.bucket && a.storage_path) {
+  try {
+    const signed = await getSignedUrl({
+      bucket: a.bucket,
+      path: a.storage_path,
+      transform: {
+        width: 320,
+        height: 320,
+        resize: "cover",
+        quality: 75,
+      },
+    });
+
+    if (signed) return [placementId, signed];
+  } catch (e) {
+    console.log("Dashboard hero signed URL error", e);
+  }
+}
+
+  /*
+  if (a.bucket && a.storage_path) {
+    try {
+      const signed = await getSignedUrl({
+        bucket: a.bucket,
+        path: a.storage_path,
+        transform: {
+          width: 320,
+          height: 320,
+          resize: "cover",
+          quality: 75,
+        },
+      });
+      if (signed) {
+        return [placementId, signed];
       }
+    } catch (e) {
+      console.log("Dashboard hero signed URL error", {
+        placementId,
+        bucket: a.bucket,
+        path: a.storage_path,
+        e,
+      });
     }
+  }
+  */
 
-    // Legacy fallback (only if it does NOT look like a signed URL).
-    if (a.url && !String(a.url).includes("token=") && !String(a.url).includes("/object/sign/")) {
-      return [placementId, a.url];
-    }
-    return null;
-  }));
+  return null;
+}));
 
   const map = {};
   entries.forEach((entry) => {
@@ -410,6 +420,7 @@ const shouldShowKeeprProgress =
       setHeroUriByPlacementId({});
       return;
     }
+
     setHeroResolving(true);
     try {
       const map = await resolveHeroUrisForAssets(allAssets);
@@ -435,25 +446,41 @@ const shouldShowKeeprProgress =
     }
   }, [allAssets]);
 
-  useEffect(() => {
-    // Re-resolve hero URIs whenever the assets list changes (new asset, new hero, etc.)
-    refreshHeroUris();
-  }, [allAssets, refreshHeroUris]);
+  const heroPlacementKey = useMemo(() => {
+    return allAssets
+      .map((a) => a?.hero_placement_id)
+      .filter(Boolean)
+      .sort()
+      .join("|");
+  }, [allAssets]);
 
-  const getAssetHeroImage = useCallback(
-    (asset) => {
-      const placementId = asset?.hero_placement_id || null;
+    useEffect(() => {
+      if (loading) return;
+      if (!heroPlacementKey) return;
 
-      // If an asset has a placement-driven hero, we only trust the placement resolution.
-      // (hero_image_url is typically a signed URL and may be expired / not team-safe.)
-      if (placementId) {
-        return heroUriByPlacementId?.[placementId] || null;
-      }
+      const t = setTimeout(() => {
+        refreshHeroUris();
+      }, 250);
 
-      return legacyHeroUrl(asset);
-    },
-    [heroUriByPlacementId]
-  );
+      return () => clearTimeout(t);
+    }, [loading, heroPlacementKey, refreshHeroUris]);
+
+    const getAssetHeroImage = useCallback(
+      (asset) => {
+        const placementId = asset?.hero_placement_id || null;
+
+        if (placementId && heroUriByPlacementId?.[placementId]) {
+          return heroUriByPlacementId[placementId];
+        }
+
+        if (asset?.hero_thumb_url) {
+          return asset.hero_thumb_url;
+        }
+
+        return legacyHeroUrl(asset);
+      },
+      [heroUriByPlacementId]
+    );
 
   /* ---- Navigation helpers ---- */
 
@@ -545,10 +572,22 @@ const shouldShowKeeprProgress =
       }
 
       setAchLoading(true);
-      const { data: achData, error: achErr } = await supabase.rpc("get_my_achievements");
-      if (achErr) throw achErr;
-      const row = Array.isArray(achData) ? achData[0] : achData;
-      setAch(row || null);
+/*
+const { data: achData, error: achErr } =
+  await supabase.rpc("get_my_achievements");
+
+if (achErr) throw achErr;
+
+const row = Array.isArray(achData)
+  ? achData[0]
+  : achData;
+
+setAch(row || null);
+*/
+
+// TEMP PERFORMANCE TEST
+setAch(null);
+
     } catch (e) {
       console.log("Dashboard identity/achievements load error", e);
     } finally {
@@ -587,8 +626,8 @@ const reloadDashboard = useCallback(async () => {
 ]);
 useFocusEffect(
   React.useCallback(() => {
-    reloadDashboard();
-  }, [reloadDashboard])
+    loadSystemModeSummary?.();
+  }, [loadSystemModeSummary])
 );
 
   const goProfile = useCallback(() => {
@@ -1397,66 +1436,27 @@ if (Platform.OS !== "ios") {
           </ScrollView>
 
           {/* Web add-asset picker modal */}
-          <Modal
+          <AddAssetTypeModal
             visible={addPickerVisible}
-            transparent
-            animationType="fade"
-            onRequestClose={() => setAddPickerVisible(false)}
-          >
-            <Pressable style={styles.modalOverlay} onPress={() => setAddPickerVisible(false)}>
-              <Pressable style={styles.modalCard} onPress={() => {}}>
-                <Text style={styles.modalTitle}>Add an asset</Text>
-
-                <Pressable
-                  style={styles.modalBtn}
-                  onPress={() => {
-                    setAddPickerVisible(false);
-                    goAddHome();
-                  }}
-                >
-                  <Ionicons name="home-outline" size={24} color={colors.textPrimary} />
-                  <Text style={styles.modalBtnText}>Home</Text>
-                </Pressable>
-
-                <Pressable
-                  style={styles.modalBtn}
-                  onPress={() => {
-                    setAddPickerVisible(false);
-                    goAddVehicle();
-                  }}
-                >
-                  <Ionicons name="car-outline" size={24} color={colors.textPrimary} />
-                  <Text style={styles.modalBtnText}>Vehicle</Text>
-                </Pressable>
-
-                <Pressable
-                  style={styles.modalBtn}
-                  onPress={() => {
-                    setAddPickerVisible(false);
-                    goAddBoat();
-                  }}
-                >
-                  <Ionicons name="boat-outline" size={18} color={colors.textPrimary} />
-                  <Text style={styles.modalBtnText}>Boat</Text>
-                </Pressable>
-
-                <Pressable
-                  style={styles.modalBtn}
-                  onPress={() => {
-                    setAddPickerVisible(false);
-                    goAddOtherAsset();
-                  }}
-                >
-                  <Ionicons name="cube-outline" size={24} color={colors.textPrimary} />
-                  <Text style={styles.modalBtnText}>Other Asset</Text>
-                </Pressable>
-
-                <Pressable style={[styles.modalBtn, styles.modalCancel]} onPress={() => setAddPickerVisible(false)}>
-                  <Text style={[styles.modalBtnText, { fontWeight: "900" }]}>Cancel</Text>
-                </Pressable>
-              </Pressable>
-            </Pressable>
-          </Modal>
+            onClose={() => setAddPickerVisible(false)}
+            title="Add an asset"
+            onSelectHome={() => {
+              setAddPickerVisible(false);
+              goAddHome();
+            }}
+            onSelectVehicle={() => {
+              setAddPickerVisible(false);
+              goAddVehicle();
+            }}
+            onSelectBoat={() => {
+              setAddPickerVisible(false);
+              goAddBoat();
+            }}
+            onSelectOther={() => {
+              setAddPickerVisible(false);
+              goAddOtherAsset();
+            }}
+          />
 
           {/* FAB */}
 {/* <TouchableOpacity style={styles.fab} onPress={goCreateEvent} activeOpacity={0.95}>

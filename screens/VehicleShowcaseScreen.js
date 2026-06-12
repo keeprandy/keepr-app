@@ -182,7 +182,10 @@ export default function VehicleShowcaseScreen({ navigation, route }) {
       setPhotosError(null);
 
       try {
-        const rows = await listAttachmentsForTarget("asset", currentVehicle.id);
+       const rows = await listAttachmentsForTarget(
+        "asset",
+        currentVehicle.id
+      );
 
         const gallery = [];
 
@@ -451,6 +454,22 @@ export default function VehicleShowcaseScreen({ navigation, route }) {
     } finally {
       setPhotosLoading(false);
     }
+  };
+
+  const buildHeroThumbUrl = async (photo) => {
+    if (!photo?.bucket || !photo?.storage_path) return null;
+
+    return await getSignedUrl({
+      bucket: photo.bucket,
+      path: photo.storage_path,
+      expiresIn: 60 * 60 * 24 * 7,
+      transform: {
+        width: 320,
+        height: 320,
+        resize: "cover",
+        quality: 75,
+      },
+    });
   };
 
   /* ---------- set hero (assets.hero_placement_id) ---------- */

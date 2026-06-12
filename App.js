@@ -87,6 +87,14 @@ import PublicActionScreen from "./screens/PublicActionScreen";
 import SendToKeeprScreen from "./screens/SendToKeeprScreen";
 import SendToKeeprAssetPicker from "./screens/SendToKeeprAssetPicker";
 import PublicKeeprStoryScreen from "./screens/PublicKeeprStoryScreen";
+import KeeprHubScreen from "./screens/KeeprHubScreen";
+import HubDetailScreen from "./screens/HubDetailScreen";
+import EditHubScreen from "./screens/EditHubScreen";
+import ManageHubStoriesScreen from "./screens/ManageHubStoriesScreen";
+import InviteHubMembersScreen from "./screens/InviteHubMembersScreen";
+import MyHubsScreen from "./screens/MyHubsScreen";
+import CreateHubScreen from "./screens/CreateHubScreen";
+
 
 // Screens
 import AssetGroupDashboardScreen from "./screens/AssetGroupDashboardScreen";
@@ -243,6 +251,7 @@ const linking = {
     
     PublicKeeprStory: "k/:kac",
     PublicAction: "k/:kac/actions",
+    KeeprHub: "h/:slug",
     KacResolve: "resolve/:kac",
     RootTabs: {
       screens: {
@@ -1389,6 +1398,7 @@ React.useEffect(() => {
 
     if (
       path.startsWith("/k/") ||
+      path.startsWith("/h/") ||
       path.startsWith("/resolve/")
     ) {
       didInitialNavResolve.current = true;
@@ -1596,10 +1606,14 @@ if (!user) {
           <RootStack.Screen name="KacRoute" component={KacRouteScreen} />
           <RootStack.Screen name="PublicAction" component={PublicActionScreen} />
           <RootStack.Screen name="KacResolve" component={KacResolveScreen} />
-          <RootStack.Screen
-          name="PublicKeeprStory"
-          component={PublicKeeprStoryScreen}
-          />
+          <RootStack.Screen name="PublicKeeprStory" component={PublicKeeprStoryScreen}/>
+          <RootStack.Screen name="KeeprHub" component={KeeprHubScreen}/>
+          <RootStack.Screen name="HubDetail" component={HubDetailScreen} />
+          <RootStack.Screen name="EditHub" component={EditHubScreen} />
+          <RootStack.Screen name="ManageHubStories" component={ManageHubStoriesScreen} />
+          <RootStack.Screen name="InviteHubMembers" component={InviteHubMembersScreen} />
+          <RootStack.Screen name="MyHubs" component={MyHubsScreen} />
+          <RootStack.Screen name="CreateHub" component={CreateHubScreen} options={{ headerShown: false }}/>
           
           <RootStack.Screen name="Invite" component={InviteRedirectScreen} />
           <RootStack.Screen name="Auth" component={AuthScreen} />
@@ -1636,6 +1650,7 @@ const initialRouteName = isResetLink
         initialState={
           Platform.OS === "web" &&
           !window.location.pathname.startsWith("/k/") &&
+          !window.location.pathname.startsWith("/h/") &&
           !window.location.pathname.startsWith("/resolve/")
             ? initialNavState
             : undefined
@@ -1676,6 +1691,14 @@ const initialRouteName = isResetLink
           <RootStack.Screen name="PublicConfig" component={PublicConfigScreen} />
           <RootStack.Screen name="PublicConfigAssetPicker" component={PublicConfigAssetPickerScreen} />
           <RootStack.Screen name="PublicKeeprStory" component={PublicKeeprStoryScreen} />
+          <RootStack.Screen name="KeeprHub" component={KeeprHubScreen}/>
+          <RootStack.Screen name="HubDetail" component={HubDetailScreen} />
+          <RootStack.Screen name="EditHub" component={EditHubScreen} />
+          <RootStack.Screen name="ManageHubStories" component={ManageHubStoriesScreen} />
+          <RootStack.Screen name="InviteHubMembers" component={InviteHubMembersScreen} />
+          <RootStack.Screen name="MyHubs" component={MyHubsScreen} />
+          <RootStack.Screen name="CreateHub" component={CreateHubScreen} options={{ headerShown: false }}/>
+          
           
           <RootStack.Screen name="UploadLab" component={UploadLabScreen} />
 
@@ -2026,6 +2049,7 @@ const isPublicPath =
   typeof window !== "undefined" &&
   (
     window.location.pathname.startsWith("/k/") ||
+    window.location.pathname.startsWith("/h/") ||
     window.location.pathname.startsWith("/resolve/")
   );
 
@@ -2034,13 +2058,15 @@ const isPublicWebRoute =
   currentRouteName === "PublicKeeprStory" ||
   currentRouteName === "PublicAction" ||
   currentRouteName === "KacRoute" ||
-  currentRouteName === "KacResolve";
+  currentRouteName === "KacResolve" ||
+  currentRouteName === "KeeprHub";
 
 const hideSidebarRoutes = [
   "StoryPrint", 
   "Auth", 
   "ResetPassword",
   "PublicKeeprStory",
+  "KeeprHub",
   "PublicAction",
   "KacRoute",
   "KacResolve",

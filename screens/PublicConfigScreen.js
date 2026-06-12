@@ -10,12 +10,23 @@ import {
   ActivityIndicator,
   Linking,
   Platform,
+  Modal,
+  FlatList,
+  TextInput,
 } from "react-native";
 
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../lib/supabaseClient";
 import { colors, spacing, radius, typography, shadows } from "../styles/theme";
+import {
+  fetchAssetHubLinks,
+  fetchMyHubs,
+  addStoryToHub,
+  createHub,
+} from "../lib/hubsApi";
+
+
 
 const MODE_OPTIONS = [
   { key: "inquiry", label: "Informational Inquiry" },
@@ -139,6 +150,12 @@ export default function PublicConfigScreen({ navigation, route }) {
   const [allowCopyLink, setAllowCopyLink] = React.useState(true);
   const [allowShareLink, setAllowShareLink] = React.useState(true);
   const [assetKac, setAssetKac] = React.useState(null);
+  const [hubLinks, setHubLinks] = React.useState([]);
+  const [hubModalVisible, setHubModalVisible] = React.useState(false);
+  const [availableHubs, setAvailableHubs] = React.useState([]);
+  const [newHubName, setNewHubName] = React.useState("");
+  const [creatingHub, setCreatingHub] = React.useState(false);
+  const [createHubModalVisible, setCreateHubModalVisible] = React.useState(false);
 
   const publicUrl = assetKac ? `https://app.keeprhome.com/k/${assetKac}` : null;
 
@@ -165,6 +182,149 @@ const copyPublicLink = async () => {
   Alert.alert("Public Link", publicUrl);
 };
 
+const openHubPicker = async () => {
+  console.log("OPEN HUB PICKER CLICKED");
+
+  setHubModalVisible(true);
+  setAvailableHubs([]);
+
+  try {
+    const user = (await supabase.auth.getUser()).data?.user;
+
+    console.log("HUB PICKER USER", user?.id);
+
+    if (!user?.id) {
+      Alert.alert("Sign in required", "You need to be signed in to add this story to a Hub.");
+      return;
+    }
+
+    const hubs = await fetchMyHubs(user.id);
+
+    console.log("MY HUBS", hubs);
+
+    const alreadyLinked = new Set(hubLinks.map((h) => h.id));
+
+    setAvailableHubs((hubs || []).filter((h) => !alreadyLinked.has(h.id)));
+  } catch (e) {
+    console.log("HUB PICKER ERROR", e?.message || e);
+    Alert.alert("Could not load Hubs", e?.message || "Try again.");
+  }
+};
+
+    const handleAddStoryToHub = async (hub) => {
+      try {
+        const user = (await supabase.auth.getUser()).data?.user;
+        if (!user?.id) return;
+
+        console.log("ADDING STORY TO NEW HUB", {
+          hubId: hub?.id,
+          assetId,
+          userId: user?.id,
+        });
+        
+        console.log("ADDING STORY TO NEW HUB", {
+          hubId: hub?.id,
+          assetId,
+          userId: user?.id,
+        });
+        
+        await addStoryToHub({
+          hubId: hub.id,
+          assetId,
+          userId: user.id,
+        });
+
+        const links = await fetchAssetHubLinks(assetId);
+        setHubLinks(links || []);
+        setHubModalVisible(false);
+      } catch (e) {
+        console.log("CREATE HUB ERROR", e);
+        Alert.alert("Could not add to Hub", e?.message || "Try again.");
+      }
+    };
+    const handleCreateHub = () => {
+      setNewHubName("");
+      setCreateHubModalVisible(true);
+    };
+
+    function slugifyHubName(name) {
+      return String(name || "")
+        .trim()
+        .toLowerCase()
+        .replace(/&/g, "and")
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+    }
+
+    const handleCreateHubAndAddStory = async () => {
+      const name = newHubName.trim();
+      if (!name) return;
+
+      try {
+        setCreatingHub(true);
+
+        const user = (await supabase.auth.getUser()).data?.user;
+        if (!user?.id) return;
+
+        console.log("CREATE HUB PAYLOAD", {
+          name,
+          slug: slugifyHubName(name),
+          createdBy: user.id,
+        });
+
+        const hub = await createHub({
+          name,
+          slug: slugifyHubName(name),
+          description: null,
+          createdBy: user.id,
+        });
+
+        console.log("CREATE HUB RESULT", hub);
+
+        try {
+          console.log("ADDING STORY TO CREATED HUB", {
+            hubId: hub?.id,
+            assetId,
+            userId: user?.id,
+          });
+
+          await addStoryToHub({
+            hubId: hub.id,
+            assetId,
+            userId: user.id,
+          });
+
+          console.log("STORY ADDED TO CREATED HUB");
+          } catch (linkErr) {
+            const msg = linkErr?.message || "";
+
+            if (msg.includes("duplicate key") || linkErr?.code === "23505") {
+              console.log("STORY ALREADY LINKED TO CREATED HUB");
+            } else {
+              console.log("ADD STORY TO CREATED HUB ERROR", linkErr);
+              throw linkErr;
+            }
+          }
+
+        await addStoryToHub({
+          hubId: hub.id,
+          assetId,
+          userId: user.id,
+        });
+
+        const links = await fetchAssetHubLinks(assetId);
+        setHubLinks(links || []);
+
+        setNewHubName("");
+        setCreateHubModalVisible(false);
+      } catch (e) {
+       console.log("CREATE HUB ERROR", e);
+        Alert.alert("Could not create Hub", e?.message || "Try again.");
+      } finally {
+        setCreatingHub(false);
+      }
+    };
+
   const loadAssetConfig = React.useCallback(async () => {
     if (!assetId) {
       setLoading(false);
@@ -188,11 +348,14 @@ const copyPublicLink = async () => {
       setAssetKac(data?.kac_id || null);
 
       const existing = data?.extra_metadata?.publicConfig || getDefaultPublicConfig();
+      console.log(
+  "LOADED PUBLIC CONFIG",
+  JSON.stringify(existing, null, 2)
+);
 
 const actionConfig = existing.actions || getDefaultPublicConfig().actions;
 const storyConfig = existing.story || getDefaultPublicConfig().story;
 const sharingConfig = existing.sharing || getDefaultPublicConfig().sharing;
-
 
 setEnabled(storyConfig.enabled === true);
 setMode(actionConfig.mode || "inquiry");
@@ -219,6 +382,14 @@ setAllowShareLink(sharingConfig.allowShareLink !== false);
 setShowTimelineHighlights(
   (storyConfig.showTimeline || "highlights_only") === "highlights_only"
 );
+
+try {
+  const links = await fetchAssetHubLinks(assetId);
+  setHubLinks(links || []);
+} catch (hubErr) {
+  console.log("Hub links load failed:", hubErr?.message || hubErr);
+  setHubLinks([]);
+}
 
     } catch (e) {
       Alert.alert("Could not load config", e?.message || "Try again.");
@@ -267,6 +438,8 @@ const saveConfig = React.useCallback(async () => {
 
     const existingPublicConfig =
       current?.extra_metadata?.publicConfig || getDefaultPublicConfig();
+    
+    console.log("SAVE ENABLED =", enabled);
 
     const publicConfig = {
       ...existingPublicConfig,
@@ -484,6 +657,75 @@ React.useEffect(() => {
         </View>
 
         <View style={styles.section}>
+        <View style={styles.sectionHeaderRow}>
+        <Text style={styles.sectionTitle}>
+          AFFILIATED HUBS
+        </Text>
+
+        <TouchableOpacity
+          style={styles.createHubLink}
+          onPress={handleCreateHub}
+        >
+          <Ionicons
+            name="add-circle-outline"
+            size={16}
+            color={colors.primary}
+          />
+          <Text style={styles.createHubLinkText}>
+            Create Hub
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.card}>
+        {hubLinks.length === 0 ? (
+        <Text style={styles.hubEmptyText}>
+          This public story is not affiliated with any Hubs yet.
+        </Text>
+      ) : (
+        hubLinks.map((hub) => (
+          <TouchableOpacity
+              key={hub.id}
+              style={styles.hubRow}
+              activeOpacity={0.85}
+              onPress={() =>
+                navigation.navigate("HubDetail", {
+                  hubId: hub.id,
+                  slug: hub.slug,
+                })
+              }
+            >
+            <View style={styles.hubIcon}>
+              <Ionicons name="albums-outline" size={17} color={colors.textPrimary} />
+            </View>
+
+            <View style={{ flex: 1 }}>
+              <Text style={styles.hubName}>{hub.name}</Text>
+              <Text style={styles.hubSubtext}>Public story link shared to this Hub</Text>
+            </View>
+
+            {hub.featured ? (
+              <View style={styles.featuredBadge}>
+                <Text style={styles.featuredText}>Featured</Text>
+              </View>
+            ) : null}
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+            </TouchableOpacity>
+        ))
+      )}
+
+      <TouchableOpacity
+        style={styles.addHubButton}
+        onPress={openHubPicker}
+        activeOpacity={0.85}
+      >
+        <Ionicons name="add-circle-outline" size={18} color={colors.textPrimary} />
+        <Text style={styles.addHubText}>Add Story to Hub</Text>
+      </TouchableOpacity>
+      </View>
+    </View>
+
+        <View style={styles.section}>
           <Text style={styles.sectionLabel}>Mode</Text>
           <View style={styles.card}>
             <Text style={styles.blockHint}>
@@ -673,6 +915,129 @@ React.useEffect(() => {
           </View>
         </View>
       </ScrollView>
+      <Modal
+        visible={hubModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setHubModalVisible(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                Add Story to Hub
+              </Text>
+
+              <TouchableOpacity
+                onPress={() => setHubModalVisible(false)}
+              >
+                <Ionicons
+                  name="close"
+                  size={22}
+                  color={colors.textPrimary}
+                />
+              </TouchableOpacity>
+            </View>
+
+            {availableHubs.length === 0 ? (
+              <View style={styles.modalEmptyState}>
+                <Ionicons name="albums-outline" size={30} color={colors.textMuted} />
+                <Text style={styles.modalEmptyTitle}>No additional Hubs</Text>
+                <Text style={styles.modalEmptyText}>
+                  This Story is already shared to every Hub you can contribute to.
+                </Text>
+              </View>
+              
+            ) : (
+              <FlatList
+                data={availableHubs}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={styles.hubPickerRow}
+                    onPress={() => handleAddStoryToHub(item)}
+                  >
+                    <View style={styles.hubIcon}>
+                      <Ionicons
+                        name="albums-outline"
+                        size={18}
+                        color={colors.textPrimary}
+                      />
+                    </View>
+
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.hubName}>
+                        {item.name}
+                      </Text>
+
+                      {!!item.description && (
+                        <Text
+                          style={styles.hubSubtext}
+                          numberOfLines={2}
+                        >
+                          {item.description}
+                        </Text>
+                      )}
+                    </View>
+
+                    <Ionicons
+                      name="add-circle-outline"
+                      size={22}
+                      color={colors.primary}
+                    />
+                  </TouchableOpacity>
+                )}
+              />
+            )}
+            
+          </View>
+          
+        </View>
+      </Modal>
+      <Modal
+        visible={createHubModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setCreateHubModalVisible(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Create Hub</Text>
+
+              <TouchableOpacity onPress={() => setCreateHubModalVisible(false)}>
+                <Ionicons name="close" size={22} color={colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.createHubLabel}>Hub name</Text>
+
+            <TextInput
+              value={newHubName}
+              onChangeText={setNewHubName}
+              placeholder="PCA 986 Registry"
+              placeholderTextColor={colors.textMuted}
+              style={styles.createHubInput}
+            />
+
+            <TouchableOpacity
+              style={[
+                styles.createHubButton,
+                { marginTop: 14, alignItems: "center" },
+                (!newHubName.trim() || creatingHub) && { opacity: 0.5 },
+              ]}
+              onPress={handleCreateHubAndAddStory}
+              disabled={!newHubName.trim() || creatingHub}
+            >
+              {creatingHub ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.createHubButtonText}>Create Hub + Add Story</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -696,11 +1061,213 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
 
+  createHubBox: {
+  marginTop: 16,
+  paddingTop: 14,
+  borderTopWidth: StyleSheet.hairlineWidth,
+  borderTopColor: colors.borderSubtle || "#E5E7EB",
+},
+
+createHubLabel: {
+  fontSize: 12,
+  fontWeight: "800",
+  color: colors.textMuted,
+  textTransform: "uppercase",
+  letterSpacing: 0.6,
+  marginBottom: 8,
+},
+
+createHubRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 10,
+},
+
+createHubInput: {
+  flex: 1,
+  borderWidth: 1,
+  borderColor: colors.borderSubtle || "#E5E7EB",
+  borderRadius: 12,
+  paddingHorizontal: 12,
+  paddingVertical: 10,
+  color: colors.textPrimary,
+  backgroundColor: colors.surfaceSubtle || "#F3F4F6",
+},
+
+createHubButton: {
+  paddingHorizontal: 14,
+  paddingVertical: 11,
+  borderRadius: 12,
+  backgroundColor: colors.textPrimary,
+},
+
+createHubButtonText: {
+  color: "#FFFFFF",
+  fontWeight: "800",
+  fontSize: 12,
+},
+
+sectionHeaderRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "space-between",
+  marginBottom: 8,
+},
+
+createHubLink: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 4,
+},
+
+createHubLinkText: {
+  color: colors.primary,
+  fontWeight: "700",
+  fontSize: 13,
+},
+
+  hubRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 10,
+  paddingVertical: 10,
+},
+
+hubIcon: {
+  width: 34,
+  height: 34,
+  borderRadius: 17,
+  alignItems: "center",
+  justifyContent: "center",
+  backgroundColor: colors.surfaceSubtle || "#F3F4F6",
+  borderWidth: 1,
+  borderColor: colors.borderSubtle || "#E5E7EB",
+},
+
+hubName: {
+  fontSize: 14,
+  fontWeight: "800",
+  color: colors.textPrimary,
+},
+
+hubSubtext: {
+  marginTop: 2,
+  fontSize: 12,
+  fontWeight: "600",
+  color: colors.textMuted,
+},
+
+featuredBadge: {
+  paddingHorizontal: 10,
+  paddingVertical: 5,
+  borderRadius: 999,
+  backgroundColor: colors.textPrimary,
+},
+
+featuredText: {
+  color: "#FFFFFF",
+  fontSize: 11,
+  fontWeight: "800",
+},
+
+hubEmptyText: {
+  fontSize: 12,
+  color: colors.textMuted,
+  fontWeight: "600",
+  marginBottom: 10,
+},
+
+addHubButton: {
+  marginTop: 8,
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 8,
+  alignSelf: "flex-start",
+  paddingHorizontal: 12,
+  paddingVertical: 9,
+  borderRadius: 999,
+  backgroundColor: colors.surfaceSubtle || "#F3F4F6",
+  borderWidth: 1,
+  borderColor: colors.borderSubtle || "#E5E7EB",
+},
+
+addHubText: {
+  fontSize: 12,
+  fontWeight: "800",
+  color: colors.textPrimary,
+},
+
   savedText: {
   marginTop: 6,
   fontSize: 11,
   fontWeight: "700",
   color: colors.textMuted,
+},
+
+modalBackdrop: {
+  flex: 1,
+  backgroundColor: "rgba(0,0,0,0.45)",
+  justifyContent: "center",
+  alignItems: "center",
+  padding: 20,
+},
+
+modalCard: {
+  width: "100%",
+  maxWidth: 520,
+  backgroundColor: colors.surface,
+  borderRadius: 18,
+  padding: 16,
+  maxHeight: "70%",
+},
+
+modalHeader: {
+  flexDirection: "row",
+  justifyContent: "space-between",
+  alignItems: "center",
+  marginBottom: 16,
+},
+
+modalTitle: {
+  fontSize: 18,
+  fontWeight: "800",
+  color: colors.textPrimary,
+},
+
+modalEmptyText: {
+  textAlign: "center",
+  color: colors.textMuted,
+  fontWeight: "600",
+},
+modalEmptyState: {
+  alignItems: "center",
+  justifyContent: "center",
+  paddingVertical: 28,
+  paddingHorizontal: 16,
+},
+
+modalEmptyTitle: {
+  marginTop: 10,
+  fontSize: 15,
+  fontWeight: "800",
+  color: colors.textPrimary,
+},
+
+modalEmptyText: {
+  marginTop: 6,
+  textAlign: "center",
+  color: colors.textMuted,
+  fontWeight: "600",
+  lineHeight: 18,
+},
+
+hubPickerRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 12,
+  paddingVertical: 12,
+  borderBottomWidth: StyleSheet.hairlineWidth,
+  borderBottomColor: colors.borderSubtle || "#E5E7EB",
 },
 
   statusCard: {

@@ -16,6 +16,7 @@ const keeprLogo = require("../../assets/app_logo_icon.png");
 export default function PublicShell({
   children,
   kac,
+  scroll = true,
 }) {
   return (
   <View style={styles.screen}>
@@ -37,7 +38,7 @@ export default function PublicShell({
           <Image source={keeprLogo} style={styles.logo} resizeMode="contain" />
 
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={styles.title}>Keepr™ Story</Text>
+            <Text style={styles.title}>Keepr™</Text>
             <Text style={styles.subtitle}>Documented ownership continuity.</Text>
           </View>
         </TouchableOpacity>
@@ -53,19 +54,25 @@ export default function PublicShell({
       </View>
     </View>
 
-    <ScrollView
-      style={styles.scroll}
-      contentContainerStyle={styles.scrollContent}
-      showsVerticalScrollIndicator={false}
-    >
-      <View style={styles.container}>{children}</View>
+    {scroll ? (
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.container}>{children}</View>
 
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>
-          Powered by Keepr™ — documented ownership continuity for the things that matter.
-        </Text>
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>
+            Powered by Keepr™ — documented ownership continuity for the things that matter.
+          </Text>
+        </View>
+      </ScrollView>
+    ) : (
+      <View style={{ flex: 1 }}>
+        <View style={styles.container}>{children}</View>
       </View>
-    </ScrollView>
+    )}
   </View>
 );
 }

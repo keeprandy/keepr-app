@@ -28,6 +28,7 @@ import { getSignedUrl } from "../lib/attachmentsApi";
 import { useFocusEffect } from "@react-navigation/native";
 
 const LIFECYCLE_STATES = [
+  "Fully Operational",
   "Under Contract",
   "Owned – Pre-Rehab",
   "Active Rehab",

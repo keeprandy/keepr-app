@@ -71,6 +71,11 @@ export default function MoreScreen({ navigation }) {
             label="Team"
             onPress={() => navigation.navigate("Team")}
           />
+            <Item
+            icon="albums-outline"
+            label="KeeprHubs"
+            onPress={() => navigation.navigate("MyHubs")}
+          />
           <Item
             icon="shield-checkmark-outline"
             label="Keepr Pros"

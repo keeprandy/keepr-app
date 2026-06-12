@@ -226,8 +226,23 @@ export default function PublicKeeprStoryScreen({ navigation, route }) {
   const { width, height } = useWindowDimensions();
   const isWide = IS_WEB && width >= 980;
 
-  const kac = route?.params?.kac || null;
+const kac = route?.params?.kac || null;
 const assetId = route?.params?.assetId || null;
+
+const webParams =
+  Platform.OS === "web" && typeof window !== "undefined"
+    ? new URLSearchParams(window.location.search)
+    : null;
+
+const originHubSlug =
+  route?.params?.hubSlug ||
+  webParams?.get("hub") ||
+  null;
+
+const originHubName =
+  route?.params?.hubName ||
+  webParams?.get("hubName") ||
+  null;
 
   const [loading, setLoading] = useState(true);
   const [asset, setAsset] = useState(null);
@@ -263,7 +278,7 @@ const assetId = route?.params?.assetId || null;
   const showLocation = storyConfig.showLocation === true;
   const showFinancials = storyConfig.showFinancials === true;
 
-  const timelineMode = storyConfig.showTimeline || "highlights_only";
+  const timelineMode = storyConfig.showTimeline || "all";
 
   const scrollRef = useRef(null);
   const shareCardCaptureRef = useRef(null);
@@ -513,6 +528,19 @@ if (kac) {
     loadPublicStory();
   }, [loadPublicStory]);
 
+  const goBackToOriginHub = useCallback(() => {
+  if (!originHubSlug) return;
+
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    window.location.href = `/h/${originHubSlug}`;
+    return;
+  }
+
+  navigation.navigate("KeeprHub", {
+    slug: originHubSlug,
+  });
+}, [navigation, originHubSlug]);
+
   /* ------------------------------------------------------------------------ */
   /*                                   LOADING                                */
   /* ------------------------------------------------------------------------ */
@@ -549,6 +577,19 @@ if (!asset || !publicEnabled) {
 return (
   <>
   <PublicShell kac={kac || asset?.kac_id}>
+
+            {originHubSlug && (
+          <TouchableOpacity
+            style={styles.originHubBack}
+            onPress={goBackToOriginHub}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="chevron-back-outline" size={18} color={colors.textPrimary} />
+            <Text style={styles.originHubBackText}>
+              Back to {originHubName || "Hub"}
+            </Text>
+          </TouchableOpacity>
+        )}
 
         {/* HERO */}
         {showHero && (
@@ -807,10 +848,7 @@ return (
                 <Text style={styles.sectionTitle}>Ownership Timeline</Text>
               </View>
 
-              {(timelineMode === "highlights_only"
-                  ? timeline.slice(0, 5)
-                  : timeline
-                ).map((item) => (
+                {timeline.map((item) => (
                 <TimelineRow
                   key={item.id}
                   item={item}
@@ -1159,6 +1197,27 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+
+  originHubBack: {
+  alignSelf: "flex-start",
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 6,
+  paddingHorizontal: 12,
+  paddingVertical: 9,
+  borderRadius: radius.pill,
+  backgroundColor: colors.surface,
+  borderWidth: 1,
+  borderColor: colors.borderSubtle,
+  marginTop: spacing.md,
+  marginBottom: -spacing.sm,
+},
+
+originHubBackText: {
+  fontSize: 13,
+  fontWeight: "900",
+  color: colors.textPrimary,
+},
 
   heroMeta: {
     padding: spacing.lg,

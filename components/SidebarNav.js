@@ -17,6 +17,7 @@ const CONSUMER_ITEMS = [
   { key: "Boats", label: "Boats", icon: "boat-outline" },
   { key: "OtherAssets", label: "Other Assets", icon: "cube-outline" },
   { key: "Notifications", label: "Actions Inbox", icon: "notifications-outline" },
+  { key: "MyHubs", label: "KeeprHubs", icon: "people-outline" },
   { key: "KeeprPros", label: "Keepr™ Pros", icon: "construct-outline" },
   { key: "PlanUpgrade", label: "Plan & Upgrade", icon: "pricetag-outline" },
   { key: "Settings", label: "Settings", icon: "settings-outline" },
@@ -117,6 +118,15 @@ if (
   routeName?.includes("Notification")
 ) {
   return "Notifications";
+}
+if (
+  routeName === "MyHubs" ||
+  routeName === "HubDetail" ||
+  routeName === "EditHub" ||
+  routeName === "ManageHubStories" ||
+  routeName === "InviteHubMembers"
+) {
+  return "MyHubs";
 }
 
   if (routeName === "KeeprPros") return "KeeprPros";
@@ -332,6 +342,11 @@ const navItems = useMemo(() => {
 
     if (key === "OtherAssets") {
   navigationRef.navigate("AssetGroupDashboard", { assetType: "other" });
+  return;
+}
+
+if (key === "MyHubs") {
+  navigationRef.navigate("MyHubs");
   return;
 }
 

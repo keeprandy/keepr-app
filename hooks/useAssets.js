@@ -44,12 +44,11 @@ export function useAssets(type, options = {}) {
         setAssets([]);
         return;
       }
+        let query = supabase.from("assets").select("*");
 
-      let query = supabase.from("assets").select("*");
-
-      // IMPORTANT:
-      // Do NOT filter by owner_id here.
-      // RLS determines which assets are visible (owned + shared via asset_members).
+        if (!includeAllOwners && ownerId) {
+          query = query.eq("owner_id", ownerId);
+        }
       // includeAllOwners remains for admin usage only.
       if (includeAllOwners) {
         // no owner filter

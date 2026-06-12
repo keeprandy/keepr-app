@@ -454,6 +454,9 @@ const [loading, setLoading] = useState(true);
   // Transfer requests (inbox_items)
   const [transferItems, setTransferItems] = useState([]);
   const [transferBusyId, setTransferBusyId] = useState(null);
+  const [hubInviteItems, setHubInviteItems] = useState([]);
+
+  
 
   // lookups
   const [assetNameById, setAssetNameById] = useState({});
@@ -722,7 +725,16 @@ const remindersByDate = useMemo(() => {
         setAssetNameById(assetMap);
         setSystemNameById(systemMap);
         setHomeSystemNameById(homeSystemMap);
-        setTransferItems(inboxRows || []);
+        const inboxItems = inboxRows || [];
+
+      setTransferItems(
+        inboxItems.filter((item) => item.type === "asset_transfer")
+      );
+
+      setHubInviteItems(
+        inboxItems.filter((item) => item.type === "hub_invite")
+      );
+
       } catch (e) {
         console.log("Notifications load error:", e);
       } finally {
@@ -1156,6 +1168,108 @@ const remindersByDate = useMemo(() => {
   }
 };
 
+  /* ------------------------- Hub Invite Handlers ------------------------- */
+
+const handleAcceptHubInvite = async (item) => {
+  if (!item || !ownerId) return;
+
+  const payload = item.payload || {};
+  const hubMemberId = payload.hub_member_id;
+
+  if (!hubMemberId) {
+    Alert.alert("Invite missing", "This invite is missing its member record.");
+    return;
+  }
+
+  setTransferBusyId(item.id);
+
+  try {
+    const { error: memberError } = await supabase
+      .from("hub_members")
+      .update({
+        status: "active",
+        accepted_at: new Date().toISOString(),
+      })
+      .eq("id", hubMemberId)
+      .eq("user_id", ownerId);
+
+    if (memberError) throw memberError;
+
+    const { error: inboxError } = await supabase
+      .from("inbox_items")
+      .update({
+        status: "accepted",
+        responded_at: new Date().toISOString(),
+      })
+      .eq("id", item.id)
+      .eq("to_user_id", ownerId);
+
+    if (inboxError) throw inboxError;
+
+    await loadEverything({ silent: true });
+
+    Alert.alert(
+      "Welcome to the Hub",
+      `You've joined ${payload.hub_name || "this KeeprHub"}.`
+    );
+  } catch (e) {
+    Alert.alert("Could not accept invite", e?.message || "Please try again.");
+  } finally {
+    setTransferBusyId(null);
+  }
+};
+
+const handleDeclineHubInvite = async (item) => {
+  if (!item || !ownerId) return;
+
+  const payload = item.payload || {};
+  const hubMemberId = payload.hub_member_id;
+
+  setTransferBusyId(item.id);
+
+  try {
+    if (hubMemberId) {
+      await supabase
+        .from("hub_members")
+        .update({
+          status: "declined",
+          accepted_at: null,
+        })
+        .eq("id", hubMemberId)
+        .eq("user_id", ownerId);
+    }
+
+    const { error } = await supabase
+      .from("inbox_items")
+      .update({
+        status: "declined",
+        responded_at: new Date().toISOString(),
+      })
+      .eq("id", item.id)
+      .eq("to_user_id", ownerId);
+
+    if (error) throw error;
+
+    await loadEverything({ silent: true });
+  } catch (e) {
+    Alert.alert("Could not decline invite", e?.message || "Please try again.");
+  } finally {
+    setTransferBusyId(null);
+  }
+};
+
+const handleViewHubInvite = (item) => {
+  const payload = item.payload || {};
+  if (!payload.hub_slug) {
+    Alert.alert("Hub unavailable", "This invite is missing the Hub link.");
+    return;
+  }
+
+  navigation.navigate("KeeprHub", {
+    slug: payload.hub_slug,
+  });
+};
+
   /* ------------------------- render helpers ------------------------- */
 
   const badgeForStatus = (statusRaw) => {
@@ -1433,7 +1547,7 @@ return (
   const renderTransferCard = (item) => {
     const payload = item?.payload || {};
     const assetName =
-      payload?.asset_name || item?.payload?.assetName || "Asset";
+      payload?.asset_name || payload?.assetName || "Unknown asset";
     const fromName =
       payload?.from_name ||
       payload?.fromEmail ||
@@ -1697,6 +1811,84 @@ Use this for your own forwarding or with trusted sources.
             />
           </TouchableOpacity>
         )}
+        {/* ---------------- Hub Invites--------------- */}
+        <Text style={styles.sectionTitle}>Hub invites</Text>
+
+        {hubInviteItems.length === 0 ? (
+          <View style={styles.emptyRow}>
+            <Ionicons name="people-outline" size={18} color={colors.textMuted} />
+            <Text style={styles.emptyText}>
+              No Hub invites yet.
+            </Text>
+          </View>
+        ) : (
+          <View style={{ gap: spacing.md }}>
+            {hubInviteItems.map((item) => {
+              const payload = item.payload || {};
+              const hubName = payload.hub_name || "KeeprHub";
+              const hubDescription =
+                payload.hub_description ||
+                "A shared space for members to showcase public Asset Stories.";
+
+              return (
+                <View key={item.id} style={styles.transferCard}>
+                  <View style={styles.transferHeaderRow}>
+                    <View style={styles.transferIcon}>
+                      <Ionicons name="people-outline" size={18} color="#2563EB" />
+                    </View>
+
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.transferTitle} numberOfLines={2}>
+                        {hubName}
+                      </Text>
+                      <Text style={styles.transferMeta}>
+                        Invited as {payload.role || "member"}
+                      </Text>
+                    </View>
+
+                    <View style={[styles.transferStatusPill, styles.transferStatusPending]}>
+                      <Text style={styles.transferStatusText}>PENDING</Text>
+                    </View>
+                  </View>
+
+                  <Text style={styles.transferBody}>
+                    {hubDescription}
+                  </Text>
+
+                  <View style={styles.transferActionsRow}>
+                    <TouchableOpacity
+                      style={styles.transferSecondaryBtn}
+                      onPress={() => handleDeclineHubInvite(item)}
+                    >
+                      <Ionicons name="close-circle-outline" size={16} color="#DC2626" />
+                      <Text style={styles.transferSecondaryText}>Decline</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.transferSecondaryBtn}
+                      onPress={() => handleViewHubInvite(item)}
+                    >
+                      <Ionicons name="open-outline" size={16} color="#2563EB" />
+                      <Text style={[styles.transferSecondaryText, { color: "#2563EB" }]}>
+                        View Hub
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.transferPrimaryBtn}
+                      onPress={() => handleAcceptHubInvite(item)}
+                    >
+                      <Ionicons name="checkmark-circle-outline" size={16} color="#FFF" />
+                      <Text style={styles.transferPrimaryText}>Accept</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
+
+        <View style={{ height: spacing.xl }} />
 
         {/* ---------------- Transfer requests ---------------- */}
         <Text style={styles.sectionTitle}>Transfer requests</Text>
