@@ -132,13 +132,15 @@ export default function HubDetailScreen({ navigation, route }) {
     navigation.navigate("KeeprHub", { slug: hubSlug });
   };
 
-    const currentMember = members.find(
-      (m) => m.user_id === user?.id
-    );
+const currentMember = members.find(
+  (m) => String(m.user_id) === String(user?.id)
+);
 
-    const canManage =
-      currentMember?.role === "owner" ||
-      currentMember?.role === "admin";
+const canAddStory = !!currentMember || !!user?.id;
+
+const canManage =
+  currentMember?.role === "owner" ||
+  currentMember?.role === "admin";
 
   if (loading) {
     return (
@@ -204,7 +206,7 @@ export default function HubDetailScreen({ navigation, route }) {
           <TouchableOpacity
             style={styles.primaryButton}
             onPress={() =>
-              navigation.navigate("KeeprHub", {
+              navigation.navigate("KeeprHubInternal", {
                 hubId: hub.id,
                 mode: "internal",
               })
@@ -213,19 +215,17 @@ export default function HubDetailScreen({ navigation, route }) {
             <Ionicons name="eye-outline" size={16} color="white" />
             <Text style={styles.primaryButtonText}>View Hub</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.primaryButton} onPress={openPublicHub}>
-            <Ionicons name="open-outline" size={16} color="#fff" />
-            <Text style={styles.primaryButtonText}>Open Public Hub</Text>
-          </TouchableOpacity>
+          {canAddStory? (
           <TouchableOpacity
-          style={styles.secondaryButton}
-          onPress={() => navigation.navigate("ManageHubStories", { hubId })}
-        >
-          <Ionicons name="add-circle-outline" size={16} color={colors.textPrimary} />
-          <Text style={styles.secondaryButtonText}>Add Asset Story</Text>
-        </TouchableOpacity>
-        </View>
+            style={styles.secondaryButton}
+            onPress={() => navigation.navigate("AddHubStory", { hubId })}
+          >
+            <Ionicons name="add-circle-outline" size={16} color={colors.textPrimary} />
+            <Text style={styles.secondaryButtonText}>Add Asset Story</Text>
+          </TouchableOpacity>
+        ) : null}
 
+        </View>
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Stories</Text>
           <View style={styles.card}>

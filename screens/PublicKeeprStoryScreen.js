@@ -227,12 +227,26 @@ export default function PublicKeeprStoryScreen({ navigation, route }) {
   const isWide = IS_WEB && width >= 980;
 
 const kac = route?.params?.kac || null;
-const assetId = route?.params?.assetId || null;
 
 const webParams =
   Platform.OS === "web" && typeof window !== "undefined"
     ? new URLSearchParams(window.location.search)
     : null;
+
+const assetId =
+  route?.params?.assetId ||
+  webParams?.get("assetId") ||
+  null;
+
+const originHubId =
+  route?.params?.hubId ||
+  webParams?.get("hubId") ||
+  null;
+
+const isInternalMode =
+  route?.params?.mode === "internal" ||
+  webParams?.get("mode") === "internal";
+
 
 const originHubSlug =
   route?.params?.hubSlug ||
@@ -243,6 +257,7 @@ const originHubName =
   route?.params?.hubName ||
   webParams?.get("hubName") ||
   null;
+
 
   const [loading, setLoading] = useState(true);
   const [asset, setAsset] = useState(null);
@@ -256,6 +271,7 @@ const originHubName =
   const [expandedTimelineId, setExpandedTimelineId] = useState(null);
   const [shareModalVisible, setShareModalVisible] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [ownerProfile, setOwnerProfile] = useState(null);
 
   const publicConfig =
   asset?.public_config ||
@@ -305,6 +321,8 @@ const originHubName =
       Alert.alert("Share failed", e?.message || "Unable to open the share sheet.");
     }
   }, [assetTitle, publicStoryUrl]);
+
+const ownerDisplayName = asset?.owner_name || null;
 
   const handleCopyPublicLink = useCallback(async () => {
     if (!publicStoryUrl) return;
@@ -432,7 +450,9 @@ if (kac) {
     }
 
     setAsset(assetRow);
+
     const publicAssetId = assetRow.asset_id || assetRow.id;
+
     const publicKac = assetRow.kac_id || kac;
 
       logPublicStoryLoad("PUBLIC STORY ASSET ROW:", assetRow);
@@ -529,44 +549,67 @@ if (kac) {
   }, [loadPublicStory]);
 
   const goBackToOriginHub = useCallback(() => {
-  if (!originHubSlug) return;
+    if (isInternalMode && originHubId) {
+      navigation.navigate("KeeprHubInternal", {
+        hubId: originHubId,
+        mode: "internal",
+      });
+      return;
+    }
 
-  if (Platform.OS === "web" && typeof window !== "undefined") {
-    window.location.href = `/h/${originHubSlug}`;
-    return;
+    if (!originHubSlug) return;
+
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      window.location.href = `/h/${originHubSlug}`;
+      return;
+    }
+
+    navigation.navigate("KeeprHub", { slug: originHubSlug });
+  }, [navigation, originHubSlug, isInternalMode, originHubId]);
+
+  const renderShell = (children) => {
+  if (isInternalMode) {
+    return (
+        <SafeAreaView
+          style={styles.internalStorySafe}
+          edges={["top", "left", "right", "bottom"]}
+        >
+        <View style={styles.internalStoryShell}>
+          {children}
+        </View>
+      </SafeAreaView>
+    );
   }
 
-  navigation.navigate("KeeprHub", {
-    slug: originHubSlug,
-  });
-}, [navigation, originHubSlug]);
+  return (
+    <PublicShell kac={kac || asset?.kac_id}>
+      {children}
+    </PublicShell>
+  );
+};
 
   /* ------------------------------------------------------------------------ */
   /*                                   LOADING                                */
   /* ------------------------------------------------------------------------ */
 
-  if (loading) {
-  return (
-    <PublicShell kac={kac}>
-      <View style={styles.centered}>
-        <ActivityIndicator />
-        <Text style={{ marginTop: spacing.sm }}>Loading Keepr Story...</Text>
-      </View>
-    </PublicShell>
+if (loading) {
+  return renderShell(
+    <View style={styles.centered}>
+      <ActivityIndicator />
+      <Text style={{ marginTop: spacing.sm }}>Loading Keepr Story...</Text>
+    </View>
   );
 }
 
 if (!asset || !publicEnabled) {
-  return (
-    <PublicShell kac={kac}>
-      <View style={styles.centered}>
-        <Text style={styles.notFoundTitle}>Story not found</Text>
-        <Text style={styles.notFoundText}>
-          This Keepr Story may be private or unavailable.
-        </Text>
-      </View>
-    </PublicShell>
-  );
+  return renderShell(
+  <View style={styles.centered}>
+    <Text style={styles.notFoundTitle}>Story not found</Text>
+    <Text style={styles.notFoundText}>
+      This Keepr Story may be private or unavailable.
+    </Text>
+  </View>
+);
 }
 
 
@@ -576,9 +619,10 @@ if (!asset || !publicEnabled) {
 
 return (
   <>
-  <PublicShell kac={kac || asset?.kac_id}>
+    {renderShell(
+      <>
 
-            {originHubSlug && (
+            {(originHubSlug || isInternalMode) && (
           <TouchableOpacity
             style={styles.originHubBack}
             onPress={goBackToOriginHub}
@@ -642,6 +686,14 @@ return (
             <Text style={styles.heroSubtitle}>
               Documented ownership story and stewardship.
             </Text>
+
+            {ownerDisplayName ? (
+              <View style={styles.ownerByline}>
+                <Ionicons name="person-circle-outline" size={16} color={colors.textSecondary} />
+                <Text style={styles.ownerBylineText}>Owned by {ownerDisplayName}</Text>
+              </View>
+            ) : null}
+
             <Image
             source={keeprEnabledMark}
             style={styles.keeprEnabledMark}
@@ -776,7 +828,6 @@ return (
         )}
         
         {/* PUBLIC TABS */}
-
         <View style={styles.tabsRow}>
           {timelineMode !== "hidden" && (
           <TouchableOpacity
@@ -986,7 +1037,8 @@ return (
     </TouchableOpacity>
   </View>
 </Modal>
-  </PublicShell>
+      </>
+    )}
   <Modal
     visible={shareModalVisible}
     transparent
@@ -1219,6 +1271,19 @@ originHubBackText: {
   color: colors.textPrimary,
 },
 
+internalStoryShell: {
+  flex: 1,
+  width: "100%",
+  maxWidth: 1180,
+  alignSelf: "center",
+  paddingHorizontal: 14,
+  paddingBottom: spacing.xl,
+},
+internalStorySafe: {
+  flex: 1,
+  backgroundColor: colors.background,
+},
+
   heroMeta: {
     padding: spacing.lg,
   },
@@ -1226,6 +1291,19 @@ originHubBackText: {
   heroMetaWide: {
     flex: 1,
   },
+
+  ownerByline: {
+  marginTop: 8,
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 6,
+},
+
+ownerBylineText: {
+  fontSize: 13,
+  fontWeight: "800",
+  color: colors.textSecondary,
+},
 
   heroZoomHint: {
   position: "absolute",
@@ -1570,7 +1648,7 @@ lightbox: {
 
 lightboxTopBar: {
   position: "absolute",
-  top: 24,
+  top: 48,
   left: 24,
   right: 24,
   zIndex: 5,

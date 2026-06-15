@@ -94,7 +94,7 @@ import ManageHubStoriesScreen from "./screens/ManageHubStoriesScreen";
 import InviteHubMembersScreen from "./screens/InviteHubMembersScreen";
 import MyHubsScreen from "./screens/MyHubsScreen";
 import CreateHubScreen from "./screens/CreateHubScreen";
-
+import AddHubStoryScreen from "./screens/AddHubStoryScreen";
 
 // Screens
 import AssetGroupDashboardScreen from "./screens/AssetGroupDashboardScreen";
@@ -1614,6 +1614,9 @@ if (!user) {
           <RootStack.Screen name="InviteHubMembers" component={InviteHubMembersScreen} />
           <RootStack.Screen name="MyHubs" component={MyHubsScreen} />
           <RootStack.Screen name="CreateHub" component={CreateHubScreen} options={{ headerShown: false }}/>
+          <RootStack.Screen name="KeeprHubInternal" component={KeeprHubScreen}/>
+          <RootStack.Screen name="AddHubStory" component={AddHubStoryScreen} />
+          <RootStack.Screen name="KeeprStoryInternal" component={PublicKeeprStoryScreen}/>
           
           <RootStack.Screen name="Invite" component={InviteRedirectScreen} />
           <RootStack.Screen name="Auth" component={AuthScreen} />
@@ -1698,7 +1701,9 @@ const initialRouteName = isResetLink
           <RootStack.Screen name="InviteHubMembers" component={InviteHubMembersScreen} />
           <RootStack.Screen name="MyHubs" component={MyHubsScreen} />
           <RootStack.Screen name="CreateHub" component={CreateHubScreen} options={{ headerShown: false }}/>
-          
+          <RootStack.Screen name="KeeprHubInternal" component={KeeprHubScreen}/>
+          <RootStack.Screen name="AddHubStory" component={AddHubStoryScreen}/>
+          <RootStack.Screen name="KeeprStoryInternal" component={PublicKeeprStoryScreen}/>
           
           <RootStack.Screen name="UploadLab" component={UploadLabScreen} />
 

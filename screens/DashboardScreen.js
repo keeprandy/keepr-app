@@ -932,7 +932,7 @@ if (Platform.OS !== "ios") {
       <SafeAreaView style={layoutStyles.screen}>
         <View style={styles.centered}>
           <ActivityIndicator />
-          <Text style={styles.loadingText}>Loading your worlds…</Text>
+          <Text style={styles.loadingText}>Loading your Stories…</Text>
         </View>
       </SafeAreaView>
     );

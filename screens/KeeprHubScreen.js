@@ -6,7 +6,6 @@ import {
   StyleSheet,
   TextInput,
   TouchableOpacity,
-  FlatList,
   Image,
   Alert,
   useWindowDimensions,
@@ -21,14 +20,21 @@ import { useFocusEffect, useRoute } from "@react-navigation/native";
 import { layoutStyles } from "../styles/layout";
 import { colors, shadows } from "../styles/theme";
 
-import { getSignedUrl } from "../lib/attachmentsApi";
+import { pickAssetHeroUri } from "../lib/assetImageResolver";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { supabase } from "../lib/supabaseClient";
 
 import {
   fetchPublicHubBySlug,
   fetchHubStoryLinks,
   fetchHub,
 } from "../lib/hubsApi";
-import HubShell from "../components/public/HubShell";
+import PublicHubShell from "../components/hubs/PublicHubShell";
+import InternalHubShell from "../components/hubs/InternalHubShell";
+
+  const PROJECT_REF = "jjzjuqxysucqutgjnrkk";
+  const FUNCTIONS_BASE = `https://${PROJECT_REF}.supabase.co/functions/v1`;
+  const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
 const SORT_OPTIONS = [
   { key: "created_desc", label: "Newest" },
@@ -62,6 +68,7 @@ function safeSubtitle(asset) {
   const model = md.model || asset?.model;
   const generation = md.generation || md.trim || md.series;
 
+
   const vehicleLine = [year, make, model, generation].filter(Boolean).join(" ");
   if (vehicleLine) return vehicleLine;
 
@@ -87,19 +94,7 @@ function storyModeLabel(asset) {
   );
 }
 
-function pickHeroUri(asset) {
-  const md = getMd(asset);
 
-  return (
-    asset?.primary_attachment_url ||
-    asset?.hero_thumb_url ||
-    asset?.hero_image_url ||
-    md.hero_url ||
-    md.primary_photo_url ||
-    md.image_url ||
-    null
-  );
-}
 
 function normalizeLinks(rows) {
   return (rows || [])
@@ -145,6 +140,28 @@ function safeOwner(asset) {
     null
   );
 }
+async function fetchPublicStoryMedia(kac) {
+  if (!kac || !ANON_KEY) return [];
+
+  const res = await fetch(`${FUNCTIONS_BASE}/public-story-media`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: ANON_KEY,
+      Authorization: `Bearer ${ANON_KEY}`,
+    },
+    body: JSON.stringify({ kac }),
+  });
+
+  const json = await res.json();
+
+  if (!res.ok) {
+    console.log("HUB PUBLIC STORY MEDIA ERROR:", kac, json);
+    return [];
+  }
+
+  return Array.isArray(json?.media) ? json.media : [];
+}
 
 export default function KeeprHubScreen({ navigation }) {
   const route = useRoute();
@@ -158,7 +175,8 @@ const hubSlug =
   route?.params?.hub?.slug ||
   null;
 
-const isInternal = route?.params?.mode === "internal" || !!hubId;
+const isInternal =
+  route?.name === "KeeprHubInternal";
 
   const [hub, setHub] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -167,6 +185,8 @@ const isInternal = route?.params?.mode === "internal" || !!hubId;
   const [sortKey, setSortKey] = useState("created_desc");
   const [containerWidth, setContainerWidth] = useState(null);
   const [activeChip, setActiveChip] = useState(null);
+  const [currentUserId, setCurrentUserId] = useState(null);
+  
   
   const effectiveWidth = containerWidth || windowWidth;
   const cardGap = 14;
@@ -190,66 +210,45 @@ const isInternal = route?.params?.mode === "internal" || !!hubId;
     [cardWidth]
   );
 
-  const enrichHeroImages = useCallback(async (assetList) => {
-    const heroPlacementIds = assetList
-      .map((asset) => asset?.hero_placement_id)
-      .filter(Boolean);
+const enrichHeroImages = useCallback(async (assetList) => {
+  const heroByAssetId = {};
 
-    if (heroPlacementIds.length === 0) return;
+  for (const asset of assetList || []) {
+    try {
+      const kac = asset?.kac_id;
+      if (!kac) continue;
 
-    const { data: placements, error } = await fetchPlacementAttachments(
-      heroPlacementIds
-    );
+      const mediaRows = await fetchPublicStoryMedia(kac);
 
-    if (error) {
-      console.log("Hub hero placement lookup failed:", error.message);
-      return;
-    }
+      const heroPlacement =
+        mediaRows.find(
+          (x) => String(x.placement_id) === String(asset.hero_placement_id)
+        ) ||
+        mediaRows.find((x) => x.role === "hero") ||
+        null;
 
-    const placementMap = {};
-    for (const p of placements || []) {
-      placementMap[p.id] = p;
-    }
+      const heroUrl = heroPlacement?.image_url || null;
 
-    for (const asset of assetList) {
-      try {
-        let heroUrl = null;
-        const placement = asset?.hero_placement_id
-          ? placementMap[asset.hero_placement_id]
-          : null;
-
-        const attachment = placement?.attachment;
-        if (attachment && !attachment.deleted_at) {
-          if (attachment.url) {
-            heroUrl = attachment.url;
-          } else if (attachment.bucket && attachment.storage_path) {
-            heroUrl = await getSignedUrl({
-              bucket: attachment.bucket,
-              path: attachment.storage_path,
-            });
-          }
-        }
-
-        if (!heroUrl && asset?.hero_image_url) {
-          heroUrl = asset.hero_image_url;
-        }
-
-        if (heroUrl) {
-          setStories((prev) =>
-            prev.map((p) =>
-              p.id === asset.id ? { ...p, primary_attachment_url: heroUrl } : p
-            )
-          );
-        }
-      } catch (heroErr) {
-        console.log(
-          "Hub hero enrichment failed:",
-          asset?.id,
-          heroErr?.message || heroErr
-        );
+      if (heroUrl) {
+        heroByAssetId[asset.id] = heroUrl;
       }
+    } catch (e) {
+      console.log("Hub public media hero failed:", asset?.name, e?.message || e);
     }
-  }, []);
+  }
+
+  setStories((prev) =>
+    prev.map((p) =>
+      heroByAssetId[p.id]
+        ? {
+          ...p,
+          public_hero_url: heroByAssetId[p.id],
+          primary_attachment_url: heroByAssetId[p.id],
+        }
+        : p
+    )
+  );
+}, []);
 
   function metadataValue(asset, key) {
   const md = getMd(asset);
@@ -265,20 +264,38 @@ const isInternal = route?.params?.mode === "internal" || !!hubId;
 const loadHub = useCallback(async () => {
   setLoading(true);
 
+  const { data: authData } = await supabase.auth.getUser();
+  setCurrentUserId(authData?.user?.id || null);
+
+
   try {
     const hubRecord = hubId
       ? await fetchHub(hubId)
       : await fetchPublicHubBySlug(hubSlug || "rally-sport-region");
 
-    setHub(hubRecord);
+    const { data: memberRow, error: memberError } = await supabase
+      .from("hub_members")
+      .select("id, role, user_id")
+      .eq("hub_id", hubRecord.id)
+      .eq("user_id", authData?.user?.id)
+      .maybeSingle();
+
+    if (memberError) {
+      console.log("Hub member lookup failed:", memberError);
+    }
+
+    setHub({
+      ...hubRecord,
+      currentMember: memberRow || null,
+    });
 
     const linkRows = await fetchHubStoryLinks(hubRecord.id);
     const assetStories = normalizeLinks(linkRows);
 
     setStories(assetStories);
+    await enrichHeroImages(assetStories);
     setLoading(false);
 
-    await enrichHeroImages(assetStories);
   } catch (e) {
     console.error(e);
     Alert.alert("Hub unavailable", e?.message || "Failed to load hub.");
@@ -397,12 +414,13 @@ const loadHub = useCallback(async () => {
       // Native fallback. If your navigator uses a different public-story route,
       // update this route name in one place.
       try {
-      navigation.navigate("PublicKeeprStory", {
-        kac,
-        kacId: kac,
-        assetId: asset.id,
+      navigation.navigate("KeeprStoryInternal", {
+        assetId: item.id,
+        kac: item.kac_id,
+        hubId: hub?.id,
         hubSlug: hub?.slug,
         hubName: hub?.name,
+        mode: "internal",
       });
       } catch (e) {
         Linking.openURL(`https://app.keeprhome.com/k/${kac}`);
@@ -413,22 +431,27 @@ const loadHub = useCallback(async () => {
 
   const renderCard = ({ item }) => {
 
-    const heroUri = pickHeroUri(item);
+    const heroUri =
+    item.primary_attachment_url ||
+    item.public_hero_url ||
+    item.hero_thumb_url ||
+    item.hero_image_url ||
+    pickAssetHeroUri(item);
     const mode = storyModeLabel(item);
     const owner = safeOwner(item);
-
 
     return (
       <TouchableOpacity
         onPress={() => {
           if (isInternal) {
-            navigation.navigate("PublicKeeprStory", {
-              assetId: item.id,
-              kac: item.kac_id,
-              hubSlug: hub?.slug,
-              hubName: hub?.name,
-              mode: "internal",
-            });
+          navigation.navigate("KeeprStoryInternal", {
+            assetId: item.id,
+            kac: item.kac_id,
+            hubId: hub?.id,
+            hubSlug: hub?.slug,
+            hubName: hub?.name,
+            mode: "internal",
+          });
           } else {
             openPublicStory(item);
           }
@@ -442,9 +465,16 @@ const loadHub = useCallback(async () => {
           },
         ]}
       >
+      
         <View style={[styles.heroWrap, { height: heroHeight }]}>
           {heroUri ? (
-            <Image source={{ uri: heroUri }} style={styles.hero} resizeMode="cover" />
+            <Image
+              source={{ uri: heroUri }}
+              style={[
+                styles.hero,
+              ]}
+              resizeMode="cover"
+            />
           ) : (
             <View style={styles.heroPlaceholder}>
               <Ionicons name="image-outline" size={28} color={colors.textMuted} />
@@ -583,7 +613,7 @@ const loadHub = useCallback(async () => {
 
       <View style={styles.summaryRow}>
         <Text style={styles.summaryText}>
-          Curated collection of public Keepr Story links
+          Ownership stories shared with this Hub
         </Text>
 
         <TouchableOpacity onPress={loadHub} style={styles.refreshBtn} activeOpacity={0.85}>
@@ -593,6 +623,85 @@ const loadHub = useCallback(async () => {
       </View>
     </View>
   );
+
+  const currentMember =
+    hub?.members?.find((m) => String(m.user_id) === String(currentUserId)) ||
+    hub?.currentMember ||
+    null;
+
+  const memberRole = currentMember?.role;
+
+  const canManageHub = memberRole === "owner" || memberRole === "admin";
+  const canManageStories = canManageHub;
+
+  const canInviteMembers =
+    canManageHub || hub?.settings?.members_can_invite === true;
+  
+const hubActions = isInternal ? (
+  <View style={styles.hubActions}>
+    {canManageHub ? (
+      <TouchableOpacity
+        style={styles.primaryHubAction}
+        onPress={() =>
+          navigation.navigate("HubDetail", {
+            hubId: hub?.id,
+            hub,
+          })
+        }
+      >
+        <Ionicons name="settings-outline" size={16} color="#fff" />
+        <Text style={styles.primaryHubActionText}>Manage Hub</Text>
+      </TouchableOpacity>
+    ) : null}
+
+    <TouchableOpacity
+      style={styles.secondaryHubAction}
+      onPress={() => {
+        if (!hub?.slug) return;
+
+        if (Platform.OS === "web" && typeof window !== "undefined") {
+          window.open(`/h/${hub.slug}`, "_blank", "noopener,noreferrer");
+          return;
+        }
+
+        navigation.navigate("KeeprHub", { slug: hub.slug });
+      }}
+    >
+      <Ionicons name="globe-outline" size={16} color={colors.textPrimary} />
+      <Text style={styles.secondaryHubActionText}>Launch the Public Hub</Text>
+    </TouchableOpacity>
+
+    {canManageStories ? (
+      <TouchableOpacity
+        style={styles.secondaryHubAction}
+        onPress={() =>
+          navigation.navigate("ManageHubStories", {
+            hubId: hub?.id,
+            hub,
+          })
+        }
+      >
+        <Ionicons name="albums-outline" size={16} color={colors.textPrimary} />
+        <Text style={styles.secondaryHubActionText}>Manage Stories</Text>
+      </TouchableOpacity>
+    ) : null}
+
+    {canInviteMembers ? (
+      <TouchableOpacity
+        style={styles.secondaryHubAction}
+        onPress={() =>
+          navigation.navigate("InviteHubMembers", {
+            hubId: hub?.id,
+            hub,
+          })
+        }
+      >
+        <Ionicons name="person-add-outline" size={16} color={colors.textPrimary} />
+        <Text style={styles.secondaryHubActionText}>Invite Members</Text>
+      </TouchableOpacity>
+    ) : null}
+  </View>
+) : null;
 
 const hubContent = (
   <View
@@ -604,6 +713,8 @@ const hubContent = (
       }
     }}
   >
+
+    {hubActions}
     {header}
 
     {loading ? (
@@ -631,46 +742,33 @@ const hubContent = (
   </View>
 );
 
+const shellProps = {
+  hub,
+  stats: {
+    stories: filtered.length,
+    owners: ownerChips.length,
+    makes: makeCount,
+  },
+  logoUrl: hub?.logo_url || hub?.photo_url || hub?.hero_image_url,
+};
+
 if (isInternal) {
-  return hubContent;
+  return (
+    <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
+      <InternalHubShell {...shellProps}>
+        {hubContent}
+      </InternalHubShell>
+    </SafeAreaView>
+  );
 }
 
 return (
-  <HubShell
-    hub={hub}
-    stats={{
-      stories: filtered.length,
-      owners: ownerChips.length,
-      makes: makeCount,
-    }}
-    logoUrl={hub?.logo_url || hub?.photo_url}
-  >
-    {hubContent}
-  </HubShell>
+  <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
+    <PublicHubShell {...shellProps}>
+      {hubContent}
+    </PublicHubShell>
+  </SafeAreaView>
 );
-}
-
-/**
- * Local helper keeps this screen independent from the original SuperKeepr screen.
- * If this lookup already exists in a shared API later, move it there.
- */
-async function fetchPlacementAttachments(heroPlacementIds) {
-  const { supabase } = require("../lib/supabaseClient");
-
-  return supabase
-    .from("attachment_placements")
-    .select(`
-      id,
-      attachment:attachments (
-        bucket,
-        storage_path,
-        url,
-        mime_type,
-        kind,
-        deleted_at
-      )
-    `)
-    .in("id", heroPlacementIds);
 }
 
 const styles = StyleSheet.create({
@@ -700,6 +798,47 @@ const styles = StyleSheet.create({
   fontWeight: "800",
   letterSpacing: 1,
   color: colors.textMuted,
+},
+
+hubActions: {
+  flexDirection: "row",
+  flexWrap: "wrap",
+  gap: 10,
+  marginBottom: 18,
+},
+
+primaryHubAction: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 8,
+  backgroundColor: "#111827",
+  borderRadius: 999,
+  paddingHorizontal: 16,
+  paddingVertical: 10,
+},
+
+primaryHubActionText: {
+  color: "#fff",
+  fontSize: 13,
+  fontWeight: "800",
+},
+
+secondaryHubAction: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 8,
+  backgroundColor: colors.surface,
+  borderRadius: 999,
+  borderWidth: 1,
+  borderColor: "#11182722",
+  paddingHorizontal: 16,
+  paddingVertical: 10,
+},
+
+secondaryHubActionText: {
+  color: colors.textPrimary,
+  fontSize: 13,
+  fontWeight: "800",
 },
 
 grid: {
