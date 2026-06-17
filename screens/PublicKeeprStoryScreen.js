@@ -873,16 +873,33 @@ return (
               styles.tabButton,
               activeTab === "actions" && styles.tabButtonActive,
             ]}
-            onPress={() => navigation.navigate("PublicAction", { kac })}
+            onPress={() => {
+              if (isInternalMode) {
+                navigation.navigate("KeeprAction", {
+                  assetId: asset?.asset_id || asset?.id,
+                  kac,
+                  assetName: asset?.name,
+                  hubId: originHubId,
+                  hubName: originHubName,
+                  mode: "internal",
+                });
+                return;
+              }
+
+              navigation.navigate("PublicAction", {
+                kac,
+                assetId: asset?.asset_id || asset?.id,
+              });
+            }}
           >
-              <Text
-              style={[
-                styles.tabLabel,
-                activeTab === "actions" && styles.tabLabelActive,
-              ]}
-            >
-              Actions
-            </Text>
+          <Text
+            style={[
+              styles.tabLabel,
+              activeTab === "actions" && styles.tabLabelActive,
+            ]}
+          >
+            {isInternalMode ? "Messages" : "Actions"}
+          </Text>
           </TouchableOpacity>
           )}
 

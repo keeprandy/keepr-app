@@ -24,6 +24,7 @@ import {
   fetchMyHubs,
   addStoryToHub,
   createHub,
+  removeStoryFromHub,
 } from "../lib/hubsApi";
 
 
@@ -131,7 +132,12 @@ export default function PublicConfigScreen({ navigation, route }) {
   const [actionsEnabled, setActionsEnabled] = React.useState(
     getDefaultActionsForMode("inquiry")
   );
-
+  const [askingPrice, setAskingPrice] = React.useState("");
+  const [externalUrl, setExternalUrl] = React.useState("");
+  const [paymentUrl, setPaymentUrl] = React.useState("");
+  const [rentalRate, setRentalRate] = React.useState("");
+  const [termsUrl, setTermsUrl] = React.useState("");
+  const [allowOffers, setAllowOffers] = React.useState(false);
 
   const [showLocation, setShowLocation] = React.useState(false);
   const [showFinancials, setShowFinancials] = React.useState(false);
@@ -242,6 +248,31 @@ const openHubPicker = async () => {
         Alert.alert("Could not add to Hub", e?.message || "Try again.");
       }
     };
+
+    const handleRemoveStoryFromHub = async (hubLink) => {
+      Alert.alert(
+        "Remove from Hub?",
+        `Remove this Story from ${hubLink.name || "this Hub"}?`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Remove",
+            style: "destructive",
+            onPress: async () => {
+              try {
+                await removeStoryFromHub(hubLink.id);
+
+                const links = await fetchAssetHubLinks(assetId);
+                setHubLinks(links || []);
+              } catch (e) {
+                Alert.alert("Could not remove from Hub", e?.message || "Try again.");
+              }
+            },
+          },
+        ]
+      );
+    };
+
     const handleCreateHub = () => {
       setNewHubName("");
       setCreateHubModalVisible(true);
@@ -703,7 +734,17 @@ React.useEffect(() => {
               <Text style={styles.hubName}>{hub.name}</Text>
               <Text style={styles.hubSubtext}>Public story link shared to this Hub</Text>
             </View>
-
+            <TouchableOpacity
+              style={styles.removeHubButton}
+              onPress={(e) => {
+                e?.stopPropagation?.();
+                handleRemoveStoryFromHub(hub);
+              }}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="remove-circle-outline" size={16} color="#DC2626" />
+              <Text style={styles.removeHubText}>Remove</Text>
+            </TouchableOpacity>
             {hub.featured ? (
               <View style={styles.featuredBadge}>
                 <Text style={styles.featuredText}>Featured</Text>
@@ -1105,6 +1146,24 @@ createHubButtonText: {
   color: "#FFFFFF",
   fontWeight: "800",
   fontSize: 12,
+},
+
+removeHubButton: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 4,
+  paddingHorizontal: 10,
+  paddingVertical: 6,
+  borderRadius: 999,
+  backgroundColor: "rgba(220, 38, 38, 0.08)",
+  borderWidth: 1,
+  borderColor: "rgba(220, 38, 38, 0.20)",
+},
+
+removeHubText: {
+  fontSize: 11,
+  fontWeight: "800",
+  color: "#DC2626",
 },
 
 sectionHeaderRow: {

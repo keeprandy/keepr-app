@@ -84,6 +84,7 @@ import KeeprStoryScreen from "./screens/KeeprStoryScreen";
 
 // Public Action Screen Launched from QR Code or Direct Link
 import PublicActionScreen from "./screens/PublicActionScreen";
+import KeeprActionScreen from "./screens/KeeprActionScreen";
 import SendToKeeprScreen from "./screens/SendToKeeprScreen";
 import SendToKeeprAssetPicker from "./screens/SendToKeeprAssetPicker";
 import PublicKeeprStoryScreen from "./screens/PublicKeeprStoryScreen";
@@ -181,6 +182,7 @@ import EditAssetScreen from "./screens/EditAssetScreen";
 import SettingsScreen from "./screens/SettingsScreen";
 import PublicConfigScreen from "./screens/PublicConfigScreen";
 import PublicConfigAssetPickerScreen from "./screens/PublicConfigAssetPickerScreen";
+
 
 // Auth
 import { AuthProvider, useAuth } from "./context/AuthContext";
@@ -1605,6 +1607,7 @@ if (!user) {
           {/* Public KAC routes MUST be accessible without auth */}
           <RootStack.Screen name="KacRoute" component={KacRouteScreen} />
           <RootStack.Screen name="PublicAction" component={PublicActionScreen} />
+          <RootStack.Screen name="KeeprAction" component={KeeprActionScreen} options={{ headerShown: false }} />
           <RootStack.Screen name="KacResolve" component={KacResolveScreen} />
           <RootStack.Screen name="PublicKeeprStory" component={PublicKeeprStoryScreen}/>
           <RootStack.Screen name="KeeprHub" component={KeeprHubScreen}/>
@@ -1755,6 +1758,7 @@ const initialRouteName = isResetLink
             component={PublicActionScreen}
             options={{ title: "Quick Capture" }}
           />
+          <RootStack.Screen name="KeeprAction" component={KeeprActionScreen} options={{ headerShown: false }} />
           <RootStack.Screen
             name="SendToKeeprAssetPicker"
             component={SendToKeeprAssetPicker}

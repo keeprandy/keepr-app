@@ -688,18 +688,18 @@ const styles = StyleSheet.create({
   },
 
   brandPanel: {
-    width: 420,
+    width: 700,
     justifyContent: "center",
   },
 
   brandContent: {
-    maxWidth: 420,
-    minWidth: 420,
+    maxWidth: 700,
+    minWidth: 700,
   },
 
   heroImage: {
-    width: 440,
-    height: 275,
+    width: 700,
+    height: 415,
     marginBottom: 24,
     resizeMode: "contain",
   },

@@ -20,6 +20,7 @@ import { colors, spacing, radius } from "../styles/theme";
 import { supabase } from "../lib/supabaseClient";
 import { useFocusEffect } from "@react-navigation/native";
 import PublicShell from "../components/public/PublicShell";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 const PROJECT_REF = "jjzjuqxysucqutgjnrkk";
 const FUNCTIONS_BASE = `https://${PROJECT_REF}.supabase.co/functions/v1`;
@@ -74,6 +75,7 @@ function getTokenFromUrlFallback() {
     return null;
   }
 }
+
 
 function getSourceUrl() {
   try {
@@ -237,6 +239,10 @@ export default function PublicActionScreen({ route, navigation }) {
 
   const kac = kacFromParams || getKacFromUrlFallback() || null;
   const token = route?.params?.token || getTokenFromUrlFallback() || null;
+
+  const isInternalMode = route?.params?.mode === "internal";
+  const originHubId = route?.params?.hubId || null;
+  const originHubName = route?.params?.hubName || null;
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -634,6 +640,21 @@ useEffect(() => {
     Alert.alert(label, "Coming soon in Portal V1. This will publish structured demand into the owner’s Event Inbox.");
   };
 
+  const renderShell = (children) => {
+  if (isInternalMode) {
+    return (
+      <SafeAreaView
+        style={styles.internalSafe}
+        edges={["top", "left", "right", "bottom"]}
+      >
+        <View style={styles.internalShell}>{children}</View>
+      </SafeAreaView>
+    );
+  }
+
+  return <PublicShell kac={resolved?.kac || kac}>{children}</PublicShell>;
+};
+
   const handleOpenPublicConfig = () => {
   if (!assetId) {
     Alert.alert("Not ready", "This asset is not fully resolved yet.");
@@ -646,32 +667,40 @@ useEffect(() => {
   });
 };
 
-  if (loading) {
-    return (
-      <PublicShell kac={kac}>
-        <View style={styles.centerFill}>
-          <ActivityIndicator />
-        </View>
-      </PublicShell>
-    );
-  }
+if (loading) {
+  return renderShell(
+    <View style={styles.centerFill}>
+      <ActivityIndicator />
+    </View>
+  );
+}
 
-  if (!kac && !token) {
-    return (
-      <PublicShell kac={kac}>
-        <View style={styles.centerFill}>
-          <Text style={styles.errorText}>Missing KAC.</Text>
-        </View>
-      </PublicShell>
-    );
-  }
-
-  return (
-  <PublicShell kac={resolved?.kac || kac}>
+if (!kac && !token) {
+  return renderShell(
+    <View style={styles.centerFill}>
+      <Text style={styles.errorText}>Missing KAC.</Text>
+    </View>
+  );
+}
+  return renderShell(
+  <>
 
       <View style={styles.actionsTopRow}>
   <TouchableOpacity
-    onPress={() => navigation.navigate("PublicKeeprStory", { kac })}
+    onPress={() => {
+  if (isInternalMode) {
+    navigation.navigate("KeeprStoryInternal", {
+      kac,
+      assetId,
+      hubId: originHubId,
+      hubName: originHubName,
+      mode: "internal",
+    });
+    return;
+  }
+
+  navigation.navigate("PublicKeeprStory", { kac });
+}}
     style={styles.backToStoryBtn}
     activeOpacity={0.85}
   >
@@ -867,8 +896,8 @@ useEffect(() => {
           </Text>
         </View>
       </View>
-    </PublicShell>
-  );
+      </>
+    );
 }
 
 const styles = StyleSheet.create({
@@ -894,6 +923,20 @@ configureBtnText: {
   color: "#FFFFFF",
   fontSize: 12,
   fontWeight: "900",
+},
+
+internalSafe: {
+  flex: 1,
+  backgroundColor: colors.background,
+},
+
+internalShell: {
+  flex: 1,
+  width: "100%",
+  maxWidth: 1180,
+  alignSelf: "center",
+  paddingHorizontal: 14,
+  paddingBottom: spacing.xl,
 },
 
 actionsTopRow: {
