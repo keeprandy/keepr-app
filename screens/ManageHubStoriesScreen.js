@@ -16,6 +16,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../lib/supabaseClient";
 import { addStoryToHub } from "../lib/hubsApi";
 import AddAssetTypeModal from "../components/AddAssetTypeModal";
+import HubActionRow from "../components/hubs/HubActionRow";
 
 import { colors, spacing, radius, shadows } from "../styles/theme";
 import {
@@ -35,6 +36,8 @@ export default function ManageHubStoriesScreen({ navigation, route }) {
 const [myAssets, setMyAssets] = React.useState([]);
 const [addingAssetId, setAddingAssetId] = React.useState(null);
 const [assetTypePickerOpen, setAssetTypePickerOpen] = React.useState(false);
+
+const activationMode = route?.params?.activationMode === true;
 
   const load = React.useCallback(async () => {
     try {
@@ -228,10 +231,25 @@ const createNewAssetStory = () => {
           </TouchableOpacity>
 
           <View style={{ flex: 1 }}>
-            <Text style={styles.title}>Manage Stories</Text>
-            <Text style={styles.subtitle}>{hub?.name}</Text>
+            <Text style={styles.title}>
+            {activationMode ? "Add Your Asset" : "Manage Stories"}
+          </Text>
+            <Text style={styles.subtitle}>
+            {activationMode
+              ? `Share your ownership story with ${hub?.name}`
+              : hub?.name}
+          </Text>
           </View>
         </View>
+        {!activationMode ? (
+          <HubActionRow
+            navigation={navigation}
+            hub={hub}
+            hubId={hubId}
+            canManage={true}
+            active="stories"
+          />
+        ) : null}
         <TouchableOpacity
           style={styles.primaryButton}
           onPress={openStoryPicker}
@@ -265,28 +283,25 @@ const createNewAssetStory = () => {
                     <Text style={styles.rowTitle}>{asset?.name || "Untitled Story"}</Text>
                     <Text style={styles.rowSubtext}>{asset?.kac_id || "Public story"}</Text>
                   </View>
-
-                  <TouchableOpacity
-                    style={[styles.smallButton, row.featured && styles.smallButtonActive]}
-                    onPress={() => toggleFeatured(row)}
-                  >
-                    <Text style={[styles.smallButtonText, row.featured && styles.smallButtonTextActive]}>
-                      {row.featured ? "Featured" : "Feature"}
-                    </Text>
-                  </TouchableOpacity>
-
-                <TouchableOpacity
-                    style={[
-                        styles.removeLinkButton,
-                        { borderWidth: 2, borderColor: "red" }
-                    ]}
-                    onPress={() => {
-                        console.log("REMOVE BUTTON PRESSED");
-                        removeStory(row);
-                    }}
+                {!activationMode ? (
+                  <>
+                    <TouchableOpacity
+                      style={[styles.smallButton, row.featured && styles.smallButtonActive]}
+                      onPress={() => toggleFeatured(row)}
                     >
-                <Text style={styles.removeLinkText}>Remove from Hub</Text>
-                </TouchableOpacity>
+                      <Text style={[styles.smallButtonText, row.featured && styles.smallButtonTextActive]}>
+                        {row.featured ? "Featured" : "Feature"}
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.removeLinkButton, { borderWidth: 2, borderColor: "red" }]}
+                      onPress={() => removeStory(row)}
+                    >
+                      <Text style={styles.removeLinkText}>Remove from Hub</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : null}
                 </View>
               );
             })

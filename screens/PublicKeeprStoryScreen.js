@@ -581,11 +581,28 @@ if (kac) {
     );
   }
 
-  return (
-    <PublicShell kac={kac || asset?.kac_id}>
-      {children}
-    </PublicShell>
-  );
+      return (
+        <PublicShell
+          kac={kac || asset?.kac_id}
+          contextTitle={asset?.name}
+          contextSubtitle="Keepr Story"
+          viewerLabel={
+            ownerDisplayName
+              ? `Owned by ${ownerDisplayName}`
+              : "Public Story"
+          }
+          primaryActionLabel="Open in Keepr"
+          onPrimaryAction={() => {
+            if (Platform.OS === "web") {
+              window.location.href = "/dashboard";
+            } else {
+              navigation.navigate("Dashboard");
+            }
+          }}
+        >
+          {children}
+        </PublicShell>
+      );
 };
 
   /* ------------------------------------------------------------------------ */

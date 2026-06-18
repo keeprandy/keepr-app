@@ -70,6 +70,7 @@ function getAssetTitle(asset) {
     "Ownership Story"
   );
 }
+import HubActionRow from "../components/hubs/HubActionRow";
 
 export default function HubDetailScreen({ navigation, route }) {
   const hubId = route?.params?.hubId;
@@ -178,6 +179,7 @@ const canManage =
   );
 }
 
+
   return (
     <SafeAreaView style={styles.screen}>
       <ScrollView contentContainerStyle={styles.content}>
@@ -198,6 +200,16 @@ const canManage =
             </Text>
           </View>
         </View>
+
+{canManage && (
+        <HubActionRow
+          navigation={navigation}
+          hub={hub}
+          hubId={hubId}
+          canManage={canManage}
+          active="overview"
+        />
+        )}
 
         <View style={styles.card}>
           <Text style={styles.cardEyebrow}>Hub</Text>
@@ -290,41 +302,6 @@ const canManage =
           </View>
         </View>
 
-        {canManage && (
-          <View style={styles.section}>
-            <Text style={styles.sectionLabel}>Administration</Text>
-
-            <View style={styles.card}>
-              <AdminRow
-                icon="create-outline"
-                title="Edit Hub"
-                onPress={() =>
-                  navigation.navigate("EditHub", { hubId })
-                }
-              />
-
-              <AdminRow
-                icon="albums-outline"
-                title="Manage Stories"
-                onPress={() =>
-                  navigation.navigate("ManageHubStories", {
-                    hubId,
-                  })
-                }
-              />
-
-              <AdminRow
-                icon="person-add-outline"
-                title="Invite Members"
-                onPress={() =>
-                  navigation.navigate("InviteHubMembers", {
-                    hubId,
-                  })
-                }
-              />
-            </View>
-          </View>
-        )}
       </ScrollView>
     </SafeAreaView>
   );

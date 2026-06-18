@@ -253,6 +253,8 @@ const linking = {
     
     PublicKeeprStory: "k/:kac",
     PublicAction: "k/:kac/actions",
+    KeeprHubInternal: "KeeprHubInternal",
+    KeeprStoryInternal: "KeeprStoryInternal",
     KeeprHub: "h/:slug",
     KacResolve: "resolve/:kac",
     RootTabs: {
@@ -1398,11 +1400,15 @@ React.useEffect(() => {
   if (Platform.OS === "web") {
     const path = window.location.pathname || "";
 
-    if (
-      path.startsWith("/k/") ||
-      path.startsWith("/h/") ||
-      path.startsWith("/resolve/")
-    ) {
+if (
+  path.startsWith("/k/") ||
+  path.startsWith("/h/") ||
+  path.startsWith("/hub/") ||
+  path.startsWith("/story/") ||
+  path.startsWith("/resolve/") ||
+  path.startsWith("/KeeprHubInternal") ||
+  path.startsWith("/KeeprStoryInternal")
+) {
       didInitialNavResolve.current = true;
       return;
     }
@@ -1657,7 +1663,10 @@ const initialRouteName = isResetLink
           Platform.OS === "web" &&
           !window.location.pathname.startsWith("/k/") &&
           !window.location.pathname.startsWith("/h/") &&
+          !window.location.pathname.startsWith("/hub/") &&
+          !window.location.pathname.startsWith("/story/") &&
           !window.location.pathname.startsWith("/resolve/")
+          
             ? initialNavState
             : undefined
         }
@@ -2053,22 +2062,48 @@ export default function App() {
   const isWebShell = Platform.OS === "web";
   const [currentRouteName, setCurrentRouteName] = React.useState("SplashIntro");
 
-const isPublicPath =
-  Platform.OS === "web" &&
-  typeof window !== "undefined" &&
-  (
-    window.location.pathname.startsWith("/k/") ||
-    window.location.pathname.startsWith("/h/") ||
-    window.location.pathname.startsWith("/resolve/")
-  );
+
+const pathname =
+  Platform.OS === "web" && typeof window !== "undefined"
+    ? window.location.pathname
+    : "";
+
+const searchParams =
+  Platform.OS === "web" && typeof window !== "undefined"
+    ? new URLSearchParams(window.location.search)
+    : null;
+
+const isInternalHubUrl =
+  pathname.startsWith("/hub/");
+
+const isPublicHubUrl =
+  pathname.startsWith("/h/");
+
+const isPublicAssetUrl =
+  pathname.startsWith("/k/") ||
+  pathname.startsWith("/resolve/");
+
+const forceKeeprShell =
+  currentRouteName === "KeeprHubInternal" ||
+  currentRouteName === "KeeprStoryInternal" ||
+  isInternalHubUrl;
+
+const forcePublicShell =
+  !forceKeeprShell &&
+  (isPublicHubUrl || isPublicAssetUrl);
 
 const isPublicWebRoute =
-  isPublicPath ||
-  currentRouteName === "PublicKeeprStory" ||
-  currentRouteName === "PublicAction" ||
-  currentRouteName === "KacRoute" ||
-  currentRouteName === "KacResolve" ||
-  currentRouteName === "KeeprHub";
+  forcePublicShell ||
+  (
+    !forceKeeprShell &&
+    [
+      "PublicKeeprStory",
+      "PublicAction",
+      "KacRoute",
+      "KacResolve",
+      "KeeprHub",
+    ].includes(currentRouteName)
+  );
 
 const hideSidebarRoutes = [
   "StoryPrint", 

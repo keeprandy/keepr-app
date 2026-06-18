@@ -21,6 +21,7 @@ import {
   removeHubMember,
 } from "../lib/hubsApi";
 import { useAuth } from "../context/AuthContext";
+import HubActionRow from "../components/hubs/HubActionRow";
 
 export default function InviteHubMembersScreen({ navigation, route }) {
   const hubId = route?.params?.hubId;
@@ -56,6 +57,14 @@ export default function InviteHubMembersScreen({ navigation, route }) {
 
   const pendingInvites = members.filter((m) => m.status === "invited");
   const activeMembers = members.filter((m) => m.status !== "invited");
+
+  const currentMember = members.find(
+  (m) => String(m.user_id) === String(user?.id)
+);
+
+const canManage =
+  currentMember?.role === "owner" ||
+  currentMember?.role === "admin";
 
   const submitInvite = async () => {
     const cleanEmail = email.trim().toLowerCase();
@@ -130,6 +139,14 @@ export default function InviteHubMembersScreen({ navigation, route }) {
             </Text>
           </View>
         </View>
+
+        <HubActionRow
+          navigation={navigation}
+          hub={hub}
+          hubId={hubId}
+          canManage={canManage}
+          active="members"
+        />
 
         <View style={styles.card}>
           <Text style={styles.label}>Email</Text>

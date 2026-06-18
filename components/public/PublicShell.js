@@ -9,27 +9,50 @@ import {
   Platform,
   TouchableOpacity,
   StatusBar,
+  useWindowDimensions,
 } from "react-native";
 
 const keeprLogo = require("../../assets/app_logo_icon.png");
+
 
 export default function PublicShell({
   children,
   kac,
   scroll = true,
+  showFooter = true,
+
+  contextTitle,
+  contextSubtitle,
+  viewerLabel,
+  primaryActionLabel,
+  onPrimaryAction,
+  onLogoPress,
 }) {
+
+  const { width } = useWindowDimensions();
+const isMobile = width < 720;
+
+
+  console.log("PUBLIC SHELL", {
+  contextTitle,
+  viewerLabel,
+  primaryActionLabel,
+  hasAction: !!onPrimaryAction,
+});
   return (
+    
   <View style={styles.screen}>
     <View style={styles.header}>
       <View style={styles.headerInner}>
         <TouchableOpacity
-          onPress={() => {
+            onPress={() => {
+            if (onLogoPress) {
+              onLogoPress();
+              return;
+            }
+
             if (Platform.OS === "web" && typeof window !== "undefined") {
-              window.open(
-                "https://www.keeprhome.com",
-                "_blank",
-                "noopener,noreferrer"
-              );
+              window.location.href = "/";
             }
           }}
           style={styles.brandRow}
@@ -43,14 +66,44 @@ export default function PublicShell({
           </View>
         </TouchableOpacity>
 
-        {!!kac && (
-          <View style={styles.kacPill}>
-            <Text style={styles.kacLabel}>KAC</Text>
-            <Text numberOfLines={1} style={styles.kacValue}>
-              {kac}
+          {contextTitle && !isMobile ? (
+            <View style={styles.contextBlock}>
+            <Text style={styles.contextTitle} numberOfLines={1}>
+              {contextTitle}
             </Text>
+            {!!contextSubtitle && (
+              <Text style={styles.contextSubtitle} numberOfLines={1}>
+                {contextSubtitle}
+              </Text>
+            )}
           </View>
-        )}
+        ) : null}
+
+        
+        <View style={styles.rightCluster}>
+          {!!viewerLabel && !isMobile && (
+            <View style={styles.viewerPill}>
+              <Text style={styles.viewerLabel}>You are</Text>
+              <Text style={styles.viewerValue}>{viewerLabel}</Text>
+            </View>
+          )}
+
+          {!!kac && (
+            <View style={styles.kacPill}>
+              <Text style={styles.kacLabel}>KAC</Text>
+              <Text numberOfLines={1} style={styles.kacValue}>
+                {kac}
+              </Text>
+            </View>
+          )}
+
+          {!!primaryActionLabel && !!onPrimaryAction && !isMobile && (
+            <TouchableOpacity style={styles.primaryAction} onPress={onPrimaryAction}>
+              <Text style={styles.primaryActionText}>{primaryActionLabel}</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+        
       </View>
     </View>
 
@@ -61,12 +114,13 @@ export default function PublicShell({
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.container}>{children}</View>
-
+      {showFooter ? (
         <View style={styles.footer}>
           <Text style={styles.footerText}>
             Powered by Keepr™ — documented ownership continuity for the things that matter.
           </Text>
         </View>
+        ) : null}
       </ScrollView>
     ) : (
       <View style={{ flex: 1 }}>
@@ -97,12 +151,12 @@ const styles = StyleSheet.create({
   borderBottomWidth: 1,
   borderBottomColor: "#E7EBF0",
 
-  paddingTop:
+paddingTop:
   Platform.OS === "web"
     ? 12
     : Platform.OS === "android"
-    ? (StatusBar.currentHeight || 24) + 12
-    : 60,
+    ? (StatusBar.currentHeight || 24) + 8
+    : 44,
 },
 
   headerInner: {
@@ -117,14 +171,78 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 10,
   },
+
+contextBlock: {
+  flex: 1,
+  minWidth: 0,
+  paddingHorizontal: 14,
+},
+
+contextTitle: {
+  fontSize: 13,
+  fontWeight: "900",
+  color: "#0F172A",
+},
+
+contextSubtitle: {
+  marginTop: 2,
+  fontSize: 11,
+  fontWeight: "700",
+  color: "#64748B",
+},
+
+rightCluster: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 8,
+  flexShrink: 0,
+  marginLeft: "auto",
+},
+
+viewerPill: {
+  borderWidth: 1,
+  borderColor: "#D8DEE8",
+  borderRadius: 999,
+  paddingHorizontal: 11,
+  paddingVertical: 7,
+  backgroundColor: "#F8FAFC",
+},
+
+viewerLabel: {
+  fontSize: 9,
+  fontWeight: "800",
+  color: "#64748B",
+  letterSpacing: 1,
+  textTransform: "uppercase",
+},
+
+viewerValue: {
+  marginTop: 2,
+  fontSize: 11,
+  fontWeight: "900",
+  color: "#0F172A",
+},
+
+primaryAction: {
+  borderRadius: 999,
+  backgroundColor: "#111827",
+  paddingHorizontal: 12,
+  paddingVertical: 9,
+},
+
+primaryActionText: {
+  color: "#fff",
+  fontSize: 12,
+  fontWeight: "900",
+},
   
 
-  brandRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    flex: 1,
-    minWidth: 0,
-  },
+brandRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  minWidth: 0,
+  flexShrink: 0,
+},
 
   logo: {
     width: 34,
@@ -175,7 +293,7 @@ const styles = StyleSheet.create({
     maxWidth: 1400,
     alignSelf: "center",
     paddingHorizontal: 14,
-    paddingTop: 16,
+    paddingTop: 0,
   },
 
   footer: {

@@ -1,5 +1,5 @@
 // screens/KeeprHubScreen.js
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -12,6 +12,10 @@ import {
   ActivityIndicator,
   Platform,
   Linking,
+  Modal,
+  Share,
+  Pressable,
+  ScrollView,
 } from "react-native";
 
 import { Ionicons } from "@expo/vector-icons";
@@ -29,8 +33,14 @@ import {
   fetchHubStoryLinks,
   fetchHub,
 } from "../lib/hubsApi";
+import PublicShell from "../components/public/PublicShell";
 import PublicHubShell from "../components/hubs/PublicHubShell";
 import InternalHubShell from "../components/hubs/InternalHubShell";
+import { getHubUserCapabilities } from "../lib/hubCapabilities";
+
+import * as Clipboard from "expo-clipboard";
+import QRCode from "react-native-qrcode-svg";
+
 
   const PROJECT_REF = "jjzjuqxysucqutgjnrkk";
   const FUNCTIONS_BASE = `https://${PROJECT_REF}.supabase.co/functions/v1`;
@@ -93,8 +103,6 @@ function storyModeLabel(asset) {
     "Current Story"
   );
 }
-
-
 
 function normalizeLinks(rows) {
   return (rows || [])
@@ -169,11 +177,15 @@ export default function KeeprHubScreen({ navigation }) {
 
 const hubId = route?.params?.hubId || route?.params?.hub?.id || null;
 
+const [galleryVisible, setGalleryVisible] = useState(false);
+const [galleryIndex, setGalleryIndex] = useState(0);
+
 const hubSlug =
   route?.params?.slug ||
   route?.params?.hubSlug ||
   route?.params?.hub?.slug ||
   null;
+
 
 const isInternal =
   route?.name === "KeeprHubInternal";
@@ -186,8 +198,10 @@ const isInternal =
   const [containerWidth, setContainerWidth] = useState(null);
   const [activeChip, setActiveChip] = useState(null);
   const [currentUserId, setCurrentUserId] = useState(null);
-  
-  
+  const [gallerySwipeStartX, setGallerySwipeStartX] = useState(null);
+  const [shareHubVisible, setShareHubVisible] = useState(false);
+  const [hubLinkCopied, setHubLinkCopied] = useState(false);
+
   const effectiveWidth = containerWidth || windowWidth;
   const cardGap = 14;
   const listSidePadding = 24;
@@ -349,7 +363,25 @@ const loadHub = useCallback(async () => {
     return list;
   }, [stories, query, sortKey]);
 
-      const assetChips = useMemo(() => {
+    const galleryItems = useMemo(
+  () =>
+    filtered
+      .filter((s) => s.public_hero_url || s.primary_attachment_url)
+      .map((s) => ({
+        id: s.id,
+        title: safeTitle(s),
+        owner: safeOwner(s),
+        image:
+          s.public_hero_url ||
+          s.primary_attachment_url,
+        kac: s.kac_id,
+      })),
+  [filtered]
+);
+
+const activeGalleryItem = galleryItems[galleryIndex] || null;
+
+    const assetChips = useMemo(() => {
     const values = [];
 
     (stories || []).forEach((asset) => {
@@ -374,6 +406,37 @@ const loadHub = useCallback(async () => {
 
   return Array.from(new Set(values)).slice(0, 14);
 }, [stories]);
+
+const hubShareUrl = useMemo(() => {
+  const slug = hub?.slug || hubSlug;
+  if (!slug) return "";
+
+  const base =
+    Platform.OS === "web" && typeof window !== "undefined"
+      ? window.location.origin
+      : process.env.EXPO_PUBLIC_KEEPR_BASE_URL || "https://app.keeprhome.com";
+
+  return `${base}/h/${slug}?src=hub_share&hub=${slug}`;
+}, [hub?.slug, hubSlug]);
+
+useEffect(() => {
+  if (!galleryVisible || Platform.OS !== "web") return;
+
+  const onKeyDown = (e) => {
+    if (e.key === "Escape") setGalleryVisible(false);
+
+    if (e.key === "ArrowLeft") {
+      setGalleryIndex((i) => Math.max(0, i - 1));
+    }
+
+    if (e.key === "ArrowRight") {
+      setGalleryIndex((i) => Math.min(galleryItems.length - 1, i + 1));
+    }
+  };
+
+  window.addEventListener("keydown", onKeyDown);
+  return () => window.removeEventListener("keydown", onKeyDown);
+}, [galleryVisible, galleryItems.length]);
 
   const ownerChips = useMemo(() => {
     const values = [];
@@ -415,8 +478,8 @@ const loadHub = useCallback(async () => {
       // update this route name in one place.
       try {
       navigation.navigate("KeeprStoryInternal", {
-        assetId: item.id,
-        kac: item.kac_id,
+        assetId: asset.id,
+        kac: asset.kac_id,
         hubId: hub?.id,
         hubSlug: hub?.slug,
         hubName: hub?.name,
@@ -439,6 +502,8 @@ const loadHub = useCallback(async () => {
     pickAssetHeroUri(item);
     const mode = storyModeLabel(item);
     const owner = safeOwner(item);
+    const isOwnedByCurrentUser =
+  String(item.owner_id || item.user_id || "") === String(currentUserId || "");
 
     return (
       <TouchableOpacity
@@ -501,9 +566,28 @@ const loadHub = useCallback(async () => {
           </Text>
         ) : null}
           <View style={styles.cardTagRow}>
+          {isInternal ? (
             <View style={styles.cardTag}>
               <Text style={styles.cardTagText}>Keepr Story</Text>
             </View>
+          ) : null}
+            {!isInternal ? (
+            <TouchableOpacity
+              style={styles.openInKeeprButton}
+              onPress={() =>
+                navigation.navigate("KeeprStoryInternal", {
+                  assetId: item.id,
+                  kac: item.kac_id,
+                  hubId: hub?.id,
+                  hubSlug: hub?.slug,
+                  hubName: hub?.name,
+                  mode: "internal",
+                })
+              }
+            >
+              <Text style={styles.openInKeeprText}>Open in Keepr</Text>
+            </TouchableOpacity>
+          ) : null}
 
             {item._featured ? (
               <View style={styles.cardTagMuted}>
@@ -629,14 +713,22 @@ const loadHub = useCallback(async () => {
     hub?.currentMember ||
     null;
 
-  const memberRole = currentMember?.role;
+  const capabilities = getHubUserCapabilities({
+  hub,
+  user: currentUserId ? { id: currentUserId } : null,
+  currentMember,
+  isInternal,
+});
 
-  const canManageHub = memberRole === "owner" || memberRole === "admin";
-  const canManageStories = canManageHub;
+const canManageHub = capabilities.canManageHub;
+const canManageStories = capabilities.canManageHub;
+const canInviteMembers =
+capabilities.canManageHub || hub?.settings?.members_can_invite === true;
 
-  const canInviteMembers =
-    canManageHub || hub?.settings?.members_can_invite === true;
-  
+const participationModel = capabilities.participation;
+const hubType = capabilities.hubType;
+const canPublicAddToHub = capabilities.canShowAddAssetCTA;
+
 const hubActions = isInternal ? (
   <View style={styles.hubActions}>
     {canManageHub ? (
@@ -653,6 +745,7 @@ const hubActions = isInternal ? (
         <Text style={styles.primaryHubActionText}>Manage Hub</Text>
       </TouchableOpacity>
     ) : null}
+
 
     <TouchableOpacity
       style={styles.secondaryHubAction}
@@ -703,6 +796,82 @@ const hubActions = isInternal ? (
   </View>
 ) : null;
 
+const addAssetLabel =
+  hubType === "community" && hub?.name?.toLowerCase().includes("porsche")
+    ? "Add My Porsche"
+    : hubType === "event"
+    ? "Join With My Asset"
+    : "Add My Asset";
+
+const handleAddToHubPress = () => {
+  if (participationModel === "invite_only") {
+    Alert.alert(
+      "Invitation required",
+      "This Hub is invite only. Please contact the Hub owner or administrator."
+    );
+    return;
+  }
+
+navigation.navigate("ManageHubStories", {
+  hubId: hub?.id,
+  activationMode: true,
+});
+};
+
+    const activationActions = (
+  <View style={styles.hubActions}>
+    <TouchableOpacity
+      style={styles.secondaryHubAction}
+      onPress={() => {
+        setGalleryIndex(0);
+        setGalleryVisible(true);
+      }}
+    >
+      <Ionicons name="images-outline" size={16} color={colors.textPrimary} />
+      <Text style={styles.secondaryHubActionText}>Browse Gallery</Text>
+    </TouchableOpacity>
+    <TouchableOpacity
+  style={styles.secondaryHubAction}
+  onPress={() => setShareHubVisible(true)}
+>
+  <Ionicons name="share-social-outline" size={16} color={colors.textPrimary} />
+  <Text style={styles.secondaryHubActionText}>Share Hub</Text>
+</TouchableOpacity>
+{canPublicAddToHub ? (
+  <TouchableOpacity
+    style={
+      participationModel === "invite_only"
+        ? styles.disabledHubAction
+        : styles.primaryHubAction
+    }
+    onPress={handleAddToHubPress}
+    activeOpacity={0.9}
+  >
+    <Ionicons
+      name={
+        participationModel === "invite_only"
+          ? "lock-closed-outline"
+          : "add-circle-outline"
+      }
+      size={16}
+      color={participationModel === "invite_only" ? colors.textMuted : "#fff"}
+    />
+    <Text
+      style={
+        participationModel === "invite_only"
+          ? styles.disabledHubActionText
+          : styles.primaryHubActionText
+      }
+    >
+      {participationModel === "invite_only"
+        ? "Invitation Required"
+        : addAssetLabel}
+    </Text>
+  </TouchableOpacity>
+) : null}
+  </View>
+);
+
 const hubContent = (
   <View
     style={[layoutStyles?.container, { flex: 1, width: "100%" }]}
@@ -713,7 +882,17 @@ const hubContent = (
       }
     }}
   >
+    {isInternal ? (
+      <View style={styles.mobileHubNav}>
+        <TouchableOpacity onPress={() => navigation.navigate("MyHubs")}>
+          <Ionicons name="chevron-back" size={20} color={colors.textPrimary} />
+        </TouchableOpacity>
 
+        <Text style={styles.mobileHubNavTitle}>Back to KeeprHubs</Text>
+      </View>
+    ) : null}
+
+    {activationActions}
     {hubActions}
     {header}
 
@@ -742,6 +921,7 @@ const hubContent = (
   </View>
 );
 
+
 const shellProps = {
   hub,
   stats: {
@@ -752,22 +932,290 @@ const shellProps = {
   logoUrl: hub?.logo_url || hub?.photo_url || hub?.hero_image_url,
 };
 
+const handleOpenHubInKeepr = () => {
+  if (!hub?.id) return;
+
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    window.location.href = `/hub/${hub.id}`;
+    return;
+  }
+
+  navigation.navigate("KeeprHubInternal", {
+    hubId: hub.id,
+    mode: "internal",
+  });
+};
+
+const handleShareHub = useCallback(async () => {
+  if (!hubShareUrl) return;
+
+  await Share.share({
+    title: hub?.name || "Keepr Hub",
+    message: `${hub?.name || "Keepr Hub"}\n${hubShareUrl}`,
+    url: hubShareUrl,
+  });
+}, [hub?.name, hubShareUrl]);
+
+const handleCopyHubLink = useCallback(async () => {
+  if (!hubShareUrl) return;
+
+  await Clipboard.setStringAsync(hubShareUrl);
+  setHubLinkCopied(true);
+  setTimeout(() => setHubLinkCopied(false), 1600);
+}, [hubShareUrl]);
+
+const galleryModal = (
+  <Modal
+    visible={galleryVisible}
+    animationType="fade"
+    transparent
+    onRequestClose={() => setGalleryVisible(false)}
+  >
+<View
+  style={{
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.95)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  }}
+>
+  {activeGalleryItem && (
+    <>
+      <Image
+        source={{ uri: activeGalleryItem.image }}
+      style={{
+        width: "92%",
+        maxWidth: 980,
+        height: Platform.OS === "web" ? "62vh" : 430,
+        borderRadius: 12,
+        resizeMode: "contain",
+      }}
+      />
+
+      <View
+        style={{
+          marginTop: 16,
+          alignItems: "center",
+        }}
+      >
+        <Text
+          style={{
+            color: "#fff",
+            fontSize: 28,
+            fontWeight: "700",
+          }}
+        >
+          {activeGalleryItem.title}
+        </Text>
+
+        <Text
+          style={{
+            color: "#ccc",
+            marginTop: 4,
+          }}
+        >
+          Owned by {activeGalleryItem.owner}
+        </Text>
+      </View>
+
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 12,
+          marginTop: 24,
+          flexWrap: "nowrap",
+        }}
+
+        onStartShouldSetResponder={() => true}
+        onResponderGrant={(e) => {
+          setGallerySwipeStartX(e.nativeEvent.pageX);
+        }}
+        onResponderRelease={(e) => {
+          if (gallerySwipeStartX == null) return;
+
+          const dx = e.nativeEvent.pageX - gallerySwipeStartX;
+
+          if (Math.abs(dx) > 50) {
+            if (dx < 0) {
+              setGalleryIndex((i) => Math.min(galleryItems.length - 1, i + 1));
+            } else {
+              setGalleryIndex((i) => Math.max(0, i - 1));
+            }
+          }
+
+          setGallerySwipeStartX(null);
+        }}
+      >
+        <TouchableOpacity
+          disabled={galleryIndex === 0}
+          onPress={() => setGalleryIndex((i) => i - 1)}
+          style={{
+            paddingHorizontal: 20,
+            paddingVertical: 10,
+            backgroundColor: "#fff",
+            borderRadius: 8,
+            opacity: galleryIndex === 0 ? 0.5 : 1,
+          }}
+        >
+          <Text>Previous</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={() => {
+            setGalleryVisible(false);
+
+            navigation.navigate("PublicKeeprStory", {
+              kac: activeGalleryItem.kac,
+              originHubId: hub?.id,
+              originHubSlug: hub?.slug,
+              originHubName: hub?.name,
+            });
+          }}
+          style={{
+            paddingHorizontal: 20,
+            paddingVertical: 10,
+            backgroundColor: "#fff",
+            borderRadius: 8,
+          }}
+        >
+          <Text>View Story</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          disabled={galleryIndex >= galleryItems.length - 1}
+          onPress={() => setGalleryIndex((i) => i + 1)}
+          style={{
+            paddingHorizontal: 20,
+            paddingVertical: 10,
+            backgroundColor: "#fff",
+            borderRadius: 8,
+            opacity:
+              galleryIndex >= galleryItems.length - 1 ? 0.5 : 1,
+          }}
+        >
+          <Text>Next</Text>
+        </TouchableOpacity>
+      </View>
+
+      <TouchableOpacity
+        onPress={() => setGalleryVisible(false)}
+        style={{
+          marginTop: 24,
+        }}
+      >
+        <Text style={{ color: "#fff" }}>Close</Text>
+      </TouchableOpacity>
+    </>
+  )}
+</View>
+  </Modal>
+);
+
+const shareHubModal = (
+  <Modal
+    visible={shareHubVisible}
+    transparent
+    animationType="fade"
+    onRequestClose={() => setShareHubVisible(false)}
+  >
+    <View style={styles.shareModalScrim}>
+      <Pressable
+        style={StyleSheet.absoluteFillObject}
+        onPress={() => setShareHubVisible(false)}
+      />
+
+      <View style={styles.shareHubCard}>
+        <ScrollView contentContainerStyle={{ alignItems: "center", padding: 20 }}>
+          <View style={styles.shareHubTopRow}>
+            <View>
+              <Text style={styles.shareHubKicker}>Keepr Hub</Text>
+              <Text style={styles.shareHubTitle}>{hub?.name || "Hub"}</Text>
+            </View>
+
+            <TouchableOpacity onPress={() => setShareHubVisible(false)}>
+              <Ionicons name="close" size={24} color={colors.textPrimary} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.shareQrPanel}>
+            <QRCode value={hubShareUrl || "https://app.keeprhome.com"} size={220} />
+          </View>
+
+          <Text style={styles.sharePublicUrl} numberOfLines={2}>
+            {hubShareUrl}
+          </Text>
+
+          <TouchableOpacity
+            style={[styles.shareModalButton, styles.shareModalPrimaryButton]}
+            onPress={handleShareHub}
+          >
+            <Ionicons name="share-social-outline" size={18} color="white" />
+            <Text style={styles.shareModalPrimaryText}>Share Hub</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.shareModalButton}
+            onPress={handleCopyHubLink}
+          >
+            <Ionicons
+              name={hubLinkCopied ? "checkmark-circle-outline" : "link-outline"}
+              size={18}
+              color={colors.textPrimary}
+            />
+            <Text style={styles.shareModalButtonText}>
+              {hubLinkCopied ? "Copied" : "Copy Link"}
+            </Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
+    </View>
+  </Modal>
+);
+
 if (isInternal) {
   return (
     <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
       <InternalHubShell {...shellProps}>
         {hubContent}
+        {galleryModal}
+        {shareHubModal}
       </InternalHubShell>
     </SafeAreaView>
   );
 }
 
 return (
-  <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
+  <PublicShell
+   showFooter={false}
+    contextTitle={hub?.name || "Keepr Hub"}
+    contextSubtitle="Keepr Community Hub"
+    viewerLabel={
+      capabilities?.canManageHub
+        ? "Hub Admin"
+        : currentMember
+        ? "Hub Member"
+        : currentUserId
+        ? "Keepr Member"
+        : "Visitor"
+    }
+    primaryActionLabel={
+      capabilities?.canManageHub || currentMember
+        ? "Open in Keepr"
+        : currentUserId
+        ? "Open Keepr"
+        : "Join Keepr"
+    }
+    onPrimaryAction={handleOpenHubInKeepr}
+  >
     <PublicHubShell {...shellProps}>
       {hubContent}
+      {galleryModal}
+      {shareHubModal}
     </PublicHubShell>
-  </SafeAreaView>
+  </PublicShell>
 );
 }
 
@@ -791,6 +1239,19 @@ const styles = StyleSheet.create({
   fontSize: 12,
   fontWeight: "700",
 },
+openInKeeprButton: {
+  alignSelf: "flex-start",
+  marginTop: 10,
+  paddingHorizontal: 10,
+  paddingVertical: 7,
+  borderRadius: 999,
+  backgroundColor: "#111827",
+},
+openInKeeprText: {
+  color: "#fff",
+  fontSize: 11,
+  fontWeight: "900",
+},
 
   hubType: {
   marginTop: 4,
@@ -807,6 +1268,25 @@ hubActions: {
   marginBottom: 18,
 },
 
+disabledHubAction: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 8,
+  backgroundColor: colors.surface,
+  borderRadius: 999,
+  borderWidth: 1,
+  borderColor: "#11182722",
+  paddingHorizontal: 16,
+  paddingVertical: 10,
+  opacity: 0.7,
+},
+
+disabledHubActionText: {
+  color: colors.textMuted,
+  fontSize: 13,
+  fontWeight: "800",
+},
+
 primaryHubAction: {
   flexDirection: "row",
   alignItems: "center",
@@ -821,6 +1301,21 @@ primaryHubActionText: {
   color: "#fff",
   fontSize: 13,
   fontWeight: "800",
+},
+
+mobileHubNav: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 8,
+  paddingHorizontal: 4,
+  paddingTop: 6,
+  paddingBottom: 14,
+},
+
+mobileHubNavTitle: {
+  fontSize: 14,
+  fontWeight: "800",
+  color: colors.textPrimary,
 },
 
 secondaryHubAction: {
@@ -962,6 +1457,104 @@ filterLabel: {
     borderColor: "#11182722",
     ...(shadows?.subtle || {}),
   },
+shareModalScrim: {
+  flex: 1,
+  backgroundColor: "rgba(6,10,18,0.76)",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 18,
+},
+
+shareHubCard: {
+  width: "100%",
+  maxWidth: 430,
+  borderRadius: 28,
+  backgroundColor: colors.surface,
+  borderWidth: 1,
+  borderColor: "rgba(255,255,255,0.22)",
+  overflow: "hidden",
+  zIndex: 2,
+  elevation: 12,
+  ...(shadows?.subtle || {}),
+},
+
+shareHubTopRow: {
+  width: "100%",
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "space-between",
+  marginBottom: 18,
+},
+
+shareHubKicker: {
+  fontSize: 12,
+  fontWeight: "900",
+  color: colors.textMuted,
+  textTransform: "uppercase",
+  letterSpacing: 0.8,
+},
+
+shareHubTitle: {
+  marginTop: 4,
+  fontSize: 22,
+  lineHeight: 26,
+  fontWeight: "900",
+  color: colors.textPrimary,
+},
+
+shareQrPanel: {
+  padding: 16,
+  borderRadius: 24,
+  backgroundColor: "white",
+  borderWidth: 1,
+  borderColor: "#11182722",
+  alignItems: "center",
+  justifyContent: "center",
+  marginBottom: 14,
+},
+
+sharePublicUrl: {
+  width: "100%",
+  textAlign: "center",
+  fontSize: 12,
+  lineHeight: 17,
+  color: colors.textMuted,
+  fontWeight: "700",
+  marginBottom: 18,
+},
+
+shareModalButton: {
+  width: "100%",
+  minHeight: 48,
+  borderRadius: 16,
+  borderWidth: 1,
+  borderColor: "#11182722",
+  backgroundColor: colors.background,
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 8,
+  paddingHorizontal: 14,
+  marginTop: 10,
+},
+
+shareModalPrimaryButton: {
+  backgroundColor: colors.brandBlue || "#2563eb",
+  borderColor: colors.brandBlue || "#2563eb",
+},
+
+shareModalPrimaryText: {
+  color: "white",
+  fontSize: 14,
+  fontWeight: "900",
+},
+
+shareModalButtonText: {
+  color: colors.textPrimary,
+  fontSize: 14,
+  fontWeight: "900",
+},
+
   heroWrap: { position: "relative", width: "100%", backgroundColor: "#f2f3f5" },
   hero: { width: "100%", height: "100%" },
   heroPlaceholder: {
@@ -995,14 +1588,14 @@ filterLabel: {
   },
 
   cardTagRow: {
-    marginTop: 10,
+    marginTop: 11,
     flexDirection: "row",
     gap: 8,
     flexWrap: "wrap",
   },
   cardTag: {
     paddingHorizontal: 9,
-    paddingVertical: 5,
+    paddingVertical: 9,
     borderRadius: 999,
     backgroundColor: "#111827",
   },
@@ -1013,7 +1606,7 @@ filterLabel: {
   },
   cardTagMuted: {
     paddingHorizontal: 9,
-    paddingVertical: 5,
+    paddingVertical: 9,
     borderRadius: 999,
     backgroundColor: "#f2f3f5",
     borderWidth: 1,
@@ -1022,7 +1615,7 @@ filterLabel: {
   cardTagMutedText: {
     color: colors.textPrimary,
     fontSize: 11,
-    fontWeight: "700",
+    fontWeight: "800",
   },
 
   metaRow: { marginTop: 10, flexDirection: "row", justifyContent: "space-between", gap: 8 },

@@ -19,6 +19,7 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { colors, spacing, radius, shadows } from "../styles/theme";
 import { fetchHub, updateHub } from "../lib/hubsApi";
+import HubActionRow from "../components/hubs/HubActionRow";
 
 const HUB_TYPES = [
   "community",
@@ -28,6 +29,13 @@ const HUB_TYPES = [
   "oem",
   "portfolio",
   "event",
+];
+
+const PARTICIPATION_MODELS = [
+  "public",
+  "moderated",
+  "invite_only",
+   "owner_controlled",
 ];
 
 export default function EditHubScreen({ navigation, route }) {
@@ -40,8 +48,12 @@ export default function EditHubScreen({ navigation, route }) {
   const [description, setDescription] = React.useState("");
   const [hubType, setHubType] = React.useState("community");
   const [visibility, setVisibility] = React.useState("public");
+  const [participationModel, setParticipationModel] =
+  React.useState("moderated");
   const [logoUrl, setLogoUrl] = React.useState("");
   const [editingLogo, setEditingLogo] = React.useState(false);
+  const [hub, setHub] = React.useState(null);
+
 
 async function handlePickLogo() {
   try {
@@ -110,11 +122,13 @@ async function handlePickLogo() {
     const load = async () => {
       try {
         const hub = await fetchHub(hubId);
+        setHub(hub);
         setLogoUrl(hub?.hero_image_url || "");
         setName(hub?.name || "");
         setDescription(hub?.description || "");
         setHubType(hub?.hub_type || "community");
-        setVisibility(hub?.visibility || "public");
+        setVisibility(hub?.settings?.visibility || hub?.visibility || "public");
+        setParticipationModel(hub?.settings?.participation_model || "moderated");
       } catch (e) {
         Alert.alert("Could not load Hub", e?.message || "Try again.");
       } finally {
@@ -134,12 +148,16 @@ async function handlePickLogo() {
     try {
       setSaving(true);
 
-      await updateHub(hubId, {
-        name: name.trim(),
-        description: description.trim() || null,
-        hub_type: hubType,
+    await updateHub(hubId, {
+      name: name.trim(),
+      description: description.trim() || null,
+      hub_type: hubType,
+      settings: {
+        ...(hub?.settings || {}),
         visibility,
-      });
+        participation_model: participationModel,
+      },
+    });
 
       navigation.goBack();
     } catch (e) {
@@ -160,6 +178,25 @@ async function handlePickLogo() {
     );
   }
 
+  const PARTICIPATION_DESCRIPTIONS = {
+  public: {
+    title: "Public",
+    body: "Anyone can add an eligible public Asset Story to this Hub. Best for open galleries, events, or lightweight showcases.",
+  },
+  moderated: {
+    title: "Moderated",
+    body: "Anyone can request to add an Asset Story. Hub admins approve it before it appears. Best for clubs, communities, and registries.",
+  },
+  invite_only: {
+    title: "Invite Only",
+    body: "Only invited members or admins can add Asset Stories. Best for dealer inventory, private portfolios, and controlled collections.",
+  },
+  owner_controlled: {
+  title: "Owner Controlled",
+  body: "Only Hub owners or administrators can add Asset Stories. Best for portfolios, dealer inventory, OEM showcases, and managed collections.",
+},
+};
+
   return (
     <SafeAreaView style={styles.screen}>
       <ScrollView contentContainerStyle={styles.content}>
@@ -173,6 +210,13 @@ async function handlePickLogo() {
             <Text style={styles.subtitle}>Give this Hub its identity.</Text>
           </View>
         </View>
+        <HubActionRow
+        navigation={navigation}
+        hub={hub}
+        hubId={hubId}
+        canManage={true}
+        active="settings"
+      />
         <View style={styles.logoSection}>
           <TouchableOpacity style={styles.logoCircle} onPress={handlePickLogo}>
             {logoUrl ? (
@@ -234,6 +278,39 @@ async function handlePickLogo() {
             ))}
           </View>
 
+          <Text style={styles.label}>Participation</Text>
+
+          <View style={styles.pillWrap}>
+            {PARTICIPATION_MODELS.map((value) => (
+              <TouchableOpacity
+                key={value}
+                onPress={() => setParticipationModel(value)}
+                style={[
+                  styles.pill,
+                  participationModel === value && styles.pillActive,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.pillText,
+                    participationModel === value &&
+                      styles.pillTextActive,
+                  ]}
+                >
+                  {value.replace("_", " ")}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <View style={styles.explainCard}>
+          <Text style={styles.explainTitle}>
+            {PARTICIPATION_DESCRIPTIONS[participationModel]?.title}
+          </Text>
+          <Text style={styles.explainBody}>
+            {PARTICIPATION_DESCRIPTIONS[participationModel]?.body}
+          </Text>
+        </View>
+
           <TouchableOpacity
             style={[styles.saveButton, saving && { opacity: 0.6 }]}
             onPress={save}
@@ -283,6 +360,28 @@ const styles = StyleSheet.create({
     borderColor: colors.borderSubtle || "#E5E7EB",
     ...(shadows?.subtle || {}),
   },
+  explainCard: {
+  marginTop: 10,
+  padding: 12,
+  borderRadius: 14,
+  backgroundColor: colors.surfaceSubtle || "#F3F4F6",
+  borderWidth: 1,
+  borderColor: colors.borderSubtle || "#E5E7EB",
+},
+
+explainTitle: {
+  fontSize: 13,
+  fontWeight: "900",
+  color: colors.textPrimary,
+},
+
+explainBody: {
+  marginTop: 4,
+  fontSize: 12,
+  lineHeight: 17,
+  fontWeight: "600",
+  color: colors.textMuted,
+},
   label: {
     marginTop: 14,
     marginBottom: 7,
