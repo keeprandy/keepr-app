@@ -91,6 +91,34 @@ class ShareQrBoundary extends React.Component {
   }
 }
 
+function extractHashtags(text) {
+  return Array.from(
+    new Set(
+      String(text || "")
+        .match(/#[A-Za-z0-9_]+/g)
+        ?.map((tag) => tag.replace("#", "").toLowerCase()) || []
+    )
+  );
+}
+
+function getStoryTags(asset) {
+  const md = asset?.extra_metadata || {};
+  const rawNarrative =
+  asset?.extra_metadata?.publicStoryNarrative ||
+  asset?.public_story_narrative ||
+  "";
+
+  const narrative = String(rawNarrative)
+    .replace(/#[A-Za-z0-9_]+/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+    return [
+      ...(Array.isArray(md.publicStoryTags) ? md.publicStoryTags : []),
+      ...extractHashtags(narrative),
+    ].filter(Boolean);
+  }
+
 function SafeShareQrCode({ value, size }) {
   return (
     <ShareQrBoundary value={value}>
@@ -279,6 +307,17 @@ const originHubName =
   {};
 
   const storyConfig = publicConfig.story || {};
+  const narrative =
+  asset?.extra_metadata?.publicStoryNarrative ||
+  asset?.public_story_narrative ||
+  "";
+
+const showNarrative =
+  storyConfig.showNarrative !== false &&
+  String(narrative).trim().length > 0;
+
+  const storyTags = getStoryTags(asset);
+
   const actionConfig = publicConfig.actions || {};
   const sharingConfig = publicConfig.sharing || {};
 
@@ -424,11 +463,23 @@ if (kac) {
 
   logPublicStoryLoad("Public story summary load failed", summaryError);
 
-  if (summaryRow) {
+if (summaryRow) {
   assetRow = {
     ...summaryRow,
     id: summaryRow.asset_id,
   };
+
+  const { data: fullAssetRow, error: fullAssetError } = await supabase
+    .from("assets")
+    .select("extra_metadata")
+    .eq("id", summaryRow.asset_id)
+    .maybeSingle();
+
+  if (fullAssetError) {
+    console.log("PUBLIC STORY FULL ASSET LOAD FAILED", fullAssetError);
+  }
+
+  assetRow.extra_metadata = fullAssetRow?.extra_metadata || {};
 }
 }
 
@@ -568,18 +619,24 @@ if (kac) {
   }, [navigation, originHubSlug, isInternalMode, originHubId]);
 
   const renderShell = (children) => {
-  if (isInternalMode) {
-    return (
-        <SafeAreaView
-          style={styles.internalStorySafe}
-          edges={["top", "left", "right", "bottom"]}
-        >
-        <View style={styles.internalStoryShell}>
-          {children}
-        </View>
-      </SafeAreaView>
-    );
-  }
+      if (isInternalMode) {
+        return (
+          <SafeAreaView
+            style={styles.internalStorySafe}
+            edges={["top", "left", "right", "bottom"]}
+          >
+            <ScrollView
+              ref={scrollRef}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.internalStoryScrollContent}
+            >
+              <View style={styles.internalStoryShell}>
+                {children}
+              </View>
+            </ScrollView>
+          </SafeAreaView>
+        );
+      }
 
       return (
         <PublicShell
@@ -716,8 +773,25 @@ return (
             style={styles.keeprEnabledMark}
             resizeMode="contain"
             />
-            <View style={styles.metaGrid}>
+               {showNarrative ? (
+              <View style={styles.narrativeBox}>
+            <Text style={styles.narrativeText}>
+              {narrative}
+            </Text>
+              </View>
+            ) : null}
 
+              {storyTags.length > 0 ? (
+              <View style={styles.hashtagRow}>
+                {storyTags.slice(0, 8).map((tag) => (
+                  <View key={tag} style={styles.hashtagPill}>
+                    <Text style={styles.hashtagText}>#{tag}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+
+            <View style={styles.metaGrid}>
             {/* VEHICLE */}
 
             {asset.type === "vehicle" && (
@@ -1233,6 +1307,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
 
+  internalStoryScrollContent: {
+  paddingBottom: spacing.xl,
+},
+
   notFoundTitle: {
     fontSize: 20,
     fontWeight: "900",
@@ -1337,6 +1415,42 @@ ownerBylineText: {
   fontSize: 13,
   fontWeight: "800",
   color: colors.textSecondary,
+},
+
+narrativeBox: {
+  marginTop: 14,
+  paddingTop: 14,
+  borderTopWidth: 1,
+  borderTopColor: colors.borderSubtle,
+},
+
+narrativeText: {
+  fontSize: 14,
+  lineHeight: 20,
+  color: colors.textSecondary,
+  fontWeight: "600",
+},
+
+hashtagRow: {
+  marginTop: 12,
+  flexDirection: "row",
+  flexWrap: "wrap",
+  gap: 8,
+},
+
+hashtagPill: {
+  paddingHorizontal: 10,
+  paddingVertical: 6,
+  borderRadius: 999,
+  backgroundColor: "#EEF2FF",
+  borderWidth: 1,
+  borderColor: "#C7D2FE",
+},
+
+hashtagText: {
+  fontSize: 12,
+  fontWeight: "900",
+  color: "#3730A3",
 },
 
   heroZoomHint: {

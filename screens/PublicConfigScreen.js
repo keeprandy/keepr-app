@@ -126,6 +126,8 @@ export default function PublicConfigScreen({ navigation, route }) {
   const [assetName, setAssetName] = React.useState(assetNameFromRoute);
   const [saveError, setSaveError] = React.useState(null);
   const [lastSavedAt, setLastSavedAt] = React.useState(null);
+  const [publicNarrative, setPublicNarrative] = React.useState("");
+  const [showNarrative, setShowNarrative] = React.useState(true);
 
   const [enabled, setEnabled] = React.useState(false);
   const [mode, setMode] = React.useState("inquiry");
@@ -379,6 +381,9 @@ const openHubPicker = async () => {
       setAssetKac(data?.kac_id || null);
 
       const existing = data?.extra_metadata?.publicConfig || getDefaultPublicConfig();
+      setPublicNarrative(data?.extra_metadata?.publicStoryNarrative || "");
+      
+
       console.log(
   "LOADED PUBLIC CONFIG",
   JSON.stringify(existing, null, 2)
@@ -388,6 +393,10 @@ const actionConfig = existing.actions || getDefaultPublicConfig().actions;
 const storyConfig = existing.story || getDefaultPublicConfig().story;
 const sharingConfig = existing.sharing || getDefaultPublicConfig().sharing;
 
+
+
+setPublicNarrative(data?.extra_metadata?.publicStoryNarrative || "");
+setShowNarrative(storyConfig.showNarrative !== false);
 setEnabled(storyConfig.enabled === true);
 setMode(actionConfig.mode || "inquiry");
 setActionsEnabled(
@@ -495,6 +504,7 @@ const saveConfig = React.useCallback(async () => {
           showProofBadges,
           showQrShare,
           showFooterCta,
+          showNarrative,
       },
       sharing: {
       ...(existingPublicConfig.sharing || getDefaultPublicConfig().sharing),
@@ -509,6 +519,7 @@ const saveConfig = React.useCallback(async () => {
     const updatedMetadata = {
       ...(current?.extra_metadata || {}),
       publicConfig,
+      publicStoryNarrative: publicNarrative,
     };
 
     const { error: updateErr } = await supabase
@@ -548,6 +559,8 @@ const saveConfig = React.useCallback(async () => {
   allowPrintSticker,
   allowCopyLink,
   allowShareLink,
+  publicNarrative,
+showNarrative,
 ]);
 
 const initialLoadComplete = React.useRef(false);
@@ -805,9 +818,33 @@ React.useEffect(() => {
             </View>
           </View>
         </View>
+        <View style={styles.section}>
+        <Text style={styles.sectionLabel}>Story Narrative</Text>
+        <View style={styles.card}>
+          <Text style={styles.blockHint}>
+            Tell the public story in your own words. This appears on the public Keepr Story.
+          </Text>
+
+          <TextInput
+            value={publicNarrative}
+            onChangeText={setPublicNarrative}
+            placeholder="Example: This Boxster S has been carefully maintained, with documented ownership history, IMS bearing service, and tasteful updates..."
+            placeholderTextColor={colors.textMuted}
+            multiline
+            style={styles.narrativeInput}
+          />
+        </View>
+      </View>
 <View style={styles.section}>
   <Text style={styles.sectionLabel}>Public Story</Text>
   <View style={styles.card}>
+    <ToggleRow
+  title="Show story narrative"
+  subtitle="Display your written story summary on the public Keepr Story."
+  value={showNarrative}
+  onValueChange={setShowNarrative}
+/>
+<View style={styles.divider} />
     <ToggleRow
       title="Show hero"
       subtitle="Display the main public story hero image and asset summary."
@@ -1096,6 +1133,20 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     width: "100%",
   },
+  narrativeInput: {
+  minHeight: 130,
+  textAlignVertical: "top",
+  borderWidth: 1,
+  borderColor: colors.borderSubtle || "#E5E7EB",
+  borderRadius: 14,
+  paddingHorizontal: 12,
+  paddingVertical: 12,
+  color: colors.textPrimary,
+  backgroundColor: colors.surfaceSubtle || "#F3F4F6",
+  fontSize: 14,
+  lineHeight: 20,
+  fontWeight: "600",
+},
   headerRow: {
     flexDirection: "row",
     alignItems: "center",

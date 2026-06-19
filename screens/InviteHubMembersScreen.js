@@ -110,8 +110,18 @@ const canManage =
     }
   };
 
-  const memberLabel = (member) =>
-    member.email || member.user_id || "Hub member";
+const memberLabel = (member) =>
+  member.email ||
+  member.profile?.display_name ||
+  member.profile?.full_name ||
+  member.profiles?.display_name ||
+  member.profiles?.full_name ||
+  member.userProfile?.display_name ||
+  member.userProfile?.full_name ||
+  member.display_name ||
+  member.full_name ||
+  member.user_id ||
+  "Hub member";
 
   if (loading) {
     return (

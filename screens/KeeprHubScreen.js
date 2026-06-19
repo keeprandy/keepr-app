@@ -51,6 +51,29 @@ const SORT_OPTIONS = [
   { key: "name_asc", label: "Name" },
 ];
 
+function extractHashtags(text) {
+  return Array.from(
+    new Set(
+      String(text || "")
+        .match(/#[A-Za-z0-9_]+/g)
+        ?.map((tag) => tag.replace("#", "").toLowerCase()) || []
+    )
+  );
+}
+
+function getStoryTags(asset) {
+  const md = asset?.extra_metadata || {};
+  const narrative =
+    md.publicStoryNarrative ||
+    asset?.public_story_narrative ||
+    "";
+
+  return [
+    ...(Array.isArray(md.publicStoryTags) ? md.publicStoryTags : []),
+    ...extractHashtags(narrative),
+  ].filter(Boolean);
+}
+
 function getMd(asset) {
   return asset?.extra_metadata && typeof asset.extra_metadata === "object"
     ? asset.extra_metadata
@@ -95,13 +118,43 @@ function safeSubtitle(asset) {
 
 function storyModeLabel(asset) {
   const md = getMd(asset);
-  return (
+
+  const raw =
+    asset?.story_mode ||
+    asset?.public_mode ||
+    asset?.mode ||
+    asset?.lifecycle_state ||
+    asset?.public_story_mode ||
+    asset?.public_config?.mode ||
+    asset?.public_config?.story_mode ||
+    asset?.public_config?.public_mode ||
     md.story_mode ||
     md.public_mode ||
     md.mode ||
     md.lifecycle_state ||
-    "Current Story"
-  );
+    md.public_story_mode ||
+    "current_story";
+
+  const normalized = String(raw)
+    .toLowerCase()
+    .trim()
+    .replace(/-/g, "_")
+    .replace(/\s+/g, "_");
+
+  const labels = {
+    for_sale: "For Sale",
+    sale: "For Sale",
+    for_rent: "For Rent",
+    rent: "For Rent",
+    current_story: "Current Story",
+    current: "Current Story",
+    system_story: "System Story",
+    system: "System Story",
+    informational_inquiry: "Informational Inquiry",
+    inquiry: "Informational Inquiry",
+  };
+
+  return labels[normalized] || raw;
 }
 
 function normalizeLinks(rows) {
@@ -226,6 +279,8 @@ const isInternal =
 
 const enrichHeroImages = useCallback(async (assetList) => {
   const heroByAssetId = {};
+  const modeByAssetId = {};
+  const metadataByAssetId = {};
 
   for (const asset of assetList || []) {
     try {
@@ -233,6 +288,20 @@ const enrichHeroImages = useCallback(async (assetList) => {
       if (!kac) continue;
 
       const mediaRows = await fetchPublicStoryMedia(kac);
+
+      const { data: assetRow } = await supabase
+        .from("assets")
+        .select("extra_metadata")
+        .eq("id", asset.id)
+        .maybeSingle();
+
+      const mode =
+        assetRow?.extra_metadata?.publicConfig?.actions?.mode;
+        metadataByAssetId[asset.id] = assetRow?.extra_metadata || {};
+
+      if (mode) {
+        modeByAssetId[asset.id] = mode;
+      }
 
       const heroPlacement =
         mediaRows.find(
@@ -251,18 +320,32 @@ const enrichHeroImages = useCallback(async (assetList) => {
     }
   }
 
-  setStories((prev) =>
-    prev.map((p) =>
-      heroByAssetId[p.id]
-        ? {
-          ...p,
+setStories((prev) =>
+  prev.map((p) => ({
+    ...p,
+    ...(heroByAssetId[p.id]
+      ? {
           public_hero_url: heroByAssetId[p.id],
           primary_attachment_url: heroByAssetId[p.id],
         }
-        : p
-    )
-  );
-}, []);
+      : {}),
+    ...(modeByAssetId[p.id]
+      ? {
+          public_story_mode: modeByAssetId[p.id],
+        }
+      : {}),
+      ...(metadataByAssetId[p.id]
+  ? {
+      extra_metadata: {
+        ...(p.extra_metadata || {}),
+        ...metadataByAssetId[p.id],
+      },
+    }
+  : {}),
+  }))
+);
+}, 
+[]);
 
   function metadataValue(asset, key) {
   const md = getMd(asset);
@@ -336,12 +419,14 @@ const loadHub = useCallback(async () => {
 
       const mode = storyModeLabel(asset).toLowerCase();
       const md = JSON.stringify(getMd(asset)).toLowerCase();
+      const tags = getStoryTags(asset).join(" ").toLowerCase();
 
       return (
         title.includes(q) ||
         subtitle.includes(q) ||
         owner.includes(q) ||
         mode.includes(q) ||
+        tags.includes(q) ||
         md.includes(q)
       );
     });
@@ -393,6 +478,18 @@ const activeGalleryItem = galleryItems[galleryIndex] || null;
 
     return Array.from(new Set(values)).slice(0, 14);
   }, [stories]);
+
+  const hashtagChips = useMemo(() => {
+  const tags = [];
+
+  (stories || []).forEach((asset) => {
+    tags.push(...getStoryTags(asset));
+  });
+
+  return Array.from(new Set(tags))
+    .sort()
+    .slice(0, 25);
+}, [stories]);
 
   const metadataChips = useMemo(() => {
   const values = [];
@@ -502,6 +599,7 @@ useEffect(() => {
     pickAssetHeroUri(item);
     const mode = storyModeLabel(item);
     const owner = safeOwner(item);
+    const storyTags = getStoryTags(item);
     const isOwnedByCurrentUser =
   String(item.owner_id || item.user_id || "") === String(currentUserId || "");
 
@@ -560,6 +658,17 @@ useEffect(() => {
           <Text style={styles.cardSubtitle} numberOfLines={2}>
             {safeSubtitle(item)}
           </Text>
+
+          {storyTags.length > 0 ? (
+            <View style={styles.cardHashtagRow}>
+              {storyTags.slice(0, 4).map((tag) => (
+                <View key={tag} style={styles.cardHashtagPill}>
+                  <Text style={styles.cardHashtagText}>#{tag}</Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+
           {owner ? (
           <Text style={styles.cardOwner} numberOfLines={1}>
             Owned by {owner}
@@ -673,6 +782,32 @@ useEffect(() => {
           );
         })}
       </View>
+      <Text style={styles.filterLabel}>Tags</Text>
+      <View style={styles.chipRow}>
+        {hashtagChips.map((chip) => {
+          const active = activeChip === chip;
+
+          return (
+            <TouchableOpacity
+              key={chip}
+              style={[styles.chip, active && styles.chipActive]}
+              onPress={() => {
+                setActiveChip(chip);
+                setQuery(chip);
+              }}
+            >
+              <Text
+                style={[
+                  styles.chipText,
+                  active && styles.chipTextActive,
+                ]}
+              >
+                #{chip}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
 
       <Text style={styles.filterLabel}>Owners</Text>
       <View style={styles.chipRow}>
@@ -727,7 +862,11 @@ capabilities.canManageHub || hub?.settings?.members_can_invite === true;
 
 const participationModel = capabilities.participation;
 const hubType = capabilities.hubType;
-const canPublicAddToHub = capabilities.canShowAddAssetCTA;
+const isAuthenticated = !!currentUserId;
+
+const canPublicAddToHub =
+  isAuthenticated &&
+  capabilities.canShowAddAssetCTA;
 
 const hubActions = isInternal ? (
   <View style={styles.hubActions}>
@@ -796,14 +935,25 @@ const hubActions = isInternal ? (
   </View>
 ) : null;
 
+const hubName = String(hub?.name || "").toLowerCase();
+
 const addAssetLabel =
-  hubType === "community" && hub?.name?.toLowerCase().includes("porsche")
+  !isAuthenticated
+    ? "Join Keepr"
+    : hubType === "community" && hubName.includes("porsche")
     ? "Add My Porsche"
+    : hubType === "community" && hubName.includes("corvette")
+    ? "Add My Corvette"
     : hubType === "event"
-    ? "Join With My Asset"
+    ? "Enter My Vehicle"
     : "Add My Asset";
 
 const handleAddToHubPress = () => {
+  if (!currentUserId) {
+    navigation.navigate("Auth");
+    return;
+  }
+
   if (participationModel === "invite_only") {
     Alert.alert(
       "Invitation required",
@@ -812,10 +962,10 @@ const handleAddToHubPress = () => {
     return;
   }
 
-navigation.navigate("ManageHubStories", {
-  hubId: hub?.id,
-  activationMode: true,
-});
+  navigation.navigate("ManageHubStories", {
+    hubId: hub?.id,
+    activationMode: true,
+  });
 };
 
     const activationActions = (
@@ -1345,6 +1495,28 @@ grid: {
 cardShell: {
   width: 420,
   maxWidth: "100%",
+},
+
+cardHashtagRow: {
+  marginTop: 10,
+  flexDirection: "row",
+  flexWrap: "wrap",
+  gap: 6,
+},
+
+cardHashtagPill: {
+  paddingHorizontal: 8,
+  paddingVertical: 5,
+  borderRadius: 999,
+  backgroundColor: "#EEF2FF",
+  borderWidth: 1,
+  borderColor: "#C7D2FE",
+},
+
+cardHashtagText: {
+  fontSize: 11,
+  fontWeight: "900",
+  color: "#3730A3",
 },
 
   searchRow: {
