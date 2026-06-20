@@ -317,9 +317,9 @@ useEffect(() => {
 
   // Responsive columns (web gets more room, but never overflows)
   const isWeb = Platform.OS === "web";
-  const maxGridWidth = 1120;
+  const maxGridWidth = 1280;
   const containerWidth = Math.min(width, maxGridWidth);
-  const numCols = isWeb ? (containerWidth >= 980 ? 3 : 2) : 2;
+  const numCols = isWeb ? (containerWidth >= 980 ? 3 : 2) : width >= 700 ? 2 : 1;
 
   const columns = useMemo(() => splitIntoColumns(groupAssets, numCols), [groupAssets, numCols]);
 
@@ -429,126 +429,107 @@ useEffect(() => {
           </TouchableOpacity>
         </View>
 
-        {loading ? (
-          <View style={styles.centered}>
-            <ActivityIndicator />
-            <Text style={styles.loadingText}>Loading…</Text>
-          </View>
-        ) : error ? (
-          <View style={styles.errorCard}>
-            ...
-          </View>
-        ) : null}
-
         {/* Section header */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeaderRow}>
-            <View style={{ flexDirection: "row", alignItems: "center" }}>
-              <Ionicons name={cfg.icon} size={18} color={colors.textSecondary} />
-              <View style={{ marginLeft: spacing.xs }}>
-                <Text style={styles.sectionLabel}>All</Text>
-                <Text style={styles.sectionHint}>
-                  {hasAssets ? `${groupAssets.length} assets` : "Add a hero photo in Showcase to see it here"}
-                </Text>
-              </View>
-            </View>
+{loading ? (
+  <View style={styles.centered}>
+    <ActivityIndicator />
+    <Text style={styles.loadingText}>Loading your assets…</Text>
+  </View>
+) : error ? (
+  <View style={styles.errorCard}>
+    <Ionicons name="warning-outline" size={18} color="#B91C1C" />
+    <Text style={styles.errorText}>{String(error)}</Text>
+  </View>
+) : (
+  <View style={styles.section}>
+    <View style={styles.collectionHeader}>
+      <View>
+        <Text style={styles.collectionLabel}>
+          {groupAssets.length} {groupAssets.length === 1 ? "Asset" : "Assets"}
+        </Text>
+        <Text style={styles.collectionHint}>
+          Browse your stories, proof, upgrades, and moments.
+        </Text>
+      </View>
 
-            {heroResolving ? (
-              <View style={styles.syncRow}>
-                <ActivityIndicator size="small" />
-                <Text style={styles.syncText}>Syncing</Text>
-              </View>
-            ) : null}
-          </View>
-
-          {!hasAssets ? (
-            <TouchableOpacity style={styles.emptyCard} onPress={goAdd} activeOpacity={0.92}>
-              <View style={styles.emptyImageStub}>
-                <Ionicons name={cfg.icon} size={34} color={colors.brandWhite} />
-              </View>
-              <View style={styles.cardFooter}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.cardTitle} numberOfLines={1}>
-                    {cfg.emptyTitle}
-                  </Text>
-                  <Text style={styles.cardSubtitle} numberOfLines={3}>
-                    {cfg.emptyBody}
-                  </Text>
-                </View>
-                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-              </View>
-            </TouchableOpacity>
-          ) : (
-            <View
-              style={[
-                styles.gridOuter,
-                {
-                  maxWidth: maxGridWidth,
-                  width: "100%",
-                  alignSelf: "center",
-                },
-              ]}
-            >
-              <View style={[styles.gridRow, { gap: spacing.md }]}>
-                {columns.map((colItems, colIdx) => (
-                  <View
-                    key={`col-${colIdx}`}
-                    style={[
-                      styles.gridCol,
-                      {
-                        flex: 1,
-                        minWidth: 0, // critical to prevent overflow on web
-                      },
-                    ]}
-                  >
-                    {colItems.map((asset) => {
-                      const uri =
-                        asset?.hero_placement_id && heroUriByPlacementId?.[asset.hero_placement_id]
-                          ? heroUriByPlacementId[asset.hero_placement_id]
-                          : null;
-
-                      const imgH = uri ? stableHeightFromId(asset.id) : 180;
-
-                      return (
-                        <TouchableOpacity
-                          key={asset.id}
-                          style={styles.card}
-                          activeOpacity={0.92}
-                          onPress={() => goStory(asset)}
-                        >
-                          {uri ? (
-                            <Image
-                              source={{ uri }}
-                              style={[styles.cardImage, { height: imgH }]}
-                              resizeMode="cover"
-                            />
-                          ) : (
-                            <View style={[styles.cardImageStub, { height: imgH }]}>
-                              <Ionicons name={cfg.icon} size={34} color={colors.brandWhite} />
-                            </View>
-                          )}
-
-                          <View style={styles.cardFooter}>
-                            <View style={{ flex: 1 }}>
-                              <Text style={styles.cardTitle} numberOfLines={1}>
-                                {asset.name || "Untitled"}
-                              </Text>
-                              <Text style={styles.cardSubtitle} numberOfLines={2}>
-                                {asset.location || "Tap to open story"}
-                              </Text>
-                            </View>
-                            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-                          </View>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                ))}
-              </View>
-            </View>
-          )}
+      {heroResolving ? (
+        <View style={styles.syncRow}>
+          <ActivityIndicator size="small" />
+          <Text style={styles.syncText}>Syncing photos</Text>
         </View>
+      ) : null}
+    </View>
 
+    {!hasAssets ? (
+      <TouchableOpacity style={styles.emptyCard} onPress={goAdd} activeOpacity={0.92}>
+        <View style={styles.emptyImageStub}>
+          <Ionicons name={cfg.icon} size={34} color={colors.brandWhite} />
+        </View>
+        <View style={styles.cardFooter}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cardTitle} numberOfLines={1}>
+              {cfg.emptyTitle}
+            </Text>
+            <Text style={styles.cardSubtitle} numberOfLines={3}>
+              {cfg.emptyBody}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        </View>
+      </TouchableOpacity>
+    ) : (
+      <View style={styles.gridOuter}>
+        <View style={[styles.gridRow, { gap: spacing.md }]}>
+          {columns.map((colItems, colIdx) => (
+            <View key={`col-${colIdx}`} style={styles.gridCol}>
+              {colItems.map((asset) => {
+                const uri =
+                  asset?.hero_placement_id && heroUriByPlacementId?.[asset.hero_placement_id]
+                    ? heroUriByPlacementId[asset.hero_placement_id]
+                    : null;
+
+                const imgH = uri ? stableHeightFromId(asset.id) : 220;
+
+                return (
+                  <TouchableOpacity
+                    key={asset.id}
+                    style={styles.card}
+                    activeOpacity={0.92}
+                    onPress={() => goStory(asset)}
+                  >
+                    {uri ? (
+                      <Image
+                        source={{ uri }}
+                        style={[styles.cardImage, { height: imgH }]}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={[styles.cardImageStub, { height: imgH }]}>
+                        <Ionicons name={cfg.icon} size={34} color={colors.brandWhite} />
+                      </View>
+                    )}
+
+                    <View style={styles.cardFooter}>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={styles.cardTitle} numberOfLines={1}>
+                          {asset.name || "Untitled"}
+                        </Text>
+                        <Text style={styles.cardSubtitle} numberOfLines={2}>
+                          {asset.location || "Tap to open story"}
+                        </Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          ))}
+        </View>
+      </View>
+    )}
+  </View>
+)}
         <View style={{ height: spacing.xl }} />
       </ScrollView>
     </SafeAreaView>
@@ -623,6 +604,26 @@ const styles = StyleSheet.create({
   topNavPillText: { fontSize: 12, fontWeight: "800", color: colors.textPrimary },
   topNavPillTextActive: { color: colors.brandWhite },
 
+  collectionHeader: {
+  marginBottom: spacing.md,
+  paddingLeft: 0,
+},
+
+collectionLabel: {
+  fontSize: 13,
+  fontWeight: "900",
+  color: colors.textSecondary,
+  textTransform: "uppercase",
+  letterSpacing: 1,
+},
+
+collectionHint: {
+  marginTop: 2,
+  fontSize: 13,
+  fontWeight: "600",
+  color: colors.textMuted,
+},
+
   errorCard: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -636,11 +637,17 @@ const styles = StyleSheet.create({
   },
   errorText: { fontSize: 12, color: "#B91C1C", flex: 1 },
 
-  section: { paddingHorizontal: spacing.lg, marginTop: spacing.md },
+  section: {
+  paddingHorizontal: spacing.lg,
+  marginTop: spacing.md,
+  maxWidth: 1120,
+  width: "100%",
+  alignSelf: "center",
+},
   sectionHeaderRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "flex-end",
+    alignItems: "flex-start",
     marginBottom: spacing.sm,
   },
   sectionLabel: { ...typography.sectionLabel, marginBottom: spacing.xs },
@@ -650,15 +657,19 @@ const styles = StyleSheet.create({
   syncText: { fontSize: 11, color: colors.textMuted, fontWeight: "800" },
 
   gridOuter: {
-    alignSelf: "center",
-  },
-  gridRow: {
+  width: "100%",
+  alignSelf: "stretch",
+},
+ gridRow: {
     flexDirection: "row",
     alignItems: "flex-start",
   },
-  gridCol: {
-    flexDirection: "column",
-  },
+
+gridCol: {
+  flex: 1,
+  minWidth: 0,
+  flexDirection: "column",
+},
 
   card: {
     backgroundColor: colors.surface,
