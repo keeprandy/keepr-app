@@ -32,11 +32,13 @@ import {
   fetchPublicHubBySlug,
   fetchHubStoryLinks,
   fetchHub,
+  acceptHubInviteByToken,
 } from "../lib/hubsApi";
 import PublicShell from "../components/public/PublicShell";
 import PublicHubShell from "../components/hubs/PublicHubShell";
 import InternalHubShell from "../components/hubs/InternalHubShell";
 import { getHubUserCapabilities } from "../lib/hubCapabilities";
+import { buildHubShareUrl } from "../lib/inviteLinks";
 
 import * as Clipboard from "expo-clipboard";
 import QRCode from "react-native-qrcode-svg";
@@ -243,6 +245,13 @@ const hubSlug =
 const isInternal =
   route?.name === "KeeprHubInternal";
 
+  const inviteToken =
+  route?.params?.invite ||
+  route?.params?.inviteToken ||
+  (Platform.OS === "web" && typeof window !== "undefined"
+    ? new URLSearchParams(window.location.search).get("invite")
+    : null);
+
   const [hub, setHub] = useState(null);
   const [loading, setLoading] = useState(true);
   const [stories, setStories] = useState([]);
@@ -254,6 +263,9 @@ const isInternal =
   const [gallerySwipeStartX, setGallerySwipeStartX] = useState(null);
   const [shareHubVisible, setShareHubVisible] = useState(false);
   const [hubLinkCopied, setHubLinkCopied] = useState(false);
+  const [inviteModalVisible, setInviteModalVisible] = useState(false);
+  const [inviteRecord, setInviteRecord] = useState(null);
+  const [inviteLoading, setInviteLoading] = useState(false);
 
   const effectiveWidth = containerWidth || windowWidth;
   const cardGap = 14;
@@ -504,17 +516,50 @@ const activeGalleryItem = galleryItems[galleryIndex] || null;
   return Array.from(new Set(values)).slice(0, 14);
 }, [stories]);
 
-const hubShareUrl = useMemo(() => {
-  const slug = hub?.slug || hubSlug;
-  if (!slug) return "";
-
   const base =
     Platform.OS === "web" && typeof window !== "undefined"
       ? window.location.origin
       : process.env.EXPO_PUBLIC_KEEPR_BASE_URL || "https://app.keeprhome.com";
 
-  return `${base}/h/${slug}?src=hub_share&hub=${slug}`;
+
+const hubShareUrl = useMemo(() => {
+  const slug = hub?.slug || hubSlug;
+  if (!slug) return "";
+
+  return buildHubShareUrl({ hubSlug: slug });
 }, [hub?.slug, hubSlug]);
+
+useEffect(() => {
+  if (!isInternal && inviteToken) {
+    setInviteModalVisible(true);
+  }
+}, [inviteToken, isInternal]);
+
+useEffect(() => {
+  async function loadInvite() {
+    if (!inviteToken) return;
+
+    try {
+      setInviteLoading(true);
+
+      const { data, error } = await supabase
+        .from("hub_members")
+        .select("*")
+        .eq("invite_token", inviteToken)
+        .maybeSingle();
+
+      if (error) throw error;
+
+      setInviteRecord(data || null);
+    } catch (e) {
+      console.log("Invite lookup failed:", e);
+    } finally {
+      setInviteLoading(false);
+    }
+  }
+
+  loadInvite();
+}, [inviteToken]);
 
 useEffect(() => {
   if (!galleryVisible || Platform.OS !== "web") return;
@@ -1337,6 +1382,100 @@ if (isInternal) {
   );
 }
 
+const inviteLandingModal = (
+  <Modal
+    visible={inviteModalVisible}
+    transparent
+    animationType="fade"
+    onRequestClose={() => setInviteModalVisible(false)}
+  >
+    <View style={styles.shareModalScrim}>
+      <Pressable
+        style={StyleSheet.absoluteFillObject}
+        onPress={() => setInviteModalVisible(false)}
+      />
+
+      <View style={styles.inviteModalCard}>
+        <View style={styles.shareHubTopRow}>
+          <View>
+            <Text style={styles.shareHubKicker}>Keepr Hub Invite</Text>
+            <Text style={styles.shareHubTitle}>{hub?.name || "Keepr Hub"}</Text>
+          </View>
+
+          <TouchableOpacity onPress={() => setInviteModalVisible(false)}>
+            <Ionicons name="close" size={24} color={colors.textPrimary} />
+          </TouchableOpacity>
+        </View>
+
+        <Text style={styles.inviteModalText}>
+          {inviteLoading
+            ? "Checking invitation..."
+            : inviteRecord?.status === "active"
+            ? "You are already a member of this Hub."
+            : "Accept this invitation and add your Keepr Story to the community."}
+        </Text>
+
+        <TouchableOpacity
+          style={[styles.shareModalButton, styles.shareModalPrimaryButton]}
+          onPress={async () => {
+            if (!currentUserId) {
+              setInviteModalVisible(false);
+              navigation.navigate("Auth", {
+                returnTo: "KeeprHub",
+                hubSlug: hub?.slug || hubSlug,
+                inviteToken,
+                intent: "accept_hub_invite",
+              });
+              return;
+            }
+
+            if (inviteRecord?.status === "active") {
+              setInviteModalVisible(false);
+              handleAddToHubPress();
+              return;
+            }
+
+            try {
+              await acceptHubInviteByToken({
+                inviteToken,
+                userId: currentUserId,
+              });
+
+              setInviteModalVisible(false);
+              await loadHub();
+              handleAddToHubPress();
+            } catch (e) {
+              Alert.alert("Could not accept invite", e?.message || "Try again.");
+            }
+          }}
+        >
+          <Ionicons name="add-circle-outline" size={18} color="white" />
+          <Text style={styles.shareModalPrimaryText}>
+            {!currentUserId
+            ? "Join Keepr to Add Your Story"
+            : inviteRecord?.status === "active"
+            ? "Add Your Story"
+            : "Accept Invitation & Add Your Story"}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.shareModalButton}
+          onPress={() => {
+            setInviteModalVisible(false);
+            setGalleryIndex(0);
+            if (galleryItems.length > 0) {
+              setGalleryVisible(true);
+            }
+          }}
+        >
+          <Ionicons name="images-outline" size={18} color={colors.textPrimary} />
+          <Text style={styles.shareModalButtonText}>Explore Member Stories</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  </Modal>
+);
+
 return (
   <PublicShell
    showFooter={false}
@@ -1364,6 +1503,7 @@ return (
       {hubContent}
       {galleryModal}
       {shareHubModal}
+      {inviteLandingModal}
     </PublicHubShell>
   </PublicShell>
 );
@@ -1635,6 +1775,28 @@ shareModalScrim: {
   alignItems: "center",
   justifyContent: "center",
   padding: 18,
+},
+
+inviteModalCard: {
+  width: "100%",
+  maxWidth: 430,
+  borderRadius: 28,
+  backgroundColor: colors.surface,
+  padding: 22,
+  borderWidth: 1,
+  borderColor: "rgba(255,255,255,0.22)",
+  zIndex: 2,
+  elevation: 12,
+  ...(shadows?.subtle || {}),
+},
+
+inviteModalText: {
+  marginTop: 6,
+  marginBottom: 10,
+  fontSize: 15,
+  lineHeight: 22,
+  fontWeight: "700",
+  color: colors.textMuted,
 },
 
 shareHubCard: {

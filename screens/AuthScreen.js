@@ -22,6 +22,8 @@ import { layoutStyles } from "../styles/layout";
 import { colors, radius, spacing, typography } from "../styles/theme";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { track, identifyUser } from "../lib/analytics";
+import { acceptHubInviteByToken } from "../lib/hubsApi";
+import { claimPendingActionsForEmail } from "../lib/hubsApi";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -68,7 +70,7 @@ function getResetRedirectTo() {
   return "keepr://reset";
 }
 
-export default function AuthScreen() {
+export default function AuthScreen({ navigation, route }) {
   const [mode, setMode] = useState("signin"); // "signin" | "signup" | "forgot"
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
@@ -157,6 +159,31 @@ export default function AuthScreen() {
     window.location.href = isIOS ? iosUrl : androidUrl;
   };
 
+const continueHubInvite = async (userId) => {
+  const intent = route?.params?.intent;
+
+  if (intent !== "accept_hub_invite") return;
+
+  const inviteToken = route?.params?.inviteToken;
+  const hubSlug = route?.params?.hubSlug;
+
+  if (!inviteToken || !hubSlug || !userId) return;
+
+  console.log("ACCEPTING HUB INVITE", {
+    inviteToken,
+    userId,
+  });
+
+  await acceptHubInviteByToken({
+    inviteToken,
+    userId,
+  });
+
+  navigation.navigate("KeeprHub", {
+    slug: hubSlug,
+  });
+};
+
   const handleSignIn = async () => {
     setFormError("");
     markAllTouched();
@@ -182,10 +209,20 @@ export default function AuthScreen() {
       if (userId) {
         try {
           await ensureProfile(userId);
+
+          // NEW
+          await claimPendingActionsForEmail({
+            userId,
+            email: normalizedEmail,
+          });
+
         } catch (e) {
-          console.log("[AuthScreen] ensureProfile failed:", e?.message || e);
+          console.log("[AuthScreen] profile/claim failed:", e?.message || e);
         }
+
+        await continueHubInvite(userId);
       }
+      
     } catch (e) {
       setFormError(e?.message || "Could not sign in.");
     } finally {
@@ -255,6 +292,13 @@ const sessionUserId = user?.id || null;
 
 if (sessionUserId) {
   await ensureProfile(sessionUserId);
+
+  await claimPendingActionsForEmail({
+    userId: sessionUserId,
+    email: normalizedEmail,
+  });
+
+  await continueHubInvite(sessionUserId);
 
   // 🔥 Attribution capture
   let sourceSlug = null;

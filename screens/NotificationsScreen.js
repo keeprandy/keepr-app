@@ -26,6 +26,8 @@ import { colors, spacing, radius, shadows } from "../styles/theme";
 import { buildTimelinePrefillFromEmailText } from "../utils/emailToTimeline";
 import * as Haptics from "expo-haptics";
 import { Swipeable } from "react-native-gesture-handler";
+import { acceptHubInviteByToken } from "../lib/hubsApi";
+import { createAction } from "../lib/actionsApi";
 
 
 /* --------------------------- helpers --------------------------- */
@@ -1170,54 +1172,118 @@ const remindersByDate = useMemo(() => {
 
   /* ------------------------- Hub Invite Handlers ------------------------- */
 
-const handleAcceptHubInvite = async (item) => {
-  if (!item || !ownerId) return;
+    const handleAcceptHubInvite = async (item) => {
 
-  const payload = item.payload || {};
-  const hubMemberId = payload.hub_member_id;
+      console.log("ACCEPT HUB INVITE CLICKED", item);
 
-  if (!hubMemberId) {
-    Alert.alert("Invite missing", "This invite is missing its member record.");
-    return;
-  }
+      if (!item || !ownerId) return;
 
-  setTransferBusyId(item.id);
+      const payload = item.payload || {};
+      const inviteToken = payload.invite_token;
+      const hubMemberId = payload.hub_member_id;
+      const hubName = payload.hub_name || "this KeeprHub";
 
-  try {
-    const { error: memberError } = await supabase
-      .from("hub_members")
-      .update({
-        status: "active",
-        accepted_at: new Date().toISOString(),
-      })
-      .eq("id", hubMemberId)
-      .eq("user_id", ownerId);
+      console.log("INVITE TOKEN", inviteToken);
+      console.log("FULL PAYLOAD", payload);
 
-    if (memberError) throw memberError;
+      if (!inviteToken) {
+        Alert.alert(
+          "Invite missing",
+          JSON.stringify(payload, null, 2)
+        );
+        return;
+      }
 
-    const { error: inboxError } = await supabase
-      .from("inbox_items")
-      .update({
-        status: "accepted",
-        responded_at: new Date().toISOString(),
-      })
-      .eq("id", item.id)
-      .eq("to_user_id", ownerId);
+      setTransferBusyId(item.id);
 
-    if (inboxError) throw inboxError;
+      try {
 
-    await loadEverything({ silent: true });
+        console.log("ACCEPT HUB INVITE PAYLOAD", {
+          inviteToken,
+          ownerId,
+          payload,
+        });
 
-    Alert.alert(
-      "Welcome to the Hub",
-      `You've joined ${payload.hub_name || "this KeeprHub"}.`
-    );
-  } catch (e) {
-    Alert.alert("Could not accept invite", e?.message || "Please try again.");
-  } finally {
-    setTransferBusyId(null);
-  }
-};
+        //
+        // 1. Accept the invitation.
+        //    This should activate the hub_member row.
+        //
+        await acceptHubInviteByToken({
+          inviteToken,
+          userId: ownerId,
+        });
+
+        //
+        // 2. Mark the notification complete.
+        //
+        const { error: inboxError } = await supabase
+          .from("inbox_items")
+          .update({
+            status: "accepted",
+            responded_at: new Date().toISOString(),
+          })
+          .eq("id", item.id)
+          .eq("to_user_id", ownerId);
+
+        if (inboxError) throw inboxError;
+
+        //
+        // 3. Complete the Action that generated this notification.
+        //
+        if (hubMemberId) {
+          await supabase
+            .from("actions")
+            .update({
+              status: "completed",
+              completed_at: new Date().toISOString(),
+            })
+            .eq("type", "hub_invite")
+            .eq("source_table", "hub_members")
+            .eq("source_id", hubMemberId)
+            .eq("assigned_to_user_id", ownerId);
+
+          //
+          // 4. Queue the next KAI Action.
+          //
+          await createAction({
+            type: "add_asset_to_hub",
+            title: `Add your first Keepr Story to ${hubName}`,
+            body: "Join the community by adding an asset story and making it visible to the Hub.",
+            priority: 15,
+            assignedToUserId: ownerId,
+            sourceTable: "hub_members",
+            sourceId: hubMemberId,
+            payload: {
+              hub_id: payload.hub_id,
+              hub_slug: payload.hub_slug,
+              hub_name: hubName,
+              hub_member_id: hubMemberId,
+            },
+          });
+        }
+
+        //
+        // 5. Refresh UI.
+        //
+        await loadEverything({ silent: true });
+
+        Alert.alert(
+          "Welcome to the Hub",
+          `You've joined ${hubName}.`
+        );
+
+      } catch (e) {
+        console.error("handleAcceptHubInvite", e);
+
+        Alert.alert(
+          "Could not accept invite",
+          e?.message || "Please try again."
+        );
+
+      } finally {
+        setTransferBusyId(null);
+      }
+    };
 
 const handleDeclineHubInvite = async (item) => {
   if (!item || !ownerId) return;

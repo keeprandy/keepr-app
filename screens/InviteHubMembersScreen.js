@@ -82,6 +82,7 @@ const canManage =
         email: cleanEmail,
         role,
         invitedBy: user?.id,
+        sendEmail: true,
       });
 
       setEmail("");
@@ -93,6 +94,7 @@ const canManage =
       setSaving(false);
     }
   };
+
 
   const removeMember = async (member) => {
     const confirmed =
