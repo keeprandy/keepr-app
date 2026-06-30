@@ -1356,7 +1356,33 @@ identifyUser();
 
   const isOnboardingDismissed = normalizedOnboardingState === "dismissed";
   const hasAssets = typeof assetCount === "number" ? assetCount > 0 : false;
-  const shouldShowOnboarding = !hasAssets && !isOnboardingComplete && !isOnboardingDismissed;
+
+  const activeTrigger = React.useMemo(() => {
+    if (Platform.OS !== "web") return null;
+
+    try {
+      const path = window.location.pathname || "";
+      const params = new URLSearchParams(window.location.search || "");
+
+      if (path.startsWith("/h/") && params.get("invite")) {
+        return {
+          type: "hub_invite",
+          hubSlug: path.split("/").filter(Boolean)[1],
+          inviteToken: params.get("invite"),
+        };
+      }
+
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }, []);
+
+  const shouldShowOnboarding =
+  !activeTrigger &&
+  !hasAssets &&
+  !isOnboardingComplete &&
+  !isOnboardingDismissed;
 
   // Force correct landing route after profile gate resolves (web/state can be "sticky")
   const targetRoute = React.useMemo(() => {
@@ -1396,6 +1422,11 @@ React.useEffect(() => {
   if (!targetRoute) return;
   if (!navigationRef?.isReady?.()) return;
   if (isResetLink) return;
+
+  if (activeTrigger?.type === "hub_invite") {
+  didInitialNavResolve.current = true;
+  return;
+}
 
   if (Platform.OS === "web") {
     const path = window.location.pathname || "";

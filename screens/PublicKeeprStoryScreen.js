@@ -578,14 +578,20 @@ if (summaryRow) {
         return 0;
       });
 
+      const dedupedGalleryRows = Array.from(
+        new Map(
+          sortedMediaRows
+            .filter((row) => !!row.image_url)
+            .map((row) => [row.image_url, row])
+        ).values()
+      );
+
       setGallery(
-        sortedMediaRows
-        .filter((row) => !!row.image_url)
-          .map((row) => ({
-            id: row.attachment_id || row.placement_id,
-            uri: row.image_url,
-            role: row.role,
-          }))
+        dedupedGalleryRows.map((row, index) => ({
+          id: row.attachment_id || row.placement_id || `${row.image_url}-${index}`,
+          uri: row.image_url,
+          role: row.role,
+        }))
       );
 
     } catch (e) {
@@ -966,14 +972,23 @@ return (
             ]}
             onPress={() => {
               if (isInternalMode) {
-                navigation.navigate("KeeprAction", {
-                  assetId: asset?.asset_id || asset?.id,
-                  kac,
-                  assetName: asset?.name,
-                  hubId: originHubId,
-                  hubName: originHubName,
-                  mode: "internal",
-                });
+
+                console.log("OPEN KEEPR ACTION FROM STORY", {
+                assetId: asset?.asset_id || asset?.id,
+                assetName: asset?.name,
+                owner_id: asset?.owner_id,
+                ownerId: asset?.ownerId,
+                originHubId,
+              });
+              navigation.navigate("KeeprAction", {
+                assetId: asset?.asset_id || asset?.id,
+                kac: asset?.kac_id || kac,
+                assetName: asset?.name,
+                assetOwnerId: asset?.owner_id || asset?.ownerId || null,
+                hubId: originHubId,
+                hubName: originHubName,
+                mode: "internal",
+              });
                 return;
               }
 

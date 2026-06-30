@@ -14,95 +14,151 @@ import { colors, spacing, radius } from "../styles/theme";
 import { supabase } from "../lib/supabaseClient";
 
 export default function KeeprActionScreen({ route, navigation }) {
-  const {
-    assetId,
-    kac,
-    assetName,
-    hubId,
-    hubName,
-  } = route?.params || {};
+    const {
+      assetId,
+      kac,
+      assetName,
+      assetOwnerId: routeAssetOwnerId,
+      hubId,
+      hubName,
+    } = route?.params || {};
 
     const [message, setMessage] = React.useState("");
     const [threads, setThreads] = React.useState([]);
     const [replyByThreadId, setReplyByThreadId] = React.useState({});
     const [loadingContext, setLoadingContext] = React.useState(true);
     const [currentUserId, setCurrentUserId] = React.useState(null);
-    const [assetOwnerId, setAssetOwnerId] = React.useState(null);
+   const [assetOwnerId, setAssetOwnerId] = React.useState(routeAssetOwnerId || null);
+    const [resolvedAssetId, setResolvedAssetId] = React.useState(assetId || null);
+    const [resolvedAssetName, setResolvedAssetName] = React.useState(assetName || null);
     const [isOwner, setIsOwner] = React.useState(false);
     const [profilesById, setProfilesById] = React.useState({});
     const [collapsedThreadIds, setCollapsedThreadIds] = React.useState({});
 
-    React.useEffect(() => {
-    let active = true;
+React.useEffect(() => {
+  let active = true;
 
-    const loadContext = async () => {
-        try {
-        setLoadingContext(true);
+  const loadContext = async () => {
+    try {
+      setLoadingContext(true);
 
-        const { data: authData } = await supabase.auth.getUser();
-        const uid = authData?.user?.id || null;
+      const { data: authData } = await supabase.auth.getUser();
+      const uid = authData?.user?.id || null;
 
-        const { data: assetRow, error } = await supabase
-            .from("assets")
-            .select("id, owner_id")
-            .eq("id", assetId)
-            .maybeSingle();
+      let query = supabase
+        .from("assets")
+        .select("id, owner_id, name, kac_id");
 
-            console.log("KEEPRACTION OWNER RESOLVE", {
-            assetId,
-            assetRow,
-            error,
-            ownerId: assetRow?.owner_id || null,
-            uid,
-            });
+      if (assetId) {
+        query = query.eq("id", assetId);
+      } else if (kac) {
+        query = query.eq("kac_id", kac);
+      } else {
+        throw new Error("Missing asset context.");
+      }
 
-        if (error) throw error;
+      const { data: assetRow, error } = await query.maybeSingle();
 
-        if (!active) return;
+      console.log("ASSET ROW", assetRow);
+      console.log("OWNER", assetRow?.owner_id);
+      console.log("ERROR", error);
 
-        setCurrentUserId(uid);
-        setAssetOwnerId(assetRow?.owner_id || null);
-        setIsOwner(!!uid && !!assetRow?.owner_id && String(uid) === String(assetRow.owner_id));
-        } catch (e) {
-        console.log("KeeprAction context load failed:", e?.message || e);
-        } finally {
-        if (active) setLoadingContext(false);
-        }
-    };
+      if (error) throw error;
 
+      if (!active) return;
 
-    if (assetId) loadContext();
+      setCurrentUserId(uid);
+      setResolvedAssetId(assetRow?.id || assetId || null);
+      setResolvedAssetName(assetRow?.name || assetName || null);
+      setAssetOwnerId(assetRow?.owner_id || routeAssetOwnerId || null);
+      const effectiveOwnerId = assetRow?.owner_id || routeAssetOwnerId || null;
 
-    return () => {
-        active = false;
-    };
-    }, [assetId]);
+      setIsOwner(
+        !!uid &&
+          !!effectiveOwnerId &&
+          String(uid) === String(effectiveOwnerId)
+      );
+    } catch (e) {
+      console.log("KeeprAction context load failed:", e?.message || e);
+    } finally {
+      if (active) setLoadingContext(false);
+    }
+  };
+
+  loadContext();
+
+  return () => {
+    active = false;
+  };
+}, [assetId, kac, assetName]);
 
   
-    const handleSendQuestion = async () => {
-    if (!message.trim()) {
-        Alert.alert("Add a message", "Type your question first.");
-        return;
+const handleSendQuestion = async () => {
+  console.log("SEND QUESTION BUTTON FIRED", {
+    message,
+    assetId,
+    resolvedAssetId,
+    kac,
+    currentUserId,
+    assetOwnerId,
+    isOwner,
+    hubId,
+  });
+
+  const cleanMessage = String(message || "").trim();
+
+  if (!cleanMessage) {
+    console.log("SEND QUESTION BLOCKED: empty message");
+    Alert.alert("Add a message", "Type your question first.");
+    return;
+  }
+
+  if (!currentUserId) {
+    console.log("SEND QUESTION BLOCKED: no current user");
+    Alert.alert("Not ready", "You need to be signed in.");
+    return;
+  }
+
+    const effectiveOwnerId = assetOwnerId || routeAssetOwnerId || null;
+
+    if (!effectiveOwnerId) {
+      console.log("SEND QUESTION BLOCKED: no asset owner", {
+        assetOwnerId,
+        routeAssetOwnerId,
+      });
+      Alert.alert("Not ready", "We could not resolve the owner for this asset.");
+      return;
     }
 
-    if (!currentUserId || !assetOwnerId) {
-        Alert.alert("Not ready", "We could not resolve the owner for this asset.");
-        return;
-    }
+  const threadAssetId = resolvedAssetId || assetId;
 
-    try {
+  if (!threadAssetId) {
+    console.log("SEND QUESTION BLOCKED: no resolved asset id");
+    Alert.alert("Not ready", "We could not resolve this asset.");
+    return;
+  }
+
+  try {
+    console.log("CREATING THREAD", {
+      threadAssetId,
+      hubId,
+      assetOwnerId,
+      currentUserId,
+      subject: resolvedAssetName || assetName || "Asset question",
+    });
+
     const { data: thread, error: threadError } = await supabase
-    .from("asset_threads")
-    .insert({
-        asset_id: assetId,
+      .from("asset_threads")
+      .insert({
+        asset_id: threadAssetId,
         hub_id: hubId || null,
-        owner_id: assetOwnerId,
+        owner_id: effectiveOwnerId,
         created_by: currentUserId,
-        subject: assetName || "Asset question",
+        subject: resolvedAssetName || assetName || "Asset question",
         status: "open",
-    })
-    .select("id")
-    .single();
+      })
+      .select("id")
+      .single();
 
     console.log("THREAD INSERT RESULT", { thread, threadError });
 
@@ -110,24 +166,24 @@ export default function KeeprActionScreen({ route, navigation }) {
     if (!thread?.id) throw new Error("Thread was not created.");
 
     const { error: msgError } = await supabase
-    .from("asset_thread_messages")
-    .insert({
+      .from("asset_thread_messages")
+      .insert({
         thread_id: thread.id,
         from_user_id: currentUserId,
-        body: message.trim(),
-    });
+        body: cleanMessage,
+      });
 
     console.log("MESSAGE INSERT RESULT", { msgError });
 
     if (msgError) throw msgError;
 
-        setMessage("");
-        await loadThreads();
-    } catch (e) {
-        Alert.alert("Could not send", e?.message || "Try again.");
-    }
-    };
-
+    setMessage("");
+    await loadThreads();
+  } catch (e) {
+    console.log("SEND QUESTION ERROR", e);
+    Alert.alert("Could not send", e?.message || "Try again.");
+  }
+};
 
     const handleSendReply = async (threadId) => {
   const body = String(replyByThreadId[threadId] || "").trim();
@@ -141,6 +197,11 @@ export default function KeeprActionScreen({ route, navigation }) {
     Alert.alert("Not ready", "You need to be signed in.");
     return;
   }
+
+  if (!resolvedAssetId) {
+  Alert.alert("Not ready", "We could not resolve this asset.");
+  return;
+}
 
   try {
     const { error } = await supabase
@@ -170,23 +231,25 @@ export default function KeeprActionScreen({ route, navigation }) {
 };
 
 const loadThreads = React.useCallback(async () => {
-  if (!assetId) return;
+  const threadAssetId = resolvedAssetId || assetId;
+  if (!threadAssetId) return;
 
   const { data: authData } = await supabase.auth.getUser();
   const uid = authData?.user?.id || null;
 
   const { data: assetRow, error: assetError } = await supabase
     .from("assets")
-    .select("id, owner_id")
-    .eq("id", assetId)
+    .select("id, owner_id, name")
+    .eq("id", threadAssetId)
     .maybeSingle();
 
   if (assetError) throw assetError;
 
-  const ownerId = assetRow?.owner_id || null;
+  const ownerId = assetRow?.owner_id || routeAssetOwnerId || null;
 
   setCurrentUserId(uid);
   setAssetOwnerId(ownerId);
+  setResolvedAssetName(assetRow?.name || assetName || null);
   setIsOwner(!!uid && !!ownerId && String(uid) === String(ownerId));
 
   const { data: threadRows, error: threadError } = await supabase
@@ -208,7 +271,7 @@ const loadThreads = React.useCallback(async () => {
         created_at
       )
     `)
-    .eq("asset_id", assetId)
+    .eq("asset_id", threadAssetId)
     .order("updated_at", { ascending: false });
 
   if (threadError) throw threadError;
@@ -227,38 +290,31 @@ const loadThreads = React.useCallback(async () => {
     )
   );
 
-let profileRows = [];
-let profileError = null;
+  if (userIds.length) {
+    const result = await supabase
+      .from("profiles")
+      .select("id, display_name, full_name, email")
+      .in("id", userIds);
 
-if (userIds.length) {
-  const result = await supabase
-    .from("profiles")
-    .select("id, display_name, full_name, email")
-    .in("id", userIds);
-
-  console.log("PROFILE QUERY", {
-    userIds,
-    data: result.data,
-    error: result.error,
-  });
-
-  profileRows = result.data || [];
-  profileError = result.error || null;
-
-  if (!profileError) {
-    const map = {};
-    profileRows.forEach((p) => {
-      map[p.id] = p;
+    console.log("PROFILE QUERY", {
+      userIds,
+      data: result.data,
+      error: result.error,
     });
 
-    console.log("PROFILE MAP", map);
+    if (!result.error) {
+      const map = {};
+      (result.data || []).forEach((p) => {
+        map[p.id] = p;
+      });
 
-    setProfilesById(map);
+      console.log("PROFILE MAP", map);
+      setProfilesById(map);
+    }
   }
-}
 
-setThreads(rows);
-}, [assetId]);
+  setThreads(rows);
+}, [resolvedAssetId, assetId, assetName, routeAssetOwnerId]);
 
 
 React.useEffect(() => {
@@ -268,10 +324,11 @@ React.useEffect(() => {
 }, [loadThreads]);
 
 React.useEffect(() => {
-  if (!assetId) return;
+  const threadAssetId = resolvedAssetId || assetId;
+  if (!threadAssetId) return;
 
   const channel = supabase
-    .channel(`asset-thread-messages-${assetId}`)
+    .channel(`asset-thread-messages-${threadAssetId}`)
     .on(
       "postgres_changes",
       {
@@ -289,7 +346,7 @@ React.useEffect(() => {
         event: "*",
         schema: "public",
         table: "asset_threads",
-        filter: `asset_id=eq.${assetId}`,
+        filter: `asset_id=eq.${threadAssetId}`,
       },
       () => {
         loadThreads();
@@ -300,7 +357,7 @@ React.useEffect(() => {
   return () => {
     supabase.removeChannel(channel);
   };
-}, [assetId, loadThreads]);
+}, [resolvedAssetId, assetId, loadThreads]);
 
     const formatNameFromEmail = (email) => {
     if (!email) return "Keepr Member";
@@ -367,7 +424,13 @@ React.useEffect(() => {
                 style={styles.textArea}
                 />
 
-                <TouchableOpacity style={styles.primaryButton} onPress={handleSendQuestion}>
+               <TouchableOpacity
+  style={styles.primaryButton}
+  onPress={() => {
+    console.log("SEND QUESTION TOUCHABLE PRESSED");
+    handleSendQuestion();
+  }}
+>
                 <Text style={styles.primaryButtonText}>Send Question</Text>
                 </TouchableOpacity>
             </>
@@ -408,13 +471,6 @@ React.useEffect(() => {
             const participantId = isOwner
             ? participantMessage?.from_user_id || thread.created_by
             : thread.owner_id;
-
-            console.log("THREAD PARTICIPANT", {
-            threadId: thread.id,
-            participantId,
-            participantProfile: profilesById[participantId],
-            allProfiles: profilesById,
-            });
 
             const participantProfile = profilesById[participantId] || {};
 

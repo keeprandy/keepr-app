@@ -39,6 +39,8 @@ import PublicHubShell from "../components/hubs/PublicHubShell";
 import InternalHubShell from "../components/hubs/InternalHubShell";
 import { getHubUserCapabilities } from "../lib/hubCapabilities";
 import { buildHubShareUrl } from "../lib/inviteLinks";
+import { getKaiTriggerContext } from "../lib/kaiEngine";
+import HubAuthModal from "../components/hubs/HubAuthModal";
 
 import * as Clipboard from "expo-clipboard";
 import QRCode from "react-native-qrcode-svg";
@@ -234,6 +236,7 @@ const hubId = route?.params?.hubId || route?.params?.hub?.id || null;
 
 const [galleryVisible, setGalleryVisible] = useState(false);
 const [galleryIndex, setGalleryIndex] = useState(0);
+const [hubAuthModalVisible, setHubAuthModalVisible] = useState(false);
 
 const hubSlug =
   route?.params?.slug ||
@@ -264,6 +267,7 @@ const isInternal =
   const [shareHubVisible, setShareHubVisible] = useState(false);
   const [hubLinkCopied, setHubLinkCopied] = useState(false);
   const [inviteModalVisible, setInviteModalVisible] = useState(false);
+  
   const [inviteRecord, setInviteRecord] = useState(null);
   const [inviteLoading, setInviteLoading] = useState(false);
 
@@ -320,6 +324,7 @@ const enrichHeroImages = useCallback(async (assetList) => {
           (x) => String(x.placement_id) === String(asset.hero_placement_id)
         ) ||
         mediaRows.find((x) => x.role === "hero") ||
+        mediaRows.find((x) => !!x.image_url) ||
         null;
 
       const heroUrl = heroPlacement?.image_url || null;
@@ -401,9 +406,21 @@ const loadHub = useCallback(async () => {
     const linkRows = await fetchHubStoryLinks(hubRecord.id);
     const assetStories = normalizeLinks(linkRows);
 
-    setStories(assetStories);
-    await enrichHeroImages(assetStories);
-    setLoading(false);
+    console.log("HUB STORIES NORMALIZED", assetStories.map((s) => ({
+  id: s.id,
+  name: s.name,
+  kac: s.kac_id,
+  public_hero_url: s.public_hero_url,
+  primary_attachment_url: s.primary_attachment_url,
+  hero_image_url: s.hero_image_url,
+})));
+
+  setStories(assetStories);
+  setLoading(false);
+
+  enrichHeroImages(assetStories).catch((e) => {
+    console.log("Hub hero enrichment failed:", e?.message || e);
+  });
 
   } catch (e) {
     console.error(e);
@@ -530,10 +547,10 @@ const hubShareUrl = useMemo(() => {
 }, [hub?.slug, hubSlug]);
 
 useEffect(() => {
-  if (!isInternal && inviteToken) {
+  if (!isInternal && inviteToken && !loading) {
     setInviteModalVisible(true);
   }
-}, [inviteToken, isInternal]);
+}, [inviteToken, isInternal, loading, currentUserId]);
 
 useEffect(() => {
   async function loadInvite() {
@@ -622,6 +639,8 @@ useEffect(() => {
       navigation.navigate("KeeprStoryInternal", {
         assetId: asset.id,
         kac: asset.kac_id,
+        assetName: asset.name,
+        assetOwnerId: asset.owner_id || asset.user_id || null,
         hubId: hub?.id,
         hubSlug: hub?.slug,
         hubName: hub?.name,
@@ -637,16 +656,24 @@ useEffect(() => {
   const renderCard = ({ item }) => {
 
     const heroUri =
-    item.primary_attachment_url ||
-    item.public_hero_url ||
-    item.hero_thumb_url ||
-    item.hero_image_url ||
-    pickAssetHeroUri(item);
+      item.public_hero_url ||
+      item.primary_attachment_url ||
+      item.hero_thumb_url ||
+      item.hero_image_url ||
+      pickAssetHeroUri(item);
+
     const mode = storyModeLabel(item);
     const owner = safeOwner(item);
     const storyTags = getStoryTags(item);
     const isOwnedByCurrentUser =
   String(item.owner_id || item.user_id || "") === String(currentUserId || "");
+
+  console.log("HUB KAI INVITE", {
+  inviteToken,
+  currentUserId,
+  gate: kaiInvite?.gate,
+  mode: kaiInvite?.mode,
+});
 
     return (
       <TouchableOpacity
@@ -729,14 +756,16 @@ useEffect(() => {
             <TouchableOpacity
               style={styles.openInKeeprButton}
               onPress={() =>
-                navigation.navigate("KeeprStoryInternal", {
-                  assetId: item.id,
-                  kac: item.kac_id,
-                  hubId: hub?.id,
-                  hubSlug: hub?.slug,
-                  hubName: hub?.name,
-                  mode: "internal",
-                })
+              navigation.navigate("KeeprStoryInternal", {
+                assetId: item.id,
+                kac: item.kac_id,
+                assetName: item.name,
+                assetOwnerId: item.owner_id || item.user_id || null,
+                hubId: hub?.id,
+                hubSlug: hub?.slug,
+                hubName: hub?.name,
+                mode: "internal",
+              })
               }
             >
               <Text style={styles.openInKeeprText}>Open in Keepr</Text>
@@ -898,6 +927,26 @@ useEffect(() => {
   user: currentUserId ? { id: currentUserId } : null,
   currentMember,
   isInternal,
+});
+
+const hasAssets = false; // wire later
+const hasHubStories = stories.some(
+  (s) => String(s.owner_id || s.user_id || "") === String(currentUserId || "")
+);
+
+const kaiInvite = getKaiTriggerContext({
+  routeName: route?.name,
+  params: route?.params || {},
+  query:
+    Platform.OS === "web" && typeof window !== "undefined"
+      ? Object.fromEntries(new URLSearchParams(window.location.search))
+      : {},
+  userId: currentUserId,
+  hub,
+  inviteRecord,
+  currentMember,
+  hasAssets,
+  hasHubStories,
 });
 
 const canManageHub = capabilities.canManageHub;
@@ -1382,6 +1431,7 @@ if (isInternal) {
   );
 }
 
+
 const inviteLandingModal = (
   <Modal
     visible={inviteModalVisible}
@@ -1398,8 +1448,10 @@ const inviteLandingModal = (
       <View style={styles.inviteModalCard}>
         <View style={styles.shareHubTopRow}>
           <View>
-            <Text style={styles.shareHubKicker}>Keepr Hub Invite</Text>
-            <Text style={styles.shareHubTitle}>{hub?.name || "Keepr Hub"}</Text>
+            <Text style={styles.shareHubKicker}>KAI Advisor</Text>
+            <Text style={styles.shareHubTitle}>
+              {kaiInvite?.title || hub?.name || "Keepr Hub"}
+            </Text>
           </View>
 
           <TouchableOpacity onPress={() => setInviteModalVisible(false)}>
@@ -1410,52 +1462,71 @@ const inviteLandingModal = (
         <Text style={styles.inviteModalText}>
           {inviteLoading
             ? "Checking invitation..."
-            : inviteRecord?.status === "active"
-            ? "You are already a member of this Hub."
-            : "Accept this invitation and add your Keepr Story to the community."}
+            : kaiInvite?.body ||
+              "I'll help you continue your Hub activation."}
         </Text>
 
         <TouchableOpacity
           style={[styles.shareModalButton, styles.shareModalPrimaryButton]}
           onPress={async () => {
-            if (!currentUserId) {
-              setInviteModalVisible(false);
-              navigation.navigate("Auth", {
-                returnTo: "KeeprHub",
-                hubSlug: hub?.slug || hubSlug,
-                inviteToken,
-                intent: "accept_hub_invite",
-              });
-              return;
-            }
-
-            if (inviteRecord?.status === "active") {
-              setInviteModalVisible(false);
-              handleAddToHubPress();
-              return;
-            }
-
             try {
+              if (kaiInvite?.gate === "auth") {
+                setInviteModalVisible(false);
+                setHubAuthModalVisible(true);
+                return;
+              }
+
+            if (kaiInvite?.gate === "membership") {
               await acceptHubInviteByToken({
                 inviteToken,
                 userId: currentUserId,
               });
 
-              setInviteModalVisible(false);
+              const accepted = await acceptHubInviteByToken({
+                inviteToken,
+                userId: currentUserId,
+              });
+
+              setInviteRecord((prev) => ({
+                ...(prev || {}),
+                ...(accepted || {}),
+                status: "active",
+                user_id: currentUserId,
+                accepted_at: new Date().toISOString(),
+              }));
+
               await loadHub();
-              handleAddToHubPress();
+
+              setInviteModalVisible(false);
+              return;
+            }
+
+            if (kaiInvite?.gate === "story_optional") {
+              setInviteModalVisible(false);
+              return;
+            }
+
+              if (kaiInvite?.gate === "story") {
+                setInviteModalVisible(false);
+                handleAddToHubPress();
+                return;
+              }
+
+              if (kaiInvite?.gate === "complete") {
+                setInviteModalVisible(false);
+                return;
+              }
+
+              setInviteModalVisible(false);
             } catch (e) {
-              Alert.alert("Could not accept invite", e?.message || "Try again.");
+              Alert.alert("Could not continue", e?.message || "Try again.");
             }
           }}
         >
-          <Ionicons name="add-circle-outline" size={18} color="white" />
+          <Ionicons name="sparkles-outline" size={18} color="white" />
           <Text style={styles.shareModalPrimaryText}>
-            {!currentUserId
-            ? "Join Keepr to Add Your Story"
-            : inviteRecord?.status === "active"
-            ? "Add Your Story"
-            : "Accept Invitation & Add Your Story"}</Text>
+            {kaiInvite?.primaryLabel || "Continue"}
+          </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -1466,10 +1537,17 @@ const inviteLandingModal = (
             if (galleryItems.length > 0) {
               setGalleryVisible(true);
             }
+            if (kaiInvite?.gate === "story_optional") {
+            setInviteModalVisible(false);
+            handleAddToHubPress();
+            return;
+          }
           }}
         >
           <Ionicons name="images-outline" size={18} color={colors.textPrimary} />
-          <Text style={styles.shareModalButtonText}>Explore Member Stories</Text>
+          <Text style={styles.shareModalButtonText}>
+            {kaiInvite?.secondaryLabel || "Explore Member Stories"}
+          </Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -1503,6 +1581,16 @@ return (
       {hubContent}
       {galleryModal}
       {shareHubModal}
+      <HubAuthModal
+        visible={hubAuthModalVisible}
+        hubName={hub?.name || "this Hub"}
+        onClose={() => setHubAuthModalVisible(false)}
+        onSuccess={async () => {
+          await loadHub();
+          setHubAuthModalVisible(false);
+          setInviteModalVisible(true);
+        }}
+      />
       {inviteLandingModal}
     </PublicHubShell>
   </PublicShell>

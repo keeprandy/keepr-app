@@ -174,10 +174,6 @@ const createNewAssetStory = () => {
   setAssetTypePickerOpen(false);
   setStoryPickerOpen(false);
 
-  const createNewAssetStory = () => {
-  console.log("CREATE NEW ASSET STORY");
-  setAssetTypePickerOpen(true);
-};
 
   if (assetType === "home") {
     navigation.navigate("AddHomeAsset", {

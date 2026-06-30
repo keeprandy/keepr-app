@@ -14,14 +14,15 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { to, hubName, inviteUrl, role } = await req.json();
+    const { to, hubName, inviteUrl, role, personalNote } = await req.json();
 
     console.log("SEND HUB INVITE BODY", {
-  to,
-  hubName,
-  inviteUrl,
-  role,
-});
+      to,
+      hubName,
+      inviteUrl,
+      role,
+      personalNote,
+    });
 
     if (!to || !inviteUrl) {
       return new Response(
@@ -39,12 +40,22 @@ Deno.serve(async (req) => {
       );
     }
 
+    const safeNote = String(personalNote || "").trim();
     const subject = `You've been invited to ${hubName || "a Keepr Hub"}`;
+
+    const noteHtml = safeNote
+      ? `<p style="font-size:16px;line-height:1.5;margin:18px 0;padding:14px 16px;background:#f6f8fb;border-radius:12px;"><strong>Personal note:</strong><br/>${safeNote}</p>`
+      : "";
+
+    const noteText = safeNote
+      ? `\n\nPersonal note:\n${safeNote}\n`
+      : "";
 
     const html = `
       <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;">
         <h1>${hubName || "Keepr Hub"}</h1>
         <p>You’ve been invited to join this Keepr Hub as a ${role || "member"}.</p>
+        ${noteHtml}
         <p>View the member stories and add your asset.</p>
         <a href="${inviteUrl}" style="display:inline-block;padding:12px 18px;background:#111827;color:white;text-decoration:none;border-radius:10px;font-weight:700;">
           View Member Stories
@@ -52,6 +63,12 @@ Deno.serve(async (req) => {
         <p style="font-size:12px;color:#777;margin-top:24px;">${inviteUrl}</p>
       </div>
     `;
+
+    const textBody =
+      `${hubName || "Keepr Hub"}\n\n` +
+      `You've been invited to join this Keepr Hub as a ${role || "member"}.\n` +
+      noteText +
+      `\nView the member stories and add your asset:\n${inviteUrl}`;
 
     const postmarkRes = await fetch("https://api.postmarkapp.com/email", {
       method: "POST",
@@ -65,16 +82,16 @@ Deno.serve(async (req) => {
         To: to,
         Subject: subject,
         HtmlBody: html,
-        TextBody: `${hubName || "Keepr Hub"}\n\nAccept this invitation and add your Keepr Story:\n${inviteUrl}`,
+        TextBody: textBody,
       }),
     });
 
-const resultText = await postmarkRes.text();
+    const resultText = await postmarkRes.text();
 
-console.log("POSTMARK STATUS", postmarkRes.status);
-console.log("POSTMARK RESPONSE", resultText);
+    console.log("POSTMARK STATUS", postmarkRes.status);
+    console.log("POSTMARK RESPONSE", resultText);
 
-return new Response(resultText, {
+    return new Response(resultText, {
       status: postmarkRes.status,
       headers: {
         ...corsHeaders,

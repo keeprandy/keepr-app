@@ -22,7 +22,6 @@ import { layoutStyles } from "../styles/layout";
 import { colors, radius, spacing, typography } from "../styles/theme";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { track, identifyUser } from "../lib/analytics";
-import { acceptHubInviteByToken } from "../lib/hubsApi";
 import { claimPendingActionsForEmail } from "../lib/hubsApi";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -159,29 +158,25 @@ export default function AuthScreen({ navigation, route }) {
     window.location.href = isIOS ? iosUrl : androidUrl;
   };
 
-const continueHubInvite = async (userId) => {
+const continueActivationJourney = async () => {
   const intent = route?.params?.intent;
 
-  if (intent !== "accept_hub_invite") return;
+  if (intent !== "accept_hub_invite") return false;
 
   const inviteToken = route?.params?.inviteToken;
   const hubSlug = route?.params?.hubSlug;
 
-  if (!inviteToken || !hubSlug || !userId) return;
+  if (!inviteToken || !hubSlug) return false;
 
-  console.log("ACCEPTING HUB INVITE", {
-    inviteToken,
-    userId,
-  });
-
-  await acceptHubInviteByToken({
-    inviteToken,
-    userId,
-  });
-
-  navigation.navigate("KeeprHub", {
+  navigation.replace("KeeprHub", {
     slug: hubSlug,
+    invite: inviteToken,
+    inviteToken,
+    intent: "accept_hub_invite",
+    src: "hub_invite",
   });
+
+  return true;
 };
 
   const handleSignIn = async () => {
@@ -220,7 +215,8 @@ const continueHubInvite = async (userId) => {
           console.log("[AuthScreen] profile/claim failed:", e?.message || e);
         }
 
-        await continueHubInvite(userId);
+        const continued = await continueActivationJourney();
+        if (continued) return;
       }
       
     } catch (e) {
@@ -287,8 +283,17 @@ const continueHubInvite = async (userId) => {
         return;
       }
 
-      const user = data?.session?.user || null;
-const sessionUserId = user?.id || null;
+      const user = data?.session?.user || null;    
+      const sessionUserId = user?.id || null;
+
+      if (!sessionUserId) {
+      setMode("signin");
+      setPassword("");
+      setFormError(
+        "Account created. Sign in to continue your Hub invitation."
+      );
+      return;
+    }
 
 if (sessionUserId) {
   await ensureProfile(sessionUserId);
@@ -298,7 +303,8 @@ if (sessionUserId) {
     email: normalizedEmail,
   });
 
-  await continueHubInvite(sessionUserId);
+ const continued = await continueActivationJourney();
+if (continued) return;
 
   // 🔥 Attribution capture
   let sourceSlug = null;

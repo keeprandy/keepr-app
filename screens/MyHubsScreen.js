@@ -74,7 +74,12 @@ export default function MyHubsScreen({ navigation }) {
             <TouchableOpacity
               key={hub.id}
               style={styles.card}
-              onPress={() => navigation.navigate("HubDetail", { hubId: hub.id })}
+              onPress={() =>
+                navigation.navigate("KeeprHubInternal", {
+                  hubId: hub.id,
+                  mode: "internal",
+                })
+              }
             >
               <View style={styles.icon}>
                 <Ionicons name="people-outline" size={18} color={colors.textPrimary} />

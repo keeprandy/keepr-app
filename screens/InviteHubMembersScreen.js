@@ -1,4 +1,5 @@
 import React from "react";
+import { supabase } from "../lib/supabaseClient";
 import {
   View,
   Text,
@@ -9,6 +10,7 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  RefreshControl,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -34,6 +36,7 @@ export default function InviteHubMembersScreen({ navigation, route }) {
 
   const [email, setEmail] = React.useState("");
   const [role, setRole] = React.useState("member");
+  const [personalNote, setPersonalNote] = React.useState("");
 
   const load = React.useCallback(async () => {
     try {
@@ -55,6 +58,30 @@ export default function InviteHubMembersScreen({ navigation, route }) {
     load();
   }, [load]);
 
+  React.useEffect(() => {
+  if (!hubId) return;
+
+  const channel = supabase
+    .channel(`hub-members-${hubId}`)
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "hub_members",
+        filter: `hub_id=eq.${hubId}`,
+      },
+      () => {
+        load();
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}, [hubId, load]);
+
   const pendingInvites = members.filter((m) => m.status === "invited");
   const activeMembers = members.filter((m) => m.status !== "invited");
 
@@ -66,40 +93,68 @@ const canManage =
   currentMember?.role === "owner" ||
   currentMember?.role === "admin";
 
-  const submitInvite = async () => {
-    const cleanEmail = email.trim().toLowerCase();
+const submitInvite = async () => {
+  const emails = email
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
 
-    if (!cleanEmail) {
-      Alert.alert("Missing email", "Enter an email address.");
-      return;
-    }
+  if (emails.length === 0) {
+    Alert.alert("Missing email", "Enter at least one email address.");
+    return;
+  }
 
-    try {
-      setSaving(true);
+  try {
+    setSaving(true);
 
+    for (const cleanEmail of emails) {
       await inviteHubMember({
         hubId,
         email: cleanEmail,
         role,
         invitedBy: user?.id,
         sendEmail: true,
+        personalNote: personalNote.trim(),
       });
+    }
 
-      setEmail("");
-      setRole("member");
-      await load();
+    setEmail("");
+    setPersonalNote("");
+    setRole("member");
+    await load();
     } catch (e) {
+      if (e?.code === "INVITE_ALREADY_PENDING") {
+        Alert.alert(
+          "Invite already pending",
+          "This person already has an invitation. Do you want to resend it?",
+          [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Resend Invite",
+              onPress: () => {
+                Alert.alert("Next", "Resend Invite is next.");
+              },
+            },
+          ]
+        );
+        return;
+      }
+
       Alert.alert("Could not invite member", e?.message || "Try again.");
     } finally {
       setSaving(false);
     }
-  };
+};
 
 
   const removeMember = async (member) => {
     const confirmed =
       Platform.OS === "web" && typeof window !== "undefined"
-        ? window.confirm("Remove this member or invite from the Hub?")
+        ? window.confirm(
+            member.status === "invited"
+              ? "Cancel this pending invite?"
+              : "Remove this member and their Stories from this Hub?"
+          )
         : true;
 
     if (!confirmed) return;
@@ -138,7 +193,12 @@ const memberLabel = (member) =>
 
   return (
     <SafeAreaView style={styles.screen}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+          contentContainerStyle={styles.content}
+          refreshControl={
+            <RefreshControl refreshing={loading} onRefresh={load} />
+          }
+        >
         <View style={styles.headerRow}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
             <Ionicons name="chevron-back-outline" size={22} color={colors.textPrimary} />
@@ -167,11 +227,19 @@ const memberLabel = (member) =>
             onChangeText={setEmail}
             autoCapitalize="none"
             keyboardType="email-address"
-            placeholder="member@example.com"
+            placeholder="member@example.com, friend@example.com"
             placeholderTextColor={colors.textMuted}
             style={styles.input}
           />
-
+          <Text style={styles.label}>Personal Note</Text>
+          <TextInput
+            value={personalNote}
+            onChangeText={setPersonalNote}
+            placeholder="Add a personal note... e.g. Add your French Horn!"
+            placeholderTextColor={colors.textMuted}
+            style={[styles.input, { minHeight: 82, textAlignVertical: "top" }]}
+            multiline
+          />
           <Text style={styles.label}>Role</Text>
           <View style={styles.pillWrap}>
             {["member", "admin"].map((value) => (
@@ -226,7 +294,9 @@ const memberLabel = (member) =>
 function MemberSection({ title, emptyText, members, memberLabel, onRemove }) {
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionLabel}>{title}</Text>
+      <Text style={styles.sectionLabel}>
+        {title} ({members.length})
+      </Text>
 
       <View style={styles.card}>
         {members.length === 0 ? (
@@ -245,7 +315,9 @@ function MemberSection({ title, emptyText, members, memberLabel, onRemove }) {
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowTitle}>{memberLabel(member)}</Text>
                 <Text style={styles.rowSubtext}>
-                  {member.role || "member"} • {member.status || "active"}
+                  {member.status === "invited"
+                  ? `Invited • ${member.role || "member"}`
+                  : `${member.role || "member"} • Active`}
                 </Text>
               </View>
 

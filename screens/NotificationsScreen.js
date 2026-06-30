@@ -27,7 +27,7 @@ import { buildTimelinePrefillFromEmailText } from "../utils/emailToTimeline";
 import * as Haptics from "expo-haptics";
 import { Swipeable } from "react-native-gesture-handler";
 import { acceptHubInviteByToken } from "../lib/hubsApi";
-import { createAction } from "../lib/actionsApi";
+import { executeAction } from "../lib/actionsApi";
 
 
 /* --------------------------- helpers --------------------------- */
@@ -1230,37 +1230,27 @@ const remindersByDate = useMemo(() => {
         //
         // 3. Complete the Action that generated this notification.
         //
-        if (hubMemberId) {
-          await supabase
-            .from("actions")
-            .update({
-              status: "completed",
-              completed_at: new Date().toISOString(),
-            })
-            .eq("type", "hub_invite")
-            .eq("source_table", "hub_members")
-            .eq("source_id", hubMemberId)
-            .eq("assigned_to_user_id", ownerId);
+if (hubMemberId) {
+  const { data: matchingActions, error: actionFindError } = await supabase
+    .from("actions")
+    .select("id")
+    .eq("type", "hub_invite")
+    .eq("source_table", "hub_members")
+    .eq("source_id", hubMemberId)
+    .eq("assigned_to_user_id", ownerId)
+    .in("status", ["open", "pending"])
+    .limit(1);
 
-          //
-          // 4. Queue the next KAI Action.
-          //
-          await createAction({
-            type: "add_asset_to_hub",
-            title: `Add your first Keepr Story to ${hubName}`,
-            body: "Join the community by adding an asset story and making it visible to the Hub.",
-            priority: 15,
-            assignedToUserId: ownerId,
-            sourceTable: "hub_members",
-            sourceId: hubMemberId,
-            payload: {
-              hub_id: payload.hub_id,
-              hub_slug: payload.hub_slug,
-              hub_name: hubName,
-              hub_member_id: hubMemberId,
-            },
-          });
-        }
+  if (actionFindError) throw actionFindError;
+
+  const actionId = matchingActions?.[0]?.id;
+
+  if (actionId) {
+    const actionResult = await executeAction(actionId);
+
+    console.log("KAI ACTION RESULT", actionResult);
+  }
+}
 
         //
         // 5. Refresh UI.
