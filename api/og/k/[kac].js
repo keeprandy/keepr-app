@@ -1,5 +1,7 @@
 // api/og/k/[kac].js
 import { createClient } from "@supabase/supabase-js";
+import fs from "fs";
+import path from "path";
 
 function esc(s) {
   return String(s ?? "")
@@ -28,41 +30,44 @@ function buildHtml({ title, description, url, image }) {
   const u = esc(url);
   const i = esc(image);
 
-  // IMPORTANT:
-  // - We return HTML (not redirect) so link preview bots can read OG tags.
-  // - For humans, we still “land” at /k/:kac (the requested URL).
-  //   You can optionally add a JS redirect to an internal route, but KEEP it same URL if possible.
-  return `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  const candidates = [
+    path.join(process.cwd(), "dist", "index.html"),
+    path.join(process.cwd(), "index.html"),
+  ];
 
-  <title>${t}</title>
-  <meta name="description" content="${d}" />
+  const indexPath = candidates.find((p) => fs.existsSync(p));
 
-  <!-- Open Graph -->
-  <meta property="og:type" content="website" />
-  <meta property="og:title" content="${t}" />
-  <meta property="og:description" content="${d}" />
-  <meta property="og:url" content="${u}" />
-  <meta property="og:image" content="${i}" />
+  if (!indexPath) {
+    return `<!doctype html><html><head>
+      <title>${t}</title>
+      <meta property="og:title" content="${t}" />
+      <meta property="og:description" content="${d}" />
+      <meta property="og:url" content="${u}" />
+      <meta property="og:image" content="${i}" />
+      <meta name="twitter:card" content="summary_large_image" />
+      <meta name="twitter:title" content="${t}" />
+      <meta name="twitter:description" content="${d}" />
+      <meta name="twitter:image" content="${i}" />
+    </head><body><a href="${u}">Open in Keepr</a></body></html>`;
+  }
 
-  <!-- Twitter -->
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="${t}" />
-  <meta name="twitter:description" content="${d}" />
-  <meta name="twitter:image" content="${i}" />
+  const appHtml = fs.readFileSync(indexPath, "utf8");
 
-</head>
-<body style="font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; padding: 24px;">
-  <h1 style="margin: 0 0 8px 0;">${t}</h1>
-  <p style="margin: 0 0 16px 0; color: #4b5563;">${d}</p>
-  <p style="margin: 0;">
-    <a href="${u}">Open in Keepr</a>
-  </p>
-</body>
-</html>`;
+  const tags = `
+    <title>${t}</title>
+    <meta name="description" content="${d}" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="${t}" />
+    <meta property="og:description" content="${d}" />
+    <meta property="og:url" content="${u}" />
+    <meta property="og:image" content="${i}" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="${t}" />
+    <meta name="twitter:description" content="${d}" />
+    <meta name="twitter:image" content="${i}" />
+  `;
+
+  return appHtml.replace("</head>", `${tags}</head>`);
 }
 
 export default async function handler(req, res) {
@@ -95,8 +100,13 @@ export default async function handler(req, res) {
       );
     }
 
-    const SUPABASE_URL = process.env.SUPABASE_URL;
-    const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+const SUPABASE_URL =
+  process.env.SUPABASE_URL ||
+  process.env.EXPO_PUBLIC_SUPABASE_URL;
+
+const SUPABASE_ANON_KEY =
+  process.env.SUPABASE_ANON_KEY ||
+  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
       // Don’t fail hard; previews should still work with fallback metadata.

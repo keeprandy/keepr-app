@@ -2,7 +2,7 @@
   "rewrites": [
     { "source": "/api/og/k/:kac", "destination": "/api/og/k/:kac" },
     { "source": "/k/:kac/actions", "destination": "/" },
-    { "source": "/k/:kac", "destination": "/" },
+    { "source": "/k/:kac", "destination": "/api/og/k/:kac" },
     { "source": "/((?!api/).*)", "destination": "/" }
   ]
 }
