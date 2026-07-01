@@ -240,6 +240,8 @@ async function fetchPublicStoryMedia(kac) {
 
   const json = await res.json();
 
+  console.log("PUBLIC STORY MEDIA JSON", json);
+
   if (!res.ok) {
     logPublicStoryLoad("PUBLIC STORY MEDIA ERROR:", json);
     return [];
@@ -525,9 +527,6 @@ if (summaryRow) {
 
 const publicAssetId = assetRow.asset_id || assetRow.id;
 
-setShowcaseFiles([]);
-setShowcaseLinks([]);
-
     const publicKac = assetRow.kac_id || kac;
 
       logPublicStoryLoad("PUBLIC STORY ASSET ROW:", assetRow);
@@ -562,6 +561,9 @@ setShowcaseLinks([]);
       logPublicStoryLoad("PUBLIC TIMELINE ERROR:", timelineError);
 
       const mediaRows = storyMedia.media || [];
+
+      setShowcaseFiles(storyMedia.showcaseFiles || []);
+      setShowcaseLinks(storyMedia.showcaseLinks || []);
 
       logPublicStoryLoad("PUBLIC STORY MEDIA:", storyMedia);
 
