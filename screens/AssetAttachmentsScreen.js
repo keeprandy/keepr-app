@@ -2169,9 +2169,15 @@ const openAdd = () => {
   const selectedRoleText = selected?.role ? roleLabel(selected.role) : "Pick One Here";
 
   const canToggleShowcase =
-    !!selected &&
-    selected._isPhoto &&
-    (selected.target_type === "asset" || selected.target_type === "system");
+  !!selected &&
+  (selected.target_type === "asset" || selected.target_type === "system");
+
+  const showcaseNoun =
+  selected?.kind === "link"
+    ? "Link"
+    : selected?._isPhoto
+    ? "Photo"
+    : "File";
 
   const handleToggleShowcase = useCallback(async () => {
     if (!selected || !canToggleShowcase) return;
@@ -3017,9 +3023,10 @@ return (
                                 styles.showcaseToggleTextActive,
                             ]}
                           >
-                            {selected.target_type === "system"
-                              ? "Showcase Photo for this system"
-                              : "Showcase Photo for this asset"}
+                            
+                        {selected.target_type === "system"
+                          ? `Showcase ${showcaseNoun} for this system`
+                          : `Showcase ${showcaseNoun} for this asset`}
                           </Text>
                         </TouchableOpacity>
                       </View>

@@ -31,6 +31,7 @@ import {
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import { confirmRemove } from "../lib/confirmRemove";
 import LightboxModal from "../components/LightboxModal";
+import ShowcaseAttachmentsSection from "../components/showcase/ShowcaseAttachmentsSection";
 
 const TILE_ASPECT = 4 / 3;
 
@@ -122,6 +123,9 @@ export default function HomeShowcaseScreen({ navigation, route }) {
   const [photos, setPhotos] = useState([]);
   const [photosLoading, setPhotosLoading] = useState(false);
   const [photosError, setPhotosError] = useState(null);
+
+  const [showcaseFiles, setShowcaseFiles] = useState([]);
+const [showcaseLinks, setShowcaseLinks] = useState([]);
   
 
   // ✅ Persistent hero: assets.hero_placement_id (NOT a URL)
@@ -203,6 +207,8 @@ export default function HomeShowcaseScreen({ navigation, route }) {
     async (opts = { useFallback: true }) => {
       if (!currentHome?.id) {
         setPhotos([]);
+        setShowcaseFiles([]);
+        setShowcaseLinks([]);
         return;
       }
 
@@ -215,6 +221,26 @@ export default function HomeShowcaseScreen({ navigation, route }) {
         const effectiveHero = latestHero ?? heroPlacementId ?? null;
 
         const rows = await listAttachmentsForTarget("asset", currentHome.id);
+
+        const showcased = (rows || []).filter((row) => row.is_showcase);
+
+        setShowcaseFiles(
+          showcased.filter((row) => {
+            const kind = row.kind || "";
+            const mime = String(row.mime_type || "").toLowerCase();
+            const fileName = row.file_name || row.storage_path || "";
+            const ext = fileName.split(".").pop()?.toLowerCase() || "";
+
+            const isImage =
+              kind === "photo" ||
+              mime.startsWith("image/") ||
+              ["jpg", "jpeg", "png", "webp", "heic", "heif"].includes(ext);
+
+            return row.kind !== "link" && !isImage;
+          })
+        );
+
+        setShowcaseLinks(showcased.filter((row) => row.kind === "link"));
 
         const gallery = [];
 
@@ -646,7 +672,25 @@ const closeLightbox = () => {
           </Text>
         </View>
 
+        <ShowcaseAttachmentsSection
+          files={showcaseFiles}
+          links={showcaseLinks}
+          getFileUrl={async (file) => {
+            if (file.url) return file.url;
+
+            if (file.bucket && file.storage_path) {
+              return await getSignedUrl({
+                bucket: file.bucket,
+                path: file.storage_path,
+              });
+            }
+
+            return null;
+          }}
+        />
+
         {/* Gallery */}
+        <Text style={styles.galleryHeading}>Gallery</Text>
         {photosLoading && !hasGallery ? (
           <View style={styles.centered}>
             <ActivityIndicator />
@@ -771,6 +815,15 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceSubtle,
   },
   blurbText: { fontSize: 13, lineHeight: 18, color: colors.textSecondary },
+
+  galleryHeading: {
+  marginHorizontal: spacing.lg,
+  marginTop: spacing.sm,
+  marginBottom: spacing.sm,
+  fontSize: 18,
+  fontWeight: "900",
+  color: colors.textPrimary,
+},
 
   gridRow: {
     flexDirection: "row",

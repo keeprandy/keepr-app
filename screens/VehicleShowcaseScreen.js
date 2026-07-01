@@ -23,6 +23,7 @@ import { useAssets } from "../hooks/useAssets";
 import { supabase } from "../lib/supabaseClient";
 import LightboxModal from "../components/LightboxModal";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import ShowcaseAttachmentsSection from "../components/showcase/ShowcaseAttachmentsSection";
 
 import {
   listAttachmentsForTarget,
@@ -71,6 +72,9 @@ export default function VehicleShowcaseScreen({ navigation, route }) {
   const [photos, setPhotos] = useState([]);
   const [photosLoading, setPhotosLoading] = useState(false);
   const [photosError, setPhotosError] = useState(null);
+
+  const [showcaseFiles, setShowcaseFiles] = useState([]);
+const [showcaseLinks, setShowcaseLinks] = useState([]);
 
   // Lightbox state
   const [lightboxVisible, setLightboxVisible] = useState(false);
@@ -169,6 +173,19 @@ export default function VehicleShowcaseScreen({ navigation, route }) {
     return gallery;
   };
 
+  const looksLikeImageAttachment = (row = {}) => {
+  const kind = row.kind || "";
+  const mime = String(row.mime_type || "").toLowerCase();
+  const fileName = row.file_name || row.storage_path || "";
+  const ext = fileName.split(".").pop()?.toLowerCase() || "";
+
+  return (
+    kind === "photo" ||
+    mime.startsWith("image/") ||
+    ["jpg", "jpeg", "png", "webp", "heic", "heif"].includes(ext)
+  );
+};
+
   /* ---------- load gallery from attachments (is_showcase = true) ---------- */
 
   const loadPhotos = useCallback(
@@ -186,6 +203,18 @@ export default function VehicleShowcaseScreen({ navigation, route }) {
         "asset",
         currentVehicle.id
       );
+
+      const showcased = (rows || []).filter((row) => row.is_showcase);
+
+        setShowcaseFiles(
+          showcased.filter(
+            (row) => row.kind !== "link" && !looksLikeImageAttachment(row)
+          )
+        );
+
+        setShowcaseLinks(
+          showcased.filter((row) => row.kind === "link")
+        );
 
         const gallery = [];
 
@@ -631,7 +660,7 @@ export default function VehicleShowcaseScreen({ navigation, route }) {
         >
           <Image
             source={{ uri: photo.url }}
-            style={[styles.tileImage, { aspectRatio: aspect }]}
+            style={[styles.tileImage]}
             resizeMode="cover"
           />
         </TouchableOpacity>
@@ -672,6 +701,7 @@ export default function VehicleShowcaseScreen({ navigation, route }) {
       .filter(Boolean)
       .join(" ") ||
     "My vehicle";
+
 
   return (
     <SafeAreaView style={layoutStyles.screen}>
@@ -736,32 +766,50 @@ export default function VehicleShowcaseScreen({ navigation, route }) {
           </Text>
         </View>
 
-        {/* Gallery */}
-        {photosLoading && !hasGallery ? (
-          <View style={styles.centered}>
-            <ActivityIndicator />
-            <Text style={{ marginTop: spacing.sm }}>Loading photos…</Text>
-          </View>
-        ) : hasGallery ? (
-          <View style={styles.masonryRow}>
-            <View style={styles.masonryColumn}>{leftColumn.map(renderTile)}</View>
-            <View style={styles.masonryColumn}>{rightColumn.map(renderTile)}</View>
-          </View>
-        ) : (
-          <View style={styles.emptyCard}>
-            <Ionicons name="images-outline" size={28} color={colors.textMuted} />
-            <Text style={styles.emptyTitle}>No showcase photos yet</Text>
-            <Text style={styles.emptyText}>
-              Add a photo of this vehicle to create a curated showcase. Only the curated set appears here.
-            </Text>
-          </View>
-        )}
+        <ShowcaseAttachmentsSection
+          files={showcaseFiles}
+          links={showcaseLinks}
+          getFileUrl={async (file) => {
+            if (file.url) return file.url;
+
+            if (file.bucket && file.storage_path) {
+              return await getSignedUrl({
+                bucket: file.bucket,
+                path: file.storage_path,
+              });
+            }
+
+            return null;
+          }}
+        />
+
+{/* Gallery */}
+{photosLoading && !hasGallery ? (
+  <View style={styles.centered}>
+    <ActivityIndicator />
+    <Text style={{ marginTop: spacing.sm }}>Loading photos…</Text>
+  </View>
+) : hasGallery ? (
+  <View style={styles.galleryGrid}>
+    {photos.map(renderTile)}
+  </View>
+) : (
+  <View style={styles.emptyCard}>
+    <Ionicons name="images-outline" size={28} color={colors.textMuted} />
+    <Text style={styles.emptyTitle}>No showcase photos yet</Text>
+    <Text style={styles.emptyText}>
+      Add a photo of this vehicle to create a curated showcase.
+    </Text>
+  </View>
+)}
 
         {photosError && (
           <View style={{ paddingHorizontal: spacing.lg, marginTop: spacing.sm }}>
             <Text style={{ color: "red", fontSize: 12 }}>{photosError}</Text>
           </View>
         )}
+
+
       </ScrollView>
 
       {/* Lightbox */}
@@ -864,6 +912,47 @@ const styles = StyleSheet.create({
   },
   blurbText: { fontSize: 12, color: colors.textSecondary, lineHeight: 18 },
 
+  proofCard: {
+  marginHorizontal: spacing.lg,
+  marginBottom: spacing.md,
+  padding: spacing.md,
+  borderRadius: radius.lg,
+  backgroundColor: colors.surface,
+  borderWidth: 1,
+  borderColor: colors.borderSubtle,
+  ...shadows.subtle,
+},
+
+proofTitle: {
+  fontSize: 14,
+  fontWeight: "900",
+  color: colors.textPrimary,
+  marginBottom: spacing.sm,
+},
+
+proofRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  paddingVertical: 10,
+  borderTopWidth: 1,
+  borderTopColor: colors.borderSubtle,
+},
+
+proofText: {
+  marginLeft: 10,
+  flex: 1,
+  fontSize: 13,
+  fontWeight: "700",
+  color: colors.textPrimary,
+},
+
+galleryGrid: {
+  flexDirection: "row",
+  flexWrap: "wrap",
+  gap: 14,
+  paddingHorizontal: spacing.lg,
+},
+
   masonryRow: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -872,18 +961,22 @@ const styles = StyleSheet.create({
   },
   masonryColumn: { width: "48%" },
 
-  tile: {
-    marginBottom: spacing.sm,
-    borderRadius: radius.lg,
-    overflow: "hidden",
-    backgroundColor: colors.surfaceSubtle,
-    ...shadows.subtle,
-    position: "relative",
-  },
-  tileImage: {
-    width: "100%",
-    backgroundColor: colors.surface,
-  },
+tile: {
+  width: Platform.OS === "web" ? 260 : "48%",
+  height: Platform.OS === "web" ? 190 : 170,
+  marginBottom: spacing.sm,
+  borderRadius: radius.lg,
+  overflow: "hidden",
+  backgroundColor: colors.surfaceSubtle,
+  ...shadows.subtle,
+  position: "relative",
+},
+
+tileImage: {
+  width: "100%",
+  height: "100%",
+  backgroundColor: colors.surface,
+},
 
   heroBadge: {
     position: "absolute",

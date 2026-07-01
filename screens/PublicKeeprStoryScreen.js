@@ -25,6 +25,8 @@ import { captureRef } from "react-native-view-shot";
 import QRCode from "react-native-qrcode-svg";
 import PublicShell from "../components/public/PublicShell";
 import { colors, radius, shadows, spacing, typography } from "../styles/theme";
+import ShowcaseAttachmentsSection from "../components/showcase/ShowcaseAttachmentsSection";
+import { getSignedUrl, listAttachmentsForTarget } from "../lib/attachmentsApi";
 
 import { supabase } from "../lib/supabaseClient";
 import { formatKeeprDate } from "../lib/dateFormat";
@@ -292,6 +294,8 @@ const originHubName =
   const [heroUri, setHeroUri] = useState(null);
   const [timeline, setTimeline] = useState([]);
   const [gallery, setGallery] = useState([]);
+  const [showcaseFiles, setShowcaseFiles] = useState([]);
+  const [showcaseLinks, setShowcaseLinks] = useState([]);
   const [systems, setSystems] = useState([]);
   const [activeTab, setActiveTab] = useState("story");
   const [lightboxIndex, setLightboxIndex] = useState(null);
@@ -443,6 +447,19 @@ const ownerDisplayName = asset?.owner_name || null;
   /*                              LOAD PUBLIC STORY                           */
   /* ------------------------------------------------------------------------ */
 
+  const looksLikeImageAttachment = (row = {}) => {
+  const kind = row.kind || "";
+  const mime = String(row.mime_type || "").toLowerCase();
+  const fileName = row.file_name || row.storage_path || "";
+  const ext = fileName.split(".").pop()?.toLowerCase() || "";
+
+  return (
+    kind === "photo" ||
+    mime.startsWith("image/") ||
+    ["jpg", "jpeg", "png", "webp", "heic", "heif"].includes(ext)
+  );
+};
+  
   const loadPublicStory = useCallback(async () => {
   if (!kac && !assetId) return;
 
@@ -503,6 +520,19 @@ if (summaryRow) {
     setAsset(assetRow);
 
     const publicAssetId = assetRow.asset_id || assetRow.id;
+
+    const attachmentRows = await listAttachmentsForTarget("asset", publicAssetId);
+    const showcasedAttachments = (attachmentRows || []).filter((row) => row.is_showcase);
+
+    setShowcaseFiles(
+      showcasedAttachments.filter(
+        (row) => row.kind !== "link" && !looksLikeImageAttachment(row)
+      )
+    );
+
+    setShowcaseLinks(
+      showcasedAttachments.filter((row) => row.kind === "link")
+    );
 
     const publicKac = assetRow.kac_id || kac;
 
@@ -581,7 +611,28 @@ if (summaryRow) {
       const dedupedGalleryRows = Array.from(
         new Map(
           sortedMediaRows
-            .filter((row) => !!row.image_url)
+          .filter((row) => {
+            const url = String(row.image_url || "").trim();
+            const kind = String(row.kind || row.attachment_kind || "").toLowerCase();
+            const mime = String(row.mime_type || "").toLowerCase();
+            const name = String(row.file_name || row.storage_path || "").toLowerCase();
+
+            const isImage =
+              kind === "photo" ||
+              kind === "image" ||
+              mime.startsWith("image/") ||
+              /\.(jpg|jpeg|png|webp|heic|heif)$/.test(name) ||
+              /\.(jpg|jpeg|png|webp|heic|heif)(\?|$)/.test(url);
+
+            return (
+              isImage &&
+              !!url &&
+              url !== "null" &&
+              url !== "undefined" &&
+              !url.includes("placeholder") &&
+              !url.includes("image-outline")
+            );
+          })
             .map((row) => [row.image_url, row])
         ).values()
       );
@@ -959,7 +1010,7 @@ return (
                 activeTab === "gallery" && styles.tabLabelActive,
               ]}
             >
-              Gallery
+              Showcase
             </Text>
           </TouchableOpacity>
           )}
@@ -1065,32 +1116,60 @@ return (
 
         {/* GALLERY TAB */}
 
-        {showGallery && activeTab === "gallery" && (
-        <View style={styles.publicGalleryWrap}>
-          {gallery.map((image, index) => (
-            <TouchableOpacity
-              key={image.id}
-              style={styles.publicGalleryTile}
-              activeOpacity={0.92}
-              onPress={() => setLightboxIndex(index)}
-            >
-              <Image
-                source={{ uri: image.uri }}
-                style={styles.publicGalleryImage}
-                resizeMode="cover"
-              />
+{showGallery && activeTab === "gallery" && (
+  <>
+<View style={styles.sectionCard}>
+  <ShowcaseAttachmentsSection
+    variant="public"
+    files={showcaseFiles}
+    links={showcaseLinks}
+    getFileUrl={async (file) => {
+      if (file.url) return file.url;
 
-              <View style={styles.galleryScrim} />
+      if (file.bucket && file.storage_path) {
+        return await getSignedUrl({
+          bucket: file.bucket,
+          path: file.storage_path,
+        });
+      }
 
-              <Image
-                source={keeprEnabledWatermark}
-                style={styles.galleryWatermark}
-                resizeMode="contain"
-              />
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
+      return null;
+    }}
+  />
+
+  {!!gallery.length && (
+    <>
+      <View style={[styles.sectionHeader, { marginTop: spacing.md }]}>
+        <Text style={styles.sectionTitle}>Gallery</Text>
+      </View>
+
+      <View style={styles.publicGalleryWrap}>
+        {gallery.map((image, index) => (
+          <TouchableOpacity
+            key={image.id}
+            style={styles.publicGalleryTile}
+            activeOpacity={0.92}
+            onPress={() => setLightboxIndex(index)}
+          >
+            <Image
+              source={{ uri: image.uri }}
+              style={styles.publicGalleryImage}
+              resizeMode="cover"
+            />
+            <View style={styles.galleryScrim} />
+            <Image
+              source={keeprEnabledWatermark}
+              style={styles.galleryWatermark}
+              resizeMode="contain"
+            />
+          </TouchableOpacity>
+        ))}
+      </View>
+    </>
+  )}
+</View>
+  </>
+)}
       <Modal
         visible={lightboxIndex !== null}
         transparent
@@ -1480,19 +1559,20 @@ hashtagText: {
   justifyContent: "center",
 },
 
-  publicGalleryWrap: {
+publicGalleryWrap: {
   flexDirection: "row",
   flexWrap: "wrap",
   gap: 14,
-  marginBottom: spacing.xl,
 },
 
 publicGalleryTile: {
   width: IS_WEB ? 260 : "48%",
-  height: 190,
-  borderRadius: radius.xl,
+  height: IS_WEB ? 190 : 170,
+  borderRadius: radius.lg,
   overflow: "hidden",
   backgroundColor: colors.surfaceSubtle,
+  borderWidth: 1,
+  borderColor: colors.borderSubtle,
   position: "relative",
   ...shadows.subtle,
 },
@@ -1946,7 +2026,7 @@ lightboxArrowRight: {
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
-    padding: spacing.lg,
+    padding: spacing.md,
     ...shadows.subtle,
     marginBottom: spacing.xl,
   },

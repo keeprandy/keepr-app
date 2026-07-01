@@ -23,6 +23,7 @@ import { colors, spacing, radius, typography, shadows } from "../styles/theme";
 import { useAssets } from "../hooks/useAssets";
 import { supabase } from "../lib/supabaseClient";
 import LightboxModal from "../components/LightboxModal";
+import ShowcaseAttachmentsSection from "../components/showcase/ShowcaseAttachmentsSection";
 
 import {
   listAttachmentsForTarget,
@@ -75,6 +76,9 @@ export default function OtherAssetShowcaseScreen({ navigation, route }) {
   const [photos, setPhotos] = useState([]);
   const [photosLoading, setPhotosLoading] = useState(false);
   const [photosError, setPhotosError] = useState(null);
+
+  const [showcaseFiles, setShowcaseFiles] = useState([]);
+const [showcaseLinks, setShowcaseLinks] = useState([]);
 
   // Lightbox state
   const [lightboxVisible, setLightboxVisible] = useState(false);
@@ -172,6 +176,8 @@ export default function OtherAssetShowcaseScreen({ navigation, route }) {
     async (opts = { useFallback: true }) => {
       if (!currentAsset?.id) {
         setPhotos([]);
+        setShowcaseFiles([]);
+        setShowcaseLinks([]);
         return;
       }
 
@@ -180,6 +186,26 @@ export default function OtherAssetShowcaseScreen({ navigation, route }) {
 
       try {
         const rows = await listAttachmentsForTarget("asset", currentAsset.id);
+
+        const showcased = (rows || []).filter((row) => row.is_showcase);
+
+        setShowcaseFiles(
+          showcased.filter((row) => {
+            const kind = row.kind || "";
+            const mime = String(row.mime_type || "").toLowerCase();
+            const fileName = row.file_name || row.storage_path || "";
+            const ext = fileName.split(".").pop()?.toLowerCase() || "";
+
+            const isImage =
+              kind === "photo" ||
+              mime.startsWith("image/") ||
+              ["jpg", "jpeg", "png", "webp", "heic", "heif"].includes(ext);
+
+            return row.kind !== "link" && !isImage;
+          })
+        );
+
+        setShowcaseLinks(showcased.filter((row) => row.kind === "link"));
 
         const gallery = [];
 
@@ -610,7 +636,25 @@ export default function OtherAssetShowcaseScreen({ navigation, route }) {
           </Text>
         </View>
 
+        <ShowcaseAttachmentsSection
+          files={showcaseFiles}
+          links={showcaseLinks}
+          getFileUrl={async (file) => {
+            if (file.url) return file.url;
+
+            if (file.bucket && file.storage_path) {
+              return await getSignedUrl({
+                bucket: file.bucket,
+                path: file.storage_path,
+              });
+            }
+
+            return null;
+          }}
+        />
+
         {/* Gallery */}
+        <Text style={styles.galleryHeading}>Gallery</Text>
         {photosLoading && !hasGallery ? (
           <View style={styles.centered}>
             <ActivityIndicator />
@@ -781,6 +825,15 @@ const styles = StyleSheet.create({
     borderColor: colors.borderSubtle,
   },
   blurbText: { fontSize: 12, color: colors.textSecondary, lineHeight: 18 },
+
+  galleryHeading: {
+  marginHorizontal: spacing.lg,
+  marginTop: spacing.sm,
+  marginBottom: spacing.sm,
+  fontSize: 18,
+  fontWeight: "900",
+  color: colors.textPrimary,
+},
 
   gridRow: {
     flexDirection: "row",
