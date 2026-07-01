@@ -245,7 +245,11 @@ async function fetchPublicStoryMedia(kac) {
     return [];
   }
 
-  return Array.isArray(json?.media) ? json.media : [];
+  return {
+  media: Array.isArray(json?.media) ? json.media : [],
+  showcaseFiles: Array.isArray(json?.showcaseFiles) ? json.showcaseFiles : [],
+  showcaseLinks: Array.isArray(json?.showcaseLinks) ? json.showcaseLinks : [],
+};
 }
 
 /* -------------------------------------------------------------------------- */
@@ -519,20 +523,10 @@ if (summaryRow) {
 
     setAsset(assetRow);
 
-    const publicAssetId = assetRow.asset_id || assetRow.id;
+const publicAssetId = assetRow.asset_id || assetRow.id;
 
-    const attachmentRows = await listAttachmentsForTarget("asset", publicAssetId);
-    const showcasedAttachments = (attachmentRows || []).filter((row) => row.is_showcase);
-
-    setShowcaseFiles(
-      showcasedAttachments.filter(
-        (row) => row.kind !== "link" && !looksLikeImageAttachment(row)
-      )
-    );
-
-    setShowcaseLinks(
-      showcasedAttachments.filter((row) => row.kind === "link")
-    );
+setShowcaseFiles([]);
+setShowcaseLinks([]);
 
     const publicKac = assetRow.kac_id || kac;
 
@@ -547,24 +541,29 @@ if (summaryRow) {
       const [
         { data: serviceRows, error: timelineError },
         { data: systemRows },
-        mediaRows,
+        storyMedia,
       ] = await Promise.all([
         supabase
           .from("public_asset_story_timeline")
           .select("*")
           .eq("kac_id", publicKac)
           .order("performed_at", { ascending: false }),
+
         supabase
           .from("systems")
           .select("id, name")
           .eq("asset_id", publicAssetId)
           .order("name", { ascending: true }),
+
         fetchPublicStoryMedia(publicKac),
       ]);
-
+      
       logPublicStoryLoad("PUBLIC TIMELINE:", serviceRows);
       logPublicStoryLoad("PUBLIC TIMELINE ERROR:", timelineError);
-      logPublicStoryLoad("PUBLIC STORY MEDIA:", mediaRows);
+
+      const mediaRows = storyMedia.media || [];
+
+      logPublicStoryLoad("PUBLIC STORY MEDIA:", storyMedia);
 
       const publicTimeline = (serviceRows || []).map((row) => ({
         id: row.id,

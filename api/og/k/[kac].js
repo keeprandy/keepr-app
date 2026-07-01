@@ -44,6 +44,8 @@ function buildHtml({ title, description, url, image }) {
       <meta property="og:description" content="${d}" />
       <meta property="og:url" content="${u}" />
       <meta property="og:image" content="${i}" />
+      <meta property="og:image:width" content="1200" />
+      <meta property="og:image:height" content="630" />
       <meta name="twitter:card" content="summary_large_image" />
       <meta name="twitter:title" content="${t}" />
       <meta name="twitter:description" content="${d}" />
