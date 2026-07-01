@@ -54,8 +54,6 @@ function buildHtml({ title, description, url, image }) {
   <meta name="twitter:description" content="${d}" />
   <meta name="twitter:image" content="${i}" />
 
-  <!-- Optional: quick human fallback if something blocks JS -->
-  <meta http-equiv="refresh" content="0; url=${u}" />
 </head>
 <body style="font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; padding: 24px;">
   <h1 style="margin: 0 0 8px 0;">${t}</h1>
@@ -80,7 +78,7 @@ export default async function handler(req, res) {
     const fallbackOgImage = `${baseUrl}/og/keepr-og-default.png`;
 
     let title = "Keepr™";
-    let description = "The living story of what you own — with proof.";
+    let description = "Owner-Curated Keepr Story.";
     let image = fallbackOgImage;
 
     // If no kac, still respond with sane OG (avoid throwing, to prevent broken previews)
@@ -118,46 +116,48 @@ export default async function handler(req, res) {
       auth: { persistSession: false },
     });
 
-    // --- Resolve KAC -> something meaningful ---
-    // We try RPC first (if you have it), then fall back to common tables/columns.
-    let resolved = null;
+const { data: summaryRow } = await supabase
+  .from("public_asset_story_summary")
+  .select("*")
+  .eq("kac_id", kac)
+  .maybeSingle();
 
-    // 1) Try RPC if it exists: "kac_resolve"
-    try {
-      const { data, error } = await supabase.rpc("kac_resolve", { p_kac: kac });
-      if (!error && data) resolved = data;
-    } catch (e) {
-      // ignore
-    }
+if (summaryRow) {
+    const assetName =
+      summaryRow.name ||
+      `${summaryRow.year || ""} ${summaryRow.make || ""} ${summaryRow.model || ""}`.trim() ||
+      "Keepr Story";
 
-    // 2) Fallback: try assets table with common columns
-    if (!resolved) {
-      // Adjust these column names if yours differ.
-      const { data } = await supabase
-        .from("assets")
-        .select("id, name, display_name, title, hero_photo_url, photo_url, share_image_url")
-        .or(`kac.eq.${kac},kac_code.eq.${kac},public_kac.eq.${kac}`)
-        .limit(1)
-        .maybeSingle();
+  title = assetName;
+  description = "Owner-curated Keepr Story.";
 
-      if (data) resolved = { asset: data };
-    }
+  try {
+    const mediaRes = await fetch(`${SUPABASE_URL}/functions/v1/public-story-media`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify({ kac }),
+    });
 
-    const asset = resolved?.asset || resolved?.data?.asset || resolved?.asset_record || null;
+    const mediaJson = await mediaRes.json();
+    const mediaRows = Array.isArray(mediaJson?.media) ? mediaJson.media : [];
 
-    if (asset) {
-      const assetName = pickFirst(asset.display_name, asset.name, asset.title) || "Keepr Asset";
-      title = `${assetName} • Keepr™`;
+    const heroPlacement =
+      mediaRows.find(
+        (x) => String(x.placement_id) === String(summaryRow.hero_placement_id)
+      ) ||
+      mediaRows.find((x) => x.role === "hero") ||
+      mediaRows.find((x) => !!x.image_url) ||
+      null;
 
-      description =
-        "Owner-controlled record of care — documents, proof, and history in one place.";
-
-      // Pick the best image you have
-      image =
-        pickFirst(asset.share_image_url, asset.hero_photo_url, asset.photo_url) ||
-        fallbackOgImage;
-    }
-
+    image = heroPlacement?.image_url || fallbackOgImage;
+  } catch (_) {
+    image = fallbackOgImage;
+  }
+}
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     // Cache: ok to cache a little at the edge; keep it short while you iterate.
     res.setHeader("Cache-Control", "public, max-age=60, s-maxage=300");
@@ -182,7 +182,7 @@ export default async function handler(req, res) {
     return res.status(200).send(
       buildHtml({
         title: "Keepr™",
-        description: "The living story of what you own — with proof.",
+        description: "Owner-Curated Keepr Story.",
         url: shareUrl,
         image: fallbackOgImage,
       })
