@@ -492,6 +492,9 @@ if (summaryRow) {
     id: summaryRow.asset_id,
   };
 
+assetRow.extra_metadata = summaryRow.extra_metadata || {};
+
+if (!assetRow.extra_metadata?.publicStoryNarrative) {
   const { data: fullAssetRow, error: fullAssetError } = await supabase
     .from("assets")
     .select("extra_metadata")
@@ -502,7 +505,11 @@ if (summaryRow) {
     console.log("PUBLIC STORY FULL ASSET LOAD FAILED", fullAssetError);
   }
 
-  assetRow.extra_metadata = fullAssetRow?.extra_metadata || {};
+  assetRow.extra_metadata =
+    fullAssetRow?.extra_metadata ||
+    summaryRow.extra_metadata ||
+    {};
+}
 }
 }
 
