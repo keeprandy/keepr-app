@@ -12,17 +12,12 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
-
-  // ...your existing logic...
-
-  return new Response(JSON.stringify(data), {
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
-});
+}
 
 async function getEffectiveRole(admin: any, asset_id: string, user_id: string) {
   const nowIso = new Date().toISOString();
@@ -70,18 +65,20 @@ async function getEffectiveRole(admin: any, asset_id: string, user_id: string) {
 
 serve(async (req) => {
   try {
+    if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
     const jwt = getJwt(req);
-    if (!jwt) return new Response(JSON.stringify({ error: "Missing auth" }), { status: 401 });
+    if (!jwt) return json({ error: "Missing auth" }, 401);
 
     const body = await req.json().catch(() => ({}));
     const kac = String(body?.kac || "").trim();
-    if (!kac) return new Response(JSON.stringify({ error: "Missing kac" }), { status: 400 });
+    if (!kac) return json({ error: "Missing kac" }, 400);
 
     const admin = getSupabaseClient();
 
     const { data: userData, error: uErr } = await admin.auth.getUser(jwt);
     const user = userData?.user;
-    if (uErr || !user) return new Response(JSON.stringify({ error: "Invalid user" }), { status: 401 });
+    if (uErr || !user) return json({ error: "Invalid user" }, 401);
 
     const { data: asset, error: aErr } = await admin
       .from("assets")
@@ -90,7 +87,7 @@ serve(async (req) => {
       .is("deleted_at", null)
       .single();
 
-    if (aErr || !asset) return new Response(JSON.stringify({ error: "Asset not found" }), { status: 404 });
+    if (aErr || !asset) return json({ error: "Asset not found" }, 404);
 
     const role = await getEffectiveRole(admin, asset.id, user.id);
 
@@ -101,18 +98,17 @@ serve(async (req) => {
           ? ["view"]
           : ["request_access", "view"];
 
-    return new Response(
-      JSON.stringify({
+    return json(
+      {
         whoami: { user_id: user.id, email: user.email ?? null },
         asset,
         system: null,
         mode: "action",
         stewardship: { access_role: role },
         allowed_actions,
-      }),
-      { headers: { "Content-Type": "application/json" } }
+      }
     );
   } catch (e) {
-    return new Response(JSON.stringify({ error: "Server error", details: String(e) }), { status: 500 });
+    return json({ error: "Server error", details: String(e) }, 500);
   }
 });

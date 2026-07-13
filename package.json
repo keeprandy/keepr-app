@@ -6,7 +6,8 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "build:web": "npx expo export --platform web",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "test:kac-resolvers": "node --test tests/kac-resolvers.test.mjs"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

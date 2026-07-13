@@ -6,23 +6,20 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
-
-  // ...your existing logic...
-
-  return new Response(JSON.stringify(data), {
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
-});
+}
 
 serve(async (req) => {
   try {
+    if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
     const body = await req.json().catch(() => ({}));
     const kac = String(body?.kac || "").trim();
-    if (!kac) return new Response(JSON.stringify({ error: "Missing kac" }), { status: 400 });
+    if (!kac) return json({ error: "Missing kac" }, 400);
 
     const admin = getSupabaseClient();
 
@@ -34,19 +31,18 @@ serve(async (req) => {
       .single();
 
     if (aErr || !asset) {
-      return new Response(JSON.stringify({ error: "Asset not found" }), { status: 404 });
+      return json({ error: "Asset not found" }, 404);
     }
 
-    return new Response(
-      JSON.stringify({
+    return json(
+      {
         asset,
         system: null,
         mode: "action",
         allowed_actions: ["view"], // public only (auth screen will return more)
-      }),
-      { headers: { "Content-Type": "application/json" } }
+      }
     );
   } catch (e) {
-    return new Response(JSON.stringify({ error: "Server error", details: String(e) }), { status: 500 });
+    return json({ error: "Server error", details: String(e) }, 500);
   }
 });
