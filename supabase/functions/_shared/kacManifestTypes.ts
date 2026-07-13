@@ -13,6 +13,41 @@ export const CALLABLE_V1_MANIFEST_PURPOSES = [
 
 export type CallableV1ManifestPurpose = typeof CALLABLE_V1_MANIFEST_PURPOSES[number];
 
+export type ManifestAccessKind =
+  | "owner"
+  | "direct_steward"
+  | "org_steward"
+  | "viewer"
+  | "unauthorized"
+  | "admin";
+
+export type ManifestGenerationStatus = "complete" | "partial";
+
+export type ManifestEndpointFailureReason =
+  | "identity_failure"
+  | "authorization_failure"
+  | "canonical_asset_failure"
+  | "security_failure";
+
+export const MANIFEST_V1_PURPOSE_ACCESS: Record<CallableV1ManifestPurpose, ManifestAccessKind[]> = {
+  asset_overview: ["owner", "direct_steward", "org_steward", "admin"],
+  admin_diagnostic: ["admin"],
+};
+
+export const MANIFEST_V1_ENDPOINT_CONTRACT = {
+  viewerDenied: true,
+  disputedAssetAvailability: "admin_review_required",
+  partialCollectorFailureStatus: "partial",
+  totalFailureReasons: [
+    "identity_failure",
+    "authorization_failure",
+    "canonical_asset_failure",
+    "security_failure",
+  ],
+  preferredReadModel: "authenticated_user_context_with_rls_compatible_reads",
+  serviceRoleUse: "narrowly_scoped_and_explicitly_documented",
+} as const;
+
 export function isCallableV1ManifestPurpose(
   purpose: string | null | undefined,
 ): purpose is CallableV1ManifestPurpose {
@@ -117,6 +152,8 @@ export interface ManifestDiagnostic {
   object_id?: string;
 }
 
+export type ManifestAssociationScope = "kac_specific" | "horizontal";
+
 export interface KnowledgeGap {
   id: string;
   category:
@@ -142,11 +179,15 @@ export interface ManifestAssociation {
   source_table?: string;
   source_service?: string;
   relationship_type: string;
-  scope: "kac_specific" | "horizontal";
+  scope: ManifestAssociationScope;
   event_role?: EventRole;
+  event_roles?: EventRole[];
   evidence_role?: EvidenceRole;
+  evidence_roles?: EvidenceRole[];
   participant_role?: ParticipantRole;
+  participant_roles?: ParticipantRole[];
   work_mode?: WorkMode;
+  work_modes?: WorkMode[];
   affected_system_id?: string | null;
   source_authority?: SourceAuthority;
   proof_state: ProofState;
@@ -158,6 +199,7 @@ export interface ManifestAssociation {
   effective_to?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+  safe_metadata?: Record<string, unknown>;
   provenance?: {
     table?: string;
     row_id?: string;
@@ -169,6 +211,7 @@ export interface ManifestAssociation {
 export interface KacIntelligenceManifest {
   manifest_version: "1.0";
   generated_at: string;
+  status: ManifestGenerationStatus;
   purpose: CallableV1ManifestPurpose;
   kac: string;
   asset: {

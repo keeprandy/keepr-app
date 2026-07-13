@@ -124,7 +124,12 @@ function activeStewardship(overrides) {
 
 const { normalizeKac, isValidNormalizedKac, resolveKacAsset } = loadModule(KAC_RESOLVE);
 const { authorizeKacAsset } = loadModule(KAC_AUTH);
-const { isCallableV1ManifestPurpose, CALLABLE_V1_MANIFEST_PURPOSES } = loadModule(KAC_TYPES);
+const {
+  isCallableV1ManifestPurpose,
+  CALLABLE_V1_MANIFEST_PURPOSES,
+  MANIFEST_V1_ENDPOINT_CONTRACT,
+  MANIFEST_V1_PURPOSE_ACCESS,
+} = loadModule(KAC_TYPES);
 
 test("normalizes KAC input", () => {
   assert.equal(normalizeKac(" kpr-6gv2-mj6w "), "KPR-6GV2-MJ6W");
@@ -272,4 +277,18 @@ test("accepts only asset_overview and admin_diagnostic as callable v1 purposes",
   assert.equal(isCallableV1ManifestPurpose("build_plan"), false);
   assert.equal(isCallableV1ManifestPurpose("prepare_transfer"), false);
   assert.equal(isCallableV1ManifestPurpose("export"), false);
+});
+
+test("documents approved v1 endpoint access decisions without implementing the endpoint", () => {
+  assert.deepEqual(local(MANIFEST_V1_PURPOSE_ACCESS.asset_overview), [
+    "owner",
+    "direct_steward",
+    "org_steward",
+    "admin",
+  ]);
+  assert.deepEqual(local(MANIFEST_V1_PURPOSE_ACCESS.admin_diagnostic), ["admin"]);
+  assert.equal(MANIFEST_V1_ENDPOINT_CONTRACT.viewerDenied, true);
+  assert.equal(MANIFEST_V1_ENDPOINT_CONTRACT.disputedAssetAvailability, "admin_review_required");
+  assert.equal(MANIFEST_V1_ENDPOINT_CONTRACT.partialCollectorFailureStatus, "partial");
+  assert.equal(MANIFEST_V1_ENDPOINT_CONTRACT.preferredReadModel, "authenticated_user_context_with_rls_compatible_reads");
 });

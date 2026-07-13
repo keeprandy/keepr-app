@@ -1,11 +1,14 @@
 export interface ResolvedKacAsset {
   id: string;
   kac_id: string;
+  master_asset_id: string | null;
   owner_id: string | null;
   name?: string;
   type?: string;
   status?: string | null;
   asset_mode?: string | null;
+  vin?: string | null;
+  serial_number?: string | null;
   lifecycle_state: "active" | "archived" | "transfer_ready" | "unclaimed" | "disputed" | "unknown";
   manifest_availability: "available" | "admin_review_required";
 }
@@ -59,7 +62,7 @@ export async function resolveKacAsset(admin: any, kacInput: unknown): Promise<Ka
 
   const { data: asset, error } = await admin
     .from("assets")
-    .select("id, kac_id, owner_id, name, type, status, asset_mode")
+    .select("id, kac_id, master_asset_id, owner_id, name, type, status, asset_mode, vin, serial_number")
     .eq("kac_id", kac)
     .is("deleted_at", null)
     .single();
@@ -74,11 +77,14 @@ export async function resolveKacAsset(admin: any, kacInput: unknown): Promise<Ka
     asset: {
       id: asset.id,
       kac_id: asset.kac_id,
+      master_asset_id: asset.master_asset_id ?? null,
       owner_id: asset.owner_id ?? null,
       name: asset.name,
       type: asset.type,
       status: asset.status ?? null,
       asset_mode: asset.asset_mode ?? null,
+      vin: asset.vin ?? null,
+      serial_number: asset.serial_number ?? null,
       ...lifecycle,
     },
   };
