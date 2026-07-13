@@ -99,10 +99,11 @@ function makeClient(db = {}) {
 }
 
 function context(overrides = {}) {
-  const { access, ...assetOverrides } = overrides;
+  const { access, association_visibility, ...assetOverrides } = overrides;
   return {
     kac: "KPR-TEST-1",
     access,
+    association_visibility,
     asset: {
       id: "asset-1",
       kac_id: "KPR-TEST-1",
@@ -322,6 +323,30 @@ test("hidden collector returns not_visible", async () => {
   );
   assert.equal(result.status, "not_visible");
   assert.equal(result.diagnostics.some((d) => d.code === "association_surface_not_visible"), true);
+});
+
+test("platform admin identity-only systems collector returns not_visible when RLS hides rows", async () => {
+  const result = await collectSystemAssociations(
+    makeClient({ systems: [], vehicle_systems: [], boat_systems: [], home_systems: [] }),
+    context({ access: "admin", association_visibility: "admin_identity_only" }),
+  );
+  assert.equal(result.status, "not_visible");
+});
+
+test("platform admin identity-only attachments collector returns not_visible when RLS hides rows", async () => {
+  const result = await collectAttachmentAssociations(
+    makeClient({ attachments: [], attachment_placements: [], attachment_links: [] }),
+    context({ access: "admin", association_visibility: "admin_identity_only" }),
+  );
+  assert.equal(result.status, "not_visible");
+});
+
+test("platform admin identity-only timeline collector returns not_visible when true emptiness cannot be proven", async () => {
+  const result = await collectTimelineAssociations(
+    makeClient({ service_records: [], story_events: [], timeline_records: [], maintenance_events: [], service_entries: [] }),
+    context({ access: "admin", association_visibility: "admin_identity_only" }),
+  );
+  assert.equal(result.status, "not_visible");
 });
 
 test("unsupported legacy collector status is preserved", () => {

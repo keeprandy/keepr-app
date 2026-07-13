@@ -292,6 +292,9 @@ export async function collectTimelineAssociations(
   if ((context.access === "direct_steward" || context.access === "org_steward") && serviceRecords.length && !storyEvents.length) {
     addNotVisibleDiagnostic(diagnostics, "timeline", assetId);
   }
+  if (context.association_visibility === "admin_identity_only" && !associations.length) {
+    addNotVisibleDiagnostic(diagnostics, "timeline", assetId);
+  }
 
   return finalizeCollectorResult(associations, diagnostics);
 }

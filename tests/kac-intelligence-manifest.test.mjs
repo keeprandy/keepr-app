@@ -393,6 +393,61 @@ test("admin RPC resolves only the requested KAC and returns one identity", async
   assert.deepEqual(rpcCalls.map((call) => call.args.p_kac), ["KPR-TEST-1"]);
 });
 
+test("platform admin identity-only overview is partial when association domains are hidden by RLS", async () => {
+  const dbRef = { current: baseDb({
+    profiles: [{ id: "admin-1", role: "admin" }],
+    assets: [],
+    __admin_assets: baseDb().assets,
+    systems: [],
+    vehicle_systems: [],
+    boat_systems: [],
+    home_systems: [],
+    service_records: [],
+    story_events: [],
+    timeline_records: [],
+    maintenance_events: [],
+    service_entries: [],
+    attachments: [],
+    attachment_placements: [],
+    attachment_links: [],
+  }) };
+  const handler = endpointFor(dbRef, { current: user("admin-1") });
+  const { response, body } = await call(handler, dbRef.current, { kac: "KPR-TEST-1", purpose: "asset_overview" }, "Bearer valid", user("admin-1"));
+  assert.equal(response.status, 200);
+  assert.equal(body.authorization.access, "admin");
+  assert.equal(body.status, "partial");
+  assert.equal(body.collector_summaries.find((s) => s.collector === "identity").status, "complete");
+  assert.equal(body.collector_summaries.find((s) => s.collector === "systems").status, "not_visible");
+  assert.equal(body.collector_summaries.find((s) => s.collector === "timeline").status, "not_visible");
+  assert.equal(body.collector_summaries.find((s) => s.collector === "attachments").status, "not_visible");
+});
+
+test("platform admin admin_diagnostic may be partial when association domains are hidden by RLS", async () => {
+  const dbRef = { current: baseDb({
+    profiles: [{ id: "admin-1", role: "superkeepr" }],
+    assets: [],
+    __admin_assets: baseDb().assets,
+    systems: [],
+    vehicle_systems: [],
+    boat_systems: [],
+    home_systems: [],
+    service_records: [],
+    story_events: [],
+    timeline_records: [],
+    maintenance_events: [],
+    service_entries: [],
+    attachments: [],
+    attachment_placements: [],
+    attachment_links: [],
+  }) };
+  const handler = endpointFor(dbRef, { current: user("admin-1") });
+  const { response, body } = await call(handler, dbRef.current, { kac: "KPR-TEST-1", purpose: "admin_diagnostic" }, "Bearer valid", user("admin-1"));
+  assert.equal(response.status, 200);
+  assert.equal(body.purpose, "admin_diagnostic");
+  assert.equal(body.status, "partial");
+  assert.equal(body.collector_summaries.some((s) => s.status === "not_visible"), true);
+});
+
 test("owner path still uses caller-scoped resolver, not admin RPC", async () => {
   const rpcCalls = [];
   const dbRef = { current: baseDb({ __rpcCalls: rpcCalls }) };

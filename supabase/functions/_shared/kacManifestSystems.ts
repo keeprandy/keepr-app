@@ -147,6 +147,9 @@ export async function collectSystemAssociations(
   if (context.access === "org_steward" && !associations.some((a) => ["vehicle_systems", "boat_systems", "home_systems"].includes(a.source_table || ""))) {
     addNotVisibleDiagnostic(diagnostics, "systems", assetId);
   }
+  if (context.association_visibility === "admin_identity_only" && !associations.length) {
+    addNotVisibleDiagnostic(diagnostics, "systems", assetId);
+  }
 
   return finalizeCollectorResult(associations, diagnostics);
 }

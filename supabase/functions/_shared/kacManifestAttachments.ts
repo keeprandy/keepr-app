@@ -246,6 +246,9 @@ export async function collectAttachmentAssociations(
   if (context.access === "direct_steward" && !associations.length) {
     addNotVisibleDiagnostic(diagnostics, "attachments", assetId);
   }
+  if (context.association_visibility === "admin_identity_only" && !associations.length) {
+    addNotVisibleDiagnostic(diagnostics, "attachments", assetId);
+  }
 
   return finalizeCollectorResult(associations, diagnostics);
 }

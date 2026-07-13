@@ -346,7 +346,12 @@ serve(async (req) => {
       });
     }
 
-    const context: ResolvedAssetContext = { kac: resolved.kac, asset: resolved.asset, access };
+    const context: ResolvedAssetContext = {
+      kac: resolved.kac,
+      asset: resolved.asset,
+      access,
+      association_visibility: isAdmin ? "admin_identity_only" : "caller_rls",
+    };
     const collectors = await Promise.all([
       runCollector("identity", () => collectAssetIdentityAssociations(client, context)),
       runCollector("systems", () => collectSystemAssociations(client, context)),

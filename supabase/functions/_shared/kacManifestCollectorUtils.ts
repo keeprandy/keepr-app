@@ -5,6 +5,7 @@ export interface ResolvedAssetContext {
   kac: string;
   asset: ResolvedKacAsset;
   access?: "owner" | "direct_steward" | "org_steward" | "viewer" | "unauthorized" | "admin";
+  association_visibility?: "caller_rls" | "admin_identity_only";
 }
 
 export interface CollectorResult {
