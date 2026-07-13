@@ -12,7 +12,8 @@
     "test:kac-manifest-foundation": "node --test tests/kac-manifest-foundation.test.mjs",
     "test:kac-manifest-collectors": "node --test tests/kac-manifest-collectors.test.mjs",
     "test:kac-intelligence-manifest": "node --test tests/kac-intelligence-manifest.test.mjs",
-    "test:kac-manifest-live-rls-remediation": "node --test tests/kac-manifest-live-rls-remediation.test.mjs"
+    "test:kac-manifest-live-rls-remediation": "node --test tests/kac-manifest-live-rls-remediation.test.mjs",
+    "test:kac-context-envelope": "node --test tests/kac-context-envelope.test.mjs"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
