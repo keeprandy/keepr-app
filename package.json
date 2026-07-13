@@ -13,7 +13,8 @@
     "test:kac-manifest-collectors": "node --test tests/kac-manifest-collectors.test.mjs",
     "test:kac-intelligence-manifest": "node --test tests/kac-intelligence-manifest.test.mjs",
     "test:kac-manifest-live-rls-remediation": "node --test tests/kac-manifest-live-rls-remediation.test.mjs",
-    "test:kac-context-envelope": "node --test tests/kac-context-envelope.test.mjs"
+    "test:kac-context-envelope": "node --test tests/kac-context-envelope.test.mjs",
+    "test:kai-asset-brief": "node --test tests/kai-asset-brief.test.mjs"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
