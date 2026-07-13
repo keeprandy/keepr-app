@@ -21,7 +21,7 @@ export type ManifestAccessKind =
   | "unauthorized"
   | "admin";
 
-export type ManifestGenerationStatus = "complete" | "partial";
+export type ManifestGenerationStatus = "complete" | "partial" | "restricted";
 
 export type ManifestEndpointFailureReason =
   | "identity_failure"
@@ -217,6 +217,8 @@ export interface KacIntelligenceManifest {
   asset: {
     id: string;
     kac_id: string;
+    lifecycle_state?: string;
+    availability?: string;
     name?: string;
     type?: string;
     status?: string | null;
@@ -229,10 +231,19 @@ export interface KacIntelligenceManifest {
       | "direct_steward"
       | "org_steward"
       | "viewer"
-      | "unauthorized";
+      | "unauthorized"
+      | "admin";
     access_role: "owner" | "steward" | "viewer" | null;
   };
   associations: ManifestAssociation[];
+  association_groups?: Record<string, ManifestAssociation[]>;
+  collector_summaries?: {
+    collector: string;
+    status: ManifestGenerationStatus;
+    association_count: number;
+    diagnostics: ManifestDiagnostic[];
+    duration_ms?: number;
+  }[];
   knowledge_gaps: KnowledgeGap[];
   diagnostics: ManifestDiagnostic[];
 }
