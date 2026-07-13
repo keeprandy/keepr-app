@@ -346,32 +346,6 @@ const handleAccountActions = () => {
     }
   };
 
-  const handleModeSwitch = async () => {
-    // If you want to keep this as a true backdoor, leave it hidden.
-    // This toggles consumer <-> superkeepr.
-    setBusy(true);
-    try {
-      const { data: userRes } = await supabase.auth.getUser();
-      const uid = userRes?.user?.id;
-      if (!uid) throw new Error("No signed-in user.");
-
-      const currentRole = profile?.role || "consumer";
-      const nextRole = currentRole === "superkeepr" ? "consumer" : "superkeepr";
-
-      const { error } = await supabase.from("profiles").update({ role: nextRole }).eq("id", uid);
-
-      if (error) throw error;
-
-      await loadProfile();
-
-      Alert.alert("Mode updated", `Now in ${nextRole} mode.`);
-    } catch (e) {
-      Alert.alert("Switch failed", e?.message || "Could not switch mode.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const handleOpenPlanUpgrade = () => {
     try {
       navigationRef.navigate("PlanUpgrade");
@@ -566,16 +540,6 @@ const handleOpenTerms = () => {
                 title="Open Upload Lab"
                 subtitle="Internal testing tools"
                 onPress={handleOpenUploadLab}
-              />
-              <View style={styles.divider} />
-              <Row
-                icon="swap-horizontal-outline"
-                iconBg={colors.surfaceSubtle}
-                title="Switch mode"
-                subtitle={`Current: ${profile?.role || "consumer"}`}
-                onPress={handleModeSwitch}
-                disabled={busy}
-                rightNode={busy ? <ActivityIndicator size="small" color={colors.textMuted} /> : null}
               />
             </View>
           </View>

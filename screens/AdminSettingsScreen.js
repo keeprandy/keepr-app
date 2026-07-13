@@ -8,14 +8,12 @@ import {
   TouchableOpacity,
   Alert,
   Platform,
-  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
 import { supabase } from "../lib/supabaseClient";
 import { navigationRef } from "../navigationRoot";
-import { ROUTES } from "../navigation/routes";
 
 export default function SettingsScreen() {
   const [busy, setBusy] = useState(false);
@@ -106,46 +104,6 @@ export default function SettingsScreen() {
     }
   };
 
-  const switchMode = async () => {
-    setBusy(true);
-    try {
-      const {
-        data: { user },
-        error: userErr,
-      } = await supabase.auth.getUser();
-
-      if (userErr || !user?.id) throw new Error("No signed-in user");
-
-      const nextRole = role === "superkeepr" ? "consumer" : "superkeepr";
-
-      const { error } = await supabase
-        .from("profiles")
-        .update({ role: nextRole })
-        .eq("id", user.id);
-
-      if (error) throw error;
-
-      setRole(nextRole);
-
-      if (navigationRef.isReady()) {
-        if (nextRole === "superkeepr") {
-          navigationRef.navigate("SuperKeeprStack", {
-            screen: ROUTES.SUPERKEEPR_DASHBOARD,
-          });
-        } else {
-          navigationRef.navigate("RootTabs", {
-            screen: ROUTES.DASHBOARD,
-          });
-        }
-      }
-    } catch (e) {
-      console.error(e);
-      Alert.alert("Switch failed", e?.message || "Could not switch mode.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const modeLabel = useMemo(() => {
     if (roleLoading) return "Loading…";
     return role === "superkeepr" ? "SuperKeepr" : "Consumer";
@@ -170,24 +128,7 @@ export default function SettingsScreen() {
             </View>
 
             <TouchableOpacity
-              style={[styles.actionBtn, busy && styles.disabled]}
-              activeOpacity={0.85}
-              onPress={switchMode}
-              disabled={busy || roleLoading}
-            >
-              {busy || roleLoading ? (
-                <ActivityIndicator size="small" color="#111827" />
-              ) : (
-                <Ionicons name="swap-horizontal" size={18} color="#111827" />
-              )}
-              <Text style={styles.actionText}>
-                Switch to {role === "superkeepr" ? "Consumer" : "SuperKeepr"}
-              </Text>
-            </TouchableOpacity>
-
-            {/* ✅ Upload Lab entry (mobile-safe) */}
-            <TouchableOpacity
-              style={[styles.actionBtn, { marginTop: 8 }]}
+              style={styles.actionBtn}
               activeOpacity={0.85}
               onPress={() => {
                 if (navigationRef.isReady()) {

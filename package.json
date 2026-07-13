@@ -8,6 +8,7 @@
     "build:web": "npx expo export --platform web",
     "web": "expo start --web",
     "test:kac-resolvers": "node --test tests/kac-resolvers.test.mjs",
+    "test:profile-security": "node --test tests/profile-security.test.mjs",
     "test:kac-manifest-foundation": "node --test tests/kac-manifest-foundation.test.mjs",
     "test:kac-manifest-collectors": "node --test tests/kac-manifest-collectors.test.mjs",
     "test:kac-intelligence-manifest": "node --test tests/kac-intelligence-manifest.test.mjs"
