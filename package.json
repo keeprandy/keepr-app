@@ -16,7 +16,8 @@
     "test:kac-context-envelope": "node --test tests/kac-context-envelope.test.mjs",
     "test:kai-asset-brief": "node --test tests/kai-asset-brief.test.mjs",
     "test:kai-interpretation": "node --test tests/kai-interpretation.test.mjs",
-    "test:kai-orchestration": "node --test tests/kai-interpretation-orchestration.test.mjs"
+    "test:kai-orchestration": "node --test tests/kai-interpretation-orchestration.test.mjs",
+    "test:kai-authority-reconciliation": "node --test tests/kai-authority-reconciliation.test.mjs"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
