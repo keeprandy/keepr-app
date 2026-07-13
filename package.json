@@ -7,7 +7,8 @@
     "ios": "expo run:ios",
     "build:web": "npx expo export --platform web",
     "web": "expo start --web",
-    "test:kac-resolvers": "node --test tests/kac-resolvers.test.mjs"
+    "test:kac-resolvers": "node --test tests/kac-resolvers.test.mjs",
+    "test:kac-manifest-foundation": "node --test tests/kac-manifest-foundation.test.mjs"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
