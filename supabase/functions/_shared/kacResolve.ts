@@ -55,6 +55,23 @@ function classifyAssetLifecycle(status: unknown): Pick<
   return { lifecycle_state: "unknown", manifest_availability: "available" };
 }
 
+function toResolvedAsset(asset: any): ResolvedKacAsset {
+  const lifecycle = classifyAssetLifecycle(asset.status);
+  return {
+    id: asset.id,
+    kac_id: asset.kac_id,
+    master_asset_id: asset.master_asset_id ?? null,
+    owner_id: asset.owner_id ?? null,
+    name: asset.name,
+    type: asset.type,
+    status: asset.status ?? null,
+    asset_mode: asset.asset_mode ?? null,
+    vin: asset.vin ?? null,
+    serial_number: asset.serial_number ?? null,
+    ...lifecycle,
+  };
+}
+
 export async function resolveKacAsset(admin: any, kacInput: unknown): Promise<KacResolveResult> {
   const kac = normalizeKac(kacInput);
   if (!kac) return { ok: false, kac: null, error: "missing_kac" };
@@ -69,23 +86,25 @@ export async function resolveKacAsset(admin: any, kacInput: unknown): Promise<Ka
 
   if (error || !asset) return { ok: false, kac, error: "asset_not_found" };
 
-  const lifecycle = classifyAssetLifecycle(asset.status);
+  return {
+    ok: true,
+    kac,
+    asset: toResolvedAsset(asset),
+  };
+}
+
+export async function resolveKacAssetForManifestAdmin(admin: any, kacInput: unknown): Promise<KacResolveResult> {
+  const kac = normalizeKac(kacInput);
+  if (!kac) return { ok: false, kac: null, error: "missing_kac" };
+  if (!isValidNormalizedKac(kac)) return { ok: false, kac, error: "malformed_kac" };
+
+  const { data, error } = await admin.rpc("keepr_resolve_kac_for_manifest_admin", { p_kac: kac });
+  const asset = Array.isArray(data) ? data[0] : data;
+  if (error || !asset) return { ok: false, kac, error: "asset_not_found" };
 
   return {
     ok: true,
     kac,
-    asset: {
-      id: asset.id,
-      kac_id: asset.kac_id,
-      master_asset_id: asset.master_asset_id ?? null,
-      owner_id: asset.owner_id ?? null,
-      name: asset.name,
-      type: asset.type,
-      status: asset.status ?? null,
-      asset_mode: asset.asset_mode ?? null,
-      vin: asset.vin ?? null,
-      serial_number: asset.serial_number ?? null,
-      ...lifecycle,
-    },
+    asset: toResolvedAsset(asset),
   };
 }

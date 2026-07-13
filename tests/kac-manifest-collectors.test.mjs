@@ -99,8 +99,10 @@ function makeClient(db = {}) {
 }
 
 function context(overrides = {}) {
+  const { access, ...assetOverrides } = overrides;
   return {
     kac: "KPR-TEST-1",
+    access,
     asset: {
       id: "asset-1",
       kac_id: "KPR-TEST-1",
@@ -114,7 +116,7 @@ function context(overrides = {}) {
       serial_number: null,
       lifecycle_state: "active",
       manifest_availability: "available",
-      ...overrides,
+      ...assetOverrides,
     },
   };
 }
@@ -135,6 +137,7 @@ const { collectAssetIdentityAssociations } = loadSharedModule("kacManifestIdenti
 const { collectSystemAssociations } = loadSharedModule("kacManifestSystems.ts");
 const { collectTimelineAssociations } = loadSharedModule("kacManifestTimeline.ts");
 const { collectAttachmentAssociations } = loadSharedModule("kacManifestAttachments.ts");
+const { finalizeCollectorResult } = loadSharedModule("kacManifestCollectorUtils.ts");
 
 test("supports legacy asset without a master asset", async () => {
   const result = await collectAssetIdentityAssociations(makeClient({ asset_identifiers: [] }), context());
@@ -303,7 +306,32 @@ test("returns orphaned placement diagnostic", async () => {
 test("returns partial collector failure diagnostic", async () => {
   const db = { systems: [], __fail: new Set(["vehicle_systems"]) };
   const result = await collectSystemAssociations(makeClient(db), context());
+  assert.equal(result.status, "failed");
   assert.equal(result.diagnostics.some((d) => d.code === "partial_query_failure"), true);
+});
+
+test("true empty collector returns complete_empty", async () => {
+  const result = await collectSystemAssociations(makeClient({ systems: [], vehicle_systems: [], boat_systems: [], home_systems: [] }), context());
+  assert.equal(result.status, "complete_empty");
+});
+
+test("hidden collector returns not_visible", async () => {
+  const result = await collectSystemAssociations(
+    makeClient({ systems: [], vehicle_systems: [], boat_systems: [], home_systems: [] }),
+    context({ access: "direct_steward" }),
+  );
+  assert.equal(result.status, "not_visible");
+  assert.equal(result.diagnostics.some((d) => d.code === "association_surface_not_visible"), true);
+});
+
+test("unsupported legacy collector status is preserved", () => {
+  const result = finalizeCollectorResult([], [{
+    code: "unsupported_legacy_surface",
+    severity: "info",
+    message: "A legacy surface is not supported by Manifest v1.",
+    source: "legacy",
+  }]);
+  assert.equal(result.status, "unsupported");
 });
 
 test("returns disputed asset diagnostic", async () => {

@@ -1,6 +1,6 @@
 import type { ManifestAssociation } from "./kacManifestTypes.ts";
 import type { CollectorResult, ResolvedAssetContext } from "./kacManifestCollectorUtils.ts";
-import { compactMetadata, diagnostic, runQuery } from "./kacManifestCollectorUtils.ts";
+import { addNotVisibleDiagnostic, compactMetadata, diagnostic, finalizeCollectorResult, runQuery } from "./kacManifestCollectorUtils.ts";
 
 interface SystemRow {
   id: string;
@@ -141,5 +141,12 @@ export async function collectSystemAssociations(
     }
   }
 
-  return { associations, diagnostics };
+  if (context.access === "direct_steward" && !associations.length) {
+    addNotVisibleDiagnostic(diagnostics, "systems", assetId);
+  }
+  if (context.access === "org_steward" && !associations.some((a) => ["vehicle_systems", "boat_systems", "home_systems"].includes(a.source_table || ""))) {
+    addNotVisibleDiagnostic(diagnostics, "systems", assetId);
+  }
+
+  return finalizeCollectorResult(associations, diagnostics);
 }

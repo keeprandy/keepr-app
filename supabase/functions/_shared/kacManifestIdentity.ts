@@ -1,6 +1,6 @@
 import type { ManifestAssociation } from "./kacManifestTypes.ts";
 import type { CollectorResult, ResolvedAssetContext } from "./kacManifestCollectorUtils.ts";
-import { compactMetadata, diagnostic, runQuery } from "./kacManifestCollectorUtils.ts";
+import { addNotVisibleDiagnostic, compactMetadata, diagnostic, finalizeCollectorResult, runQuery } from "./kacManifestCollectorUtils.ts";
 
 interface AssetIdentifierRow {
   id: string;
@@ -192,5 +192,9 @@ export async function collectAssetIdentityAssociations(
     }
   }
 
-  return { associations, diagnostics };
+  if ((context.access === "direct_steward" || context.access === "org_steward") && asset.master_asset_id && !associations.some((a) => a.source_table === "master_assets")) {
+    addNotVisibleDiagnostic(diagnostics, "identity", asset.id);
+  }
+
+  return finalizeCollectorResult(associations, diagnostics);
 }

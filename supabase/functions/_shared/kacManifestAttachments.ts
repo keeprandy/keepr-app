@@ -1,6 +1,6 @@
 import type { ManifestAssociation, ProcessingStatus, ProofState, TransferClassification } from "./kacManifestTypes.ts";
 import type { CollectorResult, ResolvedAssetContext } from "./kacManifestCollectorUtils.ts";
-import { compactMetadata, diagnostic, runQuery } from "./kacManifestCollectorUtils.ts";
+import { addNotVisibleDiagnostic, compactMetadata, diagnostic, finalizeCollectorResult, runQuery } from "./kacManifestCollectorUtils.ts";
 
 interface AttachmentRow {
   id: string;
@@ -243,5 +243,9 @@ export async function collectAttachmentAssociations(
     }
   }
 
-  return { associations, diagnostics };
+  if (context.access === "direct_steward" && !associations.length) {
+    addNotVisibleDiagnostic(diagnostics, "attachments", assetId);
+  }
+
+  return finalizeCollectorResult(associations, diagnostics);
 }

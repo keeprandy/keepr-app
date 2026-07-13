@@ -23,6 +23,14 @@ export type ManifestAccessKind =
 
 export type ManifestGenerationStatus = "complete" | "partial" | "restricted";
 
+export type ManifestCollectorStatus =
+  | "complete"
+  | "complete_empty"
+  | "partial"
+  | "not_visible"
+  | "failed"
+  | "unsupported";
+
 export type ManifestEndpointFailureReason =
   | "identity_failure"
   | "authorization_failure"
@@ -239,7 +247,7 @@ export interface KacIntelligenceManifest {
   association_groups?: Record<string, ManifestAssociation[]>;
   collector_summaries?: {
     collector: string;
-    status: ManifestGenerationStatus;
+    status: ManifestCollectorStatus;
     association_count: number;
     diagnostics: ManifestDiagnostic[];
     duration_ms?: number;

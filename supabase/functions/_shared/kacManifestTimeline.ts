@@ -1,6 +1,6 @@
 import type { EventRole, ManifestAssociation, ParticipantRole, WorkMode } from "./kacManifestTypes.ts";
 import type { CollectorResult, ResolvedAssetContext } from "./kacManifestCollectorUtils.ts";
-import { compactMetadata, diagnostic, runQuery } from "./kacManifestCollectorUtils.ts";
+import { addNotVisibleDiagnostic, compactMetadata, diagnostic, finalizeCollectorResult, runQuery } from "./kacManifestCollectorUtils.ts";
 
 interface ServiceRecordRow {
   id: string;
@@ -286,5 +286,12 @@ export async function collectTimelineAssociations(
     });
   }
 
-  return { associations, diagnostics };
+  if (context.access === "direct_steward" && !serviceRecords.length && !maintenanceEvents.length && !serviceEntries.length) {
+    addNotVisibleDiagnostic(diagnostics, "timeline", assetId);
+  }
+  if ((context.access === "direct_steward" || context.access === "org_steward") && serviceRecords.length && !storyEvents.length) {
+    addNotVisibleDiagnostic(diagnostics, "timeline", assetId);
+  }
+
+  return finalizeCollectorResult(associations, diagnostics);
 }

@@ -152,6 +152,29 @@ function makeClient(db, userResult) {
     from(table) {
       return new Query(table, db);
     },
+    rpc(name, args) {
+      db.__rpcCalls?.push({ name, args });
+      if (name !== "keepr_resolve_kac_for_manifest_admin") {
+        return Promise.resolve({ data: null, error: { message: "unexpected rpc" } });
+      }
+      const userId = userResult?.data?.user?.id;
+      const profile = (db.profiles || []).find((p) => p.id === userId);
+      if (!["admin", "superkeepr"].includes(profile?.role)) {
+        return Promise.resolve({ data: [], error: null });
+      }
+      const assets = db.__admin_assets || db.assets || [];
+      const data = assets
+        .filter((asset) => asset?.kac_id === args?.p_kac && asset?.deleted_at == null)
+        .slice(0, 1)
+        .map((asset) => ({
+          id: asset.id,
+          kac_id: asset.kac_id,
+          master_asset_id: asset.master_asset_id,
+          status: asset.status,
+          asset_mode: asset.asset_mode,
+        }));
+      return Promise.resolve({ data, error: null });
+    },
     auth: {
       async getUser() {
         return userResult;
@@ -315,10 +338,11 @@ test("viewer is denied", async () => {
 });
 
 test("unauthorized is denied", async () => {
-  const dbRef = { current: baseDb() };
+  const dbRef = { current: baseDb({ assets: [] }) };
   const handler = endpointFor(dbRef, { current: user("stranger") });
-  const { response } = await call(handler, dbRef.current, { kac: "KPR-TEST-1", purpose: "asset_overview" }, "Bearer valid", user("stranger"));
-  assert.equal(response.status, 403);
+  const { response, body } = await call(handler, dbRef.current, { kac: "KPR-TEST-1", purpose: "asset_overview" }, "Bearer valid", user("stranger"));
+  assert.equal(response.status, 404);
+  assert.equal(body.error, "asset_not_found");
 });
 
 test("admin asset_overview is allowed", async () => {
@@ -327,6 +351,56 @@ test("admin asset_overview is allowed", async () => {
   const { response, body } = await call(handler, dbRef.current, { kac: "KPR-TEST-1", purpose: "asset_overview" }, "Bearer valid", user("admin-1"));
   assert.equal(response.status, 200);
   assert.equal(body.authorization.access, "admin");
+});
+
+test("platform admin resolves an asset without stewardship through admin RPC", async () => {
+  const rpcCalls = [];
+  const dbRef = { current: baseDb({
+    profiles: [{ id: "admin-1", role: "superkeepr" }],
+    assets: [],
+    __admin_assets: baseDb().assets,
+    __rpcCalls: rpcCalls,
+  }) };
+  const handler = endpointFor(dbRef, { current: user("admin-1") });
+  const { response, body } = await call(handler, dbRef.current, { kac: "KPR-TEST-1", purpose: "asset_overview" }, "Bearer valid", user("admin-1"));
+  assert.equal(response.status, 200);
+  assert.equal(body.authorization.access, "admin");
+  assert.equal(body.asset.id, "asset-1");
+  assert.equal(rpcCalls.length, 1);
+  assert.equal(rpcCalls[0].name, "keepr_resolve_kac_for_manifest_admin");
+  assert.equal(rpcCalls[0].args.p_kac, "KPR-TEST-1");
+});
+
+test("admin RPC resolves only the requested KAC and returns one identity", async () => {
+  const rpcCalls = [];
+  const dbRef = { current: baseDb({
+    profiles: [{ id: "admin-1", role: "admin" }],
+    assets: [],
+    __admin_assets: [
+      { ...baseDb().assets[0], id: "asset-target" },
+      { ...baseDb().assets[0], id: "asset-duplicate" },
+      { ...baseDb().assets[0], id: "asset-other", kac_id: "KPR-OTHER-1" },
+    ],
+    __rpcCalls: rpcCalls,
+  }) };
+  const handler = endpointFor(dbRef, { current: user("admin-1") });
+  const { response, body } = await call(handler, dbRef.current, { kac: "KPR-TEST-1", purpose: "asset_overview" }, "Bearer valid", user("admin-1"));
+  assert.equal(response.status, 200);
+  assert.equal(body.asset.id, "asset-target");
+  assert.equal(body.asset.kac_id, "KPR-TEST-1");
+  assert.equal(body.asset.name, undefined);
+  assert.equal(body.asset.type, undefined);
+  assert.deepEqual(rpcCalls.map((call) => call.args.p_kac), ["KPR-TEST-1"]);
+});
+
+test("owner path still uses caller-scoped resolver, not admin RPC", async () => {
+  const rpcCalls = [];
+  const dbRef = { current: baseDb({ __rpcCalls: rpcCalls }) };
+  const handler = endpointFor(dbRef);
+  const { response, body } = await call(handler, dbRef.current, { kac: "KPR-TEST-1", purpose: "asset_overview" });
+  assert.equal(response.status, 200);
+  assert.equal(body.authorization.access, "owner");
+  assert.deepEqual(rpcCalls, []);
 });
 
 test("admin admin_diagnostic is allowed", async () => {
@@ -362,6 +436,16 @@ test("disputed asset diagnostic is available to admin", async () => {
   assert.equal(body.diagnostics.some((d) => d.code === "disputed_asset_requires_admin_review"), true);
 });
 
+test("disputed asset diagnostic is available to admin without stewardship", async () => {
+  const disputed = { ...baseDb().assets[0], status: "disputed" };
+  const dbRef = { current: baseDb({ profiles: [{ id: "admin-1", role: "admin" }], assets: [], __admin_assets: [disputed] }) };
+  const handler = endpointFor(dbRef, { current: user("admin-1") });
+  const { response, body } = await call(handler, dbRef.current, { kac: "KPR-TEST-1", purpose: "admin_diagnostic" }, "Bearer valid", user("admin-1"));
+  assert.equal(response.status, 200);
+  assert.equal(body.authorization.access, "admin");
+  assert.equal(body.diagnostics.some((d) => d.code === "disputed_asset_requires_admin_review"), true);
+});
+
 test("complete result includes collector summaries", async () => {
   const dbRef = { current: baseDb() };
   const handler = endpointFor(dbRef);
@@ -370,11 +454,44 @@ test("complete result includes collector summaries", async () => {
   assert.equal(body.collector_summaries.length, 4);
 });
 
+test("direct steward with hidden domains returns partial", async () => {
+  const dbRef = { current: baseDb({
+    asset_stewardships: [{ asset_id: "asset-1", user_id: "user-1", active: true, access_role: "steward", starts_at: "2020-01-01" }],
+    systems: [],
+    vehicle_systems: [],
+    attachments: [],
+    attachment_placements: [],
+  }) };
+  const handler = endpointFor(dbRef, { current: user("user-1") });
+  const { response, body } = await call(handler, dbRef.current, { kac: "KPR-TEST-1", purpose: "asset_overview" }, "Bearer valid", user("user-1"));
+  assert.equal(response.status, 200);
+  assert.equal(body.status, "partial");
+  assert.equal(body.collector_summaries.some((s) => s.status === "not_visible"), true);
+});
+
+test("org steward with hidden domains returns partial", async () => {
+  const dbRef = { current: baseDb({
+    org_members: [{ user_id: "user-1", org_id: "org-1" }],
+    asset_stewardships: [{ asset_id: "asset-1", org_id: "org-1", active: true, access_role: "steward", starts_at: "2020-01-01" }],
+    asset_identifiers: [],
+    master_assets: [],
+    vehicle_systems: [],
+    boat_systems: [],
+    home_systems: [],
+  }) };
+  const handler = endpointFor(dbRef, { current: user("user-1") });
+  const { response, body } = await call(handler, dbRef.current, { kac: "KPR-TEST-1", purpose: "asset_overview" }, "Bearer valid", user("user-1"));
+  assert.equal(response.status, 200);
+  assert.equal(body.status, "partial");
+  assert.equal(body.collector_summaries.some((s) => s.status === "not_visible"), true);
+});
+
 test("partial collector failure returns partial with sanitized diagnostics", async () => {
   const dbRef = { current: baseDb({ __fail: new Set(["systems"]) }) };
   const handler = endpointFor(dbRef);
   const { body } = await call(handler, dbRef.current, { kac: "KPR-TEST-1", purpose: "asset_overview" });
   assert.equal(body.status, "partial");
+  assert.equal(body.collector_summaries.find((s) => s.collector === "systems").status, "failed");
   assert.equal(serialized(body).includes("raw db boom"), false);
   assert.equal(body.diagnostics.some((d) => d.code === "partial_query_failure"), true);
 });

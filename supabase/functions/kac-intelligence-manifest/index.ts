@@ -7,11 +7,11 @@ import {
   type KacIntelligenceManifest,
   type KnowledgeGap,
   type ManifestAssociation,
+  type ManifestCollectorStatus,
   type ManifestDiagnostic,
-  type ManifestGenerationStatus,
 } from "../_shared/kacManifestTypes.ts";
 import { getJwt, getAuthenticatedUserId, authorizeKacAsset } from "../_shared/kacAuth.ts";
-import { resolveKacAsset, type ResolvedKacAsset } from "../_shared/kacResolve.ts";
+import { resolveKacAsset, resolveKacAssetForManifestAdmin, type ResolvedKacAsset } from "../_shared/kacResolve.ts";
 import { collectAssetIdentityAssociations } from "../_shared/kacManifestIdentity.ts";
 import { collectSystemAssociations } from "../_shared/kacManifestSystems.ts";
 import { collectTimelineAssociations } from "../_shared/kacManifestTimeline.ts";
@@ -27,7 +27,7 @@ type ManifestAccess = "owner" | "direct_steward" | "org_steward" | "viewer" | "u
 
 interface CollectorSummary {
   collector: string;
-  status: ManifestGenerationStatus;
+  status: ManifestCollectorStatus;
   association_count: number;
   diagnostics: ManifestDiagnostic[];
   duration_ms: number;
@@ -138,10 +138,10 @@ async function runCollector(
     const result = await fn();
     const diagnostics = sanitizeDiagnostics(result.diagnostics || []);
     return {
-      result: { associations: result.associations || [], diagnostics },
+      result: { associations: result.associations || [], diagnostics, status: result.status },
       summary: {
         collector: name,
-        status: diagnostics.some((d) => d.code === "partial_query_failure") ? "partial" : "complete",
+        status: result.status || (diagnostics.some((d) => d.code === "partial_query_failure") ? "failed" : result.associations?.length ? "complete" : "complete_empty"),
         association_count: result.associations?.length || 0,
         diagnostics,
         duration_ms: Date.now() - start,
@@ -155,10 +155,10 @@ async function runCollector(
       source: name,
     }]);
     return {
-      result: { associations: [], diagnostics },
+      result: { associations: [], diagnostics, status: "failed" },
       summary: {
         collector: name,
-        status: "partial",
+        status: "failed",
         association_count: 0,
         diagnostics,
         duration_ms: Date.now() - start,
@@ -310,13 +310,15 @@ serve(async (req) => {
       return json({ error: "Unsupported purpose" }, 400);
     }
 
-    const resolved = await resolveKacAsset(client, body?.kac);
+    const isAdmin = await getPlatformAdminAccess(client, auth.user_id);
+    const resolved = isAdmin
+      ? await resolveKacAssetForManifestAdmin(client, body?.kac)
+      : await resolveKacAsset(client, body?.kac);
     if (!resolved.ok) {
       const status = resolved.error === "missing_kac" || resolved.error === "malformed_kac" ? 400 : 404;
       return json({ error: resolved.error }, status);
     }
 
-    const isAdmin = await getPlatformAdminAccess(client, auth.user_id);
     const authz = await authorizeKacAsset(client, resolved.asset, auth.user_id);
     const access: ManifestAccess = isAdmin ? "admin" : authz.access;
 
@@ -344,7 +346,7 @@ serve(async (req) => {
       });
     }
 
-    const context: ResolvedAssetContext = { kac: resolved.kac, asset: resolved.asset };
+    const context: ResolvedAssetContext = { kac: resolved.kac, asset: resolved.asset, access };
     const collectors = await Promise.all([
       runCollector("identity", () => collectAssetIdentityAssociations(client, context)),
       runCollector("systems", () => collectSystemAssociations(client, context)),
@@ -357,7 +359,7 @@ serve(async (req) => {
       .flatMap((collector) => collector.result.associations)
       .map(sanitizeAssociation);
     const summaries = collectors.map((collector) => collector.summary);
-    const status: ManifestGenerationStatus = summaries.some((summary) => summary.status === "partial") ? "partial" : "complete";
+    const status = summaries.some((summary) => !["complete", "complete_empty"].includes(summary.status)) ? "partial" : "complete";
 
     return json({
       ...buildBaseManifest(purposeInput, resolved.kac, resolved.asset, access, auth.user_id),
