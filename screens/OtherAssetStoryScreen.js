@@ -872,6 +872,22 @@ const getAssetKac = () => {
   );
 };
 
+const goToKeeprIntelligenceUpdate = () => {
+  const kac = String(getAssetKac() || "").trim();
+  if (!kac) {
+    Alert.alert(
+      "Intelligence unavailable",
+      "This asset does not yet have a Keepr Asset Code."
+    );
+    return;
+  }
+  navigation.navigate("KeeprIntelligenceUpdate", {
+    kac,
+    assetName: asset?.name || assetDisplayName || "Asset",
+    assetType: "other",
+  });
+};
+
 const goToPublicStory = () => {
   if (!asset?.id) return;
 
@@ -1320,6 +1336,11 @@ const filteredTimelineItems = useMemo(() => {
               label="Systems (soon)"
               icon="grid-outline"
               onPress={goToAssetSystems}
+            />
+            <QuickActionChip
+              label="Intelligence"
+              icon="sparkles-outline"
+              onPress={goToKeeprIntelligenceUpdate}
             />
             <QuickActionChip
               label="Attachments"

@@ -781,6 +781,22 @@ const getAssetKac = () => {
   );
 };
 
+const goToKeeprIntelligenceUpdate = () => {
+  const kac = String(getAssetKac() || "").trim();
+  if (!kac) {
+    Alert.alert(
+      "Intelligence unavailable",
+      "This asset does not yet have a Keepr Asset Code."
+    );
+    return;
+  }
+  navigation.navigate("KeeprIntelligenceUpdate", {
+    kac,
+    assetName: vehicle?.name || vehicleDisplayName || "Vehicle",
+    assetType: "vehicle",
+  });
+};
+
 const goToPublicStory = () => {
   if (!vehicle?.id) return;
 
@@ -1240,6 +1256,11 @@ const meta = {
               label="Systems"
               icon="grid-outline"
               onPress={goToVehicleSystems}
+            />
+            <QuickActionChip
+              label="Intelligence"
+              icon="sparkles-outline"
+              onPress={goToKeeprIntelligenceUpdate}
             />
             <QuickActionChip
               label="Attachments"

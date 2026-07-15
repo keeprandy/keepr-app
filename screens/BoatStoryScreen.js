@@ -735,6 +735,35 @@ const goToPublicStorySettings = () => {
     });
   };
 
+  const getAssetKac = () => {
+    return (
+      route?.params?.kac ||
+      route?.params?.kacId ||
+      route?.params?.kac_id ||
+      boat?.kac ||
+      boat?.kac_code ||
+      boat?.kac_id ||
+      boat?.kacId ||
+      null
+    );
+  };
+
+  const goToKeeprIntelligenceUpdate = () => {
+    const kac = String(getAssetKac() || "").trim();
+    if (!kac) {
+      Alert.alert(
+        "Intelligence unavailable",
+        "This asset does not yet have a Keepr Asset Code."
+      );
+      return;
+    }
+    navigation.navigate("KeeprIntelligenceUpdate", {
+      kac,
+      assetName: boatName || boat?.name || "Boat",
+      assetType: "boat",
+    });
+  };
+
       const handleKeeprProgressPress = useCallback(
   (step) => {
     if (!boat?.id) return;
@@ -1256,6 +1285,11 @@ const meta = {
               label="Systems"
               icon="grid-outline"
               onPress={goToBoatSystems}
+            />
+            <QuickActionChip
+              label="Intelligence"
+              icon="sparkles-outline"
+              onPress={goToKeeprIntelligenceUpdate}
             />
             <QuickActionChip
               label="Attachments"

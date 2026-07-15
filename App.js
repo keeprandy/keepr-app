@@ -147,6 +147,7 @@ import AssetAttachmentsMobileScreen from "./screens/AssetAttachmentsMobileScreen
 import AssetAttachmentDetailMobileScreen from "./screens/AssetAttachmentDetailMobileScreen";
 import ScanDocumentMobileScreen from "./screens/ScanDocumentMobileScreen";
 import UploadLabScreen from "./screens/UploadLabScreen";
+import KeeprIntelligenceUpdateScreen from "./screens/KeeprIntelligenceUpdateScreen";
 
 // Proof Builder
 import KeeprIntelligenceScreen from "./screens/KeeprIntelligenceScreen";
@@ -1989,6 +1990,12 @@ const initialRouteName = isResetLink
           <RootStack.Screen
             name="KeeprIntelligence"
             component={KeeprIntelligenceWrapper}
+          />
+
+          <RootStack.Screen
+            name="KeeprIntelligenceUpdate"
+            component={KeeprIntelligenceUpdateScreen}
+            options={{ headerShown: false }}
           />
 
           <RootStack.Screen name="EditAsset" component={EditAssetScreen} />

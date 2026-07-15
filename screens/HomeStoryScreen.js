@@ -741,6 +741,35 @@ try {
     });
   };
 
+  const getAssetKac = () => {
+    return (
+      route?.params?.kac ||
+      route?.params?.kacId ||
+      route?.params?.kac_id ||
+      home?.kac ||
+      home?.kac_code ||
+      home?.kac_id ||
+      home?.kacId ||
+      null
+    );
+  };
+
+  const goToKeeprIntelligenceUpdate = () => {
+    const kac = String(getAssetKac() || "").trim();
+    if (!kac) {
+      Alert.alert(
+        "Intelligence unavailable",
+        "This asset does not yet have a Keepr Asset Code."
+      );
+      return;
+    }
+    navigation.navigate("KeeprIntelligenceUpdate", {
+      kac,
+      assetName: homeName || home?.name || "Home",
+      assetType: "home",
+    });
+  };
+
       const handleKeeprProgressPress = useCallback(
   (step) => {
     if (!home?.id) return;
@@ -1374,6 +1403,11 @@ try {
               label="Systems"
               icon="grid-outline"
               onPress={goToHomeSystems}
+            />
+            <QuickActionChip
+              label="Intelligence"
+              icon="sparkles-outline"
+              onPress={goToKeeprIntelligenceUpdate}
             />
             <QuickActionChip
               label="Attachments"
