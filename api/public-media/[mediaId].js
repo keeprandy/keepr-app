@@ -42,13 +42,20 @@ export default async function handler(req, res) {
   }
 
   const supabaseUrl = getEnv("SUPABASE_URL") || getEnv("EXPO_PUBLIC_SUPABASE_URL");
-  if (!supabaseUrl) {
+  const anonKey = getEnv("EXPO_PUBLIC_SUPABASE_ANON_KEY");
+  if (!supabaseUrl || !anonKey) {
     return res.status(503).json({ error: "media_unavailable" });
   }
 
   try {
     const upstream = await fetch(
-      `${supabaseUrl.replace(/\/+$/, "")}/functions/v1/public-story-media?media_id=${encodeURIComponent(mediaId)}`
+      `${supabaseUrl.replace(/\/+$/, "")}/functions/v1/public-story-media?media_id=${encodeURIComponent(mediaId)}`,
+      {
+        headers: {
+          apikey: anonKey,
+          Authorization: `Bearer ${anonKey}`,
+        },
+      }
     );
 
     if (!upstream.ok) {

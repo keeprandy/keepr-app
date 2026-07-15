@@ -9,10 +9,91 @@ function read(relativePath) {
   return fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
 }
 
+function loadPublicMediaHandler() {
+  const source = read("api/public-media/[mediaId].js");
+  const executable = source.replace("export default async function handler", "async function handler");
+  return new Function(
+    "process",
+    "fetch",
+    "Buffer",
+    `${executable}\nreturn handler;`
+  );
+}
+
+function createMockResponse() {
+  return {
+    statusCode: 200,
+    headers: {},
+    body: null,
+    ended: false,
+    setHeader(name, value) {
+      this.headers[name] = value;
+    },
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(body) {
+      this.body = body;
+      this.ended = true;
+      return this;
+    },
+    send(body) {
+      this.body = body;
+      this.ended = true;
+      return this;
+    },
+    end() {
+      this.ended = true;
+      return this;
+    },
+  };
+}
+
+async function runPublicMediaHandler({ upstreamStatus = 200, upstreamContentType = "image/jpeg", upstreamBody = "ok" }) {
+  const calls = [];
+  const handlerFactory = loadPublicMediaHandler();
+  const handler = handlerFactory(
+    {
+      env: {
+        EXPO_PUBLIC_SUPABASE_URL: "https://example.supabase.co",
+        EXPO_PUBLIC_SUPABASE_ANON_KEY: "anon-test-key",
+      },
+    },
+    async (url, options = {}) => {
+      calls.push({ url, options });
+      return {
+        ok: upstreamStatus >= 200 && upstreamStatus < 300,
+        status: upstreamStatus,
+        headers: {
+          get(name) {
+            return name.toLowerCase() === "content-type" ? upstreamContentType : null;
+          },
+        },
+        async arrayBuffer() {
+          return Buffer.from(upstreamBody).buffer.slice(
+            Buffer.from(upstreamBody).byteOffset,
+            Buffer.from(upstreamBody).byteOffset + Buffer.from(upstreamBody).byteLength
+          );
+        },
+      };
+    },
+    Buffer
+  );
+
+  const req = { method: "GET", query: { mediaId: "media_123456" } };
+  const res = createMockResponse();
+  await handler(req, res);
+  return { calls, res };
+}
+
 test("public media proxy delegates to public-story-media by opaque media id", () => {
   const source = read("api/public-media/[mediaId].js");
 
   assert.match(source, /functions\/v1\/public-story-media\?media_id=/);
+  assert.match(source, /EXPO_PUBLIC_SUPABASE_ANON_KEY/);
+  assert.match(source, /apikey:\s*anonKey/);
+  assert.match(source, /Authorization:\s*`Bearer \$\{anonKey\}`/);
   assert.match(source, /UUIDISH_RE/);
   assert.match(source, /application\/octet-stream/);
   assert.match(source, /Content-Disposition/);
@@ -24,6 +105,55 @@ test("public media proxy delegates to public-story-media by opaque media id", ()
   for (const forbidden of ["res.json({ signedUrl", "res.json({ storage_path", "res.json({ bucket"]) {
     assert.equal(source.includes(forbidden), false, `${forbidden} must not be returned`);
   }
+});
+
+test("public media proxy forwards public anon auth upstream without service-role credentials", async () => {
+  const { calls, res } = await runPublicMediaHandler({});
+
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /functions\/v1\/public-story-media\?media_id=media_123456/);
+  assert.equal(calls[0].options.headers.apikey, "anon-test-key");
+  assert.equal(calls[0].options.headers.Authorization, "Bearer anon-test-key");
+  assert.equal(JSON.stringify(calls[0]).includes("SERVICE_ROLE"), false);
+  assert.equal(res.statusCode, 200);
+  assert.equal(JSON.stringify(res.body).includes("anon-test-key"), false);
+});
+
+test("public media proxy streams upstream image responses with safe headers", async () => {
+  const { res } = await runPublicMediaHandler({
+    upstreamContentType: "image/jpeg",
+    upstreamBody: "image-body",
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.headers["Content-Type"], "image/jpeg");
+  assert.equal(res.headers["Content-Disposition"], 'inline; filename="keepr-showcase-media"');
+  assert.equal(Buffer.isBuffer(res.body), true);
+});
+
+test("public media proxy streams upstream PDF responses with safe headers", async () => {
+  const { res } = await runPublicMediaHandler({
+    upstreamContentType: "application/pdf",
+    upstreamBody: "%PDF-redacted",
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.headers["Content-Type"], "application/pdf");
+  assert.equal(res.headers["Content-Disposition"], 'inline; filename="keepr-showcase-document.pdf"');
+  assert.equal(Buffer.isBuffer(res.body), true);
+});
+
+test("public media proxy maps upstream failures to generic safe errors", async () => {
+  const unauthorized = await runPublicMediaHandler({ upstreamStatus: 401 });
+  const missing = await runPublicMediaHandler({ upstreamStatus: 404 });
+  const failed = await runPublicMediaHandler({ upstreamStatus: 500 });
+
+  assert.equal(unauthorized.res.statusCode, 502);
+  assert.deepEqual(unauthorized.res.body, { error: "media_fetch_failed" });
+  assert.equal(missing.res.statusCode, 404);
+  assert.deepEqual(missing.res.body, { error: "media_not_found" });
+  assert.equal(failed.res.statusCode, 502);
+  assert.deepEqual(failed.res.body, { error: "media_fetch_failed" });
 });
 
 test("public story screen normalizes current safe media rows to proxy URLs", () => {
