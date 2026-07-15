@@ -12,6 +12,24 @@ function safeCacheHeaders(contentType) {
   };
 }
 
+function cleanContentType(value) {
+  const contentType = String(value || "").split(";")[0].trim().toLowerCase();
+  if (!contentType || /[\r\n]/.test(contentType)) return "application/octet-stream";
+  return contentType;
+}
+
+function safeContentDisposition(contentType) {
+  if (contentType === "application/pdf") {
+    return 'inline; filename="keepr-showcase-document.pdf"';
+  }
+
+  if (contentType.startsWith("image/")) {
+    return 'inline; filename="keepr-showcase-media"';
+  }
+
+  return 'attachment; filename="keepr-showcase-file"';
+}
+
 export default async function handler(req, res) {
   if (req.method !== "GET" && req.method !== "HEAD") {
     res.setHeader("Allow", "GET, HEAD");
@@ -39,10 +57,11 @@ export default async function handler(req, res) {
       });
     }
 
-    const contentType = upstream.headers.get("content-type") || "application/octet-stream";
+    const contentType = cleanContentType(upstream.headers.get("content-type"));
     res.setHeader("Content-Type", contentType);
     res.setHeader("Cache-Control", safeCacheHeaders(contentType)["Cache-Control"]);
     res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Disposition", safeContentDisposition(contentType));
 
     if (req.method === "HEAD") {
       return res.status(200).end();

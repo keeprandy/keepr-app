@@ -26,7 +26,6 @@ import QRCode from "react-native-qrcode-svg";
 import PublicShell from "../components/public/PublicShell";
 import { colors, radius, shadows, spacing, typography } from "../styles/theme";
 import ShowcaseAttachmentsSection from "../components/showcase/ShowcaseAttachmentsSection";
-import { getSignedUrl, listAttachmentsForTarget } from "../lib/attachmentsApi";
 
 import { supabase } from "../lib/supabaseClient";
 import { formatKeeprDate } from "../lib/dateFormat";
@@ -88,6 +87,35 @@ function normalizePublicStoryMediaRows(rows) {
         is_showcase: Boolean(row?.is_showcase),
         sort_order: row?.sort_order ?? null,
         image_url: imageUrl,
+      };
+    })
+    .filter(Boolean);
+}
+
+function normalizePublicStoryFileRows(rows) {
+  return (Array.isArray(rows) ? rows : [])
+    .map((row) => {
+      const publicMediaId = row?.public_media_id || row?.id || null;
+      const url = toPublicMediaUrl(publicMediaId || row?.url);
+
+      if (!publicMediaId || !url) return null;
+
+      const safeName =
+        row?.name ||
+        row?.file_name ||
+        row?.title ||
+        "Showcase document";
+
+      return {
+        id: String(publicMediaId),
+        public_media_id: String(publicMediaId),
+        name: safeName,
+        file_name: safeName,
+        title: row?.title || safeName,
+        mime_type: row?.mime_type || row?.content_type || null,
+        role: row?.role || null,
+        notes: row?.notes || null,
+        url,
       };
     })
     .filter(Boolean);
@@ -281,7 +309,7 @@ async function fetchPublicStoryMedia(kac) {
 
   return {
   media: normalizePublicStoryMediaRows(json?.media),
-  showcaseFiles: Array.isArray(json?.showcaseFiles) ? json.showcaseFiles : [],
+  showcaseFiles: normalizePublicStoryFileRows(json?.showcaseFiles),
   showcaseLinks: Array.isArray(json?.showcaseLinks) ? json.showcaseLinks : [],
 };
 }
@@ -485,19 +513,6 @@ const ownerDisplayName = asset?.owner_name || null;
   /*                              LOAD PUBLIC STORY                           */
   /* ------------------------------------------------------------------------ */
 
-  const looksLikeImageAttachment = (row = {}) => {
-  const kind = row.kind || "";
-  const mime = String(row.mime_type || "").toLowerCase();
-  const fileName = row.file_name || row.storage_path || "";
-  const ext = fileName.split(".").pop()?.toLowerCase() || "";
-
-  return (
-    kind === "photo" ||
-    mime.startsWith("image/") ||
-    ["jpg", "jpeg", "png", "webp", "heic", "heif"].includes(ext)
-  );
-};
-  
   const loadPublicStory = useCallback(async () => {
   if (!kac && !assetId) return;
 
@@ -1155,14 +1170,6 @@ return (
     links={showcaseLinks}
     getFileUrl={async (file) => {
       if (file.url) return file.url;
-
-      if (file.bucket && file.storage_path) {
-        return await getSignedUrl({
-          bucket: file.bucket,
-          path: file.storage_path,
-        });
-      }
-
       return null;
     }}
   />
