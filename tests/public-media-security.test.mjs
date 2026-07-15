@@ -12,19 +12,19 @@ function read(relativePath) {
 test("public story media listing returns only Keepr proxy URLs", () => {
   const source = read("supabase/functions/public-story-media/index.ts");
 
-  assert.equal(source.includes("createSignedUrl"), false);
   assert.match(source, /image_url:\s*`\/api\/public-media\//);
+  assert.match(source, /media_id/);
+  assert.match(source, /createSignedUrl/);
 
   for (const forbidden of [
     "attachment_id:",
-    "bucket:",
-    "storage_path:",
     "file_name:",
-    "mime_type:",
-    "signedUrl",
   ]) {
     assert.equal(source.includes(forbidden), false, `${forbidden} must not be in the public response`);
   }
+
+  assert.equal(source.includes("image_url: signed"), false);
+  assert.equal(source.includes("image_url: upstream"), false);
 });
 
 test("public story screen normalizes media to same-origin proxy URLs", () => {
@@ -56,11 +56,22 @@ test("Open Graph route emits proxy media URLs or fallback only", () => {
 test("public media proxy signs and fetches storage only server-side", () => {
   const source = read("api/public-media/[mediaId].js");
 
-  assert.match(source, /createSignedUrl/);
-  assert.match(source, /SUPABASE_SERVICE_ROLE_KEY/);
-  assert.match(source, /select\("placement_id,url,bucket,storage_path,mime_type"\)/);
+  assert.match(source, /functions\/v1\/public-story-media\?media_id=/);
+  assert.equal(source.includes("SUPABASE_SERVICE_ROLE_KEY"), false);
+  assert.equal(source.includes("createSignedUrl"), false);
+  assert.equal(source.includes("storage_path"), false);
 
   for (const forbidden of ["res.json({ signedUrl", "res.json({ storage_path", "res.json({ bucket"]) {
     assert.equal(source.includes(forbidden), false, `${forbidden} must not be returned`);
   }
+});
+
+test("orchestration keeps JWT verification enabled while public media is explicit", () => {
+  const source = read("supabase/config.toml");
+
+  assert.match(
+    source,
+    /\[functions\.kac-intelligence-orchestration\][\s\S]*?verify_jwt = true/
+  );
+  assert.match(source, /\[functions\.public-story-media\][\s\S]*?verify_jwt = false/);
 });
