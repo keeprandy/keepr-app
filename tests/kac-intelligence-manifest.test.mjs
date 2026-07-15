@@ -215,7 +215,6 @@ function baseDb(overrides = {}) {
     home_systems: [],
     service_records: [{ id: "svc-1", asset_id: "asset-1", title: "Oil change", performed_at: "2026-01-01", system_id: "sys-1", keepr_pro_id: "pro-1", verification_status: "verified", source_type: "manual" }],
     story_events: [{ id: "story-1", asset_id: "asset-1", event_type: "maintenance", title: "Oil change Moment", metadata: { service_record_id: "svc-1" }, occurred_at: "2026-01-01T00:00:00Z", source_type: "manual", system_id: "sys-1" }],
-    timeline_records: [],
     maintenance_events: [],
     service_entries: [],
     attachments: [
@@ -404,7 +403,6 @@ test("platform admin identity-only overview is partial when association domains 
     home_systems: [],
     service_records: [],
     story_events: [],
-    timeline_records: [],
     maintenance_events: [],
     service_entries: [],
     attachments: [],
@@ -433,7 +431,6 @@ test("platform admin admin_diagnostic may be partial when association domains ar
     home_systems: [],
     service_records: [],
     story_events: [],
-    timeline_records: [],
     maintenance_events: [],
     service_entries: [],
     attachments: [],

@@ -40,7 +40,7 @@ const FORBIDDEN_METADATA_KEYS = new Set([
 ]);
 
 const SYSTEM_TABLES = new Set(["systems", "vehicle_systems", "boat_systems", "home_systems"]);
-const TIMELINE_TABLES = new Set(["service_records", "story_events", "timeline_records", "maintenance_events", "service_entries"]);
+const TIMELINE_TABLES = new Set(["service_records", "story_events", "maintenance_events", "service_entries"]);
 const EVIDENCE_TABLES = new Set(["attachments", "attachment_placements", "attachment_links", "service_record_documents", "service_record_photos", "service_photos"]);
 
 function sanitizeMetadata(input: Record<string, unknown> = {}) {
@@ -143,7 +143,7 @@ function isMaintenanceRelevant(association: ManifestAssociation) {
     roles.has("repair") ||
     roles.has("inspection") ||
     roles.has("usage") ||
-    ["service_records", "maintenance_events", "service_entries", "timeline_records"].includes(association.source_table || "");
+    ["service_records", "maintenance_events", "service_entries"].includes(association.source_table || "");
 }
 
 function associationsForPurpose(manifest: KacIntelligenceManifest, purpose: ContextEnvelopePurpose) {

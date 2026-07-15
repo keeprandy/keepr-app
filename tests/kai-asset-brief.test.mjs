@@ -135,11 +135,11 @@ function porscheManifest(overrides = {}) {
         ],
       }),
       assoc({
-        association_id: "timeline_record:usage-1",
-        object_id: "tl-1",
-        object_type: "timeline_record",
-        source_table: "timeline_records",
-        relationship_type: "timeline_fact",
+        association_id: "work_event:service_record:usage-1",
+        object_id: "svc-usage-1",
+        object_type: "work_event",
+        source_table: "service_records",
+        relationship_type: "service_record",
         event_role: "usage",
         proof_state: "claimed",
         safe_metadata: { title: "Mileage update", odometer: 40000 },
@@ -308,7 +308,7 @@ test("missing facts are grouped and resolvable only by carried capability flags"
 
 test("recent updates are deterministic and provenance-backed", () => {
   const result = brief();
-  assert.equal(result.recent_updates[0].id, "timeline_record:usage-1");
+  assert.equal(result.recent_updates[0].id, "work_event:service_record:usage-1");
   assert.equal(Boolean(result.recent_updates[0].timestamp), true);
   assert.ok(result.recent_updates.every((update) => Array.isArray(update.provenance)));
 });

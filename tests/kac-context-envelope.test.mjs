@@ -111,11 +111,11 @@ function porscheManifest(overrides = {}) {
       ],
     }),
     assoc({
-      association_id: "timeline_record:usage-1",
-      object_id: "tl-1",
-      object_type: "timeline_record",
-      source_table: "timeline_records",
-      relationship_type: "timeline_fact",
+      association_id: "work_event:service_record:usage-1",
+      object_id: "svc-usage-1",
+      object_type: "work_event",
+      source_table: "service_records",
+      relationship_type: "service_record",
       event_role: "usage",
       proof_state: "claimed",
       safe_metadata: { title: "Mileage update", odometer: 40000 },
@@ -281,7 +281,7 @@ test("readiness dimensions are produced", () => {
 
 test("recent changes are deterministic from Manifest dates", () => {
   const envelope = build(porscheManifest());
-  assert.equal(envelope.recently_changed_facts[0].id, "timeline_record:usage-1");
+  assert.equal(envelope.recently_changed_facts[0].id, "work_event:service_record:usage-1");
 });
 
 test("no extracted text, signed URLs, or personal contact fields are emitted", () => {

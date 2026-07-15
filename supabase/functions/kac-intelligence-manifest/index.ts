@@ -119,7 +119,7 @@ function groupAssociations(associations: ManifestAssociation[]) {
       groups.identity.push(association);
     } else if (["systems", "vehicle_systems", "boat_systems", "home_systems"].includes(association.source_table || "")) {
       groups.systems.push(association);
-    } else if (["service_records", "story_events", "timeline_records", "maintenance_events", "service_entries"].includes(association.source_table || "")) {
+    } else if (["service_records", "story_events", "maintenance_events", "service_entries"].includes(association.source_table || "")) {
       groups.timeline.push(association);
     } else if (["attachments", "attachment_placements", "attachment_links"].includes(association.source_table || "")) {
       groups.attachments.push(association);

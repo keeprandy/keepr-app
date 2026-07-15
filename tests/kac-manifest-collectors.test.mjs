@@ -42,9 +42,12 @@ class Query {
     this.db = db;
     this.filters = [];
     this.expectSingle = false;
+    this.selectList = "*";
   }
 
-  select() {
+  select(columns = "*") {
+    this.selectList = columns;
+    if (this.db.__selects) this.db.__selects.push({ table: this.table, columns });
     return this;
   }
 
@@ -85,6 +88,14 @@ class Query {
   then(resolve, reject) {
     if (this.db.__fail?.has(this.table)) {
       return Promise.resolve({ data: null, error: { message: "boom" } }).then(resolve, reject);
+    }
+    const allowedColumns = this.db.__columns?.[this.table];
+    if (allowedColumns && typeof this.selectList === "string" && this.selectList !== "*") {
+      const selected = this.selectList.split(",").map((column) => column.trim()).filter(Boolean);
+      const missing = selected.filter((column) => !allowedColumns.has(column));
+      if (missing.length) {
+        return Promise.resolve({ data: null, error: { message: `missing columns: ${missing.join(", ")}` } }).then(resolve, reject);
+      }
     }
     return Promise.resolve({ data: this.rows(), error: null }).then(resolve, reject);
   }
@@ -252,6 +263,126 @@ test("pairs service record with Moment without double-counting", async () => {
   ]);
 });
 
+test("timeline service records query matches production columns and preserves cost", async () => {
+  const selects = [];
+  const productionServiceRecordColumns = new Set([
+    "id",
+    "asset_id",
+    "title",
+    "notes",
+    "service_type",
+    "category",
+    "performed_at",
+    "location",
+    "odometer",
+    "cost",
+    "created_at",
+    "system_id",
+    "keepr_pro_id",
+    "source_type",
+    "source_document_id",
+    "verification_status",
+    "extra_metadata",
+    "ai_metadata",
+    "record_scope",
+    "dedupe_key",
+  ]);
+
+  const result = await collectTimelineAssociations(
+    makeClient({
+      __selects: selects,
+      __columns: { service_records: productionServiceRecordColumns },
+      service_records: [{
+        id: "svc-prod",
+        asset_id: "asset-1",
+        title: "Formula delivery service",
+        service_type: "delivery",
+        category: "commissioning",
+        performed_at: "2026-05-01",
+        odometer: null,
+        system_id: null,
+        keepr_pro_id: null,
+        source_type: "import",
+        verification_status: "verified",
+        record_scope: "current",
+        notes: "Commissioning complete",
+        location: "Lake Norman",
+        cost: 1716.91,
+        extra_metadata: {
+          source: { authority: "builder_import" },
+          pricing: { currency: "USD" },
+          stewardship_context: { storage: "marina" },
+        },
+        created_at: "2026-05-01T00:00:00Z",
+      }],
+      story_events: [],
+      maintenance_events: [],
+      service_entries: [],
+    }),
+    context({ type: "marine" }),
+  );
+
+  const serviceSelect = selects.find((entry) => entry.table === "service_records")?.columns || "";
+  assert.equal(serviceSelect.includes("price"), false);
+  assert.equal(serviceSelect.includes("cost"), true);
+  assert.equal(result.status, "complete");
+  assert.equal(result.diagnostics.some((d) => d.code === "partial_query_failure"), false);
+
+  const event = byId(result.associations, "work_event:service_record:svc-prod");
+  assert.equal(event.safe_metadata.cost, 1716.91);
+  assert.equal(event.safe_metadata.location, "Lake Norman");
+  assert.equal(event.safe_metadata.notes, "Commissioning complete");
+  assert.equal(event.safe_metadata.pricing_metadata.currency, "USD");
+});
+
+test("Formula-like manifest status remains complete when timeline uses production-shaped service records", async () => {
+  const timeline = await collectTimelineAssociations(
+    makeClient({
+      __columns: {
+        service_records: new Set([
+          "id",
+          "asset_id",
+          "title",
+          "notes",
+          "service_type",
+          "category",
+          "performed_at",
+          "location",
+          "odometer",
+          "cost",
+          "created_at",
+          "system_id",
+          "keepr_pro_id",
+          "source_type",
+          "source_document_id",
+          "verification_status",
+          "extra_metadata",
+          "ai_metadata",
+          "record_scope",
+          "dedupe_key",
+        ]),
+      },
+      service_records: [{ id: "svc-formula", asset_id: "asset-1", title: "Formula commissioning", performed_at: "2026-05-01", source_type: "import", verification_status: "verified", record_scope: "current", cost: 100 }],
+      story_events: [],
+      maintenance_events: [],
+      service_entries: [],
+    }),
+    context({ type: "marine" }),
+  );
+
+  const collectorSummaries = [
+    { collector: "identity", status: "complete" },
+    { collector: "systems", status: "complete" },
+    { collector: "timeline", status: timeline.status },
+    { collector: "attachments", status: "complete" },
+  ];
+  const manifestStatus = collectorSummaries.some((summary) => !["complete", "complete_empty"].includes(summary.status)) ? "partial" : "complete";
+
+  assert.equal(timeline.status, "complete");
+  assert.equal(timeline.diagnostics.some((d) => d.code === "partial_query_failure"), false);
+  assert.equal(manifestStatus, "complete");
+});
+
 test("collects standalone Moment", async () => {
   const result = await collectTimelineAssociations(
     makeClient({
@@ -263,17 +394,17 @@ test("collects standalone Moment", async () => {
   assert.equal(byId(result.associations, "moment:story_event:story-1").event_role, "moment");
 });
 
-test("collects standalone timeline record", async () => {
+test("collects standalone canonical service record", async () => {
   const result = await collectTimelineAssociations(
     makeClient({
-      timeline_records: [{ id: "tl-1", asset_id: "asset-1", occurred_on: "2026-01-02", type: "usage", title: "Mileage", attachment_id: "att-1", source_type: "manual" }],
+      service_records: [{ id: "svc-standalone", asset_id: "asset-1", title: "Mileage update", performed_at: "2026-01-02", service_type: "usage", source_type: "manual", verification_status: "verified" }],
     }),
     context(),
   );
 
-  const record = byId(result.associations, "timeline_record:tl-1");
-  assert.equal(record.event_role, "usage");
-  assert.equal(record.proof_state, "evidence_attached");
+  const record = byId(result.associations, "work_event:service_record:svc-standalone");
+  assert.equal(record.event_roles.includes("maintenance"), true);
+  assert.equal(record.proof_state, "verified");
 });
 
 test("keeps one attachment identity with multiple placement relationships", async () => {
@@ -343,7 +474,7 @@ test("platform admin identity-only attachments collector returns not_visible whe
 
 test("platform admin identity-only timeline collector returns not_visible when true emptiness cannot be proven", async () => {
   const result = await collectTimelineAssociations(
-    makeClient({ service_records: [], story_events: [], timeline_records: [], maintenance_events: [], service_entries: [] }),
+    makeClient({ service_records: [], story_events: [], maintenance_events: [], service_entries: [] }),
     context({ access: "admin", association_visibility: "admin_identity_only" }),
   );
   assert.equal(result.status, "not_visible");

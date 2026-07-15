@@ -18,7 +18,6 @@ interface ServiceRecordRow {
   notes?: string | null;
   location?: string | null;
   cost?: number | null;
-  price?: number | null;
   extra_metadata?: Record<string, unknown> | null;
   created_at: string | null;
 }
@@ -34,20 +33,6 @@ interface StoryEventRow {
   service_record_id: string | null;
   system_id: string | null;
   created_at: string | null;
-}
-
-interface TimelineRecordRow {
-  id: string;
-  asset_id: string;
-  occurred_on: string;
-  type: string;
-  title: string;
-  source_type: string | null;
-  source_ref_id: string | null;
-  attachment_id: string | null;
-  confidence: string | null;
-  created_at: string | null;
-  updated_at: string | null;
 }
 
 interface MaintenanceEventRow {
@@ -127,7 +112,7 @@ function serviceRecordContext(row: ServiceRecordRow) {
   return compactMetadata({
     notes: row.notes,
     location: row.location,
-    cost: row.cost ?? row.price,
+    cost: row.cost,
     source_metadata: metadata?.source,
     pricing_metadata: metadata?.pricing,
     stewardship_context: metadata?.stewardship_context,
@@ -151,23 +136,17 @@ export async function collectTimelineAssociations(
   const associations: ManifestAssociation[] = [];
   const assetId = context.asset.id;
 
-  const [serviceRecords, storyEvents, timelineRecords, maintenanceEvents, serviceEntries] = await Promise.all([
+  const [serviceRecords, storyEvents, maintenanceEvents, serviceEntries] = await Promise.all([
     runQuery<ServiceRecordRow>(diagnostics, "service_records", () =>
       admin
         .from("service_records")
-        .select("id, asset_id, title, service_type, category, performed_at, odometer, system_id, keepr_pro_id, source_type, verification_status, record_scope, notes, location, cost, price, extra_metadata, created_at")
+        .select("id, asset_id, title, service_type, category, performed_at, odometer, system_id, keepr_pro_id, source_type, verification_status, record_scope, notes, location, cost, extra_metadata, created_at")
         .eq("asset_id", assetId)
     ),
     runQuery<StoryEventRow>(diagnostics, "story_events", () =>
       admin
         .from("story_events")
         .select("id, asset_id, event_type, title, metadata, occurred_at, source_type, service_record_id, system_id, created_at")
-        .eq("asset_id", assetId)
-    ),
-    runQuery<TimelineRecordRow>(diagnostics, "timeline_records", () =>
-      admin
-        .from("timeline_records")
-        .select("id, asset_id, occurred_on, type, title, source_type, source_ref_id, attachment_id, confidence, created_at, updated_at")
         .eq("asset_id", assetId)
     ),
     runQuery<MaintenanceEventRow>(diagnostics, "maintenance_events", () =>
@@ -263,35 +242,6 @@ export async function collectTimelineAssociations(
       created_at: row.created_at,
       safe_metadata: compactMetadata({ title: row.title, event_type: row.event_type }),
       provenance: [{ table: "story_events", row_id: row.id }],
-    });
-  }
-
-  for (const row of timelineRecords) {
-    associations.push({
-      association_id: `timeline_record:${row.id}`,
-      object_id: row.id,
-      object_type: "timeline_record",
-      source_table: "timeline_records",
-      relationship_type: "timeline_record",
-      scope: "kac_specific",
-      event_role: row.type === "usage" ? "usage" : "moment",
-      event_roles: [row.type === "usage" ? "usage" : "moment"],
-      evidence_roles: row.attachment_id ? ["owner_report"] : undefined,
-      source_authority: sourceAuthority(row.source_type),
-      proof_state: row.attachment_id ? "evidence_attached" : "claimed",
-      processing_status: "not_required",
-      transfer_classification: "asset_persistent",
-      effective_from: row.occurred_on,
-      created_at: row.created_at,
-      updated_at: row.updated_at,
-      safe_metadata: compactMetadata({
-        title: row.title,
-        type: row.type,
-        source_ref_id: row.source_ref_id,
-        attachment_id: row.attachment_id,
-        confidence: row.confidence,
-      }),
-      provenance: [{ table: "timeline_records", row_id: row.id }],
     });
   }
 
