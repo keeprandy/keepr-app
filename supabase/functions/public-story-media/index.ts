@@ -37,29 +37,16 @@ serve(async (req) => {
     const media = [];
 
     for (const row of rows || []) {
-      let image_url = row.url || null;
+      const public_media_id = row.placement_id ? String(row.placement_id) : null;
 
-      if (!image_url && row.bucket && row.storage_path) {
-        const { data: signed, error: signError } = await supabase.storage
-          .from(row.bucket)
-          .createSignedUrl(row.storage_path.replace(/^\/+/, ""), 3600);
-
-        if (!signError && signed?.signedUrl) {
-          image_url = signed.signedUrl;
-        }
-      }
-
-      if (!image_url) continue;
+      if (!public_media_id) continue;
 
       media.push({
-        placement_id: row.placement_id,
-        attachment_id: row.attachment_id,
+        public_media_id,
         role: row.role,
         is_showcase: row.is_showcase,
         sort_order: row.sort_order,
-        image_url,
-        file_name: row.file_name,
-        mime_type: row.mime_type,
+        image_url: `/api/public-media/${encodeURIComponent(public_media_id)}`,
       });
     }
 
@@ -70,10 +57,13 @@ serve(async (req) => {
         "Content-Type": "application/json",
       },
     });
-  } catch (e) {
-    return new Response(JSON.stringify({ error: e?.message || "Server error" }), {
+  } catch (_e) {
+    return new Response(JSON.stringify({ error: "Server error" }), {
       status: 500,
-      headers: corsHeaders,
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json",
+      },
     });
   }
 });

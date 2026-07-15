@@ -24,6 +24,25 @@ function pickFirst(...vals) {
   return null;
 }
 
+function toPublicMediaOgUrl(baseUrl, row) {
+  const publicMediaId = row?.public_media_id || row?.placement_id || null;
+  const imageUrl = String(row?.image_url || "").trim();
+
+  if (publicMediaId) {
+    return `${baseUrl}/api/public-media/${encodeURIComponent(String(publicMediaId))}`;
+  }
+
+  if (imageUrl.startsWith("/api/public-media/")) {
+    return `${baseUrl}${imageUrl}`;
+  }
+
+  if (/^https?:\/\//i.test(imageUrl) && imageUrl.includes("/api/public-media/")) {
+    return imageUrl;
+  }
+
+  return null;
+}
+
 function buildHtml({ title, description, url, image }) {
   const t = esc(title);
   const d = esc(description);
@@ -159,13 +178,13 @@ if (summaryRow) {
 
     const heroPlacement =
       mediaRows.find(
-        (x) => String(x.placement_id) === String(summaryRow.hero_placement_id)
+        (x) => String(x.public_media_id || x.placement_id) === String(summaryRow.hero_placement_id)
       ) ||
       mediaRows.find((x) => x.role === "hero") ||
       mediaRows.find((x) => !!x.image_url) ||
       null;
 
-    image = heroPlacement?.image_url || fallbackOgImage;
+    image = toPublicMediaOgUrl(baseUrl, heroPlacement) || fallbackOgImage;
   } catch (_) {
     image = fallbackOgImage;
   }

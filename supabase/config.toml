@@ -86,3 +86,13 @@ entrypoint = "./functions/thumbnail-worker/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/thumbnail-worker/*.html" ]
+
+[functions.kac-intelligence-orchestration]
+enabled = true
+verify_jwt = true
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/kac-intelligence-orchestration/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/kac-intelligence-orchestration/*.html" ]

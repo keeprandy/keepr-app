@@ -50,6 +50,52 @@ import QRCode from "react-native-qrcode-svg";
   const FUNCTIONS_BASE = `https://${PROJECT_REF}.supabase.co/functions/v1`;
   const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
+function getPublicMediaBaseUrl() {
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    return window.location.origin;
+  }
+
+  return (
+    process.env.EXPO_PUBLIC_KEEPR_BASE_URL ||
+    process.env.PUBLIC_KEEPR_BASE_URL ||
+    "https://app.keeprhome.com"
+  );
+}
+
+function toPublicMediaUrl(publicMediaIdOrUrl) {
+  const value = String(publicMediaIdOrUrl || "").trim();
+  if (!value) return null;
+
+  if (value.startsWith("/api/public-media/")) {
+    return `${getPublicMediaBaseUrl()}${value}`;
+  }
+
+  if (/^https?:\/\//i.test(value)) {
+    return value.includes("/api/public-media/") ? value : null;
+  }
+
+  return `${getPublicMediaBaseUrl()}/api/public-media/${encodeURIComponent(value)}`;
+}
+
+function normalizePublicStoryMediaRows(rows) {
+  return (Array.isArray(rows) ? rows : [])
+    .map((row) => {
+      const publicMediaId = row?.public_media_id || row?.placement_id || null;
+      const imageUrl = toPublicMediaUrl(publicMediaId || row?.image_url);
+
+      if (!publicMediaId || !imageUrl) return null;
+
+      return {
+        public_media_id: String(publicMediaId),
+        role: row?.role || null,
+        is_showcase: Boolean(row?.is_showcase),
+        sort_order: row?.sort_order ?? null,
+        image_url: imageUrl,
+      };
+    })
+    .filter(Boolean);
+}
+
 const SORT_OPTIONS = [
   { key: "created_desc", label: "Newest" },
   { key: "name_asc", label: "Name" },
@@ -225,7 +271,7 @@ async function fetchPublicStoryMedia(kac) {
     return [];
   }
 
-  return Array.isArray(json?.media) ? json.media : [];
+  return normalizePublicStoryMediaRows(json?.media);
 }
 
 export default function KeeprHubScreen({ navigation }) {
@@ -321,7 +367,7 @@ const enrichHeroImages = useCallback(async (assetList) => {
 
       const heroPlacement =
         mediaRows.find(
-          (x) => String(x.placement_id) === String(asset.hero_placement_id)
+          (x) => String(x.public_media_id) === String(asset.hero_placement_id)
         ) ||
         mediaRows.find((x) => x.role === "hero") ||
         mediaRows.find((x) => !!x.image_url) ||
