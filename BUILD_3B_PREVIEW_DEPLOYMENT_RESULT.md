@@ -71,10 +71,11 @@ Result:
 
 ## Vercel Preview Deployment
 
-- Deployment ID: `dpl_GzdEQzWKQ4ULD5atqFdq63bBfsdx`
-- Preview URL: `https://keepr-8hv04jkbg-see-you-then.vercel.app`
-- Inspector URL: `https://vercel.com/see-you-then/keepr-app/GzdEQzWKQ4ULD5atqFdq63bBfsdx`
-- Alias: `https://keepr-app-sytandy-4796-see-you-then.vercel.app`
+- Deployment ID: `dpl_E3G9DRYxbEANkUPihAU9tNfNZjPH`
+- Preview URL: `https://keepr-7zj7trk5f-see-you-then.vercel.app`
+- Inspector URL: `https://vercel.com/see-you-then/keepr-app/dpl_E3G9DRYxbEANkUPihAU9tNfNZjPH`
+- Branch alias: `https://keepr-app-git-release-build-3b-preview-see-you-then.vercel.app`
+- Earlier manual Preview for the implementation commit: `dpl_GzdEQzWKQ4ULD5atqFdq63bBfsdx`
 - Deployment state: `READY`
 - Target: `preview`
 - Production deployment: No
@@ -99,7 +100,7 @@ Public unauthenticated curl:
 - Direct public curl to the Preview URL redirects to Vercel login because Preview deployment protection is enabled.
 - This is expected for the current hosted Preview access posture.
 
-Authenticated Vercel CLI route checks:
+Authenticated Vercel CLI route checks against final Preview:
 
 - `/` returned `200 text/html`.
 - `/k/KPR-6QEH-927H` returned `200 text/html`.
