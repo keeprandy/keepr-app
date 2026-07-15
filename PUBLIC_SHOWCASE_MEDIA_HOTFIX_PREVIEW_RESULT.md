@@ -8,38 +8,102 @@ Production base SHA: `4239717d7cdf0445a63b429ab7a5bc4a19f5d140`
 
 Hotfix branch: `hotfix/public-showcase-media-proxy`
 
-Hotfix commit SHA: `525aa6987f5b7527a6d5566a79206a6c50bdf726`
+Frontend/proxy hotfix commit SHA: `87ee515d9e23b2ab238f2cc87bbded783640729a`
+
+Edge Function contract repair commit SHA: `5ceac5431e488b52503c86227c1fa3c307b1eb39`
+
+Report commit SHA: pending at report update time
 
 Rollback point: `4239717d7cdf0445a63b429ab7a5bc4a19f5d140`
 
-## Exact Files Changed
+## Exact Implementation Files Changed
 
-- `api/public-media/[mediaId].js`
-- `screens/PublicKeeprStoryScreen.js`
-- `screens/KeeprHubScreen.js`
+Frontend/proxy hotfix:
+
 - `api/og/k/[kac].js`
+- `api/public-media/[mediaId].js`
+- `screens/KeeprHubScreen.js`
+- `screens/PublicKeeprStoryScreen.js`
 - `tests/public-media-security.test.mjs`
+
+Edge Function contract repair:
+
+- `supabase/functions/public-story-media/index.ts`
+- `tests/public-media-security.test.mjs`
+- `tests/public-story-media-contract.test.mjs`
 
 ## Implementation Summary
 
 - Added the Keepr-controlled public media proxy route at `/api/public-media/<public_media_id>`.
 - Preserved the secured media architecture: public pages consume opaque proxy media IDs and same-origin proxy URLs.
-- Updated public story and public hub media normalization to support the deployed `public-story-media` contract:
-  - `public_media_id`
-  - `role`
-  - `is_showcase`
-  - `sort_order`
-  - `image_url`
-- Removed dependency on legacy row fields for public Showcase rendering:
-  - `placement_id`
-  - `mime_type`
-  - `file_name`
-- Kept proxy media valid when:
-  - the URL has no file extension
-  - upstream content type is `application/octet-stream`
-- Updated Open Graph image selection to emit proxy-compatible media URLs or the safe fallback image only.
+- Updated public story, public hub, and OG media handling to consume proxy-compatible media rows.
+- Removed public browser-side signed URL generation from `PublicKeeprStoryScreen`.
+- Updated `public-story-media` POST to return typed arrays:
+  - `media`
+  - `showcaseFiles`
+  - `showcaseLinks`
+- Classified image rows, document/file rows, and external links separately from the existing public-approved `public_asset_story_gallery` source.
+- Preserved `public-story-media` GET as an opaque media proxy for image/document bodies.
+
+## Supabase Edge Function Deployment
+
+Project ref: `jjzjuqxysucqutgjnrkk`
+
+Function deployed: `public-story-media`
+
+Deploy command:
+
+```bash
+supabase functions deploy public-story-media --project-ref jjzjuqxysucqutgjnrkk
+```
+
+Deployment result:
+
+- Succeeded
+- Only `public-story-media` was deployed
+- No schema, migration, RLS, grant, storage, or production-data change occurred
+
+JWT/security note:
+
+- Local `supabase/config.toml` has `verify_jwt = true` for `public-story-media`.
+- POST validation succeeds with the public anon JWT.
+- GET validation without auth returns `401`.
+- GET validation with the public anon JWT returns the expected image/document body.
+
+## Typed Contract Validation
+
+Formula `KPR-6QEH-927H`:
+
+- HTTP 200
+- `media`: 5
+- `showcaseFiles`: 0
+- `showcaseLinks`: 1
+- PDFs in `media`: 0
+- links in `media`: 0
+- storage metadata returned: no
+
+Porsche `KPR-6GV2-MJ6W`:
+
+- HTTP 200
+- `media`: 11
+- `showcaseFiles`: 3
+- `showcaseLinks`: 2
+- PDFs in `media`: 0
+- links in `media`: 0
+- storage metadata returned: no
 
 ## Local Test Totals
+
+Command:
+
+```bash
+node --test tests/public-story-media-contract.test.mjs
+```
+
+Result:
+
+- 6 passing
+- 0 failing
 
 Command:
 
@@ -49,7 +113,7 @@ node --test tests/public-media-security.test.mjs
 
 Result:
 
-- 4 passing
+- 7 passing
 - 0 failing
 
 Command:
@@ -60,7 +124,7 @@ node --test tests/*.test.mjs
 
 Result:
 
-- 4 passing
+- 13 passing
 - 0 failing
 
 ## Web Build Result
@@ -75,7 +139,7 @@ Result:
 
 - Succeeded
 - Exported: `dist`
-- Web bundle: `_expo/static/js/web/index-c35e415f606e1ccc701f8af87a81dd2e.js`
+- Web bundle: `_expo/static/js/web/index-f032b702fd6346039171253cbac6ab91.js`
 
 ## Vercel Preview Deployment
 
@@ -83,9 +147,9 @@ Project: `keepr-app`
 
 Team: `see-you-then`
 
-Deployment ID: `dpl_H52H3mENYkBQg45G35ZhC4UpiK8g`
+Latest deployment ID: `dpl_4sbBJYL8sNePYgdxfuEMH1fUPzFH`
 
-Preview URL: `https://keepr-dtd2ktgo8-see-you-then.vercel.app`
+Preview URL: `https://keepr-hz9xsghlt-see-you-then.vercel.app`
 
 Branch alias: `keepr-app-git-hotfix-public-showcase-media-proxy-see-you-then.vercel.app`
 
@@ -95,73 +159,72 @@ Target: Preview (`target: null`)
 
 Production deployment: Not performed.
 
-## Formula Public Story Results
+## Combined Preview Validation
 
-KAC: `KPR-6QEH-927H`
+Preview access:
 
-Route: `/k/KPR-6QEH-927H`
+- Preview is Vercel-protected.
+- Validation used a temporary Vercel access cookie internally.
+- No share token or cookie value is included in this report.
 
-Result:
+Formula public story:
 
-- HTTP 200
+- Route `/k/KPR-6QEH-927H`: HTTP 200
 - Application shell loaded
-- Public media contract returned 6 media records
-- All 6 media records were Showcase records
-- All returned `image_url` values were Keepr-controlled proxy URLs
-- No legacy public row fields were required for rendering
-- Intended Showcase image set is available through the proxy
+- Typed contract: 5 media, 0 files, 1 link
+- No PDFs, links, HTML/error rows, or storage metadata in `media`
+- No signed URL or storage metadata detected in checked page/contract output
 
-## Proxy Response Results
+Porsche public story:
 
-Route shape: `/api/public-media/<public_media_id>`
-
-Formula proxy validation:
-
-- 6 proxy requests made
-- All 6 returned HTTP 200
-- Content types observed:
-  - `image/jpeg`
-  - `application/octet-stream`
-- `application/octet-stream` response count: 1
-- All responses were non-empty and browser-renderable through the proxy
-- Cache header observed: `public, max-age=300`
-- No media IDs, object keys, bucket names, or storage paths were printed or exposed in this report.
-
-## Public Hub Results
-
-Route: `/h/rally-sport-region`
-
-Result:
-
-- HTTP 200
+- Route `/k/KPR-6GV2-MJ6W`: HTTP 200
 - Application shell loaded
-- Public hub record found
-- Visibility: `public`
-- Hub story links RPC returned 1 story
-- Linked story media contract returned proxy-only media URLs
-- No storage leakage detected in the public hub page or linked media contract
+- Typed contract: 11 media, 3 files, 2 links
+- PDFs classified as `showcaseFiles`, not `media`
+- external links classified as `showcaseLinks`, not `media`
+- No signed URL or storage metadata detected in checked page/contract output
 
-## Open Graph Results
+Public Hub:
 
-Route: `/api/og/k/KPR-6QEH-927H`
+- Route `/h/rally-sport-region`: HTTP 200
+- Application shell loaded
+- No signed URL or storage metadata detected in checked page output
 
-Result:
+Open Graph:
 
-- HTTP 200
-- OG image resolved to a Keepr-controlled `/api/public-media/...` URL
-- Fallback OG image was not needed for the Formula public story
-- No signed storage URL or storage metadata was exposed
+- Formula OG route: HTTP 200
+- Porsche OG route: HTTP 200
+- OG HTML uses Keepr-controlled `/api/public-media/...` media where available
+- No signed URL or storage metadata detected
+
+## Remaining Blocker
+
+Combined Preview proxy body validation is not yet green.
+
+Observed:
+
+- `public-story-media` GET without auth returns `401`.
+- `public-story-media` GET with the public anon JWT returns image/document bodies correctly.
+- The Vercel `/api/public-media/<id>` route currently calls `public-story-media?media_id=<id>` without anon auth headers.
+- Therefore Preview `/api/public-media/<id>` returns `502` for media and document bodies.
+
+Impact:
+
+- The typed contract is fixed.
+- The story pages load.
+- The browser no longer receives mixed media/file/link rows.
+- But actual image/document rendering through the Vercel proxy remains blocked until the Vercel proxy forwards the public anon auth header or the Edge Function JWT policy is intentionally changed.
 
 ## Security Checks
 
-Checked Preview story HTML, public media contract responses, proxy response headers, public hub route, linked hub media contract, and OG HTML for:
+Checked Preview story HTML, public media contract responses, public hub route, OG HTML, and proxy error responses for:
 
 - signed Supabase URLs
 - Supabase storage object URLs
 - storage paths
 - bucket names
 - object keys
-- JWT-like values
+- JWT-like returned values
 - service-role values
 - raw internal diagnostics
 
@@ -178,25 +241,19 @@ Result:
 
 ## Prohibited Changes Not Made
 
-- No Supabase function changes
+- No Vercel Production deployment
 - No schema changes
 - No migrations
 - No RLS changes
 - No grant changes
 - No storage configuration changes
 - No production-data writes
-- No Build 3A changes
-- No Build 3B changes
+- No Build 3A promotion
+- No Build 3B promotion
 - No unrelated public story redesign
-- No production deployment
-
-## Known Notes
-
-- Preview deployments are Vercel-protected, so validation used a temporary Vercel share URL internally. The share token is intentionally omitted from this report.
-- `node_modules/` and `dist/` were generated locally for build validation and remain ignored/uncommitted.
 
 ## Recommendation
 
-GO for Production promotion of this hotfix after Andy/KAI review.
+NO-GO for Production promotion at this moment.
 
-This patch restores public Showcase media compatibility while preserving the secured media architecture.
+The Edge Function typed contract repair is successful and should be retained. Before Production promotion, apply one narrow compatibility patch so `/api/public-media/<id>` calls the secured `public-story-media` GET endpoint with the public anon auth headers, or explicitly review and approve changing the Edge Function JWT policy. The safer next step is the Vercel proxy header patch because it preserves `verify_jwt = true`.
