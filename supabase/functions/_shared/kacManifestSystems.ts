@@ -12,6 +12,7 @@ interface SystemRow {
   source_type: string | null;
   lifecycle_status: string | null;
   lifecycle_phase: string | null;
+  metadata?: Record<string, unknown> | null;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -31,6 +32,59 @@ interface ExtensionRow {
   created_at?: string | null;
   updated_at?: string | null;
   location_hint?: string | null;
+}
+
+const FORBIDDEN_METADATA_KEYS = new Set([
+  "extracted_text",
+  "signed_url",
+  "signedUrl",
+  "storage_path",
+  "email",
+  "phone",
+  "address",
+  "dealer_phone",
+  "dealer_address",
+  "access_token",
+  "refresh_token",
+  "secret",
+  "service_role",
+]);
+
+function safeObject(input: unknown): Record<string, unknown> | undefined {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    if (FORBIDDEN_METADATA_KEYS.has(key)) continue;
+    if (/url$/i.test(key) || /phone/i.test(key) || /address/i.test(key)) continue;
+    if (value === undefined || value === null || value === "") continue;
+    if (key === "playbook") {
+      out.playbook_present = true;
+      continue;
+    }
+    if (typeof value === "object" && !Array.isArray(value)) {
+      const nested = safeObject(value);
+      if (nested && Object.keys(nested).length) out[key] = nested;
+    } else if (Array.isArray(value)) {
+      out[key] = value
+        .filter((item) => item !== undefined && item !== null && item !== "")
+        .map((item) => typeof item === "object" ? safeObject(item) : item)
+        .filter((item) => item !== undefined);
+    } else {
+      out[key] = value;
+    }
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+function systemMetadata(row: SystemRow) {
+  const metadata = safeObject(row.metadata);
+  return compactMetadata({
+    options: metadata?.options,
+    summary: metadata?.summary,
+    origin: metadata?.origin,
+    playbook_present: metadata?.playbook_present,
+    source_semantics: metadata ? "systems_metadata_reported_or_configured_context" : undefined,
+  });
 }
 
 function systemAssociation(row: SystemRow): ManifestAssociation {
@@ -55,9 +109,36 @@ function systemAssociation(row: SystemRow): ManifestAssociation {
       source_type: row.source_type,
       lifecycle_status: row.lifecycle_status,
       lifecycle_phase: row.lifecycle_phase,
+      ...systemMetadata(row),
     }),
     provenance: [{ table: "systems", row_id: row.id }],
   };
+}
+
+function systemOptionAssociations(row: SystemRow): ManifestAssociation[] {
+  const options = safeObject(row.metadata)?.options;
+  const list = Array.isArray(options) ? options : options ? [options] : [];
+  return list.map((option, index) => ({
+    association_id: `system:${row.id}:configured_option:${index}`,
+    object_id: row.id,
+    object_type: "configured_system_option",
+    source_table: "systems",
+    relationship_type: "configured_system_option",
+    scope: "kac_specific" as const,
+    affected_system_id: row.id,
+    proof_state: "claimed" as const,
+    processing_status: "not_required" as const,
+    transfer_classification: "asset_persistent" as const,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    safe_metadata: compactMetadata({
+      name: typeof option === "object" ? (option as Record<string, unknown>).name || (option as Record<string, unknown>).label || row.name : option,
+      value: option,
+      classification: "configured_or_provisional_system_option",
+      source_semantics: "systems_metadata_options_not_verified_installed_component",
+    }),
+    provenance: [{ table: "systems", row_id: row.id, field: `metadata.options.${index}` }],
+  }));
 }
 
 function extensionAssociation(table: string, row: ExtensionRow): ManifestAssociation {
@@ -84,6 +165,8 @@ function extensionAssociation(table: string, row: ExtensionRow): ManifestAssocia
       hours: row.hours,
       status: row.status,
       location_hint: row.location_hint,
+      classification: row.serial_number || row.model || row.hours !== undefined ? "probable_or_verified_installed_component" : "probable_installed_component",
+      source_semantics: "extension_row_kac_specific_installed_component_context",
     }),
     provenance: [{ table, row_id: row.id }],
   };
@@ -100,11 +183,12 @@ export async function collectSystemAssociations(
   const systems = await runQuery<SystemRow>(diagnostics, "systems", () =>
     admin
       .from("systems")
-      .select("id, asset_id, ksc_code, name, status, system_type, source_type, lifecycle_status, lifecycle_phase, created_at, updated_at")
+      .select("id, asset_id, ksc_code, name, status, system_type, source_type, lifecycle_status, lifecycle_phase, metadata, created_at, updated_at")
       .eq("asset_id", assetId)
   );
   const systemIds = new Set(systems.map((system) => system.id));
   associations.push(...systems.map(systemAssociation));
+  associations.push(...systems.flatMap(systemOptionAssociations));
 
   const extensionTables = [
     {

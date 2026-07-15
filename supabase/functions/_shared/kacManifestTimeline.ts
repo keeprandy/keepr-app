@@ -15,6 +15,11 @@ interface ServiceRecordRow {
   source_type: string | null;
   verification_status: string | null;
   record_scope: string | null;
+  notes?: string | null;
+  location?: string | null;
+  cost?: number | null;
+  price?: number | null;
+  extra_metadata?: Record<string, unknown> | null;
   created_at: string | null;
 }
 
@@ -84,6 +89,52 @@ function participantRoles(row: ServiceRecordRow): ParticipantRole[] {
   return row.keepr_pro_id ? ["keepr_pro"] : [];
 }
 
+const FORBIDDEN_METADATA_KEYS = new Set([
+  "extracted_text",
+  "signed_url",
+  "signedUrl",
+  "storage_path",
+  "email",
+  "phone",
+  "address",
+  "dealer_phone",
+  "dealer_address",
+  "access_token",
+  "refresh_token",
+  "secret",
+  "service_role",
+]);
+
+function safeObject(input: unknown): Record<string, unknown> | undefined {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    if (FORBIDDEN_METADATA_KEYS.has(key)) continue;
+    if (/url$/i.test(key) || /phone/i.test(key) || /address/i.test(key)) continue;
+    if (value === undefined || value === null || value === "") continue;
+    if (typeof value === "object" && !Array.isArray(value)) {
+      const nested = safeObject(value);
+      if (nested && Object.keys(nested).length) out[key] = nested;
+    } else {
+      out[key] = value;
+    }
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+function serviceRecordContext(row: ServiceRecordRow) {
+  const metadata = safeObject(row.extra_metadata);
+  return compactMetadata({
+    notes: row.notes,
+    location: row.location,
+    cost: row.cost ?? row.price,
+    source_metadata: metadata?.source,
+    pricing_metadata: metadata?.pricing,
+    stewardship_context: metadata?.stewardship_context,
+    source_semantics: "service_record_reported_or_documented_context",
+  });
+}
+
 function eventRolesForService(row: ServiceRecordRow, pairedStory?: StoryEventRow): EventRole[] {
   const roles: EventRole[] = [];
   if (pairedStory) roles.push("moment");
@@ -104,7 +155,7 @@ export async function collectTimelineAssociations(
     runQuery<ServiceRecordRow>(diagnostics, "service_records", () =>
       admin
         .from("service_records")
-        .select("id, asset_id, title, service_type, category, performed_at, odometer, system_id, keepr_pro_id, source_type, verification_status, record_scope, created_at")
+        .select("id, asset_id, title, service_type, category, performed_at, odometer, system_id, keepr_pro_id, source_type, verification_status, record_scope, notes, location, cost, price, extra_metadata, created_at")
         .eq("asset_id", assetId)
     ),
     runQuery<StoryEventRow>(diagnostics, "story_events", () =>
@@ -181,6 +232,7 @@ export async function collectTimelineAssociations(
         odometer: row.odometer,
         record_scope: row.record_scope,
         paired_story_event_id: pairedStory?.id,
+        ...serviceRecordContext(row),
       }),
       provenance: [
         { table: "service_records", row_id: row.id },

@@ -24,6 +24,129 @@ interface MasterAssetRow {
 }
 
 const ASSET_IDENTITY_FIELDS = ["kac_id", "vin", "serial_number"] as const;
+const FORBIDDEN_METADATA_KEYS = new Set([
+  "extracted_text",
+  "signed_url",
+  "signedUrl",
+  "storage_path",
+  "email",
+  "phone",
+  "address",
+  "dealer_phone",
+  "dealer_address",
+  "access_token",
+  "refresh_token",
+  "secret",
+  "service_role",
+]);
+
+function safeObject(input: unknown): Record<string, unknown> | undefined {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    if (FORBIDDEN_METADATA_KEYS.has(key)) continue;
+    if (/url$/i.test(key) || /phone/i.test(key) || /address/i.test(key)) continue;
+    if (value === undefined || value === null || value === "") continue;
+    if (typeof value === "object" && !Array.isArray(value)) {
+      const nested = safeObject(value);
+      if (nested && Object.keys(nested).length) out[key] = nested;
+    } else if (Array.isArray(value)) {
+      out[key] = value
+        .filter((item) => item !== undefined && item !== null && item !== "")
+        .map((item) => typeof item === "object" ? safeObject(item) : item)
+        .filter((item) => item !== undefined);
+    } else {
+      out[key] = value;
+    }
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+function firstPresent(row: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    if (row[key] !== undefined && row[key] !== null && row[key] !== "") return row[key];
+  }
+  return undefined;
+}
+
+function assetScalarMetadata(row: Record<string, unknown>) {
+  return compactMetadata({
+    year: firstPresent(row, ["year", "model_year"]),
+    make: firstPresent(row, ["make", "manufacturer"]),
+    model: row.model,
+    asset_subtype: row.asset_subtype,
+    hull_material: row.hull_material,
+    length_feet: firstPresent(row, ["length_feet", "length_ft"]),
+    engine_type: row.engine_type,
+    engine_hours: row.engine_hours,
+    location: firstPresent(row, ["location", "location_reported"]),
+    purchase_date: row.purchase_date,
+    data_source: row.data_source,
+    asset_mode: row.asset_mode,
+    commercial_entity: row.commercial_entity,
+    source_semantics: "assets_scalar_identity_exact_when_directly_stored",
+  });
+}
+
+function extraMetadataFacts(assetId: string, extra: Record<string, unknown> | undefined): ManifestAssociation[] {
+  if (!extra) return [];
+  const associations: ManifestAssociation[] = [];
+  const direct = compactMetadata({
+    model: extra.model,
+    model_year: extra.model_year,
+    oem: extra.oem,
+    source: safeObject(extra.source),
+    pricing: safeObject(extra.pricing),
+    stewardship_context: safeObject(extra.stewardship_context),
+    publicConfig: safeObject(extra.publicConfig),
+    source_semantics: "assets_extra_metadata_reported_context",
+  });
+  if (Object.keys(direct).length > 1) {
+    associations.push({
+      association_id: `asset:${assetId}:extra_metadata`,
+      object_id: assetId,
+      object_type: "asset_metadata",
+      source_table: "assets",
+      relationship_type: "asset_reported_metadata",
+      scope: "kac_specific",
+      proof_state: "claimed",
+      processing_status: "not_required",
+      transfer_classification: "asset_persistent",
+      safe_metadata: direct,
+      provenance: [{ table: "assets", row_id: assetId, field: "extra_metadata" }],
+    });
+  }
+
+  const configuration = safeObject(extra.configuration);
+  if (configuration) {
+    for (const [key, value] of Object.entries(configuration)) {
+      if (value === undefined || value === null || value === "") continue;
+      const values = Array.isArray(value) ? value : [value];
+      values.forEach((item, index) => {
+        associations.push({
+          association_id: `asset:${assetId}:configured_option:${key}:${index}`,
+          object_id: assetId,
+          object_type: "configured_option",
+          source_table: "assets",
+          relationship_type: "configured_asset_option",
+          scope: "kac_specific",
+          proof_state: "claimed",
+          processing_status: "not_required",
+          transfer_classification: "asset_persistent",
+          safe_metadata: compactMetadata({
+            name: key,
+            value: item,
+            classification: "configured_option",
+            source_semantics: "configured_option_not_verified_installed_component",
+          }),
+          provenance: [{ table: "assets", row_id: assetId, field: `extra_metadata.configuration.${key}` }],
+        });
+      });
+    }
+  }
+
+  return associations;
+}
 
 function identityKindFromAssetField(field: string) {
   if (field === "kac_id") return "kac";
@@ -37,6 +160,14 @@ export async function collectAssetIdentityAssociations(
   const diagnostics: CollectorResult["diagnostics"] = [];
   const associations: ManifestAssociation[] = [];
   const asset = context.asset;
+  const assetRows = await runQuery<Record<string, unknown>>(diagnostics, "assets", () =>
+    admin
+      .from("assets")
+      .select("*")
+      .eq("id", asset.id)
+  );
+  const assetRow = assetRows[0] || asset as unknown as Record<string, unknown>;
+  const extraMetadata = safeObject((assetRow as any).extra_metadata);
 
   associations.push({
     association_id: `asset:${asset.id}:identity`,
@@ -57,9 +188,11 @@ export async function collectAssetIdentityAssociations(
       lifecycle_state: asset.lifecycle_state,
       manifest_availability: asset.manifest_availability,
       asset_mode: asset.asset_mode,
+      ...assetScalarMetadata(assetRow),
     }),
     provenance: [{ table: "assets", row_id: asset.id }],
   });
+  associations.push(...extraMetadataFacts(asset.id, extraMetadata));
 
   if (asset.manifest_availability === "admin_review_required") {
     diagnostics.push(
