@@ -59,6 +59,40 @@ function getPublicStoryBaseUrl() {
   );
 }
 
+function toPublicMediaUrl(publicMediaIdOrUrl) {
+  const value = String(publicMediaIdOrUrl || "").trim();
+  if (!value) return null;
+
+  if (value.startsWith("/api/public-media/")) {
+    return `${getPublicStoryBaseUrl()}${value}`;
+  }
+
+  if (/^https?:\/\//i.test(value)) {
+    return value.includes("/api/public-media/") ? value : null;
+  }
+
+  return `${getPublicStoryBaseUrl()}/api/public-media/${encodeURIComponent(value)}`;
+}
+
+function normalizePublicStoryMediaRows(rows) {
+  return (Array.isArray(rows) ? rows : [])
+    .map((row) => {
+      const publicMediaId = row?.public_media_id || row?.placement_id || null;
+      const imageUrl = toPublicMediaUrl(publicMediaId || row?.image_url);
+
+      if (!publicMediaId || !imageUrl) return null;
+
+      return {
+        public_media_id: String(publicMediaId),
+        role: row?.role || null,
+        is_showcase: Boolean(row?.is_showcase),
+        sort_order: row?.sort_order ?? null,
+        image_url: imageUrl,
+      };
+    })
+    .filter(Boolean);
+}
+
 class ShareQrBoundary extends React.Component {
   state = { hasError: false };
 
@@ -240,15 +274,13 @@ async function fetchPublicStoryMedia(kac) {
 
   const json = await res.json();
 
-  console.log("PUBLIC STORY MEDIA JSON", json);
-
   if (!res.ok) {
     logPublicStoryLoad("PUBLIC STORY MEDIA ERROR:", json);
     return [];
   }
 
   return {
-  media: Array.isArray(json?.media) ? json.media : [],
+  media: normalizePublicStoryMediaRows(json?.media),
   showcaseFiles: Array.isArray(json?.showcaseFiles) ? json.showcaseFiles : [],
   showcaseLinks: Array.isArray(json?.showcaseLinks) ? json.showcaseLinks : [],
 };
@@ -593,9 +625,10 @@ const publicAssetId = assetRow.asset_id || assetRow.id;
 
       const heroPlacement =
         mediaRows.find(
-          (x) => String(x.placement_id) === String(assetRow.hero_placement_id)
+          (x) => String(x.public_media_id) === String(assetRow.hero_placement_id)
         ) ||
         mediaRows.find((x) => x.role === "hero") ||
+        mediaRows.find((x) => !!x.image_url) ||
         null;
 
       logPublicStoryLoad("PUBLIC HERO PLACEMENT:", heroPlacement);
@@ -621,22 +654,11 @@ const publicAssetId = assetRow.asset_id || assetRow.id;
           sortedMediaRows
           .filter((row) => {
             const url = String(row.image_url || "").trim();
-            const kind = String(row.kind || row.attachment_kind || "").toLowerCase();
-            const mime = String(row.mime_type || "").toLowerCase();
-            const name = String(row.file_name || row.storage_path || "").toLowerCase();
-
-            const isImage =
-              kind === "photo" ||
-              kind === "image" ||
-              mime.startsWith("image/") ||
-              /\.(jpg|jpeg|png|webp|heic|heif)$/.test(name) ||
-              /\.(jpg|jpeg|png|webp|heic|heif)(\?|$)/.test(url);
-
             return (
-              isImage &&
               !!url &&
               url !== "null" &&
               url !== "undefined" &&
+              url.includes("/api/public-media/") &&
               !url.includes("placeholder") &&
               !url.includes("image-outline")
             );
@@ -647,7 +669,7 @@ const publicAssetId = assetRow.asset_id || assetRow.id;
 
       setGallery(
         dedupedGalleryRows.map((row, index) => ({
-          id: row.attachment_id || row.placement_id || `${row.image_url}-${index}`,
+          id: row.public_media_id || `${row.image_url}-${index}`,
           uri: row.image_url,
           role: row.role,
         }))
