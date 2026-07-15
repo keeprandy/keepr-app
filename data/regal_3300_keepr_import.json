@@ -1,0 +1,122 @@
+{
+  "import_version": "1.0-sanitized",
+  "import_type": "keepr_test_fixture",
+  "captured_at": "2026-07-11",
+  "source": {
+    "source_type": "sanitized_dealer_listing_fixture",
+    "platform": "Boat Trader",
+    "status_at_capture": "captured_for_deterministic_tests",
+    "source_rights_note": "Sanitized deterministic fixture derived from dealer-reported public listing facts. URLs and contact fields are intentionally omitted."
+  },
+  "asset": {
+    "asset_type": "marine",
+    "category": "boat",
+    "subtype": "bowrider",
+    "display_name": "2020 Regal 3300",
+    "year": 2020,
+    "manufacturer": "Regal",
+    "model": "3300",
+    "length_ft": 34,
+    "beam_ft": 10.33,
+    "ownership_state": "sold_pending_transfer",
+    "kac": null,
+    "hin": null,
+    "nickname": null,
+    "hero_image_filename": null,
+    "public_story_summary": "A sanitized 2020 Regal 3300 marine fixture with twin Volvo Penta propulsion, joystick docking, autopilot, and low dealer-reported engine hours."
+  },
+  "propulsion": {
+    "engine_make": "Volvo Penta",
+    "engine_model_reported": "Twin Volvo V8 350 Catalyst EVC, Joystick",
+    "engine_count": 2,
+    "total_power_hp": 700,
+    "engine_hours_reported": 220,
+    "engine_type": "inboard-outboard",
+    "fuel_type": "gasoline",
+    "port_engine_serial": null,
+    "starboard_engine_serial": null,
+    "port_drive_serial": null,
+    "starboard_drive_serial": null
+  },
+  "equipment": [
+    "Twin Volvo V8 350 Catalyst Joystick",
+    "Automatic fire extinguisher",
+    "Gas vapor detector",
+    "Premium Package",
+    "Cruise Package",
+    "Technology Package",
+    "Cockpit refrigerator",
+    "Power underwater platform",
+    "Volvo 12-inch Glass Cockpit and autopilot"
+  ],
+  "timeline_events": [
+    {
+      "event_type": "listing_captured",
+      "title": "Sanitized dealer listing captured in Keepr test fixture",
+      "event_date": "2026-07-11",
+      "description": "Public listing facts captured for deterministic Build 2.x and Build 3A tests.",
+      "source_type": "sanitized_dealer_listing_fixture",
+      "evidence_status": "supported"
+    }
+  ],
+  "systems": [
+    {
+      "name": "Port engine",
+      "type": "engine",
+      "manufacturer": "Volvo Penta",
+      "model": "V8 350 Catalyst EVC",
+      "serial_number": null
+    },
+    {
+      "name": "Starboard engine",
+      "type": "engine",
+      "manufacturer": "Volvo Penta",
+      "model": "V8 350 Catalyst EVC",
+      "serial_number": null
+    },
+    {
+      "name": "Port sterndrive",
+      "type": "propulsion_drive",
+      "manufacturer": "Volvo Penta",
+      "model": null,
+      "serial_number": null
+    },
+    {
+      "name": "Starboard sterndrive",
+      "type": "propulsion_drive",
+      "manufacturer": "Volvo Penta",
+      "model": null,
+      "serial_number": null
+    },
+    {
+      "name": "EVC and joystick",
+      "type": "control_system",
+      "manufacturer": "Volvo Penta",
+      "model": "EVC / Joystick",
+      "serial_number": null
+    },
+    {
+      "name": "Autopilot",
+      "type": "navigation",
+      "manufacturer": "Volvo Penta",
+      "model": "Glass Cockpit Autopilot",
+      "serial_number": null
+    },
+    {
+      "name": "Cockpit refrigerator",
+      "type": "galley",
+      "manufacturer": null,
+      "model": null,
+      "serial_number": null
+    },
+    {
+      "name": "Power underwater platform",
+      "type": "swim_platform",
+      "manufacturer": "Regal",
+      "model": null,
+      "serial_number": null
+    }
+  ],
+  "onboarding_actions": [],
+  "image_manifest": []
+}
