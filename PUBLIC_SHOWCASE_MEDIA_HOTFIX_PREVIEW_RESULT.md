@@ -150,9 +150,9 @@ Project: `keepr-app`
 
 Team: `see-you-then`
 
-Latest deployment ID: `dpl_24EL8tQvFE1nyDiyc32BrJYgJzMq`
+Latest deployment ID: `dpl_6bbAe5h2TmAUiwUQWPQsnURMFAKq`
 
-Preview URL: `https://keepr-jmsyq5qny-see-you-then.vercel.app`
+Preview URL: `https://keepr-3ah3hn2e9-see-you-then.vercel.app`
 
 Branch alias: `keepr-app-git-hotfix-public-showcase-media-proxy-see-you-then.vercel.app`
 
@@ -169,6 +169,7 @@ Preview access:
 - Preview is Vercel-protected.
 - Validation used a temporary Vercel access cookie internally.
 - No share token or cookie value is included in this report.
+- Final validation was repeated against the report-commit Preview deployment listed above. The earlier proxy-auth code deployment `dpl_24EL8tQvFE1nyDiyc32BrJYgJzMq` produced the same media/proxy/security results.
 
 Formula public story:
 
