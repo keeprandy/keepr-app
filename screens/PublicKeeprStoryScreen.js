@@ -46,6 +46,66 @@ function logPublicStoryLoad(...args) {
   }
 }
 
+const SUPPORTED_PUBLIC_ACTIONS = new Set([
+  "request_info",
+  "request_service",
+  "submit_quote",
+  "submit_proposal",
+  "pay_rent",
+]);
+
+const PUBLIC_ACTION_ALIASES = {
+  answer_question: "request_info",
+  capture_event_inbox: "request_service",
+};
+
+function getActionsForMode(mode) {
+  switch (String(mode || "").toLowerCase()) {
+    case "for_sale":
+      return ["request_info", "submit_quote"];
+    case "for_rent":
+      return ["request_info", "request_service", "pay_rent"];
+    case "builder":
+      return ["request_service", "submit_proposal"];
+    case "system_story":
+      return ["request_service", "submit_quote"];
+    case "current_story":
+      return ["request_info", "request_service", "submit_quote"];
+    case "inquiry":
+    default:
+      return ["request_info", "request_service", "submit_quote"];
+  }
+}
+
+function normalizePublicActionKey(action) {
+  const key = String(action || "").trim();
+  return PUBLIC_ACTION_ALIASES[key] || key;
+}
+
+function uniqueSupportedActions(actions) {
+  const seen = new Set();
+  const out = [];
+
+  for (const action of Array.isArray(actions) ? actions : []) {
+    const key = normalizePublicActionKey(action);
+    if (!SUPPORTED_PUBLIC_ACTIONS.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+  }
+
+  return out;
+}
+
+function getEffectivePublicActions({ actionConfig, allowedActions, mode }) {
+  const configured = uniqueSupportedActions(actionConfig?.actionsEnabled);
+  if (configured.length) return configured;
+
+  const backend = uniqueSupportedActions(allowedActions);
+  if (backend.length) return backend;
+
+  return uniqueSupportedActions(getActionsForMode(mode));
+}
+
 function getPublicStoryBaseUrl() {
   if (Platform.OS === "web" && typeof window !== "undefined") {
     return window.location.origin;
@@ -370,6 +430,7 @@ const originHubName =
   const [shareModalVisible, setShareModalVisible] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [ownerProfile, setOwnerProfile] = useState(null);
+  const [secondaryLoading, setSecondaryLoading] = useState(false);
 
   const publicConfig =
   asset?.public_config ||
@@ -390,6 +451,18 @@ const showNarrative =
 
   const actionConfig = publicConfig.actions || {};
   const sharingConfig = publicConfig.sharing || {};
+  const actionMode = actionConfig.mode || publicConfig.mode || "inquiry";
+  const effectivePublicActions = useMemo(
+    () =>
+      getEffectivePublicActions({
+        actionConfig,
+        allowedActions: asset?.allowed_actions,
+        mode: actionMode,
+      }),
+    [actionConfig, asset?.allowed_actions, actionMode]
+  );
+  const showActionsTab =
+    actionConfig.enabled !== false && effectivePublicActions.length > 0;
 
  const publicEnabled = storyConfig.enabled === true;
 
@@ -517,6 +590,7 @@ const ownerDisplayName = asset?.owner_name || null;
   if (!kac && !assetId) return;
 
   setLoading(true);
+  setSecondaryLoading(false);
 
   try {
     let assetRow = null;
@@ -540,23 +614,6 @@ if (summaryRow) {
   };
 
 assetRow.extra_metadata = summaryRow.extra_metadata || {};
-
-if (!assetRow.extra_metadata?.publicStoryNarrative) {
-  const { data: fullAssetRow, error: fullAssetError } = await supabase
-    .from("assets")
-    .select("extra_metadata")
-    .eq("id", summaryRow.asset_id)
-    .maybeSingle();
-
-  if (fullAssetError) {
-    console.log("PUBLIC STORY FULL ASSET LOAD FAILED", fullAssetError);
-  }
-
-  assetRow.extra_metadata =
-    fullAssetRow?.extra_metadata ||
-    summaryRow.extra_metadata ||
-    {};
-}
 }
 }
 
@@ -578,6 +635,8 @@ if (!assetRow.extra_metadata?.publicStoryNarrative) {
     }
 
     setAsset(assetRow);
+    setLoading(false);
+    setSecondaryLoading(true);
 
 const publicAssetId = assetRow.asset_id || assetRow.id;
 
@@ -591,25 +650,42 @@ const publicAssetId = assetRow.asset_id || assetRow.id;
   
       /* ----------------------- TIMELINE / SYSTEMS / MEDIA -------------------- */
 
-      const [
-        { data: serviceRows, error: timelineError },
-        { data: systemRows },
-        storyMedia,
-      ] = await Promise.all([
-        supabase
-          .from("public_asset_story_timeline")
-          .select("*")
-          .eq("kac_id", publicKac)
-          .order("performed_at", { ascending: false }),
+      const timelinePromise = supabase
+        .from("public_asset_story_timeline")
+        .select("*")
+        .eq("kac_id", publicKac)
+        .order("performed_at", { ascending: false });
 
-        supabase
-          .from("systems")
-          .select("id, name")
-          .eq("asset_id", publicAssetId)
-          .order("name", { ascending: true }),
+      const systemsPromise =
+        assetId && !kac
+          ? supabase
+              .from("systems")
+              .select("id, name")
+              .eq("asset_id", publicAssetId)
+              .order("name", { ascending: true })
+          : Promise.resolve({ data: [], error: null });
 
-        fetchPublicStoryMedia(publicKac),
-      ]);
+      const [timelineResult, systemsResult, mediaResult] =
+        await Promise.allSettled([
+          timelinePromise,
+          systemsPromise,
+          fetchPublicStoryMedia(publicKac),
+        ]);
+
+      const { data: serviceRows, error: timelineError } =
+        timelineResult.status === "fulfilled"
+          ? timelineResult.value || {}
+          : { data: [], error: timelineResult.reason };
+
+      const { data: systemRows } =
+        systemsResult.status === "fulfilled"
+          ? systemsResult.value || {}
+          : { data: [] };
+
+      const storyMedia =
+        mediaResult.status === "fulfilled"
+          ? mediaResult.value || {}
+          : { media: [], showcaseFiles: [], showcaseLinks: [] };
       
       logPublicStoryLoad("PUBLIC TIMELINE:", serviceRows);
       logPublicStoryLoad("PUBLIC TIMELINE ERROR:", timelineError);
@@ -694,6 +770,7 @@ const publicAssetId = assetRow.asset_id || assetRow.id;
       logPublicStoryLoad("Public story load error", e);
     } finally {
       setLoading(false);
+      setSecondaryLoading(false);
     }
   }, [kac, assetId]);
 
@@ -1060,7 +1137,7 @@ return (
           </TouchableOpacity>
           )}
 
-          {actionConfig.actionsEnabled?.length > 0 && (
+          {showActionsTab && (
           <TouchableOpacity
             style={[
               styles.tabButton,
@@ -1118,6 +1195,10 @@ return (
                 <Text style={styles.sectionTitle}>Ownership Timeline</Text>
               </View>
 
+              {secondaryLoading && !timeline.length ? (
+                <Text style={styles.cardHint}>Loading timeline...</Text>
+              ) : null}
+
                 {timeline.map((item) => (
                 <TimelineRow
                   key={item.id}
@@ -1164,6 +1245,10 @@ return (
 {showGallery && activeTab === "gallery" && (
   <>
 <View style={styles.sectionCard}>
+  {secondaryLoading && !gallery.length && !showcaseFiles.length && !showcaseLinks.length ? (
+    <Text style={styles.cardHint}>Loading Showcase...</Text>
+  ) : null}
+
   <ShowcaseAttachmentsSection
     variant="public"
     files={showcaseFiles}

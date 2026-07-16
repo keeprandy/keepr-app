@@ -156,6 +156,38 @@ function normalizeResolved(input, { kac, token }) {
   };
 }
 
+async function fetchPublicSummaryConfig(kac) {
+  const cleanKac = String(kac || "").trim();
+  if (!cleanKac) return null;
+
+  const { data, error } = await supabase
+    .from("public_asset_story_summary")
+    .select("asset_id, kac_id, name, type, public_config, extra_metadata")
+    .eq("kac_id", cleanKac)
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  const publicConfig =
+    data.public_config ||
+    data.extra_metadata?.publicConfig ||
+    null;
+
+  return {
+    asset_id: data.asset_id || null,
+    kac: data.kac_id || cleanKac,
+    asset_type: data.type || null,
+    asset_name: data.name || null,
+    public_config: publicConfig,
+    asset: {
+      id: data.asset_id || null,
+      kac_id: data.kac_id || cleanKac,
+      name: data.name || null,
+      type: data.type || null,
+    },
+  };
+}
+
 const ACTION_META = {
   request_info: {
     label: "Request Info",
@@ -207,6 +239,11 @@ const ACTION_META = {
   },
 };
 
+const ACTION_ALIASES = {
+  answer_question: "request_info",
+  capture_event_inbox: "request_service",
+};
+
 function getActionsForMode(mode) {
   switch (String(mode || "").toLowerCase()) {
     case "for_sale":
@@ -228,6 +265,35 @@ function getActionsForMode(mode) {
     default:
       return ["request_info", "request_service", "submit_quote"];
   }
+}
+
+function normalizeActionKey(action) {
+  const key = String(action || "").trim();
+  return ACTION_ALIASES[key] || key;
+}
+
+function uniqueSupportedActions(actions) {
+  const seen = new Set();
+  const out = [];
+
+  for (const action of Array.isArray(actions) ? actions : []) {
+    const key = normalizeActionKey(action);
+    if (!ACTION_META[key] || seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+  }
+
+  return out;
+}
+
+function getEffectivePublicActions({ actionConfig, allowedActions, mode }) {
+  const configured = uniqueSupportedActions(actionConfig?.actionsEnabled);
+  if (configured.length) return configured;
+
+  const backend = uniqueSupportedActions(allowedActions);
+  if (backend.length) return backend;
+
+  return uniqueSupportedActions(getActionsForMode(mode));
 }
 
 export default function PublicActionScreen({ route, navigation }) {
@@ -321,11 +387,11 @@ const configuredActions = Array.isArray(actionConfig.actionsEnabled)
   : null;
 
 // final action set
-const enabledActions = configuredActions
-  ? configuredActions
-  : backendAllowedActions.length
-  ? backendAllowedActions
-  : getActionsForMode(mode);
+const enabledActions = getEffectivePublicActions({
+  actionConfig,
+  allowedActions: backendAllowedActions,
+  mode,
+});
 
 const selectedActionMeta = selectedAction ? ACTION_META[selectedAction] : null;
 
@@ -385,7 +451,22 @@ const canLog = enabledActions.includes("request_service") || !!assetId;
         if (cancelled) return;
 
         const normalized = normalizeResolved(json, { kac, token });
-        setResolved(normalized);
+        const publicSummary = !token
+          ? await fetchPublicSummaryConfig(normalized?.kac || kac)
+          : null;
+
+        setResolved({
+          ...normalized,
+          ...publicSummary,
+          asset: {
+            ...(normalized?.asset || {}),
+            ...(publicSummary?.asset || {}),
+          },
+          public_config:
+            normalized?.public_config ||
+            publicSummary?.public_config ||
+            null,
+        });
       } catch (e) {
         if (cancelled) return;
         setResolved(null);
@@ -732,7 +813,7 @@ if (!kac && !token) {
           </Text>
         </View>
 
-{actionConfig.enabled !== false ? (
+{actionConfig.enabled !== false && enabledActions.length > 0 ? (
   <>
 <Text style={styles.sectionTitle}>CHOOSE AN ACTION</Text>
 <View style={styles.card}>
@@ -771,6 +852,13 @@ if (!kac && !token) {
   </View>
 </View>
   </>
+) : actionConfig.enabled !== false ? (
+  <View style={styles.card}>
+    <Text style={styles.cardTitle}>Actions unavailable</Text>
+    <Text style={styles.cardHint}>
+      This public story is not currently accepting supported public actions.
+    </Text>
+  </View>
 ) : null}
 
 {selectedActionMeta ? (
