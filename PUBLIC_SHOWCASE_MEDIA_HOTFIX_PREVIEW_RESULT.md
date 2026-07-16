@@ -12,6 +12,8 @@ Frontend/proxy hotfix commit SHA: `87ee515d9e23b2ab238f2cc87bbded783640729a`
 
 Edge Function contract repair commit SHA: `5ceac5431e488b52503c86227c1fa3c307b1eb39`
 
+Final proxy-auth patch commit SHA: `7fb3e369435c7b66abbbcb583625ce2d4142d392`
+
 Report commit SHA: pending at report update time
 
 Rollback point: `4239717d7cdf0445a63b429ab7a5bc4a19f5d140`
@@ -44,6 +46,7 @@ Edge Function contract repair:
   - `showcaseLinks`
 - Classified image rows, document/file rows, and external links separately from the existing public-approved `public_asset_story_gallery` source.
 - Preserved `public-story-media` GET as an opaque media proxy for image/document bodies.
+- Updated `/api/public-media/<public_media_id>` to authenticate its upstream request to `public-story-media` with the public anon headers, preserving `verify_jwt = true` without using service-role credentials.
 
 ## Supabase Edge Function Deployment
 
@@ -97,6 +100,17 @@ Porsche `KPR-6GV2-MJ6W`:
 Command:
 
 ```bash
+node --test tests/public-media-security.test.mjs
+```
+
+Result:
+
+- 11 passing
+- 0 failing
+
+Command:
+
+```bash
 node --test tests/public-story-media-contract.test.mjs
 ```
 
@@ -108,23 +122,12 @@ Result:
 Command:
 
 ```bash
-node --test tests/public-media-security.test.mjs
-```
-
-Result:
-
-- 7 passing
-- 0 failing
-
-Command:
-
-```bash
 node --test tests/*.test.mjs
 ```
 
 Result:
 
-- 13 passing
+- 17 passing
 - 0 failing
 
 ## Web Build Result
@@ -147,9 +150,9 @@ Project: `keepr-app`
 
 Team: `see-you-then`
 
-Latest deployment ID: `dpl_4sbBJYL8sNePYgdxfuEMH1fUPzFH`
+Latest deployment ID: `dpl_24EL8tQvFE1nyDiyc32BrJYgJzMq`
 
-Preview URL: `https://keepr-hz9xsghlt-see-you-then.vercel.app`
+Preview URL: `https://keepr-jmsyq5qny-see-you-then.vercel.app`
 
 Branch alias: `keepr-app-git-hotfix-public-showcase-media-proxy-see-you-then.vercel.app`
 
@@ -172,22 +175,32 @@ Formula public story:
 - Route `/k/KPR-6QEH-927H`: HTTP 200
 - Application shell loaded
 - Typed contract: 5 media, 0 files, 1 link
+- Proxy media requests: 5 HTTP 200 image bodies
+- Image body validation: 5 JPEG bodies
+- Hero/gallery media render path uses `/api/public-media/<id>`
 - No PDFs, links, HTML/error rows, or storage metadata in `media`
 - No signed URL or storage metadata detected in checked page/contract output
+- No blank proxy media failures detected
 
 Porsche public story:
 
 - Route `/k/KPR-6GV2-MJ6W`: HTTP 200
 - Application shell loaded
 - Typed contract: 11 media, 3 files, 2 links
+- Proxy media requests: 11 HTTP 200 image bodies
+- Image body validation: 9 JPEG, 1 PNG, 1 WebP
+- Proxy document requests: 3 HTTP 200 PDF bodies
 - PDFs classified as `showcaseFiles`, not `media`
 - external links classified as `showcaseLinks`, not `media`
+- document cards open through `/api/public-media/<id>`
 - No signed URL or storage metadata detected in checked page/contract output
+- No blank proxy media failures detected
 
 Public Hub:
 
 - Route `/h/rally-sport-region`: HTTP 200
 - Application shell loaded
+- Hub page output did not expose signed URLs or storage metadata
 - No signed URL or storage metadata detected in checked page output
 
 Open Graph:
@@ -197,23 +210,15 @@ Open Graph:
 - OG HTML uses Keepr-controlled `/api/public-media/...` media where available
 - No signed URL or storage metadata detected
 
-## Remaining Blocker
+## Prior 502 Blocker
 
-Combined Preview proxy body validation is not yet green.
+Status: resolved.
 
-Observed:
-
-- `public-story-media` GET without auth returns `401`.
-- `public-story-media` GET with the public anon JWT returns image/document bodies correctly.
-- The Vercel `/api/public-media/<id>` route currently calls `public-story-media?media_id=<id>` without anon auth headers.
-- Therefore Preview `/api/public-media/<id>` returns `502` for media and document bodies.
-
-Impact:
-
-- The typed contract is fixed.
-- The story pages load.
-- The browser no longer receives mixed media/file/link rows.
-- But actual image/document rendering through the Vercel proxy remains blocked until the Vercel proxy forwards the public anon auth header or the Edge Function JWT policy is intentionally changed.
+- `public-story-media` keeps `verify_jwt = true`.
+- The Vercel `/api/public-media/<id>` route now sends the public anon `apikey` and `Authorization: Bearer <anon>` headers to the upstream Edge Function.
+- Preview proxy image requests now return HTTP 200.
+- Preview proxy PDF requests now return HTTP 200.
+- No 502 responses were observed in the final hosted media-body validation.
 
 ## Security Checks
 
@@ -254,6 +259,8 @@ Result:
 
 ## Recommendation
 
-NO-GO for Production promotion at this moment.
+GO for Production promotion review.
 
-The Edge Function typed contract repair is successful and should be retained. Before Production promotion, apply one narrow compatibility patch so `/api/public-media/<id>` calls the secured `public-story-media` GET endpoint with the public anon auth headers, or explicitly review and approve changing the Edge Function JWT policy. The safer next step is the Vercel proxy header patch because it preserves `verify_jwt = true`.
+The typed `public-story-media` contract and the Vercel media proxy are now aligned in Preview. Formula and Porsche Showcase photos/files/links validate through the secured proxy model, the previous 502 blocker is resolved, and checked browser/network outputs do not expose signed Supabase URLs, storage paths, buckets, object keys, JWTs, service-role values, or raw diagnostics.
+
+Production promotion should still be performed as a separate, explicit action after Andy/KAI review. Rollback point remains `4239717d7cdf0445a63b429ab7a5bc4a19f5d140`.
