@@ -165,10 +165,24 @@ test("Public Action resolves configured actions from public story summary", () =
 test("Public Story releases initial loading before secondary requests finish", () => {
   const source = read("screens/PublicKeeprStoryScreen.js");
 
-  assert.match(source, /setAsset\(assetRow\);\s*setLoading\(false\);\s*setSecondaryLoading\(true\);/s);
+  assert.match(source, /setAsset\(assetRow\);\s*if \(assetRow\.hero_placement_id\) \{\s*setHeroUri\(toPublicMediaUrl\(assetRow\.hero_placement_id\)\);\s*\}\s*setLoading\(false\);\s*setSecondaryLoading\(true\);/s);
   assert.match(source, /Promise\.allSettled/);
   assert.match(source, /Loading timeline\.\.\./);
   assert.match(source, /Loading Showcase\.\.\./);
+});
+
+test("Public Story can request the hero from summary before media hydration completes", () => {
+  const source = read("screens/PublicKeeprStoryScreen.js");
+  const summaryHeroIndex = source.indexOf("setHeroUri(toPublicMediaUrl(assetRow.hero_placement_id))");
+  const mediaRequestIndex = source.indexOf("fetchPublicStoryMedia(publicKac)");
+  const mediaHeroIndex = source.indexOf("setHeroUri(heroPlacement?.image_url || null)");
+
+  assert.notEqual(summaryHeroIndex, -1, "summary hero assignment missing");
+  assert.notEqual(mediaRequestIndex, -1, "media request missing");
+  assert.notEqual(mediaHeroIndex, -1, "media reconciliation hero assignment missing");
+  assert.ok(summaryHeroIndex < mediaRequestIndex, "summary hero must be set before media POST starts");
+  assert.ok(mediaRequestIndex < mediaHeroIndex, "typed media response should still reconcile hero later");
+  assert.match(source, /setHeroUri\(null\);/);
 });
 
 test("slow or failed secondary story requests do not turn a valid story into not found", () => {
@@ -186,4 +200,3 @@ test("public Story no longer performs public-mode private asset enrichment or sy
   assert.doesNotMatch(source, /\.from\("assets"\)\s*\.select\("extra_metadata"\)/s);
   assert.match(source, /assetId && !kac\s*\?\s*supabase\s*\.from\("systems"\)/s);
 });
-

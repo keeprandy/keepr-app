@@ -591,6 +591,7 @@ const ownerDisplayName = asset?.owner_name || null;
 
   setLoading(true);
   setSecondaryLoading(false);
+  setHeroUri(null);
 
   try {
     let assetRow = null;
@@ -635,6 +636,9 @@ assetRow.extra_metadata = summaryRow.extra_metadata || {};
     }
 
     setAsset(assetRow);
+    if (assetRow.hero_placement_id) {
+      setHeroUri(toPublicMediaUrl(assetRow.hero_placement_id));
+    }
     setLoading(false);
     setSecondaryLoading(true);
 

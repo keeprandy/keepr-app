@@ -204,12 +204,19 @@ test("Open Graph route emits proxy media URLs or fallback only", () => {
 
 test("public-story-media returns separate media, files, and links arrays", () => {
   const source = read("supabase/functions/public-story-media/index.ts");
+  const postLoop = source.slice(
+    source.indexOf("for (const row of rows || [])"),
+    source.indexOf("return jsonResponse({ media, showcaseFiles, showcaseLinks })")
+  );
 
   assert.match(source, /return jsonResponse\(\{ media, showcaseFiles, showcaseLinks \}\)/);
   assert.match(source, /function isImageLike/);
   assert.match(source, /function isDocumentLike/);
   assert.match(source, /function isExternalShowcaseLink/);
-  assert.match(source, /function upstreamLooksAvailable/);
   assert.match(source, /public_asset_story_gallery/);
+  assert.doesNotMatch(source, /function upstreamLooksAvailable/);
+  assert.doesNotMatch(postLoop, /signedOrDirectUrl/);
+  assert.doesNotMatch(postLoop, /fetch\(/);
+  assert.doesNotMatch(postLoop, /createSignedUrl/);
   assert.doesNotMatch(source, /return jsonResponse\(\{ media \}\)/);
 });

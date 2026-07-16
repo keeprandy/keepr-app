@@ -53,7 +53,7 @@ function proxyUrl(id) {
   return `/api/public-media/${encodeURIComponent(id)}`;
 }
 
-function classifyRows(rows, availability = {}) {
+function classifyRows(rows) {
   const media = [];
   const showcaseFiles = [];
   const showcaseLinks = [];
@@ -70,7 +70,7 @@ function classifyRows(rows, availability = {}) {
     }
 
     const id = row.public_media_id || row.placement_id;
-    if (!id || availability[id] === false) continue;
+    if (!id) continue;
 
     if (isImageLike(row)) {
       const key = `media:${id}`;
@@ -130,15 +130,37 @@ test("Formula-like image rows remain media while HTML-like external rows become 
 });
 
 test("failed and unknown octet-stream rows are excluded conservatively", () => {
-  const result = classifyRows(
-    [
-      { placement_id: "bad_000001", mime_type: "image/jpeg", file_name: "bad.jpg", storage_path: "redacted" },
-      { placement_id: "unk_000001", mime_type: "application/octet-stream", storage_path: "redacted" },
-    ],
-    { bad_000001: false }
-  );
+  const result = classifyRows([
+    { placement_id: "bad_000001", mime_type: "text/html", file_name: "", storage_path: "redacted" },
+    { placement_id: "unk_000001", mime_type: "application/octet-stream", storage_path: "redacted" },
+  ]);
 
   assert.deepEqual(result, { media: [], showcaseFiles: [], showcaseLinks: [] });
+});
+
+test("Boat-like 31 image and 3 file rows classify in one metadata pass", () => {
+  const rows = [
+    ...Array.from({ length: 31 }, (_, index) => ({
+      placement_id: `boat_img_${String(index).padStart(2, "0")}`,
+      kind: "photo",
+      mime_type: index % 2 ? "image/webp" : "application/octet-stream",
+      file_name: `gallery-${index}.webp`,
+      storage_path: "redacted",
+    })),
+    ...Array.from({ length: 3 }, (_, index) => ({
+      placement_id: `boat_pdf_${String(index).padStart(2, "0")}`,
+      kind: "file",
+      mime_type: "application/pdf",
+      file_name: `document-${index}.pdf`,
+      storage_path: "redacted",
+    })),
+  ];
+
+  const result = classifyRows(rows);
+
+  assert.equal(result.media.length, 31);
+  assert.equal(result.showcaseFiles.length, 3);
+  assert.equal(result.showcaseLinks.length, 0);
 });
 
 test("items are not duplicated across response arrays", () => {
@@ -155,6 +177,11 @@ test("items are not duplicated across response arrays", () => {
 });
 
 test("contract tests do not depend on private storage metadata", () => {
+  const postLoop = source.slice(
+    source.indexOf("for (const row of rows || [])"),
+    source.indexOf("return jsonResponse({ media, showcaseFiles, showcaseLinks })")
+  );
+
   for (const forbidden of [
     "signedUrl:",
     "bucket:",
@@ -163,4 +190,8 @@ test("contract tests do not depend on private storage metadata", () => {
   ]) {
     assert.equal(source.includes(forbidden), false, `${forbidden} must not appear in returned object literals`);
   }
+
+  assert.equal(source.includes("function upstreamLooksAvailable"), false);
+  assert.equal(postLoop.includes("signedOrDirectUrl"), false);
+  assert.equal(postLoop.includes("fetch("), false);
 });

@@ -121,19 +121,6 @@ async function signedOrDirectUrl(supabase: ReturnType<typeof createClient>, row:
   return signed.signedUrl;
 }
 
-async function upstreamLooksAvailable(url: string) {
-  try {
-    const head = await fetch(url, { method: "HEAD" });
-    if (head.ok) return true;
-    if (head.status !== 405 && head.status !== 403) return false;
-
-    const get = await fetch(url, { headers: { range: "bytes=0-0" } });
-    return get.ok;
-  } catch (_) {
-    return false;
-  }
-}
-
 function safeDisposition(contentType: string) {
   if (contentType === "application/pdf") {
     return 'inline; filename="keepr-showcase-document.pdf"';
@@ -285,15 +272,10 @@ serve(async (req) => {
       const mediaId = publicMediaId(row);
       if (!mediaId || !hasProxySource(row)) continue;
 
-      if (isImageLike(row) || isDocumentLike(row)) {
-        const upstreamUrl = await signedOrDirectUrl(supabase, row);
-        if (!upstreamUrl || !(await upstreamLooksAvailable(upstreamUrl))) continue;
-
-        if (isImageLike(row)) {
-          pushUnique(media, seen, `media:${mediaId}`, mediaItem(row, mediaId));
-        } else {
-          pushUnique(showcaseFiles, seen, `file:${mediaId}`, fileItem(row, mediaId));
-        }
+      if (isImageLike(row)) {
+        pushUnique(media, seen, `media:${mediaId}`, mediaItem(row, mediaId));
+      } else if (isDocumentLike(row)) {
+        pushUnique(showcaseFiles, seen, `file:${mediaId}`, fileItem(row, mediaId));
       }
     }
 
