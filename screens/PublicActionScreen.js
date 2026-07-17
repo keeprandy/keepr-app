@@ -648,10 +648,17 @@ useEffect(() => {
 
       Alert.alert(
         "Sent",
-        `Sent to the owner${res?.event?.id ? ` (${shortId(res.event.id)})` : ""}.`
+        `Sent to the owner${res?.thread?.id ? ` (${shortId(res.thread.id)})` : ""}.`
       );
 
       setQuestion("");
+
+      if (res?.public_thread?.token) {
+        navigation.navigate("PublicThreadMessage", {
+          publicThreadToken: res.public_thread.token,
+          messageId: res?.message?.id || null,
+        });
+      }
     } catch (e) {
       Alert.alert("Could not send", e?.message || "Try again.");
     }

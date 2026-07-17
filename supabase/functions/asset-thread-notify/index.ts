@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { hashToken } from "../_shared/crypto.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -35,6 +36,14 @@ function getBaseUrl() {
     Deno.env.get("SITE_URL") ||
     "https://app.keeprhome.com"
   ).replace(/\/+$/, "");
+}
+
+function createOpaqueToken() {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  let raw = "";
+  for (const byte of bytes) raw += String.fromCharCode(byte);
+  return btoa(raw).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 function buildThreadUrl({
@@ -192,13 +201,6 @@ serve(async (req) => {
 
     const ownerId = safeStr(visibleThread.owner_id);
     const creatorId = safeStr(visibleThread.created_by);
-    const recipientUserId =
-      eventType === "owner_reply" ? creatorId : ownerId;
-
-    if (!recipientUserId || String(recipientUserId) === String(user.id)) {
-      return json(200, { ok: true, skipped: "no_recipient" });
-    }
-
     if (eventType === "owner_reply" && String(user.id) !== String(ownerId)) {
       return json(403, { ok: false, error: "owner_reply_requires_owner" });
     }
@@ -215,7 +217,49 @@ serve(async (req) => {
       safeStr(assetRow?.name) ||
       safeStr(visibleThread.subject) ||
       "this asset";
-    const threadUrl = buildThreadUrl({
+    let recipientUserId =
+      eventType === "owner_reply" ? creatorId : ownerId;
+    let publicSenderEmail: string | null = null;
+    let publicThreadToken: string | null = null;
+
+    if (eventType === "owner_reply" && !recipientUserId) {
+      const { data: publicLink, error: publicLinkError } = await admin
+        .from("public_asset_thread_tokens")
+        .select("sender_email, sender_name")
+        .eq("thread_id", threadId)
+        .eq("asset_id", assetId)
+        .is("revoked_at", null)
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (publicLinkError) throw publicLinkError;
+      publicSenderEmail = safeStr(publicLink?.sender_email) || null;
+
+      if (publicSenderEmail) {
+        publicThreadToken = createOpaqueToken();
+        await admin.from("public_asset_thread_tokens").insert({
+          thread_id: threadId,
+          asset_id: assetId,
+          sender_email: publicSenderEmail,
+          sender_name: safeStr(publicLink?.sender_name) || null,
+          token_hash: await hashToken(publicThreadToken),
+          expires_at: null,
+        });
+      }
+    }
+
+    if (!recipientUserId && !publicSenderEmail) {
+      return json(200, { ok: true, skipped: "no_recipient" });
+    }
+
+    if (recipientUserId && String(recipientUserId) === String(user.id)) {
+      return json(200, { ok: true, skipped: "self_recipient" });
+    }
+
+    const threadUrl = publicThreadToken
+      ? `${getBaseUrl()}/thread/${encodeURIComponent(publicThreadToken)}/message/${encodeURIComponent(messageId)}`
+      : buildThreadUrl({
       baseUrl: getBaseUrl(),
       assetId,
       kac,
@@ -240,6 +284,7 @@ serve(async (req) => {
         ? "Open the exact Keepr conversation to reply."
         : "Open the exact Keepr conversation to respond.";
 
+    if (recipientUserId) {
     try {
       const { error: notificationError } = await admin
         .from("notifications")
@@ -255,8 +300,12 @@ serve(async (req) => {
     } catch (notificationError) {
       console.error("Asset thread in-app notification failed", notificationError);
     }
+    }
 
     try {
+      let to = publicSenderEmail || "";
+
+      if (!to && recipientUserId) {
       const { data: recipientProfile, error: profileError } = await admin
         .from("profiles")
         .select("email")
@@ -264,7 +313,9 @@ serve(async (req) => {
         .maybeSingle();
 
       if (profileError) throw profileError;
-      const to = safeStr(recipientProfile?.email);
+      to = safeStr(recipientProfile?.email);
+      }
+
       if (!to) throw new Error("Recipient email unavailable.");
 
       await sendPostmarkEmail({

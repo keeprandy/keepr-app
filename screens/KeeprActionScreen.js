@@ -13,6 +13,39 @@ import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, radius } from "../styles/theme";
 import { supabase } from "../lib/supabaseClient";
 
+const PROJECT_REF = "jjzjuqxysucqutgjnrkk";
+const FUNCTIONS_BASE = `https://${PROJECT_REF}.supabase.co/functions/v1`;
+const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+
+async function postPublicThread(payload) {
+  if (!ANON_KEY) throw new Error("Missing EXPO_PUBLIC_SUPABASE_ANON_KEY");
+
+  const res = await fetch(`${FUNCTIONS_BASE}/public-thread`, {
+    method: "POST",
+    credentials: "omit",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: ANON_KEY,
+      Authorization: `Bearer ${ANON_KEY}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const text = await res.text();
+  let json = null;
+  try {
+    json = JSON.parse(text);
+  } catch {}
+
+  if (!res.ok) {
+    const err = new Error((json && (json.error || json.message)) || text || `HTTP ${res.status}`);
+    err.code = json?.error || null;
+    throw err;
+  }
+
+  return json || {};
+}
+
 export default function KeeprActionScreen({ route, navigation }) {
     const {
       assetId,
@@ -40,6 +73,7 @@ export default function KeeprActionScreen({ route, navigation }) {
     const [profilesById, setProfilesById] = React.useState({});
     const [collapsedThreadIds, setCollapsedThreadIds] = React.useState({});
     const [threadAccessState, setThreadAccessState] = React.useState(accessState || null);
+    const isPublicThread = !!publicThreadToken;
 
 const notifyThreadMessage = React.useCallback(async ({
   eventType,
@@ -69,6 +103,43 @@ const notifyThreadMessage = React.useCallback(async ({
   }
 }, [assetId, resolvedAssetId, kac, projectionType, hubId]);
 
+const applyPublicThreadResponse = React.useCallback((json) => {
+  const thread = json?.thread || null;
+  const asset = json?.asset || null;
+  if (!thread?.id || !asset?.id) {
+    throw new Error("private_link_expired");
+  }
+
+  setCurrentUserId(null);
+  setAssetOwnerId(thread.owner_id || null);
+  setResolvedAssetId(asset.id);
+  setResolvedAssetName(asset.name || "Asset");
+  setIsOwner(false);
+  setProfilesById({});
+  setThreads([thread]);
+  setThreadAccessState(null);
+  setCollapsedThreadIds((prev) => ({ ...prev, [thread.id]: false }));
+}, []);
+
+const loadPublicThread = React.useCallback(async () => {
+  if (!publicThreadToken) return false;
+
+  try {
+    const json = await postPublicThread({
+      intent: "read_thread",
+      token: publicThreadToken,
+      message_id: messageId || null,
+    });
+    applyPublicThreadResponse(json);
+    return true;
+  } catch (e) {
+    const code = e?.code || e?.message;
+    setThreadAccessState(code === "expired" ? "private_link_expired" : "private_link_expired");
+    setThreads([]);
+    return true;
+  }
+}, [publicThreadToken, messageId, applyPublicThreadResponse]);
+
 React.useEffect(() => {
   let active = true;
 
@@ -76,20 +147,18 @@ React.useEffect(() => {
     try {
       setLoadingContext(true);
 
-      const { data: authData } = await supabase.auth.getUser();
-      const uid = authData?.user?.id || null;
-
-      if (!uid && (threadId || publicThreadToken)) {
-        if (!active) return;
-        setCurrentUserId(null);
-        setThreadAccessState("requires_sign_in");
+      if (publicThreadToken) {
+        await loadPublicThread();
         return;
       }
 
-      if (!assetId && !kac && publicThreadToken) {
+      const { data: authData } = await supabase.auth.getUser();
+      const uid = authData?.user?.id || null;
+
+      if (!uid && threadId) {
         if (!active) return;
-        setCurrentUserId(uid);
-        setThreadAccessState("private_link_expired");
+        setCurrentUserId(null);
+        setThreadAccessState("requires_sign_in");
         return;
       }
 
@@ -139,7 +208,7 @@ React.useEffect(() => {
   return () => {
     active = false;
   };
-}, [assetId, kac, assetName, publicThreadToken, accessState]);
+}, [assetId, kac, assetName, publicThreadToken, accessState, loadPublicThread]);
 
   
 const handleSendQuestion = async () => {
@@ -275,6 +344,26 @@ const handleSendQuestion = async () => {
     return;
   }
 
+  if (publicThreadToken) {
+    try {
+      const json = await postPublicThread({
+        intent: "post_followup",
+        token: publicThreadToken,
+        message: body,
+      });
+
+      setReplyByThreadId((prev) => ({
+        ...prev,
+        [threadId]: "",
+      }));
+      applyPublicThreadResponse(json);
+    } catch (e) {
+      setThreadAccessState("private_link_expired");
+      Alert.alert("Could not reply", "This private link is expired or unavailable.");
+    }
+    return;
+  }
+
   if (!currentUserId) {
     Alert.alert("Not ready", "You need to be signed in.");
     return;
@@ -320,6 +409,7 @@ const handleSendQuestion = async () => {
 };
 
 const loadThreads = React.useCallback(async () => {
+  if (publicThreadToken) return;
   const threadAssetId = resolvedAssetId || assetId;
   if (!threadAssetId) return;
 
@@ -420,14 +510,15 @@ const loadThreads = React.useCallback(async () => {
   }
 
   setThreads(rows);
-}, [resolvedAssetId, assetId, assetName, routeAssetOwnerId, threadId, accessState]);
+}, [resolvedAssetId, assetId, assetName, routeAssetOwnerId, threadId, accessState, publicThreadToken]);
 
 
 React.useEffect(() => {
+  if (publicThreadToken) return;
   loadThreads().catch((e) => {
     console.log("Load asset threads failed:", e?.message || e);
   });
-}, [loadThreads]);
+}, [loadThreads, publicThreadToken]);
 
 React.useEffect(() => {
   if (!threadId) return;
@@ -438,6 +529,7 @@ React.useEffect(() => {
 }, [threadId, messageId]);
 
 React.useEffect(() => {
+  if (publicThreadToken) return;
   const threadAssetId = resolvedAssetId || assetId;
   if (!threadAssetId) return;
 
@@ -471,7 +563,7 @@ React.useEffect(() => {
   return () => {
     supabase.removeChannel(channel);
   };
-}, [resolvedAssetId, assetId, loadThreads]);
+}, [resolvedAssetId, assetId, loadThreads, publicThreadToken]);
 
     const formatNameFromEmail = (email) => {
     if (!email) return "Keepr Member";
@@ -581,7 +673,7 @@ const accessNotice = noticeCopyByState[threadAccessState] || null;
                 : "Use this for quick member-to-member questions about this asset."}
             </Text>
 
-            {!isOwner ? (
+            {!isOwner && !isPublicThread ? (
             <>
                 <TextInput
                 value={message}
@@ -603,7 +695,7 @@ const accessNotice = noticeCopyByState[threadAccessState] || null;
                 <Text style={styles.primaryButtonText}>Send Question</Text>
                 </TouchableOpacity>
             </>
-            ) : (
+            ) : isOwner ? (
             <View style={styles.ownerActionList}>
                 <TouchableOpacity style={styles.ownerActionRow}>
                 <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.textPrimary} />
@@ -615,6 +707,10 @@ const accessNotice = noticeCopyByState[threadAccessState] || null;
                 <Text style={styles.ownerActionText}>Configure Public Actions</Text>
                 </TouchableOpacity>
             </View>
+            ) : (
+            <Text style={styles.cardHint}>
+                You are viewing this conversation through a secure private link. Use the reply box below to follow up.
+            </Text>
             )}
 
             <View style={styles.card}>
@@ -720,11 +816,14 @@ const accessNotice = noticeCopyByState[threadAccessState] || null;
                         const displayName =
                         profile.full_name ||
                         profile.display_name ||
+                        m.sender_role === "public_sender" && "Public Sender" ||
                         formatNameFromEmail(profile.email);
 
                         const roleLabel =
                         String(m.from_user_id) === String(assetOwnerId)
                             ? "Owner"
+                            : m.sender_role === "public_sender"
+                            ? "Public Sender"
                             : "Member";
 
                         return (
