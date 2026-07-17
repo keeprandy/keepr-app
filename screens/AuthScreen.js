@@ -159,6 +159,14 @@ export default function AuthScreen({ navigation, route }) {
   };
 
 const continueActivationJourney = async () => {
+  const continueRoute = route?.params?.continueRoute;
+  const continueParams = route?.params?.continueParams;
+
+  if (continueRoute) {
+    navigation.replace(continueRoute, continueParams || {});
+    return true;
+  }
+
   const intent = route?.params?.intent;
 
   if (intent !== "accept_hub_invite") return false;

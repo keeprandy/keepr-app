@@ -253,6 +253,12 @@ const linking = {
     
     PublicKeeprStory: "k/:kac",
     PublicAction: "k/:kac/actions",
+    KeeprThread: "asset/:assetId/thread/:threadId",
+    KeeprThreadMessage: "asset/:assetId/thread/:threadId/message/:messageId",
+    KacThread: "k/:kac/thread/:threadId",
+    KacThreadMessage: "k/:kac/thread/:threadId/message/:messageId",
+    PublicThread: "thread/:publicThreadToken",
+    PublicThreadMessage: "thread/:publicThreadToken/message/:messageId",
     KeeprHubInternal: "KeeprHubInternal",
     KeeprStoryInternal: "KeeprStoryInternal",
     KeeprHub: "h/:slug",
@@ -1436,6 +1442,8 @@ if (
   path.startsWith("/h/") ||
   path.startsWith("/hub/") ||
   path.startsWith("/story/") ||
+  path.startsWith("/asset/") ||
+  path.startsWith("/thread/") ||
   path.startsWith("/resolve/") ||
   path.startsWith("/KeeprHubInternal") ||
   path.startsWith("/KeeprStoryInternal")
@@ -1645,6 +1653,12 @@ if (!user) {
           <RootStack.Screen name="KacRoute" component={KacRouteScreen} />
           <RootStack.Screen name="PublicAction" component={PublicActionScreen} />
           <RootStack.Screen name="KeeprAction" component={KeeprActionScreen} options={{ headerShown: false }} />
+          <RootStack.Screen name="KeeprThread" component={KeeprActionScreen} options={{ headerShown: false }} />
+          <RootStack.Screen name="KeeprThreadMessage" component={KeeprActionScreen} options={{ headerShown: false }} />
+          <RootStack.Screen name="KacThread" component={KeeprActionScreen} options={{ headerShown: false }} />
+          <RootStack.Screen name="KacThreadMessage" component={KeeprActionScreen} options={{ headerShown: false }} />
+          <RootStack.Screen name="PublicThread" component={KeeprActionScreen} options={{ headerShown: false }} />
+          <RootStack.Screen name="PublicThreadMessage" component={KeeprActionScreen} options={{ headerShown: false }} />
           <RootStack.Screen name="KacResolve" component={KacResolveScreen} />
           <RootStack.Screen name="PublicKeeprStory" component={PublicKeeprStoryScreen}/>
           <RootStack.Screen name="KeeprHub" component={KeeprHubScreen}/>
@@ -1799,6 +1813,12 @@ const initialRouteName = isResetLink
             options={{ title: "Quick Capture" }}
           />
           <RootStack.Screen name="KeeprAction" component={KeeprActionScreen} options={{ headerShown: false }} />
+          <RootStack.Screen name="KeeprThread" component={KeeprActionScreen} options={{ headerShown: false }} />
+          <RootStack.Screen name="KeeprThreadMessage" component={KeeprActionScreen} options={{ headerShown: false }} />
+          <RootStack.Screen name="KacThread" component={KeeprActionScreen} options={{ headerShown: false }} />
+          <RootStack.Screen name="KacThreadMessage" component={KeeprActionScreen} options={{ headerShown: false }} />
+          <RootStack.Screen name="PublicThread" component={KeeprActionScreen} options={{ headerShown: false }} />
+          <RootStack.Screen name="PublicThreadMessage" component={KeeprActionScreen} options={{ headerShown: false }} />
           <RootStack.Screen
             name="SendToKeeprAssetPicker"
             component={SendToKeeprAssetPicker}

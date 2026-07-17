@@ -21,6 +21,11 @@ export default function KeeprActionScreen({ route, navigation }) {
       assetOwnerId: routeAssetOwnerId,
       hubId,
       hubName,
+      threadId,
+      messageId,
+      projectionType,
+      publicThreadToken,
+      accessState,
     } = route?.params || {};
 
     const [message, setMessage] = React.useState("");
@@ -34,6 +39,35 @@ export default function KeeprActionScreen({ route, navigation }) {
     const [isOwner, setIsOwner] = React.useState(false);
     const [profilesById, setProfilesById] = React.useState({});
     const [collapsedThreadIds, setCollapsedThreadIds] = React.useState({});
+    const [threadAccessState, setThreadAccessState] = React.useState(accessState || null);
+
+const notifyThreadMessage = React.useCallback(async ({
+  eventType,
+  threadId: notifyThreadId,
+  messageId: notifyMessageId,
+}) => {
+  if (!notifyThreadId || !notifyMessageId) return;
+
+  try {
+    const { error } = await supabase.functions.invoke("asset-thread-notify", {
+      body: {
+        event_type: eventType,
+        thread_id: notifyThreadId,
+        message_id: notifyMessageId,
+        asset_id: resolvedAssetId || assetId || null,
+        kac: kac || null,
+        projection_type: projectionType || null,
+        hub_id: hubId || null,
+      },
+    });
+
+    if (error) {
+      console.error("Asset thread notification failed", error);
+    }
+  } catch (notificationError) {
+    console.error("Asset thread notification failed", notificationError);
+  }
+}, [assetId, resolvedAssetId, kac, projectionType, hubId]);
 
 React.useEffect(() => {
   let active = true;
@@ -44,6 +78,20 @@ React.useEffect(() => {
 
       const { data: authData } = await supabase.auth.getUser();
       const uid = authData?.user?.id || null;
+
+      if (!uid && (threadId || publicThreadToken)) {
+        if (!active) return;
+        setCurrentUserId(null);
+        setThreadAccessState("requires_sign_in");
+        return;
+      }
+
+      if (!assetId && !kac && publicThreadToken) {
+        if (!active) return;
+        setCurrentUserId(uid);
+        setThreadAccessState("private_link_expired");
+        return;
+      }
 
       let query = supabase
         .from("assets")
@@ -78,6 +126,7 @@ React.useEffect(() => {
           !!effectiveOwnerId &&
           String(uid) === String(effectiveOwnerId)
       );
+      setThreadAccessState(accessState || null);
     } catch (e) {
       console.log("KeeprAction context load failed:", e?.message || e);
     } finally {
@@ -90,7 +139,7 @@ React.useEffect(() => {
   return () => {
     active = false;
   };
-}, [assetId, kac, assetName]);
+}, [assetId, kac, assetName, publicThreadToken, accessState]);
 
   
 const handleSendQuestion = async () => {
@@ -147,37 +196,70 @@ const handleSendQuestion = async () => {
       subject: resolvedAssetName || assetName || "Asset question",
     });
 
-    const { data: thread, error: threadError } = await supabase
+    const { data: existingThread, error: existingThreadError } = await supabase
       .from("asset_threads")
-      .insert({
-        asset_id: threadAssetId,
-        hub_id: hubId || null,
-        owner_id: effectiveOwnerId,
-        created_by: currentUserId,
-        subject: resolvedAssetName || assetName || "Asset question",
-        status: "open",
-      })
       .select("id")
-      .single();
+      .eq("asset_id", threadAssetId)
+      .eq("owner_id", effectiveOwnerId)
+      .eq("created_by", currentUserId)
+      .eq("status", "open")
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingThreadError) throw existingThreadError;
+
+    let thread = existingThread;
+    let threadError = null;
+
+    if (!thread?.id) {
+      const result = await supabase
+        .from("asset_threads")
+        .insert({
+          asset_id: threadAssetId,
+          hub_id: hubId || null,
+          owner_id: effectiveOwnerId,
+          created_by: currentUserId,
+          subject: resolvedAssetName || assetName || "Asset question",
+          status: "open",
+        })
+        .select("id")
+        .single();
+
+      thread = result.data;
+      threadError = result.error;
+    } else {
+      await supabase
+        .from("asset_threads")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", thread.id);
+    }
 
     console.log("THREAD INSERT RESULT", { thread, threadError });
 
     if (threadError) throw threadError;
     if (!thread?.id) throw new Error("Thread was not created.");
 
-    const { error: msgError } = await supabase
+    const { data: createdMessage, error: msgError } = await supabase
       .from("asset_thread_messages")
       .insert({
         thread_id: thread.id,
         from_user_id: currentUserId,
         body: cleanMessage,
-      });
+      })
+      .select("id")
+      .single();
 
     console.log("MESSAGE INSERT RESULT", { msgError });
 
     if (msgError) throw msgError;
 
     setMessage("");
+    await notifyThreadMessage({
+      eventType: "new_ask_owner_message",
+      threadId: thread.id,
+      messageId: createdMessage?.id,
+    });
     await loadThreads();
   } catch (e) {
     console.log("SEND QUESTION ERROR", e);
@@ -204,13 +286,15 @@ const handleSendQuestion = async () => {
 }
 
   try {
-    const { error } = await supabase
+    const { data: createdMessage, error } = await supabase
       .from("asset_thread_messages")
       .insert({
         thread_id: threadId,
         from_user_id: currentUserId,
         body,
-      });
+      })
+      .select("id")
+      .single();
 
     if (error) throw error;
 
@@ -224,6 +308,11 @@ const handleSendQuestion = async () => {
       [threadId]: "",
     }));
 
+    await notifyThreadMessage({
+      eventType: "owner_reply",
+      threadId,
+      messageId: createdMessage?.id,
+    });
     await loadThreads();
   } catch (e) {
     Alert.alert("Could not reply", e?.message || "Try again.");
@@ -252,7 +341,7 @@ const loadThreads = React.useCallback(async () => {
   setResolvedAssetName(assetRow?.name || assetName || null);
   setIsOwner(!!uid && !!ownerId && String(uid) === String(ownerId));
 
-  const { data: threadRows, error: threadError } = await supabase
+  let threadQuery = supabase
     .from("asset_threads")
     .select(`
       id,
@@ -271,12 +360,29 @@ const loadThreads = React.useCallback(async () => {
         created_at
       )
     `)
-    .eq("asset_id", threadAssetId)
-    .order("updated_at", { ascending: false });
+    .eq("asset_id", threadAssetId);
 
-  if (threadError) throw threadError;
+  if (threadId) {
+    threadQuery = threadQuery.eq("id", threadId);
+  }
+
+  const { data: threadRows, error: threadError } = await threadQuery.order(
+    "updated_at",
+    { ascending: false }
+  );
+
+  if (threadError) {
+    if (threadId) setThreadAccessState("access_denied");
+    throw threadError;
+  }
 
   const rows = threadRows || [];
+
+  if (threadId && rows.length === 0) {
+    setThreadAccessState("missing_thread");
+  } else if (!accessState) {
+    setThreadAccessState(null);
+  }
 
   const userIds = Array.from(
     new Set(
@@ -314,7 +420,7 @@ const loadThreads = React.useCallback(async () => {
   }
 
   setThreads(rows);
-}, [resolvedAssetId, assetId, assetName, routeAssetOwnerId]);
+}, [resolvedAssetId, assetId, assetName, routeAssetOwnerId, threadId, accessState]);
 
 
 React.useEffect(() => {
@@ -322,6 +428,14 @@ React.useEffect(() => {
     console.log("Load asset threads failed:", e?.message || e);
   });
 }, [loadThreads]);
+
+React.useEffect(() => {
+  if (!threadId) return;
+  setCollapsedThreadIds((prev) => ({
+    ...prev,
+    [threadId]: false,
+  }));
+}, [threadId, messageId]);
 
 React.useEffect(() => {
   const threadAssetId = resolvedAssetId || assetId;
@@ -374,6 +488,27 @@ React.useEffect(() => {
   });
 };
 
+const noticeCopyByState = {
+  missing_thread: {
+    title: "Thread unavailable",
+    text: "We could not find that exact message thread for this asset. You can still use asset Actions from here.",
+  },
+  access_denied: {
+    title: "Access denied",
+    text: "You do not have access to this asset thread.",
+  },
+  private_link_expired: {
+    title: "Private link expired",
+    text: "This public sender link is expired or has been revoked. Ask the owner for a fresh link.",
+  },
+  requires_sign_in: {
+    title: "Sign in to open this conversation",
+    text: "After sign-in, Keepr will return you to this exact asset thread.",
+  },
+};
+
+const accessNotice = noticeCopyByState[threadAccessState] || null;
+
   return (
     <SafeAreaView style={styles.safe} edges={["top", "left", "right", "bottom"]}>
       <ScrollView contentContainerStyle={styles.shell}>
@@ -397,9 +532,43 @@ React.useEffect(() => {
           <Text style={styles.kicker}>MESSAGES</Text>
           <Text style={styles.title}>{assetName || "Asset Actions"}</Text>
           <Text style={styles.subtitle}>
-            Ask the owner a question or start a lightweight Keepr conversation around this asset.
+            {threadId
+              ? "Opening the exact asset conversation from your notification."
+              : "Ask the owner a question or start a lightweight Keepr conversation around this asset."}
           </Text>
         </View>
+
+        {accessNotice && (
+          <View style={styles.noticeCard}>
+            <Text style={styles.noticeTitle}>{accessNotice.title}</Text>
+            <Text style={styles.noticeText}>{accessNotice.text}</Text>
+            {threadAccessState === "requires_sign_in" && (
+              <TouchableOpacity
+                style={styles.noticeButton}
+                onPress={() =>
+                  navigation.navigate("Auth", {
+                    continueRoute: route?.name || "KeeprThread",
+                    continueParams: route?.params || {},
+                  })
+                }
+              >
+                <Text style={styles.noticeButtonText}>Sign in to continue</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
+        {(threadId || messageId || projectionType || hubId) && (
+          <View style={styles.contextChip}>
+            <Ionicons name="link-outline" size={14} color={colors.textSecondary} />
+            <Text style={styles.contextChipText} numberOfLines={1}>
+              {threadId ? `Thread ${String(threadId).slice(0, 8)}` : "Asset Actions"}
+              {messageId ? ` • Message ${String(messageId).slice(0, 8)}` : ""}
+              {projectionType ? ` • ${projectionType}` : ""}
+              {hubId ? " • Hub context" : ""}
+            </Text>
+          </View>
+        )}
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>
@@ -545,6 +714,8 @@ React.useEffect(() => {
                     {(thread.asset_thread_messages || []).map((m) => {
                         const mine = String(m.from_user_id) === String(currentUserId);
                         const profile = profilesById[m.from_user_id] || {};
+                        const isTargetMessage =
+                        !!messageId && String(m.id) === String(messageId);
 
                         const displayName =
                         profile.full_name ||
@@ -562,6 +733,7 @@ React.useEffect(() => {
                             style={[
                             styles.messageBubble,
                             mine ? styles.messageBubbleMine : styles.messageBubbleOther,
+                            isTargetMessage && styles.messageBubbleHighlight,
                             ]}
                         >
                             <Text style={[styles.messageMeta, mine && styles.messageMetaMine]}>
@@ -727,6 +899,65 @@ threadEmail: {
   color: colors.textMuted,
 },
 
+noticeCard: {
+  borderWidth: 1,
+  borderColor: colors.borderSubtle,
+  borderRadius: radius.lg,
+  backgroundColor: colors.surface,
+  padding: spacing.md,
+  marginBottom: spacing.md,
+},
+
+noticeTitle: {
+  fontSize: 14,
+  fontWeight: "900",
+  color: colors.textPrimary,
+},
+
+noticeText: {
+  marginTop: 4,
+  fontSize: 13,
+  lineHeight: 18,
+  color: colors.textSecondary,
+},
+
+noticeButton: {
+  marginTop: spacing.md,
+  alignSelf: "flex-start",
+  borderRadius: radius.pill,
+  backgroundColor: colors.textPrimary,
+  paddingHorizontal: 16,
+  paddingVertical: 10,
+},
+
+noticeButtonText: {
+  color: "white",
+  fontSize: 13,
+  fontWeight: "900",
+},
+
+contextChip: {
+  alignSelf: "flex-start",
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 6,
+  borderWidth: 1,
+  borderColor: colors.borderSubtle,
+  borderRadius: radius.pill,
+  backgroundColor: colors.surface,
+  paddingHorizontal: 12,
+  paddingVertical: 8,
+  marginBottom: spacing.md,
+  maxWidth: "100%",
+},
+
+contextChipText: {
+  flexShrink: 1,
+  fontSize: 12,
+  fontWeight: "800",
+  color: colors.textSecondary,
+},
+
 messageMetaMine: {
   color: "rgba(255,255,255,0.82)",
 },
@@ -753,6 +984,11 @@ messageBubbleOther: {
   backgroundColor: colors.surface,
   borderWidth: 1,
   borderColor: colors.borderSubtle,
+},
+
+messageBubbleHighlight: {
+  borderWidth: 2,
+  borderColor: colors.brandBlue,
 },
 
 messageMeta: {
