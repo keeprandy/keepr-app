@@ -33,14 +33,13 @@ import {
   normalizeProjectionConfig,
   splitConfiguredHighlights,
 } from "../lib/projectionRegistry";
+import { getSupabaseFunctionUrl } from "../lib/supabaseFunctions";
 const keeprEnabledMark = require("../assets/public/keepr-enabled-mark-180.png");
 const keeprEnabledWatermark = require("../assets/public/keepr-enabled-mark-120.png");
 const keeprLogo = require("../assets/app_logo_icon.png");
 
 const HERO_ASPECT = 4 / 3;
 const IS_WEB = Platform.OS === "web";
-const PROJECT_REF = "jjzjuqxysucqutgjnrkk";
-const FUNCTIONS_BASE = `https://${PROJECT_REF}.supabase.co/functions/v1`;
 const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 const DEBUG_PUBLIC_STORY_LOAD = false;
 
@@ -378,7 +377,7 @@ function TimelineRow({
 async function fetchPublicStoryMedia(kac) {
   if (!kac || !ANON_KEY) return [];
 
-  const res = await fetch(`${FUNCTIONS_BASE}/public-story-media`, {
+  const res = await fetch(getSupabaseFunctionUrl("public-story-media"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

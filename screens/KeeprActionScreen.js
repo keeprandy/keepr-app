@@ -12,15 +12,14 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, radius } from "../styles/theme";
 import { supabase } from "../lib/supabaseClient";
+import { getSupabaseFunctionUrl } from "../lib/supabaseFunctions";
 
-const PROJECT_REF = "jjzjuqxysucqutgjnrkk";
-const FUNCTIONS_BASE = `https://${PROJECT_REF}.supabase.co/functions/v1`;
 const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
 async function postPublicThread(payload) {
   if (!ANON_KEY) throw new Error("Missing EXPO_PUBLIC_SUPABASE_ANON_KEY");
 
-  const res = await fetch(`${FUNCTIONS_BASE}/public-thread`, {
+  const res = await fetch(getSupabaseFunctionUrl("public-thread"), {
     method: "POST",
     credentials: "omit",
     headers: {

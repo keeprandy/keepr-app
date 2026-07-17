@@ -21,9 +21,8 @@ import { supabase } from "../lib/supabaseClient";
 import { useFocusEffect } from "@react-navigation/native";
 import PublicShell from "../components/public/PublicShell";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { getSupabaseFunctionUrl } from "../lib/supabaseFunctions";
 
-const PROJECT_REF = "jjzjuqxysucqutgjnrkk";
-const FUNCTIONS_BASE = `https://${PROJECT_REF}.supabase.co/functions/v1`;
 const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
 const IS_WEB = Platform.OS === "web";
@@ -91,7 +90,7 @@ async function postFunction(path, payload, accessToken) {
 
   const bearer = accessToken ? accessToken : ANON_KEY;
 
-  const res = await fetch(`${FUNCTIONS_BASE}/${path}`, {
+  const res = await fetch(getSupabaseFunctionUrl(path), {
     method: "POST",
     credentials: "omit",
     headers: {

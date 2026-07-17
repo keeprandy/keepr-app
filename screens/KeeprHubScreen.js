@@ -41,13 +41,11 @@ import { getHubUserCapabilities } from "../lib/hubCapabilities";
 import { buildHubShareUrl } from "../lib/inviteLinks";
 import { getKaiTriggerContext } from "../lib/kaiEngine";
 import HubAuthModal from "../components/hubs/HubAuthModal";
+import { getSupabaseFunctionUrl } from "../lib/supabaseFunctions";
 
 import * as Clipboard from "expo-clipboard";
 import QRCode from "react-native-qrcode-svg";
 
-
-  const PROJECT_REF = "jjzjuqxysucqutgjnrkk";
-  const FUNCTIONS_BASE = `https://${PROJECT_REF}.supabase.co/functions/v1`;
   const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
 function getPublicMediaBaseUrl() {
@@ -254,7 +252,7 @@ function safeOwner(asset) {
 async function fetchPublicStoryMedia(kac) {
   if (!kac || !ANON_KEY) return [];
 
-  const res = await fetch(`${FUNCTIONS_BASE}/public-story-media`, {
+  const res = await fetch(getSupabaseFunctionUrl("public-story-media"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

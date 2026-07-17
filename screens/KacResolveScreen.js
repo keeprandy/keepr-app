@@ -14,9 +14,8 @@ import {
 } from "react-native";
 
 import { colors, spacing, radius } from "../styles/theme";
+import { getSupabaseFunctionUrl } from "../lib/supabaseFunctions";
 
-const PROJECT_REF = "jjzjuqxysucqutgjnrkk";
-const FUNCTIONS_BASE = `https://${PROJECT_REF}.supabase.co/functions/v1`;
 const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
 const IS_WEB = Platform.OS === "web";
@@ -48,7 +47,7 @@ function getKacFromUrlFallback() {
 }
 
 async function postFunction(path, body) {
-  const res = await fetch(`${FUNCTIONS_BASE}/${path}`, {
+  const res = await fetch(getSupabaseFunctionUrl(path), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
