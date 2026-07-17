@@ -88,6 +88,27 @@ Only after review, copy the sanitized schema-only baseline to:
 supabase/baseline/20260717_keepr_schema_baseline.sql
 ```
 
+## Reviewed Baseline Scope
+
+The committed baseline was derived from the Production schema-only export but
+intentionally excludes Supabase-managed `storage` schema internals. A hosted
+Supabase project already owns the storage schema, and the staging temporary
+migration role cannot recreate storage-owned types, functions, tables, and
+system policies.
+
+The baseline therefore includes Keepr `public` schema objects and preserves
+public functions that reference `storage.objects`, while storage bucket creation
+and storage policy configuration remain explicit setup steps.
+
+First staging validation found zero copied rows, but schema lint also found
+follow-up items that must be reviewed before acceptance fixtures:
+
+- enable/represent the required `pgcrypto` extension for `digest(...)` callers;
+- review `public.delete_service_record_full` because it references
+  `storage.delete_object(...)`, which is not present in managed staging storage;
+- accept or separately remediate existing Production-carried lint findings in
+  legacy/action functions.
+
 ## Bootstrap Order
 
 1. Create a new Supabase project, for example `keepr-staging`.
@@ -181,4 +202,3 @@ Create only synthetic:
 - Ask Owner thread/message/token rows through the app flow
 
 Cleanup must delete all rows and storage objects with the run prefix.
-

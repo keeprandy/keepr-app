@@ -4,12 +4,13 @@ Date: 2026-07-17
 
 ## Current Decision
 
-Do not create staging yet.
+Staging project `nvtotcdsvijssokijnbn` has been created and is confirmed not to
+be Production project `jjzjuqxysucqutgjnrkk`.
 
-Do not modify `keepr-prod`.
-
-The current Vercel Preview exists but points at Production Supabase
-configuration and is suitable for visual inspection only.
+The reviewed schema baseline was applied to staging on 2026-07-17. Continue to
+hold before configuring Auth, secrets, Vercel Preview variables, Edge Functions,
+Postmark, or synthetic fixtures until the validation findings below are
+reviewed.
 
 ## Baseline Export Method
 
@@ -18,7 +19,7 @@ Use a schema-only dump from Production project `jjzjuqxysucqutgjnrkk`.
 The dump must be written to `/tmp`, reviewed, sanitized, and only then copied to
 `supabase/baseline/20260717_keepr_schema_baseline.sql`.
 
-Recommended command:
+Initial export command:
 
 ```bash
 supabase db dump --linked --schema public --schema storage --file /tmp/keepr_schema_baseline_public_storage.sql
@@ -37,6 +38,12 @@ Review guards:
 ```bash
 rg -n "COPY |INSERT INTO|auth\\.users|vault|postgres://|supabase\\.co|service_role|BEGIN DATA|TABLE DATA" /tmp/keepr_schema_baseline_public_storage.sql
 ```
+
+The hosted Supabase `storage` schema is managed by Supabase and cannot be
+recreated from the Keepr baseline by the temporary migration role. The committed
+baseline therefore preserves Keepr `public` schema objects and omits
+Supabase-managed `storage` schema internals. Storage buckets and storage
+policies remain a separate staging setup step.
 
 ## Required Schema Contents
 
@@ -220,6 +227,40 @@ Prepared:
 - `supabase/baseline/validate_staging_inventory.sql`
 - `supabase/baseline/validate_no_real_data.sql`
 
+Because the Supabase CLI does not provide an arbitrary SQL execution command and
+we are not exposing database credentials, the first staging run used supported
+linked CLI inspections instead of executing the custom SQL scripts directly.
+
+Executed validation:
+
+- `supabase migration list --linked`
+- `supabase db lint --linked --schema public --fail-on error`
+- `supabase inspect db table-stats --linked`
+
+Results:
+
+- Migration history is aligned through cutoff `20260717120000`.
+- Required Event Projection tables are present in staging.
+- Table stats report zero estimated rows for `profiles`, `assets`,
+  `asset_threads`, `asset_thread_messages`, `public_asset_thread_tokens`,
+  `notifications`, and `event_inbox`.
+- Schema lint currently reports invalid-function findings that must be reviewed
+  before continuing:
+  - `public.get_public_asset_view` and `public.get_public_system_package`
+    reference `digest(...)`; staging needs the required `pgcrypto` extension
+    enabled or represented in a reviewed baseline correction.
+  - `public.delete_service_record_full` references `storage.delete_object(...)`,
+    which is not present in the managed staging storage schema after omitting
+    storage internals.
+  - Legacy/action functions `public.accept_asset_transfer`,
+    `public.accept_asset_transfer_simple`, and `public.apply_action_proposal`
+    have existing lint findings carried by the Production schema.
+
+Recommendation: do not configure staging secrets, deploy Edge Functions, or
+create synthetic fixtures until these findings are accepted or a reviewed
+schema-baseline correction is approved.
+- `supabase/baseline/validate_no_real_data.sql`
+
 ## Manual Steps For Andy
 
 1. Create Supabase project `keepr-staging`.
@@ -231,4 +272,3 @@ Prepared:
 7. Configure staging secrets.
 8. Configure Vercel Preview environment variables to staging.
 9. Approve synthetic acceptance.
-
