@@ -29,6 +29,10 @@ import ShowcaseAttachmentsSection from "../components/showcase/ShowcaseAttachmen
 
 import { supabase } from "../lib/supabaseClient";
 import { formatKeeprDate } from "../lib/dateFormat";
+import {
+  normalizeProjectionConfig,
+  splitConfiguredHighlights,
+} from "../lib/projectionRegistry";
 const keeprEnabledMark = require("../assets/public/keepr-enabled-mark-180.png");
 const keeprEnabledWatermark = require("../assets/public/keepr-enabled-mark-120.png");
 const keeprLogo = require("../assets/app_logo_icon.png");
@@ -243,6 +247,30 @@ function getStoryTags(asset) {
     ].filter(Boolean);
   }
 
+function getAssetKindLabel(type) {
+  switch (String(type || "").toLowerCase()) {
+    case "vehicle":
+      return "vehicle";
+    case "boat":
+      return "boat";
+    case "home":
+      return "home";
+    default:
+      return "asset";
+  }
+}
+
+function getAssetIdentityLine(asset) {
+  return [asset?.year, asset?.make, asset?.model]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+}
+
+function hasEventProjectionValue(value) {
+  return String(value || "").trim().length > 0;
+}
+
 function SafeShareQrCode({ value, size }) {
   return (
     <ShareQrBoundary value={value}>
@@ -438,6 +466,12 @@ const originHubName =
   {};
 
   const storyConfig = publicConfig.story || {};
+  const projectionConfig = useMemo(
+    () => normalizeProjectionConfig(publicConfig),
+    [publicConfig]
+  );
+  const isEventProjection = projectionConfig.purpose === "event";
+  const eventProjection = projectionConfig.event || {};
   const narrative =
   asset?.extra_metadata?.publicStoryNarrative ||
   asset?.public_story_narrative ||
@@ -475,6 +509,7 @@ const showNarrative =
   const showFooterCta = storyConfig.showFooterCta !== false;
   const showLocation = storyConfig.showLocation === true;
   const showFinancials = storyConfig.showFinancials === true;
+  const showEventOwnerName = eventProjection.showOwnerName === true;
 
   const timelineMode = storyConfig.showTimeline || "all";
 
@@ -505,6 +540,62 @@ const showNarrative =
   }, [assetTitle, publicStoryUrl]);
 
 const ownerDisplayName = asset?.owner_name || null;
+  const assetKindLabel = getAssetKindLabel(asset?.type);
+  const assetIdentityLine = getAssetIdentityLine(asset) || assetTitle;
+  const eventStoryHighlights = splitConfiguredHighlights(eventProjection.selectedStoryHighlights);
+  const eventVehicleHighlights = splitConfiguredHighlights(eventProjection.selectedVehicleHighlights);
+  const eventSystemHighlights = splitConfiguredHighlights(eventProjection.selectedSystemHighlights);
+  const eventProofHighlights = splitConfiguredHighlights(eventProjection.selectedProofOfCare);
+  const eventFeaturedUri = toPublicMediaUrl(eventProjection.featuredImage);
+  const eventHubName = eventProjection.hubName || originHubName || null;
+  const eventHubId = eventProjection.hubId || originHubId || null;
+  const eventAskOwnerTitle = showEventOwnerName && ownerDisplayName
+    ? `Ask ${ownerDisplayName} about this ${assetKindLabel}`
+    : `Ask the owner about this ${assetKindLabel}`;
+  const eventActionRouteParams = {
+    kac: asset?.kac_id || kac,
+    assetId: asset?.asset_id || asset?.id,
+    projectionType: "event",
+    hubId: eventHubId,
+    hubName: eventHubName,
+    eventName: eventProjection.eventName || null,
+    eventDate: eventProjection.eventDate || null,
+  };
+
+  const openEventMessageOwner = useCallback(() => {
+    if (isInternalMode) {
+      navigation.navigate("KeeprAction", {
+        ...eventActionRouteParams,
+        assetName: asset?.name,
+        assetOwnerId: asset?.owner_id || asset?.ownerId || null,
+        mode: "internal",
+      });
+      return;
+    }
+
+    navigation.navigate("PublicAction", eventActionRouteParams);
+  }, [
+    navigation,
+    isInternalMode,
+    eventActionRouteParams.kac,
+    eventActionRouteParams.assetId,
+    eventActionRouteParams.hubId,
+    eventActionRouteParams.hubName,
+    eventActionRouteParams.eventName,
+    eventActionRouteParams.eventDate,
+    asset?.name,
+    asset?.owner_id,
+    asset?.ownerId,
+  ]);
+
+  const eventCardOrder = Array.isArray(projectionConfig.cardOrder)
+    ? projectionConfig.cardOrder
+    : [];
+  const eventCardsToRender = isEventProjection
+    ? eventCardOrder.filter((card) =>
+        ["event_showcase", "vehicle_highlights", "message_owner"].includes(card)
+      )
+    : [];
 
   const handleCopyPublicLink = useCallback(async () => {
     if (!publicStoryUrl) return;
@@ -845,6 +936,181 @@ const publicAssetId = assetRow.asset_id || assetRow.id;
       );
 };
 
+  const renderEventShowcaseCard = () => {
+    if (!isEventProjection || eventProjection.includeEventShowcase === false) return null;
+
+    const hasContent =
+      hasEventProjectionValue(eventProjection.eventName) ||
+      hasEventProjectionValue(eventProjection.displayHeadline) ||
+      hasEventProjectionValue(eventProjection.description) ||
+      hasEventProjectionValue(eventProjection.eventDate) ||
+      hasEventProjectionValue(eventProjection.eventLocation) ||
+      hasEventProjectionValue(eventHubName) ||
+      hasEventProjectionValue(eventProjection.classOrCategory) ||
+      !!eventFeaturedUri;
+
+    if (!hasContent) return null;
+
+    return (
+      <View key="event_showcase" style={styles.projectionCard}>
+        <View style={styles.projectionCardHeader}>
+          <Text style={styles.projectionKicker}>Event Projection</Text>
+          {!!eventProjection.classOrCategory && (
+            <View style={styles.projectionPill}>
+              <Text style={styles.projectionPillText}>{eventProjection.classOrCategory}</Text>
+            </View>
+          )}
+        </View>
+
+        {!!eventFeaturedUri && (
+          <Image
+            source={{ uri: eventFeaturedUri }}
+            style={styles.projectionImage}
+            resizeMode="cover"
+          />
+        )}
+
+        <Text style={styles.projectionCardTitle}>
+          {eventProjection.displayHeadline ||
+            eventProjection.eventName ||
+            `${assetTitle} at the event`}
+        </Text>
+
+        {!!eventProjection.description && (
+          <Text style={styles.projectionBodyText}>{eventProjection.description}</Text>
+        )}
+
+        <View style={styles.projectionMetaWrap}>
+          {!!eventProjection.eventName && (
+            <View style={styles.projectionMetaItem}>
+              <Ionicons name="flag-outline" size={15} color={colors.textSecondary} />
+              <Text style={styles.projectionMetaText}>{eventProjection.eventName}</Text>
+            </View>
+          )}
+          {!!eventHubName && (
+            <View style={styles.projectionMetaItem}>
+              <Ionicons name="people-outline" size={15} color={colors.textSecondary} />
+              <Text style={styles.projectionMetaText}>{eventHubName}</Text>
+            </View>
+          )}
+          {!!eventProjection.eventDate && (
+            <View style={styles.projectionMetaItem}>
+              <Ionicons name="calendar-outline" size={15} color={colors.textSecondary} />
+              <Text style={styles.projectionMetaText}>{eventProjection.eventDate}</Text>
+            </View>
+          )}
+          {!!eventProjection.eventLocation && (
+            <View style={styles.projectionMetaItem}>
+              <Ionicons name="location-outline" size={15} color={colors.textSecondary} />
+              <Text style={styles.projectionMetaText}>{eventProjection.eventLocation}</Text>
+            </View>
+          )}
+        </View>
+
+        {eventProjection.allowAskOwner !== false && showActionsTab ? (
+          <TouchableOpacity
+            style={styles.projectionPrimaryCta}
+            activeOpacity={0.88}
+            onPress={openEventMessageOwner}
+          >
+            <Ionicons name="chatbubble-ellipses-outline" size={17} color="white" />
+            <Text style={styles.projectionPrimaryCtaText}>{eventAskOwnerTitle}</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    );
+  };
+
+  const renderVehicleHighlightsCard = () => {
+    if (!isEventProjection || eventProjection.includeVehicleHighlights === false) return null;
+
+    const highlights = [
+      ...(eventVehicleHighlights || []),
+      ...(eventSystemHighlights || []),
+      ...(eventProjection.includeStoryHighlights === false ? [] : eventStoryHighlights),
+      ...(eventProjection.includeProofOfCare === false ? [] : eventProofHighlights),
+    ];
+
+    const hasIdentity = hasEventProjectionValue(assetIdentityLine);
+    if (!hasIdentity && !highlights.length) return null;
+
+    return (
+      <View key="vehicle_highlights" style={styles.projectionCard}>
+        <Text style={styles.projectionKicker}>Vehicle Highlights</Text>
+        <Text style={styles.projectionCardTitle}>{assetIdentityLine || assetTitle}</Text>
+
+        <View style={styles.projectionIdentityGrid}>
+          {!!asset?.year && (
+            <View style={styles.projectionIdentityTile}>
+              <Text style={styles.projectionIdentityLabel}>Year</Text>
+              <Text style={styles.projectionIdentityValue}>{asset.year}</Text>
+            </View>
+          )}
+          {!!asset?.make && (
+            <View style={styles.projectionIdentityTile}>
+              <Text style={styles.projectionIdentityLabel}>
+                {asset?.type === "boat" ? "Builder" : "Make"}
+              </Text>
+              <Text style={styles.projectionIdentityValue}>{asset.make}</Text>
+            </View>
+          )}
+          {!!asset?.model && (
+            <View style={styles.projectionIdentityTile}>
+              <Text style={styles.projectionIdentityLabel}>Model</Text>
+              <Text style={styles.projectionIdentityValue}>{asset.model}</Text>
+            </View>
+          )}
+        </View>
+
+        {!!highlights.length && (
+          <View style={styles.projectionBulletList}>
+            {highlights.slice(0, 8).map((highlight) => (
+              <View key={highlight} style={styles.projectionBulletRow}>
+                <Ionicons name="checkmark-circle-outline" size={16} color={colors.brandBlue} />
+                <Text style={styles.projectionBulletText}>{highlight}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  const renderMessageOwnerCard = () => {
+    if (!isEventProjection || eventProjection.allowAskOwner === false || !showActionsTab) return null;
+
+    return (
+      <View key="message_owner" style={styles.projectionCard}>
+        <Text style={styles.projectionKicker}>Message Owner</Text>
+        <Text style={styles.projectionCardTitle}>{eventAskOwnerTitle}</Text>
+        <Text style={styles.projectionBodyText}>
+          Start a secure conversation about this {assetKindLabel}. The message stays connected to this public story and event context.
+        </Text>
+        <TouchableOpacity
+          style={styles.projectionSecondaryCta}
+          activeOpacity={0.88}
+          onPress={openEventMessageOwner}
+        >
+          <Ionicons name="chatbubble-outline" size={17} color={colors.textPrimary} />
+          <Text style={styles.projectionSecondaryCtaText}>Ask Owner</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
+  const renderEventProjectionCard = (card) => {
+    switch (card) {
+      case "event_showcase":
+        return renderEventShowcaseCard();
+      case "vehicle_highlights":
+        return renderVehicleHighlightsCard();
+      case "message_owner":
+        return renderMessageOwnerCard();
+      default:
+        return null;
+    }
+  };
+
   /* ------------------------------------------------------------------------ */
   /*                                   LOADING                                */
   /* ------------------------------------------------------------------------ */
@@ -1100,6 +1366,12 @@ return (
           </View>
         </View>
         )}
+
+        {isEventProjection && eventCardsToRender.length > 0 ? (
+          <View style={styles.projectionCardArea}>
+            {eventCardsToRender.map((card) => renderEventProjectionCard(card)).filter(Boolean)}
+          </View>
+        ) : null}
         
         {/* PUBLIC TABS */}
         <View style={styles.tabsRow}>
@@ -1164,6 +1436,9 @@ return (
                 assetOwnerId: asset?.owner_id || asset?.ownerId || null,
                 hubId: originHubId,
                 hubName: originHubName,
+                projectionType: isEventProjection ? "event" : projectionConfig.purpose,
+                eventName: isEventProjection ? eventProjection.eventName || null : null,
+                eventDate: isEventProjection ? eventProjection.eventDate || null : null,
                 mode: "internal",
               });
                 return;
@@ -1172,6 +1447,11 @@ return (
               navigation.navigate("PublicAction", {
                 kac,
                 assetId: asset?.asset_id || asset?.id,
+                projectionType: isEventProjection ? "event" : projectionConfig.purpose,
+                hubId: eventHubId,
+                hubName: eventHubName,
+                eventName: isEventProjection ? eventProjection.eventName || null : null,
+                eventDate: isEventProjection ? eventProjection.eventDate || null : null,
               });
             }}
           >
@@ -2115,6 +2395,185 @@ lightboxArrowRight: {
     color: colors.textPrimary,
     fontWeight: "800",
     marginTop: 3,
+  },
+
+  projectionCardArea: {
+    gap: 14,
+    marginBottom: spacing.lg,
+  },
+
+  projectionCard: {
+    borderRadius: radius.xl,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    padding: spacing.lg,
+    ...shadows.subtle,
+  },
+
+  projectionCardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 10,
+  },
+
+  projectionKicker: {
+    fontSize: 11,
+    fontWeight: "900",
+    color: colors.textMuted,
+    textTransform: "uppercase",
+    letterSpacing: 0,
+  },
+
+  projectionPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceSubtle,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+  },
+
+  projectionPillText: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: colors.textSecondary,
+  },
+
+  projectionImage: {
+    width: "100%",
+    height: 220,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surfaceSubtle,
+    marginTop: 14,
+    marginBottom: 14,
+  },
+
+  projectionCardTitle: {
+    fontSize: 22,
+    lineHeight: 27,
+    fontWeight: "900",
+    color: colors.textPrimary,
+    marginTop: 8,
+  },
+
+  projectionBodyText: {
+    fontSize: 14,
+    lineHeight: 21,
+    fontWeight: "600",
+    color: colors.textSecondary,
+    marginTop: 10,
+  },
+
+  projectionMetaWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginTop: 16,
+  },
+
+  projectionMetaItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceSubtle,
+  },
+
+  projectionMetaText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: colors.textSecondary,
+  },
+
+  projectionPrimaryCta: {
+    marginTop: 18,
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+    borderRadius: radius.pill,
+    backgroundColor: colors.brandBlue,
+  },
+
+  projectionPrimaryCtaText: {
+    color: "white",
+    fontSize: 14,
+    fontWeight: "900",
+  },
+
+  projectionSecondaryCta: {
+    marginTop: 16,
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceSubtle,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+  },
+
+  projectionSecondaryCtaText: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+
+  projectionIdentityGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginTop: 14,
+  },
+
+  projectionIdentityTile: {
+    minWidth: 110,
+    padding: 12,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surfaceSubtle,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+  },
+
+  projectionIdentityLabel: {
+    fontSize: 11,
+    fontWeight: "900",
+    color: colors.textMuted,
+    textTransform: "uppercase",
+  },
+
+  projectionIdentityValue: {
+    marginTop: 4,
+    fontSize: 14,
+    fontWeight: "900",
+    color: colors.textPrimary,
+  },
+
+  projectionBulletList: {
+    gap: 9,
+    marginTop: 14,
+  },
+
+  projectionBulletRow: {
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "flex-start",
+  },
+
+  projectionBulletText: {
+    flex: 1,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: "700",
+    color: colors.textSecondary,
   },
 
   tabsRow: {

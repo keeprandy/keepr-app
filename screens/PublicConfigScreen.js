@@ -26,6 +26,13 @@ import {
   createHub,
   removeStoryFromHub,
 } from "../lib/hubsApi";
+import {
+  getDefaultEventProjectionConfig,
+  getOperationalProjectionOptions,
+  getProjectionActionsForPurpose,
+  isFinancialControlAllowedForProjection,
+  normalizeProjectionConfig,
+} from "../lib/projectionRegistry";
 
 
 
@@ -36,6 +43,8 @@ const MODE_OPTIONS = [
   { key: "current_story", label: "Current Story" },
   { key: "system_story", label: "System Story" },
 ];
+
+const PROJECTION_OPTIONS = getOperationalProjectionOptions();
 
 const ACTION_OPTIONS = [
   { key: "request_info", label: "Request Info" },
@@ -107,6 +116,11 @@ function getDefaultPublicConfig() {
       mode: "inquiry",
       actionsEnabled: getDefaultActionsForMode("inquiry"),
     },
+    projection: {
+      purpose: "share",
+      cardOrder: ["hero", "story_context", "timeline", "showcase", "actions"],
+      event: getDefaultEventProjectionConfig(),
+    },
     sharing: {
       enabled: false,
       showQrBadge: true,
@@ -133,6 +147,10 @@ export default function PublicConfigScreen({ navigation, route }) {
   const [mode, setMode] = React.useState("inquiry");
   const [actionsEnabled, setActionsEnabled] = React.useState(
     getDefaultActionsForMode("inquiry")
+  );
+  const [projectionPurpose, setProjectionPurpose] = React.useState("share");
+  const [eventProjection, setEventProjection] = React.useState(
+    getDefaultEventProjectionConfig()
   );
   const [askingPrice, setAskingPrice] = React.useState("");
   const [externalUrl, setExternalUrl] = React.useState("");
@@ -166,6 +184,14 @@ export default function PublicConfigScreen({ navigation, route }) {
   const [createHubModalVisible, setCreateHubModalVisible] = React.useState(false);
 
   const publicUrl = assetKac ? `https://app.keeprhome.com/k/${assetKac}` : null;
+  const financialControlsAllowed = isFinancialControlAllowedForProjection(projectionPurpose);
+
+const updateEventProjection = React.useCallback((key, value) => {
+  setEventProjection((prev) => ({
+    ...prev,
+    [key]: value,
+  }));
+}, []);
 
 const openPublicStory = () => {
   if (!publicUrl) return;
@@ -392,12 +418,15 @@ const openHubPicker = async () => {
 const actionConfig = existing.actions || getDefaultPublicConfig().actions;
 const storyConfig = existing.story || getDefaultPublicConfig().story;
 const sharingConfig = existing.sharing || getDefaultPublicConfig().sharing;
+const projectionConfig = normalizeProjectionConfig(existing);
 
 
 
 setPublicNarrative(data?.extra_metadata?.publicStoryNarrative || "");
 setShowNarrative(storyConfig.showNarrative !== false);
 setEnabled(storyConfig.enabled === true);
+setProjectionPurpose(projectionConfig.purpose);
+setEventProjection(projectionConfig.event);
 setMode(actionConfig.mode || "inquiry");
 setActionsEnabled(
   Array.isArray(actionConfig.actionsEnabled) && actionConfig.actionsEnabled.length
@@ -483,17 +512,29 @@ const saveConfig = React.useCallback(async () => {
 
     const publicConfig = {
       ...existingPublicConfig,
-      
+      projection: {
+        ...(existingPublicConfig.projection || {}),
+        purpose: projectionPurpose,
+        cardOrder: projectionPurpose === "event"
+          ? ["event_showcase", "vehicle_highlights", "message_owner"]
+          : normalizeProjectionConfig(existingPublicConfig).template.defaultCardOrder,
+        event: {
+          ...getDefaultEventProjectionConfig(),
+          ...eventProjection,
+        },
+      },
       actions: {
         enabled,
-        mode,
-        actionsEnabled,
+        mode: projectionPurpose === "event" ? "event" : mode,
+        actionsEnabled: projectionPurpose === "event"
+          ? getProjectionActionsForPurpose("event")
+          : actionsEnabled,
       },
       story: {
         ...(existingPublicConfig.story || getDefaultPublicConfig().story),
         enabled,
         showLocation,
-        showFinancials,
+        showFinancials: financialControlsAllowed ? showFinancials : false,
         showSystems,
         showProof,
         showTimeline: showTimelineHighlights
@@ -545,8 +586,11 @@ const saveConfig = React.useCallback(async () => {
   enabled,
   mode,
   actionsEnabled,
+  projectionPurpose,
+  eventProjection,
   showLocation,
   showFinancials,
+  financialControlsAllowed,
   showSystems,
   showProof,
   showTimelineHighlights,
@@ -582,6 +626,8 @@ React.useEffect(() => {
   enabled,
   mode,
   actionsEnabled,
+  projectionPurpose,
+  eventProjection,
   showLocation,
   showFinancials,
   showSystems,
@@ -780,14 +826,43 @@ React.useEffect(() => {
     </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Mode</Text>
+          <Text style={styles.sectionLabel}>Projection Purpose</Text>
           <View style={styles.card}>
             <Text style={styles.blockHint}>
-              Mode changes the default action set and how this asset behaves publicly.
+              Choose the public purpose for this Story. Event adds curated cards without replacing the Story.
             </Text>
 
             <View style={styles.pillWrap}>
-              {MODE_OPTIONS.map((item) => (
+              {PROJECTION_OPTIONS.map((item) => (
+                <Pill
+                  key={item.key}
+                  label={item.label}
+                  active={projectionPurpose === item.key}
+                  onPress={() => {
+                    setProjectionPurpose(item.key);
+                    if (item.key === "event") {
+                      setActionsEnabled(getProjectionActionsForPurpose("event"));
+                      setShowFinancials(false);
+                    } else if (item.key === "share") {
+                      applyModeDefaults("inquiry");
+                    }
+                  }}
+                />
+              ))}
+            </View>
+          </View>
+        </View>
+
+        {projectionPurpose !== "event" ? (
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Mode</Text>
+          <View style={styles.card}>
+            <Text style={styles.blockHint}>
+              Mode keeps older public configurations working and controls default actions for Share and Custom.
+            </Text>
+
+            <View style={styles.pillWrap}>
+              {MODE_OPTIONS.filter((item) => item.key !== "for_rent").map((item) => (
                 <Pill
                   key={item.key}
                   label={item.label}
@@ -798,6 +873,122 @@ React.useEffect(() => {
             </View>
           </View>
         </View>
+        ) : null}
+
+        {projectionPurpose === "event" ? (
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Event Projection</Text>
+          <View style={styles.card}>
+            <Text style={styles.blockHint}>
+              Configure only fields that will appear publicly on the Event cards.
+            </Text>
+
+            <TextInput
+              value={eventProjection.eventName}
+              onChangeText={(value) => updateEventProjection("eventName", value)}
+              placeholder="Event name"
+              placeholderTextColor={colors.textMuted}
+              style={styles.input}
+            />
+            <TextInput
+              value={eventProjection.eventDate}
+              onChangeText={(value) => updateEventProjection("eventDate", value)}
+              placeholder="Event date"
+              placeholderTextColor={colors.textMuted}
+              style={styles.input}
+            />
+            <TextInput
+              value={eventProjection.eventLocation}
+              onChangeText={(value) => updateEventProjection("eventLocation", value)}
+              placeholder="Event location"
+              placeholderTextColor={colors.textMuted}
+              style={styles.input}
+            />
+            <TextInput
+              value={eventProjection.hubName}
+              onChangeText={(value) => updateEventProjection("hubName", value)}
+              placeholder="Hub or club association"
+              placeholderTextColor={colors.textMuted}
+              style={styles.input}
+            />
+            <TextInput
+              value={eventProjection.classOrCategory}
+              onChangeText={(value) => updateEventProjection("classOrCategory", value)}
+              placeholder="Class or category"
+              placeholderTextColor={colors.textMuted}
+              style={styles.input}
+            />
+            <TextInput
+              value={eventProjection.displayHeadline}
+              onChangeText={(value) => updateEventProjection("displayHeadline", value)}
+              placeholder="Display headline"
+              placeholderTextColor={colors.textMuted}
+              style={styles.input}
+            />
+            <TextInput
+              value={eventProjection.description}
+              onChangeText={(value) => updateEventProjection("description", value)}
+              placeholder="Event-specific description"
+              placeholderTextColor={colors.textMuted}
+              multiline
+              textAlignVertical="top"
+              style={styles.narrativeInput}
+            />
+            <TextInput
+              value={eventProjection.featuredImage}
+              onChangeText={(value) => updateEventProjection("featuredImage", value)}
+              placeholder="Featured image public media ID or proxy URL"
+              placeholderTextColor={colors.textMuted}
+              style={styles.input}
+            />
+            <TextInput
+              value={eventProjection.selectedVehicleHighlights}
+              onChangeText={(value) => updateEventProjection("selectedVehicleHighlights", value)}
+              placeholder="Selected vehicle/system highlights, one per line"
+              placeholderTextColor={colors.textMuted}
+              multiline
+              textAlignVertical="top"
+              style={styles.narrativeInput}
+            />
+            <TextInput
+              value={eventProjection.selectedProofOfCare}
+              onChangeText={(value) => updateEventProjection("selectedProofOfCare", value)}
+              placeholder="Selected proof of care, one per line"
+              placeholderTextColor={colors.textMuted}
+              multiline
+              textAlignVertical="top"
+              style={styles.narrativeInput}
+            />
+            <TextInput
+              value={eventProjection.activeFrom}
+              onChangeText={(value) => updateEventProjection("activeFrom", value)}
+              placeholder="Active from"
+              placeholderTextColor={colors.textMuted}
+              style={styles.input}
+            />
+            <TextInput
+              value={eventProjection.activeUntil}
+              onChangeText={(value) => updateEventProjection("activeUntil", value)}
+              placeholder="Active until / revert after event"
+              placeholderTextColor={colors.textMuted}
+              style={styles.input}
+            />
+
+            <View style={styles.divider} />
+            <ToggleRow title="Show owner name" value={!!eventProjection.showOwnerName} onValueChange={(value) => updateEventProjection("showOwnerName", value)} />
+            <View style={styles.divider} />
+            <ToggleRow title="Include Event Showcase" value={eventProjection.includeEventShowcase !== false} onValueChange={(value) => updateEventProjection("includeEventShowcase", value)} />
+            <View style={styles.divider} />
+            <ToggleRow title="Include selected Story highlights" value={eventProjection.includeStoryHighlights !== false} onValueChange={(value) => updateEventProjection("includeStoryHighlights", value)} />
+            <View style={styles.divider} />
+            <ToggleRow title="Include selected vehicle/system highlights" value={eventProjection.includeVehicleHighlights !== false} onValueChange={(value) => updateEventProjection("includeVehicleHighlights", value)} />
+            <View style={styles.divider} />
+            <ToggleRow title="Include selected proof of care" value={eventProjection.includeProofOfCare !== false} onValueChange={(value) => updateEventProjection("includeProofOfCare", value)} />
+            <View style={styles.divider} />
+            <ToggleRow title="Allow Ask Owner" value={eventProjection.allowAskOwner !== false} onValueChange={(value) => updateEventProjection("allowAskOwner", value)} />
+          </View>
+        </View>
+        ) : null}
 
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Actions</Text>
@@ -933,13 +1124,17 @@ React.useEffect(() => {
             />
             <View style={styles.divider} />
 
+            {financialControlsAllowed ? (
             <ToggleRow
               title="Show financials"
               subtitle="Display spend or value-related numbers."
               value={showFinancials}
               onValueChange={setShowFinancials}
             />
+            ) : null}
+            {financialControlsAllowed ? (
             <View style={styles.divider} />
+            ) : null}
 
             <ToggleRow
               title="Show systems"
@@ -1145,6 +1340,18 @@ const styles = StyleSheet.create({
   backgroundColor: colors.surfaceSubtle || "#F3F4F6",
   fontSize: 14,
   lineHeight: 20,
+  fontWeight: "600",
+},
+input: {
+  marginTop: spacing.sm,
+  borderWidth: 1,
+  borderColor: colors.borderSubtle || "#E5E7EB",
+  borderRadius: 12,
+  paddingHorizontal: 12,
+  paddingVertical: 10,
+  color: colors.textPrimary,
+  backgroundColor: colors.surfaceSubtle || "#F3F4F6",
+  fontSize: 14,
   fontWeight: "600",
 },
   headerRow: {

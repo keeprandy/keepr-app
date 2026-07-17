@@ -309,6 +309,9 @@ export default function PublicActionScreen({ route, navigation }) {
   const isInternalMode = route?.params?.mode === "internal";
   const originHubId = route?.params?.hubId || null;
   const originHubName = route?.params?.hubName || null;
+  const projectionType = route?.params?.projectionType || null;
+  const eventName = route?.params?.eventName || null;
+  const eventDate = route?.params?.eventDate || null;
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -418,6 +421,13 @@ const canLog = enabledActions.includes("request_service") || !!assetId;
       kac: resolved?.kac || kac || null,
       asset_id: assetId || resolved?.asset_id || null,
       asset_name: asset?.name || resolved?.asset_name || resolved?.asset?.name || null,
+      projection_type: projectionType || null,
+      hub_id: originHubId || null,
+      hub_name: originHubName || null,
+      event: {
+        name: eventName || null,
+        date: eventDate || null,
+      },
       source_url: getSourceUrl(),
     };
   }

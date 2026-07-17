@@ -187,6 +187,12 @@ Deno.serve(async (req) => {
           safeStr(payloadPublicAction.asset_name) ||
           safeStr(resolved.asset_name) ||
           null,
+        projection_type:
+          safeStr(payloadPublicAction.projection_type) ||
+          null,
+        hub_id:
+          safeStr(payloadPublicAction.hub_id) ||
+          null,
         source_url:
           safeStr(payloadPublicAction.source_url) ||
           null,
@@ -230,7 +236,7 @@ Deno.serve(async (req) => {
             .from("asset_threads")
             .insert({
               asset_id: assetRow.id,
-              hub_id: null,
+              hub_id: publicAction.hub_id || null,
               owner_id: assetRow.owner_id,
               created_by: null,
               subject: assetName || "Asset question",
@@ -289,8 +295,8 @@ Deno.serve(async (req) => {
           asset_id: assetRow.id,
           kac: safeStr(assetRow.kac_id).toUpperCase() || kac,
           message_id: createdMessage.id,
-          projection_type: null,
-          hub_id: null,
+          projection_type: publicAction.projection_type || null,
+          hub_id: publicAction.hub_id || null,
           thread_url: ownerThreadUrl,
         };
 
