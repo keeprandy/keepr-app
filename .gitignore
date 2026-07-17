@@ -55,3 +55,4 @@ app-example
 supabase/.temp/.tmp.drivedownload/
 supabase/.temp/
 .vercel
+.env*
