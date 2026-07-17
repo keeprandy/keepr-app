@@ -100,14 +100,23 @@ The baseline therefore includes Keepr `public` schema objects and preserves
 public functions that reference `storage.objects`, while storage bucket creation
 and storage policy configuration remain explicit setup steps.
 
-First staging validation found zero copied rows, but schema lint also found
-follow-up items that must be reviewed before acceptance fixtures:
+First staging validation found zero copied rows. Narrow staging corrections were
+applied and recorded in `supabase/baseline/staging-patches/`:
 
-- enable/represent the required `pgcrypto` extension for `digest(...)` callers;
-- review `public.delete_service_record_full` because it references
-  `storage.delete_object(...)`, which is not present in managed staging storage;
-- accept or separately remediate existing Production-carried lint findings in
-  legacy/action functions.
+- `20260717120500_staging_schema_validation_patch.sql`
+- `20260717120600_staging_pgcrypto_digest_resolution.sql`
+
+The committed baseline now includes the `pgcrypto` requirement and a
+`public.digest(text, text)` compatibility wrapper over `extensions.digest(...)`.
+
+`public.delete_service_record_full` is intentionally excluded from the staging
+baseline because it depends on `storage.delete_object(...)`, a Supabase-managed
+storage internal that should not be recreated or stubbed. This RPC is not on the
+Event Projection acceptance path.
+
+Remaining schema lint findings are non-blocking legacy parity issues for this
+staging acceptance pass and are documented in
+`docs/STAGING_BOOTSTRAP_PLAN.md`.
 
 ## Bootstrap Order
 

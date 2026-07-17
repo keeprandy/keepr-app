@@ -22,6 +22,20 @@ ALTER SCHEMA "public" OWNER TO "pg_database_owner";
 COMMENT ON SCHEMA "public" IS 'standard public schema';
 
 
+CREATE EXTENSION IF NOT EXISTS "pgcrypto" WITH SCHEMA "extensions";
+
+
+CREATE OR REPLACE FUNCTION "public"."digest"("data" text, "type" text) RETURNS bytea
+    LANGUAGE sql IMMUTABLE PARALLEL SAFE
+    SET search_path TO 'extensions', 'pg_catalog'
+    AS 35583
+      SELECT "extensions"."digest"("data", "type");
+    35583;
+
+
+ALTER FUNCTION "public"."digest"("data" text, "type" text) OWNER TO "postgres";
+
+
 
 
 
@@ -1136,40 +1150,6 @@ $$;
 
 
 ALTER FUNCTION "public"."decline_asset_transfer"("p_inbox_item_id" "uuid", "p_user_id" "uuid") OWNER TO "postgres";
-
-
-CREATE OR REPLACE FUNCTION "public"."delete_service_record_full"("p_service_record_id" "uuid") RETURNS "void"
-    LANGUAGE "plpgsql" SECURITY DEFINER
-    SET "search_path" TO 'public', 'pg_catalog'
-    AS $$
-declare
-  photo record;
-begin
-  -- 1. Delete storage objects for service record photos
-  for photo in
-    select storage_path
-    from public.service_record_photos
-    where service_record_id = p_service_record_id
-  loop
-    perform storage.delete_object('asset_photos', photo.storage_path);
-  end loop;
-
-  -- 2. Delete service record photos
-  delete from public.service_record_photos
-  where service_record_id = p_service_record_id;
-
-  -- 3. Delete story events explicitly tied to this record
-  delete from public.story_events
-  where service_record_id = p_service_record_id;
-
-  -- 4. Delete the service record itself
-  delete from public.service_records
-  where id = p_service_record_id;
-end;
-$$;
-
-
-ALTER FUNCTION "public"."delete_service_record_full"("p_service_record_id" "uuid") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."enforce_org_member_limit"() RETURNS "trigger"
@@ -8733,10 +8713,6 @@ GRANT ALL ON FUNCTION "public"."decline_asset_transfer"("p_inbox_item_id" "uuid"
 GRANT ALL ON FUNCTION "public"."decline_asset_transfer"("p_inbox_item_id" "uuid", "p_user_id" "uuid") TO "service_role";
 
 
-
-GRANT ALL ON FUNCTION "public"."delete_service_record_full"("p_service_record_id" "uuid") TO "anon";
-GRANT ALL ON FUNCTION "public"."delete_service_record_full"("p_service_record_id" "uuid") TO "authenticated";
-GRANT ALL ON FUNCTION "public"."delete_service_record_full"("p_service_record_id" "uuid") TO "service_role";
 
 
 
