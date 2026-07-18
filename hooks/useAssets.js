@@ -7,7 +7,8 @@ import { useAuth } from "../context/AuthContext";
  * useAssets(type, options)
  *
  * Defaults:
- * - ONLY returns assets owned by the current user (owner_id = user.id)
+ * - returns assets visible to the current user through RLS
+ *   (owned assets plus explicitly shared Team/stewardship assets)
  * - excludes soft-deleted assets (deleted_at IS NULL)
  *
  * options:
@@ -28,9 +29,9 @@ export function useAssets(type, options = {}) {
   const [error, setError] = useState(null);
 
   const typeFilter = useMemo(() => {
-  if (!type) return null;
-  return type;
-}, [type]);
+    if (!type) return null;
+    return type;
+  }, [type]);
 
   const ownerId = user?.id || null;
 
@@ -39,16 +40,15 @@ export function useAssets(type, options = {}) {
     setError(null);
 
     try {
-      // If we're in "owned assets only" mode and we don't have a user yet, return empty
+      // If we're in authenticated listing mode and we don't have a user yet, return empty.
       if (!includeAllOwners && !ownerId) {
         setAssets([]);
         return;
       }
-        let query = supabase.from("assets").select("*");
+      let query = supabase.from("assets").select("*");
 
-        if (!includeAllOwners && ownerId) {
-          query = query.eq("owner_id", ownerId);
-        }
+      // Do not filter by owner_id here. RLS determines the assets visible to
+      // the caller, including Team-shared assets through asset_stewardships.
       // includeAllOwners remains for admin usage only.
       if (includeAllOwners) {
         // no owner filter
