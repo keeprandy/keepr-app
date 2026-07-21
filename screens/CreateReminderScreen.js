@@ -31,6 +31,7 @@ import {
   buildKeeprProAssignmentOptions,
   buildTeamAssignmentOption,
   buildTeamMemberAssignmentOption,
+  cancelReminderPushNotification,
   completeSharedCoordinationAction,
   createReminderWebNotifications,
   ensureNextReminderOccurrence,
@@ -1694,6 +1695,21 @@ const canSave = useMemo(
                   recurrenceUpdateError
                 );
               }
+
+              const nextPushBody = [
+                assignedTo,
+                providerTarget?.label,
+                assetName,
+                systemName,
+              ]
+                .filter(Boolean)
+                .join(" • ");
+              await scheduleReminderPushNotification({
+                reminderId: recurrenceResult.reminderId,
+                title: title.trim(),
+                body: nextPushBody || "Tap to open in Keepr",
+                dueAtISO: recurrenceResult.dueAt,
+              });
             } else if (recurrenceResult?.reason) {
               const recurrenceMeta = {
                 ...extraMeta,
@@ -1749,6 +1765,8 @@ const canSave = useMemo(
             body: pushBody || "Tap to open in Keepr",
             dueAtISO,
           });
+        } else if (savedId) {
+          await cancelReminderPushNotification(savedId);
         }
 
         setStatus(effectiveStatus);
@@ -2120,6 +2138,7 @@ const canSave = useMemo(
             .eq("owner_id", ownerId);
 
           if (error) throw error;
+          await cancelReminderPushNotification(reminderIdFromRoute);
           navigation.navigate(afterSave);
         } catch (e) {
           console.log("Delete reminder error:", e);
@@ -2154,6 +2173,7 @@ const canSave = useMemo(
                 .eq("owner_id", ownerId);
 
               if (error) throw error;
+              await cancelReminderPushNotification(reminderIdFromRoute);
 
               navigation.navigate(afterSave);
             } catch (e) {
