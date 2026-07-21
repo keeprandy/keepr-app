@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { hashToken } from "../_shared/crypto.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -32,6 +33,7 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseAnon = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
     const supabase = createClient(supabaseUrl, supabaseAnon, {
       global: {
@@ -46,23 +48,53 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const kac = safeStr(body?.kac).trim();
+    const token = safeStr(body?.token).trim();
     const intent =
       safeStr(body?.intent).trim() ||
       safeStr(body?.action_type).trim();
 
-    if (!kac) return json(400, { error: "Missing kac" });
+    if (!kac && !token) return json(400, { error: "Missing kac or token" });
     if (!intent) return json(400, { error: "Missing intent" });
 
-    const { data: rows, error: rpcErr } = await supabase.rpc(
-      "resolve_kac",
-      { p_kac: kac }
-    );
+    let resolved: Record<string, unknown> | null = null;
 
-    if (rpcErr) return json(400, { error: rpcErr.message });
+    if (token) {
+      if (!serviceRole) return json(500, { error: "Missing service role configuration" });
+      const admin = createClient(supabaseUrl, serviceRole);
+      const tokenHash = await hashToken(token);
+      const { data: link, error: linkErr } = await admin
+        .from("public_links")
+        .select("id, asset_id, system_id, mode, label, is_active, expires_at")
+        .eq("token_hash", tokenHash)
+        .single();
 
-    const resolved = Array.isArray(rows) ? rows[0] : rows;
-    if (!resolved?.master_asset_id)
-      return json(404, { error: "KAC not found" });
+      if (linkErr || !link || !link.is_active) {
+        return json(404, { error: "Invalid QR code" });
+      }
+      if (link.expires_at && new Date(link.expires_at) < new Date()) {
+        return json(403, { error: "QR code expired" });
+      }
+
+      resolved = {
+        master_asset_id: link.asset_id,
+        asset_id: link.asset_id,
+        system_id: link.system_id,
+        public_link_id: link.id,
+        mode: link.mode,
+        label: link.label,
+      };
+    } else {
+      const { data: rows, error: rpcErr } = await supabase.rpc(
+        "resolve_kac",
+        { p_kac: kac }
+      );
+
+      if (rpcErr) return json(400, { error: rpcErr.message });
+
+      resolved = Array.isArray(rows) ? rows[0] : rows;
+      if (!resolved?.master_asset_id)
+        return json(404, { error: "KAC not found" });
+    }
 
     if (intent === "capture_event_inbox") {
       if (!user?.id)
@@ -109,6 +141,23 @@ Deno.serve(async (req) => {
           null,
         source_url:
           safeStr(payloadPublicAction.source_url) ||
+          null,
+        system_id:
+          safeStr(payloadPublicAction.system_id) ||
+          safeStr(resolved.system_id) ||
+          null,
+        keepr_pro_id:
+          safeStr(payloadPublicAction.keepr_pro_id) ||
+          null,
+        assignment_scope:
+          safeStr(payloadPublicAction.assignment_scope) ||
+          null,
+        source_screen:
+          safeStr(payloadPublicAction.source_screen) ||
+          null,
+        public_link_id:
+          safeStr(payloadPublicAction.public_link_id) ||
+          safeStr(resolved.public_link_id) ||
           null,
       };
 

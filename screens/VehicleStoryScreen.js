@@ -31,6 +31,9 @@ import KeeprProgressCard, {
   buildKeeprProgressModel,
 } from "../components/KeeprProgressCard";
 import PublicStoryCard from "../components/PublicStoryCard";
+import KeeprProCommunicationCard, {
+  getAssetKeeprProFromMetadata,
+} from "../components/KeeprProCommunicationCard";
 
 // ✅ low-level upload helper (NOT a hook)
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
@@ -1040,6 +1043,25 @@ const meta = {
 
   const vehicleDisplayName =
   `${vehicle?.year || ""} ${vehicle?.make || ""} ${vehicle?.model || ""}`.trim() || "Vehicle";
+  const assetKeeprPro = useMemo(() => getAssetKeeprProFromMetadata(vehicle), [vehicle]);
+  const requestAssetServiceFromKeeprPro = useCallback(
+    (pro) => {
+      const publicKac = vehicle?.kac || vehicle?.kac_code || vehicle?.kac_id || vehicle?.kacId || null;
+      if (!publicKac) {
+        Alert.alert("Public link needed", "Create a Keepr public link before requesting service this way.");
+        return;
+      }
+      navigation.navigate("PublicAction", {
+        kac: publicKac,
+        actionType: "request_service",
+        assetId: vehicle?.id || null,
+        keeprProId: pro?.id || null,
+        assignmentScope: "asset",
+        sourceScreen: "vehicle_story",
+      });
+    },
+    [navigation, vehicle]
+  );
 
 
   const goToStoryPrint = () => {
@@ -1402,6 +1424,14 @@ const meta = {
               />
             </View>
             )}
+            {assetKeeprPro ? (
+              <KeeprProCommunicationCard
+                keeprPro={assetKeeprPro}
+                assignmentScope="asset"
+                assetName={vehicleName}
+                onRequestService={() => requestAssetServiceFromKeeprPro(assetKeeprPro)}
+              />
+            ) : null}
             <TouchableOpacity
             style={styles.primaryAddBtn}
             onPress={goToAttachments}

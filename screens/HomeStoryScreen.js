@@ -32,6 +32,9 @@ import KeeprProgressCard, {
 import { buildHighlights } from "../lib/storyHighlightEngine";
 
 import PublicStoryCard from "../components/PublicStoryCard";
+import KeeprProCommunicationCard, {
+  getAssetKeeprProFromMetadata,
+} from "../components/KeeprProCommunicationCard";
 
 // ✅ low-level upload helper (NOT a hook)
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
@@ -1071,6 +1074,25 @@ const filteredTimelineItems = useMemo(() => {
 
   const homeLocation = meta.location || null;
   const homeName = home?.name || "My home";
+  const assetKeeprPro = useMemo(() => getAssetKeeprProFromMetadata(home), [home]);
+  const requestAssetServiceFromKeeprPro = useCallback(
+    (pro) => {
+      const publicKac = home?.kac || home?.kac_code || home?.kac_id || home?.kacId || null;
+      if (!publicKac) {
+        Alert.alert("Public link needed", "Create a Keepr public link before requesting service this way.");
+        return;
+      }
+      navigation.navigate("PublicAction", {
+        kac: publicKac,
+        actionType: "request_service",
+        assetId: home?.id || null,
+        keeprProId: pro?.id || null,
+        assignmentScope: "asset",
+        sourceScreen: "home_story",
+      });
+    },
+    [navigation, home]
+  );
 
 const goToStoryPrint = (target = "StoryPrint") => {
   if (!home) return;
@@ -1532,6 +1554,14 @@ try {
               />
             </View>
             )}
+            {assetKeeprPro ? (
+              <KeeprProCommunicationCard
+                keeprPro={assetKeeprPro}
+                assignmentScope="asset"
+                assetName={homeName}
+                onRequestService={() => requestAssetServiceFromKeeprPro(assetKeeprPro)}
+              />
+            ) : null}
             <TouchableOpacity
             style={styles.primaryAddBtn}
             onPress={goToAttachments}

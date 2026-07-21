@@ -16,6 +16,7 @@ import { layoutStyles } from "../styles/layout";
 import { colors, spacing, radius } from "../styles/theme";
 import { supabase } from "../lib/supabaseClient";
 import { publicResolve } from "../lib/publicQrApi";
+import KeeprProCommunicationCard from "../components/KeeprProCommunicationCard";
 
 const IS_WEB = Platform.OS === "web";
 
@@ -140,6 +141,11 @@ function buildSystemStoryFromPackage(pkg, assetNameFallback = null) {
   const system = pkg?.system || {};
   const readiness = pkg?.readiness || {};
   const proof = Array.isArray(pkg?.proof) ? pkg.proof : [];
+  const packagePros = Array.isArray(pkg?.assigned_keepr_pros)
+    ? pkg.assigned_keepr_pros
+    : Array.isArray(readiness?.assigned_keepr_pros)
+      ? readiness.assigned_keepr_pros
+      : [];
 
   // Standardized metadata captured via EditSystemEnrichmentScreen.
   // We prefer these when present, and fall back to legacy `readiness` fields.
@@ -162,6 +168,8 @@ function buildSystemStoryFromPackage(pkg, assetNameFallback = null) {
   );
 
   return {
+    assetId: pkg?.asset?.id || system?.asset_id || pkg?.asset_id || null,
+    systemId: system?.id || pkg?.system_id || null,
     assetName: assetNameFallback || pkg?.asset?.name || "Asset",
     systemName: system?.name || "System",
     heroUri,
@@ -225,9 +233,11 @@ function buildSystemStoryFromPackage(pkg, assetNameFallback = null) {
       intervalMonths: readiness?.interval_months || system?.interval_months || null,
       intervalHours: readiness?.interval_hours || system?.interval_hours || null,
       nextDue: readiness?.next_due || system?.next_service_date || null,
+      assignedKeeprPros: packagePros,
     },
     additionalMetadata: flattenMetadata({ system: system?.metadata || {}, readiness: readiness || {} }),
     readinessSnapshot: {
+      status: readiness?.status || readiness?.readiness_status || readiness?.readinessStatus || null,
       fuel: readiness?.fuel_type || null,
       outletWithin10ft: readiness?.outlet_within_10ft,
       breakerDistanceFt: readiness?.breaker_distance_ft,
@@ -239,7 +249,7 @@ function buildSystemStoryFromPackage(pkg, assetNameFallback = null) {
   };
 }
 
-function applySystemRowEnrichment(story, systemRow, assignedProNames = []) {
+function applySystemRowEnrichment(story, systemRow, assignedPros = []) {
   if (!story) return story;
   const sys = systemRow || {};
   const std = getStandardMeta(sys);
@@ -293,8 +303,8 @@ function applySystemRowEnrichment(story, systemRow, assignedProNames = []) {
   );
   const intervalHours = pickFirst(sys.interval_hours, rel.interval_hours, story?.service?.intervalHours);
 
-  const assignedLine = Array.isArray(assignedProNames) && assignedProNames.length
-    ? assignedProNames.join(", ")
+  const assignedLine = Array.isArray(assignedPros) && assignedPros.length
+    ? assignedPros.map((p) => p?.name || p?.label).filter(Boolean).join(", ")
     : pickFirst(rel.assigned_vendor, rel.vendor, null);
 
   return {
@@ -321,6 +331,9 @@ function applySystemRowEnrichment(story, systemRow, assignedProNames = []) {
       intervalMonths: intervalMonths || story?.service?.intervalMonths || null,
       intervalHours: intervalHours || story?.service?.intervalHours || null,
       assignedPros: assignedLine || null,
+      assignedKeeprPros: Array.isArray(assignedPros) && assignedPros.length
+        ? assignedPros
+        : story?.service?.assignedKeeprPros || [],
     },
     playbook: playbookText || null,
   };
@@ -388,20 +401,33 @@ const token = routeToken || webToken || null;
           const resolved = await publicResolve(token);
           if (cancelled) return;
 
-          // If your public-resolve later returns a full package, this is where we’d use it.
-          // For now, we at least populate names to avoid empty shell.
-          setSystemStory({
-            assetName: resolved?.asset?.name || "Asset",
-            systemName: resolved?.system?.name || "System",
-            heroUri: null,
-            keyFacts: {},
-            warranty: {},
-            service: {},
-            attachments: { photos: 0, files: 0, links: 0 },
-            timeline: [],
-            readinessSnapshot: {},
-            proofItems: [],
-          });
+          const payload = resolved?.payload || null;
+          if (payload) {
+            const story = buildSystemStoryFromPackage(
+              payload,
+              payload?.asset?.name || resolved?.asset?.name || "Asset"
+            );
+            setSystemStory({
+              ...story,
+              projectionMode: resolved?.mode || null,
+              projectionLabel: resolved?.label || null,
+            });
+          } else {
+            setSystemStory({
+              assetName: resolved?.asset?.name || "Asset",
+              systemName: resolved?.system?.name || "System",
+              heroUri: null,
+              keyFacts: {},
+              warranty: {},
+              service: {},
+              attachments: { photos: 0, files: 0, links: 0 },
+              timeline: [],
+              readinessSnapshot: {},
+              proofItems: [],
+              projectionMode: resolved?.mode || null,
+              projectionLabel: resolved?.label || null,
+            });
+          }
           setLoading(false);
           return;
         }
@@ -447,7 +473,7 @@ const token = routeToken || webToken || null;
           .maybeSingle();
 
         // Resolve assigned Keepr Pros (if EditSystemEnrichment stored them in metadata.relationships)
-        let assignedProNames = [];
+        let assignedPros = [];
         const rel = getStandardMeta(sysRow)?.relationships || {};
         const proIdsJson =
           rel?.keepr_pro_ids ||
@@ -471,15 +497,16 @@ const token = routeToken || webToken || null;
         if (proIds.length) {
           const { data: pros } = await supabase
             .from("keepr_pros")
-            .select("id, name")
+            .select("id, name, category, phone, email, website")
             .in("id", proIds);
-          assignedProNames = (pros || []).map((p) => p?.name).filter(Boolean);
+          const byId = new Map((pros || []).map((p) => [p.id, p]));
+          assignedPros = proIds.map((id) => byId.get(id)).filter(Boolean);
         }
 
         if (cancelled) return;
 
         const baseStory = buildSystemStoryFromPackage(pkg, assetNameFallback);
-        const story = applySystemRowEnrichment(baseStory, sysRow, assignedProNames);
+        const story = applySystemRowEnrichment(baseStory, sysRow, assignedPros);
         setSystemStory(story);
         setLoading(false);
       } catch (e) {
@@ -549,7 +576,27 @@ const token = routeToken || webToken || null;
     timeline = [],
     readinessSnapshot = {},
     proofItems = [],
+    projectionMode = null,
+    projectionLabel = null,
   } = systemStory;
+  const isServiceReady =
+    projectionMode === "service_ready" ||
+    String(projectionLabel || "").toLowerCase().includes("service ready");
+  const assignedKeeprPros = Array.isArray(service.assignedKeeprPros)
+    ? service.assignedKeeprPros
+    : [];
+
+  const requestServiceFromProjection = (pro = null) => {
+    navigation.navigate("PublicAction", {
+      token,
+      actionType: "request_service",
+      assetId: systemStory?.assetId || null,
+      systemId: systemStory?.systemId || systemId || null,
+      keeprProId: pro?.id || null,
+      assignmentScope: "system",
+      sourceScreen: isServiceReady ? "service_ready_projection" : "system_story_print",
+    });
+  };
 
   const Sheet = () => (
     <>
@@ -566,10 +613,20 @@ const token = routeToken || webToken || null;
 
       <View style={styles.sheet}>
         <View style={styles.headerBlock}>
+          {isServiceReady ? (
+            <Text style={styles.projectionKicker}>
+              {projectionLabel || "Service Ready"}
+            </Text>
+          ) : null}
           <Text style={styles.assetTitle}>{systemName || "System"}</Text>
           <Text style={styles.assetSubtitle}>
             Asset: {assetName || "Asset"} · Printed {printedAt}
           </Text>
+          {isServiceReady ? (
+            <Text style={styles.assetSubtitle}>
+              Readiness: {formatMaybe(readinessSnapshot.status || keyFacts.lifecycleStatus || "Ready for service review")}
+            </Text>
+          ) : null}
         </View>
 
         {heroUri ? (
@@ -638,6 +695,10 @@ const token = routeToken || webToken || null;
 
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Readiness snapshot</Text>
+            <View style={styles.kvRow}>
+              <Text style={styles.kvKey}>Status</Text>
+              <Text style={styles.kvVal}>{formatMaybe(readinessSnapshot.status)}</Text>
+            </View>
             <View style={styles.kvRow}>
               <Text style={styles.kvKey}>Fuel</Text>
               <Text style={styles.kvVal}>{formatMaybe(readinessSnapshot.fuel)}</Text>
@@ -719,6 +780,29 @@ const token = routeToken || webToken || null;
               <Text style={styles.kvKey}>Next due</Text>
               <Text style={styles.kvVal}>{formatMaybe(formatDate(service.nextDue))}</Text>
             </View>
+
+            {assignedKeeprPros.length ? (
+              assignedKeeprPros.map((pro) => (
+                <KeeprProCommunicationCard
+                  key={pro.id || pro.name}
+                  keeprPro={pro}
+                  assignmentScope="system"
+                  assetName={assetName}
+                  systemName={systemName}
+                  onRequestService={() => requestServiceFromProjection(pro)}
+                  compact
+                />
+              ))
+            ) : service.assignedPros ? (
+              <KeeprProCommunicationCard
+                keeprPro={{ name: service.assignedPros }}
+                assignmentScope="system"
+                assetName={assetName}
+                systemName={systemName}
+                onRequestService={() => requestServiceFromProjection(null)}
+                compact
+              />
+            ) : null}
           </View>
 
           <View style={styles.card}>
@@ -921,6 +1005,13 @@ const styles = StyleSheet.create({
   },
 
   headerBlock: { marginBottom: spacing.md },
+  projectionKicker: {
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    color: colors.primary || "#2563EB",
+    marginBottom: 4,
+  },
   assetTitle: { fontSize: 20, fontWeight: "800", color: colors.textPrimary || "#111827", marginBottom: 4 },
   assetSubtitle: { fontSize: 12, color: colors.textMuted || "#6B7280" },
 

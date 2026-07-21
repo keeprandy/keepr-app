@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import * as Clipboard from "expo-clipboard";
 import { useFocusEffect } from "@react-navigation/native";
 
 import { layoutStyles } from "../styles/layout";
@@ -22,10 +23,12 @@ import { colors, spacing, radius, typography, shadows } from "../styles/theme";
 
 import { useVehicles } from "../context/VehiclesContext";
 import { supabase } from "../lib/supabaseClient";
+import { createOrReuseServiceReadyLink } from "../lib/systemServiceReadyLinks";
 
 import { useAttachments } from "../hooks/useAttachments";
 import { ATTACHMENT_BUCKET, getSignedUrl } from "../lib/attachmentsApi";
 import AttachmentViewerModal from "../components/AttachmentViewerModal";
+import KeeprProCommunicationCard from "../components/KeeprProCommunicationCard";
 
 const HERO_ASPECT = 4 / 3;
 const IS_WEB = Platform.OS === "web";
@@ -697,7 +700,56 @@ export default function VehicleSystemStoryScreen(props) {
   }
 
   
-};
+  };
+
+  const handleShareServiceReady = useCallback(async () => {
+    try {
+      const result = await createOrReuseServiceReadyLink({
+        supabase,
+        assetId,
+        systemId,
+        systemName: system?.name,
+      });
+
+      if (!result?.url) {
+        Alert.alert(
+          "Service Ready is active",
+          "An active Service Ready projection already exists, but its original token URL cannot be recovered from the stored hash. Create a new QR/link from this screen when you need a fresh copy."
+        );
+        return;
+      }
+
+      await Clipboard.setStringAsync(result.url);
+      Alert.alert("Service Ready link copied", result.url);
+    } catch (e) {
+      console.error("Service Ready link failed", e);
+      Alert.alert("Could not create Service Ready link", e?.message || "Please try again.");
+    }
+  }, [assetId, systemId, system?.name]);
+
+  const handleRequestServiceFromKeeprPro = useCallback(async (pro) => {
+    try {
+      const result = await createOrReuseServiceReadyLink({
+        supabase,
+        assetId,
+        systemId,
+        systemName: system?.name,
+        forceNew: true,
+      });
+
+      navigation.navigate("PublicAction", {
+        token: result.token,
+        actionType: "request_service",
+        systemId,
+        assetId,
+        keeprProId: pro?.id || null,
+        assignmentScope: "system",
+        sourceScreen: "vehicle_system_story",
+      });
+    } catch (e) {
+      Alert.alert("Could not start service request", e?.message || "Please try again.");
+    }
+  }, [navigation, assetId, systemId, system?.name]);
 
   // ---- render ----
   return (
@@ -751,6 +803,16 @@ export default function VehicleSystemStoryScreen(props) {
           <Ionicons name="print-outline" size={14} />
           <Text style={styles.chipLabel}> Print report</Text>
         </TouchableOpacity>
+
+          <TouchableOpacity style={styles.chip} onPress={handleShareServiceReady}>
+            <Ionicons
+              name="share-social-outline"
+              size={14}
+              color={colors.textSecondary}
+              style={{ marginRight: 6 }}
+            />
+            <Text style={styles.chipLabel}>Service Ready</Text>
+          </TouchableOpacity>
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
@@ -948,26 +1010,15 @@ export default function VehicleSystemStoryScreen(props) {
                   ) : assignedPros.length ? (
                     <View style={{ marginTop: spacing.sm }}>
                       {assignedPros.map((pro) => (
-                        <TouchableOpacity
+                        <KeeprProCommunicationCard
                           key={pro.id}
-                          style={styles.proRow}
-                          onPress={() => openKeeprPro(pro)}
-                          activeOpacity={0.85}
-                        >
-                          <View style={{ flex: 1 }}>
-                            <Text style={styles.proName} numberOfLines={1}>
-                              {pro.name}
-                            </Text>
-                            <Text style={styles.proMeta} numberOfLines={1}>
-                              {[pro.category, pro.phone || pro.email].filter(Boolean).join(" · ")}
-                            </Text>
-                          </View>
-                          <Ionicons
-                            name="chevron-forward-outline"
-                            size={18}
-                            color={colors.textSecondary}
-                          />
-                        </TouchableOpacity>
+                          keeprPro={pro}
+                          assignmentScope="system"
+                          assetName={assetName}
+                          systemName={system?.name}
+                          onRequestService={() => handleRequestServiceFromKeeprPro(pro)}
+                          onViewKeeprPro={() => openKeeprPro(pro)}
+                        />
                       ))}
                     </View>
                   ) : (
@@ -1102,22 +1153,15 @@ export default function VehicleSystemStoryScreen(props) {
                 ) : assignedPros.length ? (
                   <View style={{ marginTop: spacing.sm }}>
                     {assignedPros.map((pro) => (
-                      <TouchableOpacity
+                      <KeeprProCommunicationCard
                         key={pro.id}
-                        style={styles.proRow}
-                        onPress={() => openKeeprPro(pro)}
-                        activeOpacity={0.85}
-                      >
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.proName} numberOfLines={1}>
-                            {pro.name}
-                          </Text>
-                          <Text style={styles.proMeta} numberOfLines={1}>
-                            {[pro.category, pro.phone || pro.email].filter(Boolean).join(" · ")}
-                          </Text>
-                        </View>
-                        <Ionicons name="chevron-forward-outline" size={18} color={colors.textSecondary} />
-                      </TouchableOpacity>
+                        keeprPro={pro}
+                        assignmentScope="system"
+                        assetName={assetName}
+                        systemName={system?.name}
+                        onRequestService={() => handleRequestServiceFromKeeprPro(pro)}
+                        onViewKeeprPro={() => openKeeprPro(pro)}
+                      />
                     ))}
                   </View>
                 ) : (

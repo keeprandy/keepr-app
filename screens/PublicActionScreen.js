@@ -309,6 +309,12 @@ export default function PublicActionScreen({ route, navigation }) {
   const isInternalMode = route?.params?.mode === "internal";
   const originHubId = route?.params?.hubId || null;
   const originHubName = route?.params?.hubName || null;
+  const requestedAction = route?.params?.actionType || route?.params?.action_type || null;
+  const routeSystemId = route?.params?.systemId || route?.params?.system_id || null;
+  const routeKeeprProId = route?.params?.keeprProId || route?.params?.keepr_pro_id || null;
+  const routeAssignmentScope =
+    route?.params?.assignmentScope || route?.params?.assignment_scope || null;
+  const routeSourceScreen = route?.params?.sourceScreen || route?.params?.source_screen || null;
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -418,6 +424,12 @@ const canLog = enabledActions.includes("request_service") || !!assetId;
       kac: resolved?.kac || kac || null,
       asset_id: assetId || resolved?.asset_id || null,
       asset_name: asset?.name || resolved?.asset_name || resolved?.asset?.name || null,
+      system_id: routeSystemId || resolved?.system_id || null,
+      keepr_pro_id: routeKeeprProId || null,
+      assignment_scope: routeAssignmentScope || null,
+      source_screen: routeSourceScreen || (token ? "public_action_token" : "public_action"),
+      public_link_id: resolved?.public_link_id || null,
+      token_context: token ? "public_link" : null,
       source_url: getSourceUrl(),
     };
   }
@@ -487,10 +499,15 @@ const canLog = enabledActions.includes("request_service") || !!assetId;
 useEffect(() => {
   if (!enabledActions.length) return;
 
+  if (requestedAction && enabledActions.includes(requestedAction)) {
+    setSelectedAction(requestedAction);
+    return;
+  }
+
   if (!selectedAction || !enabledActions.includes(selectedAction)) {
     setSelectedAction(enabledActions[0]);
   }
-}, [enabledActions]);
+}, [enabledActions, requestedAction, selectedAction]);
 
 useEffect(() => {
   let cancelled = false;

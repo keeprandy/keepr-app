@@ -286,6 +286,7 @@ const linking = {
     },
     TimelineRecord: "TimelineRecord",
     CreateReminder: "CreateReminder",
+    SystemStoryPrint: "SystemStoryPrint",
     UploadLab: "upload-lab",
     AssetAttachments: "asset/:assetId/attachments",
     HomePublic: "public/home/:assetId",
