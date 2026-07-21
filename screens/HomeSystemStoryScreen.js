@@ -40,6 +40,7 @@ import { useAttachments } from "../hooks/useAttachments";
 import { ATTACHMENT_BUCKET, getSignedUrl } from "../lib/attachmentsApi";
 import AttachmentViewerModal from "../components/AttachmentViewerModal";
 import KeeprProCommunicationCard from "../components/KeeprProCommunicationCard";
+import ServiceReadyLinkModal from "../components/ServiceReadyLinkModal";
 import { WebView } from "react-native-webview";
 
 const HERO_ASPECT = 4 / 3;
@@ -215,6 +216,8 @@ export default function HomeSystemStoryScreen({ route, navigation }) {
 const [thumbErrorByKey, setThumbErrorByKey] = useState({});
 const [recordThumbErrorByUrl, setRecordThumbErrorByUrl] = useState({});
   const [printing, setPrinting] = useState(false);
+  const [serviceReadyUrl, setServiceReadyUrl] = useState(null);
+  const [serviceReadyQrVisible, setServiceReadyQrVisible] = useState(false);
 
 const markThumbFailed = useCallback((key) => {
   if (!key) return;
@@ -732,6 +735,27 @@ const setHeroAttachment = useCallback(
     }
   }, [navigation, systemId, assetId]);
 
+  const generateFreshServiceReadyLink = useCallback(async () => {
+    try {
+      const result = await createOrReuseServiceReadyLink({
+        supabase,
+        assetId,
+        systemId,
+        systemName: system?.name,
+        forceNew: true,
+      });
+
+      if (!result?.url) throw new Error("No Service Ready URL returned.");
+      setServiceReadyUrl(result.url);
+      await Clipboard.setStringAsync(result.url);
+      setServiceReadyQrVisible(true);
+      Alert.alert("New Service Ready link copied", result.url);
+    } catch (e) {
+      console.error("Service Ready link failed", e);
+      Alert.alert("Could not create Service Ready link", e?.message || "Please try again.");
+    }
+  }, [assetId, systemId, system?.name]);
+
   const handleShareServiceReady = useCallback(async () => {
     try {
       const result = await createOrReuseServiceReadyLink({
@@ -739,23 +763,40 @@ const setHeroAttachment = useCallback(
         assetId,
         systemId,
         systemName: system?.name,
+        sessionUrl: serviceReadyUrl,
       });
 
-      if (!result?.url) {
-        Alert.alert(
-          "Service Ready is active",
-          "An active Service Ready projection already exists, but its original token URL cannot be recovered from the stored hash. Create a new QR/link from this screen when you need a fresh copy."
-        );
+      if (result?.url) {
+        setServiceReadyUrl(result.url);
+        Alert.alert("Service Ready link", "Use the current session link.", [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Copy Link",
+            onPress: async () => {
+              await Clipboard.setStringAsync(result.url);
+              Alert.alert("Service Ready link copied", result.url);
+            },
+          },
+          { text: "Show QR", onPress: () => setServiceReadyQrVisible(true) },
+        ]);
         return;
       }
 
-      await Clipboard.setStringAsync(result.url);
-      Alert.alert("Service Ready link copied", result.url);
+      Alert.alert(
+        "Service Ready is active",
+        result?.activeLinkCount > 1
+          ? "Multiple active Service Ready links exist for this system. Keepr cannot recover their original URLs from stored token hashes, but you can generate a fresh QR and link without changing the existing ones."
+          : "An active Service Ready projection already exists. Keepr cannot recover its original URL from the stored token hash, but you can generate a fresh QR and link without changing the existing one.",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Generate New QR & Link", onPress: generateFreshServiceReadyLink },
+        ]
+      );
     } catch (e) {
       console.error("Service Ready link failed", e);
-      Alert.alert("Could not create Service Ready link", e?.message || "Please try again.");
+      Alert.alert("Could not inspect Service Ready link", e?.message || "Please try again.");
     }
-  }, [assetId, systemId, system?.name]);
+  }, [assetId, generateFreshServiceReadyLink, serviceReadyUrl, system?.name, systemId]);
 
   const handleRequestServiceFromKeeprPro = useCallback(
     async (pro) => {
@@ -1707,6 +1748,12 @@ const warrantyStarts = warrantyMeta?.starts_on || warrantyMeta?.start_on || warr
         onIndexChange={handleViewerIndexChange}
         onClose={() => setViewerVisible(false)}
         onDelete={null}
+      />
+      <ServiceReadyLinkModal
+        visible={serviceReadyQrVisible}
+        url={serviceReadyUrl}
+        systemName={system?.name}
+        onClose={() => setServiceReadyQrVisible(false)}
       />
     </SafeAreaView>
   );
