@@ -46,6 +46,11 @@ import GlassFooter from "./components/navigation/GlassFooter";
 import MoreScreen from "./screens/MoreScreen";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ExpoLinking from "expo-linking";
+import {
+  addReminderNotificationResponseListener,
+  getLastReminderNotificationResponse,
+  setReminderNotificationHandler,
+} from "./lib/remindersNotifications";
 
 import ManageTeamScreen from "./screens/ManageTeamScreen";
 import PrivacyTrustScreen from "./screens/PrivacyTrustScreen";
@@ -237,7 +242,7 @@ const HomeStackNav = createNativeStackNavigator();
 const linking = {
   prefixes: [
     "keepr://",
-    "http://localhost:8081",
+    ...(Platform.OS === "web" ? ["http://localhost:8081"] : []),
     "https://app.keeprhome.com",
     "https://keeprhome.com",
     "https://keeprmarine.com",
@@ -280,6 +285,7 @@ const linking = {
       },
     },
     TimelineRecord: "TimelineRecord",
+    CreateReminder: "CreateReminder",
     UploadLab: "upload-lab",
     AssetAttachments: "asset/:assetId/attachments",
     HomePublic: "public/home/:assetId",
@@ -1155,6 +1161,155 @@ async function captureInviteSourceFromUrl(url) {
   }
 }
 
+const PENDING_REMINDER_NOTIFICATION_KEY =
+  "keepr.pendingReminderNotification.v1";
+
+function extractReminderNotificationData(responseOrData) {
+  const data =
+    responseOrData?.notification?.request?.content?.data ||
+    responseOrData?.request?.content?.data ||
+    responseOrData ||
+    {};
+
+  let reminderId = data?.reminderId || data?.reminder_id || null;
+  let afterSave = data?.afterSave || data?.after_save || "Notifications";
+
+  if (!reminderId && data?.deepLink) {
+    try {
+      const parsed = ExpoLinking.parse(String(data.deepLink));
+      reminderId =
+        parsed?.queryParams?.reminderId ||
+        parsed?.queryParams?.reminder_id ||
+        parsed?.queryParams?.reopenReminderId ||
+        null;
+      afterSave =
+        parsed?.queryParams?.afterSave ||
+        parsed?.queryParams?.after_save ||
+        afterSave;
+    } catch (_) {}
+  }
+
+  if (!reminderId) return null;
+
+  return {
+    reminderId: String(reminderId),
+    afterSave: String(afterSave || "Notifications"),
+    eventKey: data?.eventKey || data?.event_key || null,
+    notificationType:
+      data?.notificationType || data?.notification_type || "reminder",
+  };
+}
+
+async function storePendingReminderNotification(target) {
+  if (!target?.reminderId) return;
+  try {
+    await AsyncStorage.setItem(
+      PENDING_REMINDER_NOTIFICATION_KEY,
+      JSON.stringify({
+        ...target,
+        storedAt: new Date().toISOString(),
+      })
+    );
+  } catch (error) {
+    console.log("Pending reminder notification store skipped:", error);
+  }
+}
+
+async function takePendingReminderNotification() {
+  try {
+    const raw = await AsyncStorage.getItem(PENDING_REMINDER_NOTIFICATION_KEY);
+    if (!raw) return null;
+    await AsyncStorage.removeItem(PENDING_REMINDER_NOTIFICATION_KEY);
+    return JSON.parse(raw);
+  } catch (error) {
+    console.log("Pending reminder notification read skipped:", error);
+    return null;
+  }
+}
+
+async function verifyReminderForNotification({ reminderId, ownerId }) {
+  if (!reminderId || !ownerId) {
+    return { ok: false, reason: "missing_context" };
+  }
+
+  try {
+    const { data, error } = await supabase.rpc("get_coordination_action", {
+      p_reminder_id: reminderId,
+    });
+
+    if (!error) {
+      if (!data?.id) return { ok: false, reason: "missing_or_unauthorized" };
+      if (String(data.status || "").toLowerCase() === "archived") {
+        return { ok: false, reason: "stale_archived" };
+      }
+      return { ok: true, reminder: data };
+    }
+
+    if (error?.code !== "PGRST202") {
+      return { ok: false, reason: "query_failed", error };
+    }
+
+    const fallback = await supabase
+      .from("reminders")
+      .select("id,status,owner_id,extra_metadata")
+      .eq("id", reminderId)
+      .eq("owner_id", ownerId)
+      .maybeSingle();
+
+    if (fallback.error) {
+      return { ok: false, reason: "query_failed", error: fallback.error };
+    }
+    if (!fallback.data?.id) {
+      return { ok: false, reason: "missing_or_unauthorized" };
+    }
+    if (String(fallback.data.status || "").toLowerCase() === "archived") {
+      return { ok: false, reason: "stale_archived" };
+    }
+
+    return { ok: true, reminder: fallback.data };
+  } catch (error) {
+    return { ok: false, reason: "exception", error };
+  }
+}
+
+async function openReminderFromNotification(target, ownerId) {
+  const reminderId = target?.reminderId;
+  if (!reminderId || !ownerId) return false;
+
+  if (!navigationRef?.isReady?.()) {
+    await storePendingReminderNotification(target);
+    return false;
+  }
+
+  const verification = await verifyReminderForNotification({
+    reminderId,
+    ownerId,
+  });
+
+  if (!verification.ok) {
+    console.log("Reminder notification target skipped:", {
+      reminderId,
+      reason: verification.reason,
+      error: verification.error?.message || verification.error || null,
+    });
+    navigationRef.current?.navigate("Notifications", {
+      screen: "InboxHome",
+      params: {
+        notificationStatus: verification.reason,
+      },
+    });
+    return false;
+  }
+
+  navigationRef.current?.navigate("CreateReminder", {
+    reminderId,
+    afterSave: target.afterSave || "Notifications",
+    notificationEventKey: target.eventKey || null,
+  });
+
+  return true;
+}
+
 function isPasswordRecoveryUrl(url) {
   if (!url || typeof url !== "string") return false;
 
@@ -1204,8 +1359,22 @@ function getInitialWebPasswordRecoveryUrl() {
   }
 }
 
+function normalizeInitialActionWebPath() {
+  if (Platform.OS !== "web") return;
+  try {
+    const path = window.location.pathname || "";
+    if (path === "/Notifications" || path === "/Notifications/InboxHome") {
+      const next = `/inbox${window.location.search || ""}${window.location.hash || ""}`;
+      window.history.replaceState(window.history.state, "", next);
+    }
+  } catch (_) {}
+}
+
 function Root({ onRouteChange, setCurrentRouteName, currentRouteName }) {
   const { initializing, user } = useAuth();
+  const [isNavReady, setIsNavReady] = React.useState(Platform.OS !== "web");
+
+  normalizeInitialActionWebPath();
 
     React.useEffect(() => {
     if (!user?.id) return;
@@ -1243,10 +1412,62 @@ React.useEffect(() => {
   resetShareIntent();
 }, [user?.id, hasShareIntent, shareIntent, resetShareIntent]);
 
+React.useEffect(() => {
+  if (Platform.OS === "web") return;
+  setReminderNotificationHandler();
+
+  let mounted = true;
+
+  const handleResponse = async (response) => {
+    const target = extractReminderNotificationData(response);
+    if (!target) return;
+    if (!mounted) return;
+
+    if (!user?.id || !navigationRef?.isReady?.()) {
+      await storePendingReminderNotification(target);
+      return;
+    }
+
+    await openReminderFromNotification(target, user.id);
+  };
+
+  const captureInitialNotification = async () => {
+    const response = await getLastReminderNotificationResponse();
+    await handleResponse(response);
+  };
+
+  captureInitialNotification();
+
+  const sub = addReminderNotificationResponseListener(handleResponse);
+
+  return () => {
+    mounted = false;
+    sub?.remove?.();
+  };
+}, [user?.id]);
+
+React.useEffect(() => {
+  if (Platform.OS === "web") return;
+  if (!user?.id || !navigationRef?.isReady?.()) return;
+
+  let mounted = true;
+
+  const drainPending = async () => {
+    const target = await takePendingReminderNotification();
+    if (!mounted || !target?.reminderId) return;
+    await openReminderFromNotification(target, user.id);
+  };
+
+  drainPending();
+
+  return () => {
+    mounted = false;
+  };
+}, [user?.id, isNavReady]);
+
 // Web navigation state persistence (prevents tab-switch / refresh from dumping to Dashboard)
 const NAV_PERSIST_KEY = "keepr.nav.state.v1";
 const [initialNavState, setInitialNavState] = React.useState(undefined);
-const [isNavReady, setIsNavReady] = React.useState(Platform.OS !== "web");
 const [passwordRecoveryUrl, setPasswordRecoveryUrl] = React.useState(
   getInitialWebPasswordRecoveryUrl
 );
@@ -1437,6 +1658,9 @@ if (
   path.startsWith("/hub/") ||
   path.startsWith("/story/") ||
   path.startsWith("/resolve/") ||
+  path.startsWith("/inbox") ||
+  path.startsWith("/CreateReminder") ||
+  path.startsWith("/Notifications") ||
   path.startsWith("/KeeprHubInternal") ||
   path.startsWith("/KeeprStoryInternal")
 ) {
@@ -1696,6 +1920,9 @@ const initialRouteName = isResetLink
           !window.location.pathname.startsWith("/h/") &&
           !window.location.pathname.startsWith("/hub/") &&
           !window.location.pathname.startsWith("/story/") &&
+          !window.location.pathname.startsWith("/inbox") &&
+          !window.location.pathname.startsWith("/CreateReminder") &&
+          !window.location.pathname.startsWith("/Notifications") &&
           !window.location.pathname.startsWith("/resolve/")
           
             ? initialNavState

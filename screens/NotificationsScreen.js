@@ -28,6 +28,13 @@ import * as Haptics from "expo-haptics";
 import { Swipeable } from "react-native-gesture-handler";
 import { acceptHubInviteByToken } from "../lib/hubsApi";
 import { executeAction } from "../lib/actionsApi";
+import {
+  fetchCoordinationActions,
+  getReminderActionContext,
+  getReminderProviderLabel,
+  getReminderResponsibilityLabel,
+  getReminderVisibilityScope,
+} from "../lib/teamActions";
 
 
 /* --------------------------- helpers --------------------------- */
@@ -165,6 +172,25 @@ function formatDateLabel(d) {
   } catch {
     return "";
   }
+}
+
+function getReminderDueLabel(reminder) {
+  if (!reminder?.due_at) return null;
+  const due = new Date(reminder.due_at);
+  if (Number.isNaN(due.getTime())) return null;
+
+  const now = new Date();
+  const dueDate = new Date(due);
+  dueDate.setHours(0, 0, 0, 0);
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+
+  if (String(reminder?.status || "").toLowerCase() === "completed") {
+    return "Completed";
+  }
+  if (due.getTime() < now.getTime()) return "Overdue";
+  if (dueDate.getTime() === today.getTime()) return "Due today";
+  return "Upcoming";
 }
 
 function formatMoneyFromCents(cents) {
@@ -537,26 +563,51 @@ const showAttachments =
     }
   }, [events, draftEvents, submittedEvents, filter]);
 
+  const getReminderPrimaryDate = useCallback(
+    (reminder) => {
+      const meta =
+        reminder?.extra_metadata && typeof reminder.extra_metadata === "object"
+          ? reminder.extra_metadata
+          : {};
+      if (reminderFilter === "completed") {
+        return (
+          meta.completed_at ||
+          meta.work_completed_on ||
+          meta.actual_completed_date ||
+          reminder?.updated_at ||
+          reminder?.due_at
+        );
+      }
+      return reminder?.due_at;
+    },
+    [reminderFilter]
+  );
+
   // Reminders sorted & grouped for schedule view
   const sortedReminders = useMemo(() => {
     if (!reminders) return [];
     return [...reminders].sort((a, b) => {
+      if (reminderFilter === "completed") {
+        const da = new Date(getReminderPrimaryDate(a) || 0).getTime();
+        const db = new Date(getReminderPrimaryDate(b) || 0).getTime();
+        return db - da;
+      }
       const da = a?.due_at ? new Date(a.due_at).getTime() : 0;
       const db = b?.due_at ? new Date(b.due_at).getTime() : 0;
       return da - db;
     });
-  }, [reminders]);
+  }, [reminders, reminderFilter, getReminderPrimaryDate]);
 
 const remindersByDate = useMemo(() => {
   const map = {};
   sortedReminders.forEach((r) => {
-    const key = localDateKey(r?.due_at);
+    const key = localDateKey(getReminderPrimaryDate(r));
     if (!key) return;
     if (!map[key]) map[key] = [];
     map[key].push(r);
   });
   return map;
-}, [sortedReminders]);
+}, [sortedReminders, getReminderPrimaryDate]);
 
   const reminderDateKeys = useMemo(
     () => Object.keys(remindersByDate).sort(),
@@ -588,15 +639,10 @@ const remindersByDate = useMemo(() => {
           .eq("owner_id", ownerId)
           .order("created_at", { ascending: false });
 
-        const remindersPromise = supabase
-          .from("reminders")
-          .select("*")
-          .eq("owner_id", ownerId)
-          .in(
-            "status",
-            reminderFilter === "completed" ? ["completed"] : ["open"]
-          )
-          .order("due_at", { ascending: true });
+        const remindersPromise = fetchCoordinationActions({
+          statuses: reminderFilter === "completed" ? ["completed"] : ["open"],
+          ownerId,
+        }).then((data) => ({ data, error: null }));
 
         const inboxPromise = supabase
           .from("inbox_items")
@@ -1721,13 +1767,66 @@ return (
     const assetName = r.asset_id ? assetNameById[r.asset_id] : null;
     const systemName = r.system_id ? systemNameById[r.system_id] : null;
     const ctx = [assetName, systemName].filter(Boolean).join(" • ");
+    const responsibleLabel = getReminderResponsibilityLabel(r);
+    const providerLabel = getReminderProviderLabel(r);
+    const visibilityScope = getReminderVisibilityScope(r);
+    const actionContext = getReminderActionContext(r);
+    const responsibleParty =
+      r?.extra_metadata && typeof r.extra_metadata === "object"
+        ? r.extra_metadata.responsible_party || r.extra_metadata.assignment_target || {}
+        : {};
+    const assignedToMe =
+      responsibleParty?.type === "team_member" &&
+      String(responsibleParty?.id || "") === String(ownerId || "");
+    const unassignedTeam =
+      visibilityScope === "team" &&
+      (!responsibleLabel || responsibleLabel === "Unassigned");
+    const dueLabel = getReminderDueLabel(r);
+    const primaryDate = getReminderPrimaryDate(r);
+    const completionMeta =
+      r?.extra_metadata && typeof r.extra_metadata === "object"
+        ? r.extra_metadata
+        : {};
     const overdue =
       r.status === "open" && r.due_at && new Date(r.due_at) < new Date();
+    const completedAt = completionMeta.completed_at || null;
+    const workCompletedOn =
+      completionMeta.work_completed_on || completionMeta.actual_completed_date;
+    const proofLabel = completionMeta.linked_service_record_id
+      ? completionMeta.completion_source === "created_service_record"
+        ? "Timeline entry created"
+        : "Proof linked"
+      : null;
+    const recurrenceLabel = completionMeta.recurrence_next_reminder_id
+      ? "Next reminder created"
+      : completionMeta.recurrence_status === "unparseable_repeat_rule"
+      ? "Repeat needs review"
+      : null;
+    const secondaryBits = [
+      visibilityScope === "team"
+        ? actionContext === "household"
+          ? "Shared with Team"
+          : "Team-visible"
+        : "Private",
+      assignedToMe ? "Assigned to you" : null,
+      unassignedTeam ? "Unassigned Team Action" : null,
+      responsibleLabel ? `Responsible: ${responsibleLabel}` : null,
+      providerLabel ? `Provider: ${providerLabel}` : null,
+      proofLabel,
+      recurrenceLabel,
+      ctx || null,
+      workCompletedOn ? `Work completed ${String(workCompletedOn).slice(0, 10)}` : null,
+      completedAt ? `Closed ${formatDateTimeUS(completedAt)}` : null,
+    ].filter(Boolean);
 
     return (
       <TouchableOpacity
         key={r.id}
-        style={styles.reminderCard}
+        style={[
+          styles.reminderCard,
+          assignedToMe && styles.reminderCardAssignedToMe,
+          unassignedTeam && styles.reminderCardUnassignedTeam,
+        ]}
         activeOpacity={0.9}
         onPress={() =>
           navigation.navigate("CreateReminder", {
@@ -1757,11 +1856,32 @@ return (
                 <Text style={styles.badgeText}>Overdue</Text>
               </View>
             ) : null}
+            {!overdue && dueLabel ? (
+              <View
+                style={[
+                  styles.badge,
+                  dueLabel === "Due today"
+                    ? styles.badgeBlue
+                    : styles.badgeNeutral,
+                ]}
+              >
+                <Text style={styles.badgeText}>{dueLabel}</Text>
+              </View>
+            ) : null}
           </View>
           <Text style={styles.reminderMeta} numberOfLines={1}>
-            {formatDateTimeUS(r.due_at)}
-            {ctx ? ` • ${ctx}` : ""}
+            {formatDateTimeUS(primaryDate)}
           </Text>
+          {secondaryBits.length > 0 ? (
+            <Text style={styles.reminderAssignmentMeta} numberOfLines={1}>
+              {secondaryBits.join(" • ")}
+            </Text>
+          ) : null}
+          {completionMeta.completed_by_user_id ? (
+            <Text style={styles.reminderCompletionMeta} numberOfLines={1}>
+              Completed by {completionMeta.completed_by_user_id}
+            </Text>
+          ) : null}
         </View>
         <Ionicons
           name="chevron-forward"
@@ -3975,6 +4095,14 @@ statusReadyDraftText: {
     gap: 10,
     ...(shadows?.subtle || {}),
   },
+  reminderCardAssignedToMe: {
+    borderColor: colors.brandBlue,
+    backgroundColor: "#EFF6FF",
+  },
+  reminderCardUnassignedTeam: {
+    borderColor: "#F59E0B55",
+    backgroundColor: "#FFFBEB",
+  },
   reminderTitle: {
     fontSize: 14,
     fontWeight: "900",
@@ -3986,6 +4114,18 @@ statusReadyDraftText: {
     fontWeight: "700",
     color: colors.textMuted,
     marginTop: 4,
+  },
+  reminderAssignmentMeta: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: colors.textSecondary,
+    marginTop: 3,
+  },
+  reminderCompletionMeta: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: colors.textMuted,
+    marginTop: 3,
   },
 
   reminderDayBlock: {
@@ -4006,6 +4146,8 @@ statusReadyDraftText: {
   },
   badgeOrange: { backgroundColor: "#FFF7ED", borderColor: "#FDBA7422" },
   badgeRed: { backgroundColor: "#FEF2F2", borderColor: "#FCA5A522" },
+  badgeBlue: { backgroundColor: "#EFF6FF", borderColor: "#93C5FD33" },
+  badgeNeutral: { backgroundColor: "#F8FAFC", borderColor: "#CBD5E133" },
   badgeText: { fontSize: 11, fontWeight: "900", color: colors.textPrimary },
 
   // Add choice floating Modal sheet
