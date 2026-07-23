@@ -45,21 +45,20 @@ import HubAuthModal from "../components/hubs/HubAuthModal";
 import * as Clipboard from "expo-clipboard";
 import QRCode from "react-native-qrcode-svg";
 
-
-  const PROJECT_REF = "jjzjuqxysucqutgjnrkk";
-  const FUNCTIONS_BASE = `https://${PROJECT_REF}.supabase.co/functions/v1`;
-  const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
-
 function getPublicMediaBaseUrl() {
-  if (Platform.OS === "web" && typeof window !== "undefined") {
-    return window.location.origin;
-  }
-
-  return (
+  const configuredBase = (
     process.env.EXPO_PUBLIC_KEEPR_BASE_URL ||
     process.env.PUBLIC_KEEPR_BASE_URL ||
-    "https://app.keeprhome.com"
-  );
+    ""
+  ).replace(/\/+$/, "");
+
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    const origin = window.location.origin;
+    const isLocalOrigin = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(origin);
+    return isLocalOrigin && configuredBase ? configuredBase : origin;
+  }
+
+  return configuredBase || "https://app.keeprhome.com";
 }
 
 function toPublicMediaUrl(publicMediaIdOrUrl) {
@@ -224,6 +223,11 @@ function normalizeLinks(rows) {
 
       return {
         ...asset,
+        hero_image_url: asset.hero_image_url || row.hero_image_url || null,
+        hero_thumb_url: asset.hero_thumb_url || row.hero_thumb_url || null,
+        public_hero_url: asset.public_hero_url || row.public_hero_url || null,
+        primary_attachment_url:
+          asset.primary_attachment_url || row.primary_attachment_url || null,
         ownerProfile,
         owner_name: ownerName,
         _hubLinkId: row.id,
@@ -252,26 +256,18 @@ function safeOwner(asset) {
   );
 }
 async function fetchPublicStoryMedia(kac) {
-  if (!kac || !ANON_KEY) return [];
+  if (!kac) return [];
 
-  const res = await fetch(`${FUNCTIONS_BASE}/public-story-media`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      apikey: ANON_KEY,
-      Authorization: `Bearer ${ANON_KEY}`,
-    },
-    body: JSON.stringify({ kac }),
+  const { data, error } = await supabase.functions.invoke("public-story-media", {
+    body: { kac },
   });
 
-  const json = await res.json();
-
-  if (!res.ok) {
-    console.log("HUB PUBLIC STORY MEDIA ERROR:", kac, json);
+  if (error) {
+    console.log("HUB PUBLIC STORY MEDIA ERROR:", kac, error?.message || error);
     return [];
   }
 
-  return normalizePublicStoryMediaRows(json?.media);
+  return normalizePublicStoryMediaRows(data?.media);
 }
 
 export default function KeeprHubScreen({ navigation }) {

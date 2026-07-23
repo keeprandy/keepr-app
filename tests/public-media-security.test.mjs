@@ -208,6 +208,11 @@ test("public hub story cards consume only proxy-compatible media rows", () => {
   assert.match(source, /function normalizePublicStoryMediaRows/);
   assert.match(source, /\/api\/public-media\//);
   assert.match(source, /String\(x\.public_media_id\)/);
+  assert.match(source, /function getPublicMediaBaseUrl/);
+  assert.match(source, /EXPO_PUBLIC_KEEPR_BASE_URL/);
+  assert.match(source, /isLocalOrigin/);
+  assert.match(source, /hero_image_url:\s*asset\.hero_image_url \|\| row\.hero_image_url \|\| null/);
+  assert.match(source, /primary_attachment_url:\s*[\s\S]*asset\.primary_attachment_url \|\| row\.primary_attachment_url \|\| null/);
 });
 
 test("Open Graph route emits proxy media URLs or fallback only", () => {
