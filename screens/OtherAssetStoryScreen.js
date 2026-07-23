@@ -1811,10 +1811,16 @@ const styles = StyleSheet.create({
   heroImageWrap: {
     width: "100%",
     aspectRatio: HERO_ASPECT,
+    maxHeight: 620,
+    overflow: "hidden",
     backgroundColor: colors.surfaceSubtle,
-     borderRadius: radius.lg,
+    borderRadius: radius.lg,
   },
-  heroImage: { width: "100%", height: "100%" },
+  heroImage: {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+  },
 
   heroTouchable: {
   width: "100%",

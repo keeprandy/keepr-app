@@ -24,6 +24,8 @@ import { colors, spacing, radius, typography, shadows } from "../styles/theme";
 import { useVehicles } from "../context/VehiclesContext";
 import { supabase } from "../lib/supabaseClient";
 import { createOrReuseServiceReadyLink } from "../lib/systemServiceReadyLinks";
+import { buildServiceActionRouteParams } from "../lib/serviceActionPrefill";
+import { buildPrivateKeeprProActionPrefill } from "../lib/keeprProEngagement";
 
 import { useAttachments } from "../hooks/useAttachments";
 import { ATTACHMENT_BUCKET, getSignedUrl } from "../lib/attachmentsApi";
@@ -515,6 +517,18 @@ export default function VehicleSystemStoryScreen(props) {
 
   const goToAddService = useCallback(() => {
     if (!navigation?.navigate || !system || !assetId) return;
+    navigation.navigate("CreateReminder", buildServiceActionRouteParams({
+      assetId,
+      assetName,
+      systemId: system.id,
+      systemName: system.name,
+      assetType: "vehicle",
+      sourceScreen: "vehicle_system_story",
+    }));
+  }, [navigation, system, assetId, assetName]);
+
+  const goToAddTimelineRecord = useCallback(() => {
+    if (!navigation?.navigate || !system || !assetId) return;
     navigation.navigate("AddTimelineRecord", {
       source: "system",
       assetId,
@@ -555,9 +569,17 @@ export default function VehicleSystemStoryScreen(props) {
   const openKeeprPro = useCallback(
     (keeprPro) => {
       if (!navigation?.navigate || !keeprPro?.id) return;
-      navigation.navigate("KeeprProDetail", { pro: keeprPro });
+      navigation.navigate("KeeprProDetail", {
+        pro: keeprPro,
+        assetId,
+        assetName,
+        assetType: "vehicle",
+        systemId,
+        systemName: system?.name || route?.params?.systemName || null,
+        assignmentScope: "system",
+      });
     },
-    [navigation]
+    [navigation, assetId, assetName, systemId, system?.name, route?.params?.systemName]
   );
 
   // ---- hero selection ----
@@ -620,6 +642,88 @@ export default function VehicleSystemStoryScreen(props) {
     },
     [viewerCollection]
   );
+
+  const generateFreshServiceReadyLink = useCallback(async () => {
+    try {
+      const result = await createOrReuseServiceReadyLink({
+        supabase,
+        assetId,
+        systemId,
+        systemName: system?.name,
+        forceNew: true,
+      });
+
+      if (!result?.url) throw new Error("No Service Ready URL returned.");
+      setServiceReadyUrl(result.url);
+      await Clipboard.setStringAsync(result.url);
+      setServiceReadyQrVisible(true);
+      Alert.alert("New Service Ready link copied", result.url);
+    } catch (e) {
+      console.error("Service Ready link failed", e);
+      Alert.alert("Could not create Service Ready link", e?.message || "Please try again.");
+    }
+  }, [assetId, systemId, system?.name]);
+
+  const handleShareServiceReady = useCallback(async () => {
+    try {
+      const result = await createOrReuseServiceReadyLink({
+        supabase,
+        assetId,
+        systemId,
+        systemName: system?.name,
+        sessionUrl: serviceReadyUrl,
+      });
+
+      if (result?.url) {
+        setServiceReadyUrl(result.url);
+        Alert.alert("Service Ready link", "Use the current session link.", [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Copy Link",
+            onPress: async () => {
+              await Clipboard.setStringAsync(result.url);
+              Alert.alert("Service Ready link copied", result.url);
+            },
+          },
+          { text: "Show QR", onPress: () => setServiceReadyQrVisible(true) },
+        ]);
+        return;
+      }
+
+      Alert.alert(
+        "Service Ready is active",
+        result?.activeLinkCount > 1
+          ? "Multiple active Service Ready links exist for this system. Keepr cannot recover their original URLs from stored token hashes, but you can generate a fresh QR and link without changing the existing ones."
+          : "An active Service Ready projection already exists. Keepr cannot recover its original URL from the stored token hash, but you can generate a fresh QR and link without changing the existing one.",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Generate New QR & Link", onPress: generateFreshServiceReadyLink },
+        ]
+      );
+    } catch (e) {
+      console.error("Service Ready link failed", e);
+      Alert.alert("Could not inspect Service Ready link", e?.message || "Please try again.");
+    }
+  }, [assetId, generateFreshServiceReadyLink, serviceReadyUrl, system?.name, systemId]);
+
+  const handleRequestServiceFromKeeprPro = useCallback(async (pro) => {
+      const prefill = buildPrivateKeeprProActionPrefill({
+        assetId,
+        assetName,
+        systemId,
+        systemName: system?.name || null,
+        keeprProId: pro?.id || null,
+        keeprProLabel: pro?.name || pro?.label || null,
+        assignmentScope: "system",
+        sourceScreen: "vehicle_system_story",
+      });
+      navigation.navigate("CreateReminder", {
+        prefill,
+        assetId,
+        systemId,
+        afterSave: "Notifications",
+      });
+  }, [navigation, assetId, assetName, systemId, system?.name]);
 
   // ---- derived labels ----
   const status = system?.status || "healthy";
@@ -704,93 +808,6 @@ export default function VehicleSystemStoryScreen(props) {
 
   
   };
-
-  const generateFreshServiceReadyLink = useCallback(async () => {
-    try {
-      const result = await createOrReuseServiceReadyLink({
-        supabase,
-        assetId,
-        systemId,
-        systemName: system?.name,
-        forceNew: true,
-      });
-
-      if (!result?.url) throw new Error("No Service Ready URL returned.");
-      setServiceReadyUrl(result.url);
-      await Clipboard.setStringAsync(result.url);
-      setServiceReadyQrVisible(true);
-      Alert.alert("New Service Ready link copied", result.url);
-    } catch (e) {
-      console.error("Service Ready link failed", e);
-      Alert.alert("Could not create Service Ready link", e?.message || "Please try again.");
-    }
-  }, [assetId, systemId, system?.name]);
-
-  const handleShareServiceReady = useCallback(async () => {
-    try {
-      const result = await createOrReuseServiceReadyLink({
-        supabase,
-        assetId,
-        systemId,
-        systemName: system?.name,
-        sessionUrl: serviceReadyUrl,
-      });
-
-      if (result?.url) {
-        setServiceReadyUrl(result.url);
-        Alert.alert("Service Ready link", "Use the current session link.", [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Copy Link",
-            onPress: async () => {
-              await Clipboard.setStringAsync(result.url);
-              Alert.alert("Service Ready link copied", result.url);
-            },
-          },
-          { text: "Show QR", onPress: () => setServiceReadyQrVisible(true) },
-        ]);
-        return;
-      }
-
-      Alert.alert(
-        "Service Ready is active",
-        result?.activeLinkCount > 1
-          ? "Multiple active Service Ready links exist for this system. Keepr cannot recover their original URLs from stored token hashes, but you can generate a fresh QR and link without changing the existing ones."
-          : "An active Service Ready projection already exists. Keepr cannot recover its original URL from the stored token hash, but you can generate a fresh QR and link without changing the existing one.",
-        [
-          { text: "Cancel", style: "cancel" },
-          { text: "Generate New QR & Link", onPress: generateFreshServiceReadyLink },
-        ]
-      );
-    } catch (e) {
-      console.error("Service Ready link failed", e);
-      Alert.alert("Could not inspect Service Ready link", e?.message || "Please try again.");
-    }
-  }, [assetId, generateFreshServiceReadyLink, serviceReadyUrl, system?.name, systemId]);
-
-  const handleRequestServiceFromKeeprPro = useCallback(async (pro) => {
-    try {
-      const result = await createOrReuseServiceReadyLink({
-        supabase,
-        assetId,
-        systemId,
-        systemName: system?.name,
-        forceNew: true,
-      });
-
-      navigation.navigate("PublicAction", {
-        token: result.token,
-        actionType: "request_service",
-        systemId,
-        assetId,
-        keeprProId: pro?.id || null,
-        assignmentScope: "system",
-        sourceScreen: "vehicle_system_story",
-      });
-    } catch (e) {
-      Alert.alert("Could not start service request", e?.message || "Please try again.");
-    }
-  }, [navigation, assetId, systemId, system?.name]);
 
   // ---- render ----
   return (
@@ -1347,7 +1364,7 @@ export default function VehicleSystemStoryScreen(props) {
                 <Text style={styles.emptyStateText}>
                   No service records yet. Add your first service event to start the story.
                 </Text>
-                <TouchableOpacity style={styles.primaryAction} onPress={goToAddService} activeOpacity={0.85}>
+                <TouchableOpacity style={styles.primaryAction} onPress={goToAddTimelineRecord} activeOpacity={0.85}>
                   <Ionicons
                     name="add-circle-outline"
                     size={16}

@@ -18,6 +18,7 @@ import {
 
 import { colors, spacing, radius } from "../styles/theme";
 import { supabase } from "../lib/supabaseClient";
+import { buildPrivateKeeprProActionPrefill } from "../lib/keeprProEngagement";
 import { useFocusEffect } from "@react-navigation/native";
 import PublicShell from "../components/public/PublicShell";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -310,11 +311,17 @@ export default function PublicActionScreen({ route, navigation }) {
   const originHubId = route?.params?.hubId || null;
   const originHubName = route?.params?.hubName || null;
   const requestedAction = route?.params?.actionType || route?.params?.action_type || null;
+  const routeAssetId = route?.params?.assetId || route?.params?.asset_id || null;
+  const routeAssetName = route?.params?.assetName || route?.params?.asset_name || null;
   const routeSystemId = route?.params?.systemId || route?.params?.system_id || null;
+  const routeSystemName = route?.params?.systemName || route?.params?.system_name || null;
   const routeKeeprProId = route?.params?.keeprProId || route?.params?.keepr_pro_id || null;
+  const routeKeeprProLabel =
+    route?.params?.keeprProLabel || route?.params?.keepr_pro_label || null;
   const routeAssignmentScope =
     route?.params?.assignmentScope || route?.params?.assignment_scope || null;
   const routeSourceScreen = route?.params?.sourceScreen || route?.params?.source_screen || null;
+  const isPrivateKeeprProRequest = !!route?.params?.privateKeeprProRequest;
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -335,8 +342,12 @@ export default function PublicActionScreen({ route, navigation }) {
   const [viewerUserId, setViewerUserId] = useState(null);
 const [canConfigurePublicView, setCanConfigurePublicView] = useState(false);
 
-  const assetId = resolved?.asset_id || null;
+  const assetId = resolved?.asset_id || routeAssetId || null;
   const asset = resolved?.asset || null;
+  const effectiveAssetName =
+    asset?.name || resolved?.asset_name || resolved?.asset?.name || routeAssetName || null;
+  const effectiveSystemId = routeSystemId || resolved?.system_id || null;
+  const effectiveSystemName = routeSystemName || resolved?.system_name || null;
 
   const headerSubtitle = useMemo(() => {
     return "Keepr Owner Portal";
@@ -403,6 +414,8 @@ const selectedActionMeta = selectedAction ? ACTION_META[selectedAction] : null;
 
 const canAsk = enabledActions.includes("request_info");
 const canLog = enabledActions.includes("request_service") || !!assetId;
+const actionSubjectLabel = effectiveSystemName || effectiveAssetName || "this KeeprStory";
+const actionParentLabel = effectiveSystemName && effectiveAssetName ? effectiveAssetName : null;
 
   function requireIdentity() {
     if (!name.trim() || !email.trim()) {
@@ -422,10 +435,12 @@ const canLog = enabledActions.includes("request_service") || !!assetId;
         phone: phone.trim() || null,
       },
       kac: resolved?.kac || kac || null,
-      asset_id: assetId || resolved?.asset_id || null,
-      asset_name: asset?.name || resolved?.asset_name || resolved?.asset?.name || null,
-      system_id: routeSystemId || resolved?.system_id || null,
+      asset_id: assetId || null,
+      asset_name: effectiveAssetName,
+      system_id: effectiveSystemId,
+      system_name: effectiveSystemName,
       keepr_pro_id: routeKeeprProId || null,
+      keepr_pro_label: routeKeeprProLabel || null,
       assignment_scope: routeAssignmentScope || null,
       source_screen: routeSourceScreen || (token ? "public_action_token" : "public_action"),
       public_link_id: resolved?.public_link_id || null,
@@ -439,6 +454,31 @@ const canLog = enabledActions.includes("request_service") || !!assetId;
     let cancelled = false;
 
     const run = async () => {
+      if (isPrivateKeeprProRequest && routeAssetId) {
+        setResolved({
+          ok: true,
+          scope: routeSystemId ? "system" : "asset",
+          mode: "private_keeprpro_request",
+          asset_id: routeAssetId,
+          asset_name: routeAssetName || null,
+          system_id: routeSystemId || null,
+          system_name: routeSystemName || null,
+          asset: {
+            id: routeAssetId,
+            name: routeAssetName || null,
+          },
+          public_config: {
+            actions: {
+              enabled: true,
+              actionsEnabled: ["request_service"],
+            },
+          },
+        });
+        setLoading(false);
+        setError("");
+        return;
+      }
+
       if (!kac && !token) {
         setLoading(false);
         setResolved(null);
@@ -493,7 +533,15 @@ const canLog = enabledActions.includes("request_service") || !!assetId;
     return () => {
       cancelled = true;
     };
-  }, [kac, token])
+  }, [
+    kac,
+    token,
+    isPrivateKeeprProRequest,
+    routeAssetId,
+    routeAssetName,
+    routeSystemId,
+    routeSystemName,
+  ])
 );
 
 useEffect(() => {
@@ -734,6 +782,37 @@ useEffect(() => {
   }
 };
 
+  const handleCreatePrivateKeeprProAction = () => {
+    const prefill = buildPrivateKeeprProActionPrefill({
+      actionTitle: actionTitle || selectedActionMeta?.title || null,
+      actionMessage: actionMessage || null,
+      assetId,
+      assetName: effectiveAssetName,
+      systemId: effectiveSystemId,
+      systemName: effectiveSystemName,
+      keeprProId: routeKeeprProId,
+      keeprProLabel: routeKeeprProLabel,
+      assignmentScope: routeAssignmentScope || "system",
+      sourceScreen: routeSourceScreen || "private_keeprpro_request",
+      sourceUrl: getSourceUrl(),
+      contact:
+        name || email || phone
+          ? {
+              name: name.trim() || null,
+              email: email.trim() || null,
+              phone: phone.trim() || null,
+            }
+          : null,
+    });
+
+    navigation.navigate("CreateReminder", {
+      prefill,
+      assetId,
+      systemId: effectiveSystemId,
+      afterSave: "Notifications",
+    });
+  };
+
   const showNotLiveYet = (label) => {
     Alert.alert(label, "Coming soon in Portal V1. This will publish structured demand into the owner’s Event Inbox.");
   };
@@ -773,7 +852,7 @@ if (loading) {
   );
 }
 
-if (!kac && !token) {
+if (!kac && !token && !isPrivateKeeprProRequest) {
   return renderShell(
     <View style={styles.centerFill}>
       <Text style={styles.errorText}>Missing KAC.</Text>
@@ -786,6 +865,38 @@ if (!kac && !token) {
       <View style={styles.actionsTopRow}>
   <TouchableOpacity
     onPress={() => {
+  if (isPrivateKeeprProRequest && routeSystemId) {
+    navigation.navigate("HomeSystemStory", {
+      homeId: routeAssetId,
+      assetId: routeAssetId,
+      homeName: routeAssetName || effectiveAssetName,
+      assetName: routeAssetName || effectiveAssetName,
+      systemId: routeSystemId,
+      systemName: routeSystemName || effectiveSystemName,
+    });
+    return;
+  }
+
+  if (isPrivateKeeprProRequest && routeAssetId) {
+    if (navigation.canGoBack?.()) {
+      navigation.goBack();
+    } else {
+      const routeName =
+        routeSourceScreen === "boat_story"
+          ? "BoatStory"
+          : routeSourceScreen === "vehicle_story"
+          ? "VehicleStory"
+          : "HomeStory";
+      navigation.navigate(routeName, {
+        assetId: routeAssetId,
+        homeId: routeAssetId,
+        assetName: routeAssetName || effectiveAssetName,
+        homeName: routeAssetName || effectiveAssetName,
+      });
+    }
+    return;
+  }
+
   if (isInternalMode) {
     navigation.navigate("KeeprStoryInternal", {
       kac,
@@ -826,9 +937,25 @@ if (!kac && !token) {
         <View style={styles.portalIntroCard}>
           <Text style={styles.portalIntroTitle}>Take Action</Text>
           <Text style={styles.portalIntroText}>
-            This asset can accept structured requests through Keepr. Choose what you want to do below.
+            {actionSubjectLabel} can accept structured requests through Keepr. Choose what you want to do below.
           </Text>
         </View>
+
+{isPrivateKeeprProRequest ? (
+  <View style={styles.privateContextCard}>
+    <Text style={styles.privateKicker}>KeeprPro request</Text>
+    <Text style={styles.privateTitle} numberOfLines={2}>
+      {routeKeeprProLabel || "KeeprPro"}
+    </Text>
+    <Text style={styles.privateMeta} numberOfLines={2}>
+      {[effectiveSystemName, actionParentLabel].filter(Boolean).join(" • ") ||
+        "System context"}
+    </Text>
+    <Text style={styles.privateMeta}>
+      Connector: {routeAssignmentScope === "system" ? "System service" : "Asset service"}
+    </Text>
+  </View>
+) : null}
 
 {actionConfig.enabled !== false && enabledActions.length > 0 ? (
   <>
@@ -904,35 +1031,45 @@ if (!kac && !token) {
         style={[styles.input, styles.textArea]}
       />
 
-      <TextInput
-        value={name}
-        onChangeText={setName}
-        placeholder="Name"
-        style={styles.input}
-      />
+      {isPrivateKeeprProRequest ? null : (
+        <>
+          <TextInput
+            value={name}
+            onChangeText={setName}
+            placeholder="Name"
+            style={styles.input}
+          />
 
-      <TextInput
-        value={email}
-        onChangeText={setEmail}
-        placeholder="Email"
-        autoCapitalize="none"
-        keyboardType="email-address"
-        style={styles.input}
-      />
+          <TextInput
+            value={email}
+            onChangeText={setEmail}
+            placeholder="Email"
+            autoCapitalize="none"
+            keyboardType="email-address"
+            style={styles.input}
+          />
 
-      <TextInput
-        value={phone}
-        onChangeText={setPhone}
-        placeholder="Phone (optional)"
-        keyboardType="phone-pad"
-        style={styles.input}
-      />
+          <TextInput
+            value={phone}
+            onChangeText={setPhone}
+            placeholder="Phone (optional)"
+            keyboardType="phone-pad"
+            style={styles.input}
+          />
+        </>
+      )}
 
       <TouchableOpacity
-        onPress={handleSubmitStructuredAction}
+        onPress={
+          isPrivateKeeprProRequest
+            ? handleCreatePrivateKeeprProAction
+            : handleSubmitStructuredAction
+        }
         style={styles.primaryBtn}
       >
-        <Text style={styles.primaryBtnText}>{selectedActionMeta.cta}</Text>
+        <Text style={styles.primaryBtnText}>
+          {isPrivateKeeprProRequest ? "Create Action" : selectedActionMeta.cta}
+        </Text>
       </TouchableOpacity>
     </View>
   </>
@@ -1135,6 +1272,32 @@ actionPillTextActive: {
     fontSize: 13,
     lineHeight: 20,
     color: colors.textMuted,
+  },
+
+  privateContextCard: {
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    backgroundColor: "#EFF6FF",
+    borderRadius: radius.lg || 14,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  privateKicker: {
+    fontSize: 11,
+    fontWeight: "900",
+    color: "#2563EB",
+    textTransform: "uppercase",
+  },
+  privateTitle: {
+    marginTop: 4,
+    fontSize: 16,
+    fontWeight: "900",
+    color: colors.textPrimary,
+  },
+  privateMeta: {
+    marginTop: 4,
+    fontSize: 12,
+    color: colors.textSecondary || colors.textMuted,
   },
 
   sectionTitle: {

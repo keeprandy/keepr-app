@@ -35,6 +35,8 @@ import {
 import { useHome } from "../context/HomeContext";
 import { supabase } from "../lib/supabaseClient";
 import { createOrReuseServiceReadyLink } from "../lib/systemServiceReadyLinks";
+import { buildServiceActionRouteParams } from "../lib/serviceActionPrefill";
+import { buildPrivateKeeprProActionPrefill } from "../lib/keeprProEngagement";
 
 import { useAttachments } from "../hooks/useAttachments";
 import { ATTACHMENT_BUCKET, getSignedUrl } from "../lib/attachmentsApi";
@@ -179,6 +181,12 @@ export default function HomeSystemStoryScreen({ route, navigation }) {
     route?.params?.homeName ??
     currentHome?.name ??
     "My asset";
+
+  const systemNameFromRoute =
+    route?.params?.systemName ??
+    route?.params?.system_name ??
+    route?.params?.system?.name ??
+    null;
 
   const [system, setSystem] = useState(null);
   const [records, setRecords] = useState([]);
@@ -621,9 +629,17 @@ useFocusEffect(
       if (!keeprPro?.id) return;
       // KeeprProDetailScreen expects a full `pro` object in route params.
       // Passing the object keeps the detail page actionable immediately.
-      navigation.navigate("KeeprProDetail", { pro: keeprPro });
+      navigation.navigate("KeeprProDetail", {
+        pro: keeprPro,
+        assetId,
+        assetName,
+        assetType: "home",
+        systemId,
+        systemName: system?.name || route?.params?.systemName || null,
+        assignmentScope: "system",
+      });
     },
-    [navigation]
+    [navigation, assetId, assetName, systemId, system?.name, route?.params?.systemName]
   );
 
   const handleBack = () => {
@@ -636,6 +652,19 @@ useFocusEffect(
   };
 
   const goToAddService = () => {
+    if (!system || !assetId) return;
+
+    navigation.navigate("CreateReminder", buildServiceActionRouteParams({
+      assetId,
+      assetName,
+      systemId: system.id,
+      systemName: system.name,
+      assetType: "home",
+      sourceScreen: "home_system_story",
+    }));
+  };
+
+  const goToAddTimelineRecord = () => {
     if (!system || !assetId) return;
 
     navigation.navigate("AddTimelineRecord", {
@@ -704,25 +733,30 @@ const setHeroAttachment = useCallback(
 );
 
 
-  // NEW: delegate printing to SystemStoryPrintScreen
+  const handleViewSystemKeeprStory = useCallback(() => {
+    if (!systemId) return;
+
+    navigation.navigate("SystemStoryPrint", {
+      systemId,
+      assetId,
+      assetName,
+      systemName: system?.name || systemNameFromRoute || null,
+      source: "home_system_story",
+    });
+  }, [navigation, systemId, assetId, assetName, system?.name, systemNameFromRoute]);
+
   const handlePrintSystemStory = useCallback(async () => {
     if (!systemId) return;
 
     try {
       setPrinting(true);
 
-      const { data, error } = await supabase.rpc(
-        "generate_system_readiness_package",
-        { p_system_id: systemId }
-      );
-
-      if (error) throw error;
-
-      navigation.navigate("SystemReadinessPackagePrint", {
-        packageId: data,
+      navigation.navigate("SystemStoryPrint", {
         systemId,
         assetId,
-        source: "home_system_story",
+        assetName,
+        systemName: system?.name || systemNameFromRoute || null,
+        source: "home_system_story_print",
       });
     } catch (e) {
       console.error("Print system readiness failed", e);
@@ -733,7 +767,7 @@ const setHeroAttachment = useCallback(
     } finally {
       setPrinting(false);
     }
-  }, [navigation, systemId, assetId]);
+  }, [navigation, systemId, assetId, assetName, system?.name, systemNameFromRoute]);
 
   const generateFreshServiceReadyLink = useCallback(async () => {
     try {
@@ -800,29 +834,24 @@ const setHeroAttachment = useCallback(
 
   const handleRequestServiceFromKeeprPro = useCallback(
     async (pro) => {
-      try {
-        const result = await createOrReuseServiceReadyLink({
-          supabase,
-          assetId,
-          systemId,
-          systemName: system?.name,
-          forceNew: true,
-        });
-
-        navigation.navigate("PublicAction", {
-          token: result.token,
-          actionType: "request_service",
-          systemId,
-          assetId,
-          keeprProId: pro?.id || null,
-          assignmentScope: "system",
-          sourceScreen: "home_system_story",
-        });
-      } catch (e) {
-        Alert.alert("Could not start service request", e?.message || "Please try again.");
-      }
+      const prefill = buildPrivateKeeprProActionPrefill({
+        assetId,
+        assetName,
+        systemId,
+        systemName: system?.name || systemNameFromRoute || null,
+        keeprProId: pro?.id || null,
+        keeprProLabel: pro?.name || pro?.label || null,
+        assignmentScope: "system",
+        sourceScreen: "home_system_story",
+      });
+      navigation.navigate("CreateReminder", {
+        prefill,
+        assetId,
+        systemId,
+        afterSave: "Notifications",
+      });
     },
-    [navigation, assetId, systemId, system?.name]
+    [navigation, assetId, assetName, systemId, system?.name, systemNameFromRoute]
   );
 
 
@@ -1021,6 +1050,19 @@ const warrantyStarts = warrantyMeta?.starts_on || warrantyMeta?.start_on || warr
               style={{ marginRight: 6 }}
             />
             <Text style={styles.chipLabel}>Edit System Info</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.chip}
+            onPress={handleViewSystemKeeprStory}
+          >
+            <Ionicons
+              name="open-outline"
+              size={14}
+              color={colors.textSecondary}
+              style={{ marginRight: 6 }}
+            />
+            <Text style={styles.chipLabel}>View KeeprStory</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -1643,7 +1685,7 @@ const warrantyStarts = warrantyMeta?.starts_on || warrantyMeta?.start_on || warr
                 </Text>
                 <TouchableOpacity
                   style={[styles.primaryAction]}
-                  onPress={goToAddService}
+                  onPress={goToAddTimelineRecord}
                   activeOpacity={0.85}
                 >
                   <Ionicons

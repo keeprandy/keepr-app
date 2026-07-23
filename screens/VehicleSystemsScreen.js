@@ -23,6 +23,7 @@ import { supabase } from "../lib/supabaseClient";
 import { layoutStyles } from "../styles/layout";
 import { colors, radius, shadows, spacing, typography } from "../styles/theme";
 import { formatKeeprDate } from "../lib/dateFormat";
+import { buildServiceActionRouteParams } from "../lib/serviceActionPrefill";
 
 const IS_WEB = Platform.OS === "web";
 const SYSTEMS_TABLE = "systems";
@@ -215,15 +216,14 @@ const VehicleSystemsScreen = ({ route, navigation }) => {
   const handleAddRecordForSystem = (system) => {
     if (!system?.id || !vehicleId) return;
 
-    navigation.navigate("AddTimelineRecord", {
-      source: "vehicleSystem",
+    navigation.navigate("CreateReminder", buildServiceActionRouteParams({
       assetId: vehicleId,
       assetName: vehicleLabel,
       systemId: system.id,
       systemName: getDisplayName(system),
-      defaultCategory: "service",
-      defaultTitle: getDisplayName(system) ? `${getDisplayName(system)} service` : "Service",
-    });
+      assetType: "vehicle",
+      sourceScreen: "vehicle_systems",
+    }));
   };
 
   const handleCreateSystem = async (nameOverride) => {

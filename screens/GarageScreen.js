@@ -24,6 +24,7 @@ import {
 
 import { useAssets } from "../hooks/useAssets";
 import { formatDateUS } from "../utils/format";
+import { buildServiceActionRouteParams } from "../lib/serviceActionPrefill";
 
 const VEHICLE_HERO_ASPECT = 16 / 9;
 
@@ -143,12 +144,12 @@ export default function GarageScreen({ navigation, route }) {
 
   const goToAddServiceRecord = () => {
     if (!currentVehicle?.id) return;
-    navigation.navigate("AddServiceRecord", {
-      source: "vehicle",
+    navigation.navigate("CreateReminder", buildServiceActionRouteParams({
       assetId: currentVehicle.id,
-      vehicleId: currentVehicle.id,
       assetName: buildVehicleDisplayName(),
-    });
+      assetType: "vehicle",
+      sourceScreen: "garage",
+    }));
   };
 
   // Loading / error / empty states

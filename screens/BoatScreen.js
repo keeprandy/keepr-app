@@ -24,6 +24,7 @@ import {
 
 import { useAssets } from "../hooks/useAssets";
 import { formatDateUS } from "../utils/format";
+import { buildServiceActionRouteParams } from "../lib/serviceActionPrefill";
 
 const BOAT_HERO_ASPECT = 16 / 9;
 
@@ -138,12 +139,12 @@ export default function BoatScreen({ navigation, route }) {
   // Add service record from anywhere
   const goToAddServiceRecord = () => {
     if (!currentBoat?.id) return;
-    navigation.navigate("AddServiceRecord", {
-      source: "boat",
+    navigation.navigate("CreateReminder", buildServiceActionRouteParams({
       assetId: currentBoat.id,
-      boatId: currentBoat.id,
       assetName: currentBoat.name,
-    });
+      assetType: "boat",
+      sourceScreen: "boat_dashboard",
+    }));
   };
 
   // Loading / error / empty states

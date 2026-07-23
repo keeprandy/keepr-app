@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -19,6 +19,8 @@ import { layoutStyles } from "../styles/layout";
 import { colors, spacing, radius, typography, shadows } from "../styles/theme";
 import { supabase } from "../lib/supabaseClient";
 import { useOperationFeedback } from "../context/OperationFeedbackContext";
+import { getAssetKeeprProsFromMetadata } from "../components/KeeprProCommunicationCard";
+import { buildPrivateKeeprProActionPrefill } from "../lib/keeprProEngagement";
 
 const categoryIconName = (category) => {
   switch (category) {
@@ -127,6 +129,35 @@ const blankDraft = () => ({
   country: "",
 });
 
+function getSystemKeeprProIds(system) {
+  const meta =
+    system?.metadata && typeof system.metadata === "object"
+      ? system.metadata
+      : system?.extra_metadata && typeof system.extra_metadata === "object"
+      ? system.extra_metadata
+      : {};
+  const standard = meta?.standard && typeof meta.standard === "object" ? meta.standard : {};
+  const relationships =
+    standard?.relationships && typeof standard.relationships === "object"
+      ? standard.relationships
+      : meta?.relationships && typeof meta.relationships === "object"
+      ? meta.relationships
+      : {};
+  const raw =
+    relationships.keepr_pro_ids ||
+    relationships.keeprProIds ||
+    relationships.keepr_pros ||
+    [];
+  if (!Array.isArray(raw)) return [];
+  return [
+    ...new Set(
+      raw
+        .map((item) => (typeof item === "string" ? item : item?.id || item?.keepr_pro_id))
+        .filter(Boolean)
+    ),
+  ];
+}
+
 export default function KeeprProDetailScreen({ route, navigation }) {
   const isCreateMode =
     route?.params?.mode === "create" ||
@@ -154,6 +185,8 @@ export default function KeeprProDetailScreen({ route, navigation }) {
   const [serviceEvents, setServiceEvents] = useState([]);
   const [serviceLoading, setServiceLoading] = useState(isCreateMode ? false : true);
   const [serviceError, setServiceError] = useState(null);
+  const [actionContexts, setActionContexts] = useState([]);
+  const [actionContextPickerVisible, setActionContextPickerVisible] = useState(false);
 
   // If NOT create mode, load latest pro details by id
   useEffect(() => {
@@ -346,6 +379,89 @@ export default function KeeprProDetailScreen({ route, navigation }) {
     };
   }, [pro?.id, isCreateMode]);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadActionContexts = async () => {
+      if (isCreateMode || !pro?.id) {
+        setActionContexts([]);
+        return;
+      }
+
+      try {
+        const [{ data: assetRows, error: assetErr }, { data: systemRows, error: systemErr }] =
+          await Promise.all([
+            supabase
+              .from("assets")
+              .select("id,name,type,metadata,extra_metadata")
+              .is("deleted_at", null)
+              .eq("status", "active"),
+            supabase
+              .from("systems")
+              .select("id,name,asset_id,metadata,extra_metadata"),
+          ]);
+
+        if (assetErr) console.log("KeeprPro action asset lookup skipped:", assetErr);
+        if (systemErr) console.log("KeeprPro action system lookup skipped:", systemErr);
+
+        const assets = assetErr ? [] : assetRows || [];
+        const assetById = new Map(assets.map((asset) => [asset.id, asset]));
+        const contexts = [];
+        const seen = new Set();
+
+        assets.forEach((asset) => {
+          const matches = getAssetKeeprProsFromMetadata(asset).some(
+            (assetPro) => assetPro?.id === pro.id
+          );
+          if (!matches) return;
+          const key = `asset:${asset.id}`;
+          seen.add(key);
+          contexts.push({
+            key,
+            assignmentScope: "asset",
+            assetId: asset.id,
+            assetName: asset.name || "Asset",
+            assetType: asset.type || null,
+            systemId: null,
+            systemName: null,
+            label: asset.name || "Asset",
+            detail: "Asset relationship",
+          });
+        });
+
+        (systemErr ? [] : systemRows || []).forEach((system) => {
+          if (!getSystemKeeprProIds(system).includes(pro.id)) return;
+          const key = `system:${system.id}`;
+          if (seen.has(key)) return;
+          seen.add(key);
+          const asset = assetById.get(system.asset_id) || null;
+          contexts.push({
+            key,
+            assignmentScope: "system",
+            assetId: system.asset_id || null,
+            assetName: asset?.name || "Asset",
+            assetType: asset?.type || null,
+            systemId: system.id,
+            systemName: system.name || "System",
+            label: system.name || "System",
+            detail: asset?.name ? `System on ${asset.name}` : "System relationship",
+          });
+        });
+
+        if (!isMounted) return;
+        setActionContexts(contexts);
+      } catch (err) {
+        console.log("KeeprPro action context lookup failed:", err);
+        if (isMounted) setActionContexts([]);
+      }
+    };
+
+    loadActionContexts();
+    return () => {
+      isMounted = false;
+    };
+  }, [pro?.id, isCreateMode]);
+
   const assetChips = useMemo(() => {
     const map = new Map();
     serviceEvents.forEach((evt) => {
@@ -360,6 +476,85 @@ export default function KeeprProDetailScreen({ route, navigation }) {
     });
     return Array.from(map.values());
   }, [serviceEvents]);
+
+  const routeActionContext = useMemo(() => {
+    const routeAssetId = route?.params?.assetId || route?.params?.asset_id || null;
+    const routeSystemId = route?.params?.systemId || route?.params?.system_id || null;
+    const routeScope =
+      route?.params?.assignmentScope ||
+      route?.params?.assignment_scope ||
+      (routeSystemId ? "system" : routeAssetId ? "asset" : null);
+
+    if (!routeAssetId && !routeSystemId) return null;
+
+    return {
+      key: routeSystemId ? `system:${routeSystemId}` : `asset:${routeAssetId}`,
+      assignmentScope: routeScope,
+      assetId: routeAssetId,
+      assetName: route?.params?.assetName || route?.params?.asset_name || null,
+      assetType: route?.params?.assetType || route?.params?.asset_type || null,
+      systemId: routeSystemId,
+      systemName: route?.params?.systemName || route?.params?.system_name || null,
+      label:
+        routeScope === "system"
+          ? route?.params?.systemName || route?.params?.system_name || "System"
+          : route?.params?.assetName || route?.params?.asset_name || "Asset",
+      detail:
+        routeScope === "system"
+          ? route?.params?.assetName || route?.params?.asset_name
+            ? `System on ${route.params.assetName || route.params.asset_name}`
+            : "System relationship"
+          : "Asset relationship",
+    };
+  }, [route?.params]);
+
+  const openCreateActionForContext = useCallback(
+    (context = null) => {
+      if (!pro?.id) return;
+      setActionContextPickerVisible(false);
+
+      const prefill = buildPrivateKeeprProActionPrefill({
+        assetId: context?.assetId || null,
+        assetName: context?.assetName || null,
+        systemId: context?.systemId || null,
+        systemName: context?.systemName || null,
+        keeprProId: pro.id,
+        keeprProLabel: pro.name || "KeeprPro",
+        assignmentScope: context?.assignmentScope || "asset",
+        sourceScreen: "keeprpro_detail",
+      });
+
+      navigation.navigate("CreateReminder", {
+        prefill,
+        assetId: context?.assetId || null,
+        systemId: context?.systemId || null,
+        afterSave: "Notifications",
+        preferred_provider_id: pro.id,
+        keeprProId: pro.id,
+        keeprProLabel: pro.name || "KeeprPro",
+        assignmentScope: context?.assignmentScope || null,
+        sourceScreen: "keeprpro_detail",
+      });
+    },
+    [navigation, pro?.id, pro?.name]
+  );
+
+  const handleCreateAction = useCallback(() => {
+    if (!pro?.id) return;
+    if (routeActionContext) {
+      openCreateActionForContext(routeActionContext);
+      return;
+    }
+    if (actionContexts.length === 1) {
+      openCreateActionForContext(actionContexts[0]);
+      return;
+    }
+    if (actionContexts.length > 1) {
+      setActionContextPickerVisible(true);
+      return;
+    }
+    openCreateActionForContext(null);
+  }, [actionContexts, openCreateActionForContext, pro?.id, routeActionContext]);
 
   // If create mode and we haven't created yet, we still render the screen (draft-driven)
   if (!pro && !loading && !isCreateMode) {
@@ -1173,6 +1368,15 @@ export default function KeeprProDetailScreen({ route, navigation }) {
                 />
                 <Text style={styles.actionButtonSecondaryText}>Directions</Text>
               </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={handleCreateAction}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="add-circle-outline" size={16} color={colors.brandWhite} />
+                <Text style={styles.actionButtonText}>Create Action</Text>
+              </TouchableOpacity>
             </View>
           )}
 
@@ -1453,6 +1657,52 @@ export default function KeeprProDetailScreen({ route, navigation }) {
                 disabled={deleting}
               >
                 <Text style={styles.confirmBtnDeleteText}>{deleting ? "Deleting…" : "Delete"}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={actionContextPickerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setActionContextPickerVisible(false)}
+      >
+        <View style={styles.confirmBackdrop}>
+          <View style={styles.confirmCard}>
+            <Text style={styles.confirmTitle}>Choose Action context</Text>
+            <Text style={styles.confirmBody}>
+              This KeeprPro is connected to more than one asset or system. Choose
+              where this Action belongs.
+            </Text>
+
+            {actionContexts.map((context) => (
+              <TouchableOpacity
+                key={context.key}
+                style={styles.contextChoice}
+                onPress={() => openCreateActionForContext(context)}
+                activeOpacity={0.85}
+              >
+                <Ionicons
+                  name={context.assignmentScope === "system" ? "settings-outline" : "cube-outline"}
+                  size={16}
+                  color={colors.brandBlue}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.contextChoiceTitle}>{context.label}</Text>
+                  <Text style={styles.contextChoiceDetail}>{context.detail}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+              </TouchableOpacity>
+            ))}
+
+            <View style={styles.confirmRow}>
+              <TouchableOpacity
+                style={[styles.confirmBtn, styles.confirmBtnCancel]}
+                onPress={() => setActionContextPickerVisible(false)}
+              >
+                <Text style={styles.confirmBtnCancelText}>Cancel</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1907,6 +2157,27 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     color: colors.textSecondary,
     marginBottom: spacing.lg,
+  },
+  contextChoice: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    backgroundColor: colors.surface,
+  },
+  contextChoiceTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: colors.textPrimary,
+  },
+  contextChoiceDetail: {
+    marginTop: 2,
+    fontSize: 12,
+    color: colors.textMuted,
   },
   confirmRow: {
     flexDirection: "row",

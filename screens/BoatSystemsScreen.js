@@ -26,6 +26,7 @@ import { colors, radius, shadows, spacing, typography } from "../styles/theme";
 import marineKsc from "../data/marine_ksc.json";
 import { supabase } from "../lib/supabaseClient";
 import { formatKeeprDate } from "../lib/dateFormat";
+import { buildServiceActionRouteParams } from "../lib/serviceActionPrefill";
 
 const IS_WEB = Platform.OS === "web";
 const SYSTEMS_TABLE = "systems";
@@ -260,19 +261,17 @@ const BoatSystemsScreen = ({ route, navigation }) => {
   };
 
 
-  // ✅ Add record uses AddTimelineRecord (not AddServiceRecord)
   const handleAddServiceForSystem = (system) => {
     if (!system?.id || !boatId) return;
 
-    navigation.navigate("AddTimelineRecord", {
-      source: "boatSystem",
+    navigation.navigate("CreateReminder", buildServiceActionRouteParams({
       assetId: boatId,
       assetName: boatLabel,
       systemId: system.id,
       systemName: getDisplayName(system),
-      defaultCategory: "service",
-      defaultTitle: system.name ? `${system.name} service` : "Service",
-    });
+      assetType: "boat",
+      sourceScreen: "boat_systems",
+    }));
   };
 
   const handleOpenSystemAttachments = (system) => {

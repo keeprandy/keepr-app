@@ -1,9 +1,10 @@
 // screens/EditAssetScreen.js
 import { Ionicons } from "@expo/vector-icons";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -38,6 +39,62 @@ const KInput = (props) => {
   );
 };
 
+function buildKeeprProLabel(row) {
+  const name = row?.name || "";
+  const location = row?.location || "";
+  if (name && location) return `${name} · ${location}`;
+  return name || location || "KeeprPro";
+}
+
+function uniqIds(arr) {
+  const out = [];
+  const seen = new Set();
+  for (const value of arr || []) {
+    if (!value) continue;
+    const id = String(value);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
+function ensureAssetMetadata(src) {
+  const base = src && typeof src === "object" && !Array.isArray(src) ? src : {};
+  const standard = base.standard && typeof base.standard === "object" ? base.standard : {};
+  const relationships =
+    standard.relationships && typeof standard.relationships === "object"
+      ? standard.relationships
+      : {};
+
+  return {
+    ...base,
+    standard: {
+      ...standard,
+      relationships: {
+        ...relationships,
+        keepr_pro_ids: Array.isArray(relationships.keepr_pro_ids)
+          ? relationships.keepr_pro_ids
+          : [],
+        keepr_pro_assignments: Array.isArray(relationships.keepr_pro_assignments)
+          ? relationships.keepr_pro_assignments
+          : [],
+      },
+    },
+  };
+}
+
+function extractAssetKeeprProIds(assetRow) {
+  const meta = ensureAssetMetadata(assetRow?.metadata || assetRow?.extra_metadata);
+  const relationships = meta.standard.relationships || {};
+  const ids =
+    relationships.keepr_pro_ids ||
+    relationships.keeprProIds ||
+    relationships.keepr_pros ||
+    [];
+  return uniqIds(Array.isArray(ids) ? ids : []);
+}
+
 export default function EditAssetScreen({ route, navigation }) {
   const assetId = route.params?.assetId ?? null;
   const assetTypeParam = route.params?.assetType ?? null; // "home", "vehicle", "boat", etc.
@@ -49,7 +106,7 @@ export default function EditAssetScreen({ route, navigation }) {
   const [error, setError] = useState(null);
 
   // Core fields
-  const [type, setType] = useState(assetTypeParam || "home");
+  const [type, setType] = useState(assetId ? "home" : assetTypeParam || "home");
   const [name, setName] = useState("");
   const [location, setLocation] = useState("");
   const [notes, setNotes] = useState("");
@@ -96,9 +153,16 @@ export default function EditAssetScreen({ route, navigation }) {
   const [engineType, setEngineType] = useState("");
   const [engineHours, setEngineHours] = useState("");
   const [registrationNumber, setRegistrationNumber] = useState("");
+  const [assetMetadata, setAssetMetadata] = useState({});
+  const [keeprPros, setKeeprPros] = useState([]);
+  const [prosLoading, setProsLoading] = useState(false);
+  const [prosError, setProsError] = useState(null);
+  const [selectedProIds, setSelectedProIds] = useState([]);
+  const [showProPicker, setShowProPicker] = useState(false);
+  const [proSearch, setProSearch] = useState("");
 
   // Derive effective type
-  const effectiveType = (assetTypeParam || type || "home").toLowerCase();
+  const effectiveType = (assetId ? type : assetTypeParam || type || "home").toLowerCase();
   const isHome = effectiveType === "home";
   const isVehicle = effectiveType === "vehicle";
   const isBoat = effectiveType === "boat";
@@ -163,6 +227,7 @@ export default function EditAssetScreen({ route, navigation }) {
             "engine_type",
             "engine_hours",
             "registration_number",
+            "extra_metadata",
           ].join(",")
         )
         .eq("id", assetId)
@@ -179,7 +244,7 @@ export default function EditAssetScreen({ route, navigation }) {
 
       if (data) {
         // Core
-        setType(data.type || assetTypeParam || "home");
+        setType(data.type || "home");
         setName(data.name || "");
         setLocation(data.location || "");
         setNotes(data.notes || "");
@@ -241,6 +306,8 @@ export default function EditAssetScreen({ route, navigation }) {
           data.engine_hours != null ? String(data.engine_hours) : ""
         );
         setRegistrationNumber(data.registration_number || "");
+        setAssetMetadata(data.extra_metadata || {});
+        setSelectedProIds(extractAssetKeeprProIds(data));
       }
 
       setLoading(false);
@@ -253,6 +320,43 @@ export default function EditAssetScreen({ route, navigation }) {
     };
   }, [assetId, assetTypeParam]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadKeeprPros() {
+      if (!user?.id) {
+        setKeeprPros([]);
+        return;
+      }
+
+      setProsLoading(true);
+      setProsError(null);
+      try {
+        const { data, error } = await supabase
+          .from("keepr_pros")
+          .select("id,name,category,phone,email,website,location,is_favorite")
+          .eq("user_id", user.id)
+          .order("is_favorite", { ascending: false })
+          .order("name", { ascending: true });
+
+        if (error) throw error;
+        if (!cancelled) setKeeprPros(data || []);
+      } catch (e) {
+        if (!cancelled) {
+          setProsError(e?.message || "Could not load KeeprPros.");
+          setKeeprPros([]);
+        }
+      } finally {
+        if (!cancelled) setProsLoading(false);
+      }
+    }
+
+    loadKeeprPros();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
   const handleBack = () => {
     navigation.goBack();
   };
@@ -261,6 +365,41 @@ export default function EditAssetScreen({ route, navigation }) {
     if (!value) return null;
     const n = Number(String(value).replace(/,/g, ""));
     return Number.isFinite(n) ? n : null;
+  };
+
+  const selectedPros = useMemo(() => {
+    const byId = new Map((keeprPros || []).map((pro) => [String(pro.id), pro]));
+    return selectedProIds.map((id) => byId.get(String(id))).filter(Boolean);
+  }, [keeprPros, selectedProIds]);
+
+  const filteredPros = useMemo(() => {
+    const q = proSearch.trim().toLowerCase();
+    if (!q) return keeprPros;
+    return keeprPros.filter((pro) =>
+      [pro.name, pro.category, pro.location, pro.phone, pro.email]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(q)
+    );
+  }, [keeprPros, proSearch]);
+
+  const toggleKeeprPro = (id) => {
+    if (!id) return;
+    setSelectedProIds((prev) => {
+      const set = new Set(prev || []);
+      const key = String(id);
+      if (set.has(key)) set.delete(key);
+      else set.add(key);
+      return Array.from(set);
+    });
+  };
+
+  const clearKeeprPros = () => setSelectedProIds([]);
+
+  const openKeeprProDetail = (pro) => {
+    if (!pro?.id) return;
+    navigation.navigate("KeeprProDetail", { pro });
   };
 
   const handleSave = async () => {
@@ -284,7 +423,7 @@ export default function EditAssetScreen({ route, navigation }) {
       return;
     }
 
-    const normalizedType = (assetTypeParam || type || "home").toLowerCase();
+    const normalizedType = (assetId ? type : assetTypeParam || type || "home").toLowerCase();
 
     const isHomeType = normalizedType === "home";
     const isVehicleType = normalizedType === "vehicle";
@@ -358,6 +497,39 @@ export default function EditAssetScreen({ route, navigation }) {
         ? registrationNumber || null
         : null,
     };
+
+    const nextMetadata = ensureAssetMetadata(assetMetadata);
+    const selectedIds = uniqIds(selectedProIds);
+    const selectedById = new Map((keeprPros || []).map((pro) => [String(pro.id), pro]));
+    const assignments = selectedIds
+      .map((id) => selectedById.get(String(id)))
+      .filter(Boolean)
+      .map((pro) => ({
+        type: "keepr_pro",
+        id: pro.id,
+        keepr_pro_id: pro.id,
+        label: buildKeeprProLabel(pro),
+        name: pro.name || buildKeeprProLabel(pro),
+        category: pro.category || null,
+        phone: pro.phone || null,
+        email: pro.email || null,
+        website: pro.website || null,
+        location: pro.location || null,
+        scope: "asset",
+        assignment_scope: "asset",
+        relationship_label: "Linked Service Partner",
+      }));
+
+    nextMetadata.standard.relationships.keepr_pro_ids = selectedIds;
+    nextMetadata.standard.relationships.keepr_pro_assignments = assignments;
+    if (assignments[0]) {
+      nextMetadata.asset_keepr_pro = assignments[0];
+      nextMetadata.keepr_pro_label = assignments[0].label;
+    } else {
+      delete nextMetadata.asset_keepr_pro;
+      delete nextMetadata.keepr_pro_label;
+    }
+    payload.extra_metadata = nextMetadata;
 
     let result;
     if (assetId) {
@@ -964,6 +1136,50 @@ export default function EditAssetScreen({ route, navigation }) {
               />
             </View>
           </View>
+
+          {/* KeeprPro */}
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>KeeprPro</Text>
+            <View style={styles.settingsCard}>
+              <View style={styles.settingsCardContent}>
+                <View style={styles.settingsIcon}>
+                  <Ionicons
+                    name="construct-outline"
+                    size={18}
+                    color={colors.textPrimary}
+                  />
+                </View>
+
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.settingsTitle}>
+                    {selectedPros.length
+                      ? selectedPros.map((pro) => buildKeeprProLabel(pro)).join(", ")
+                      : "No KeeprPro connected"}
+                  </Text>
+                  <Text style={styles.settingsSubtitle}>
+                    {selectedPros.length
+                      ? "Connected to this asset"
+                      : "Connect a service partner to this asset."}
+                  </Text>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.inlineActionBtn}
+                  onPress={() => setShowProPicker(true)}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.inlineActionText}>
+                    {selectedPros.length ? "Change" : "Connect"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+            <Text style={styles.helperText}>
+              Asset-level means this provider is connected to the asset generally. It does not assign them to every system.
+            </Text>
+            {!!prosError && <Text style={styles.errorText}>{prosError}</Text>}
+          </View>
+
           {/* Public View & Actions */}
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>Public view & actions</Text>
@@ -1030,6 +1246,112 @@ export default function EditAssetScreen({ route, navigation }) {
             </TouchableOpacity>
           </View>
         </ScrollView>
+
+        <Modal
+          visible={showProPicker}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowProPicker(false)}
+        >
+          <View style={styles.modalBackdrop}>
+            <View style={styles.modalCard}>
+              <View style={styles.modalHeader}>
+                <View>
+                  <Text style={styles.modalKicker}>KeeprPro</Text>
+                  <Text style={styles.modalTitle}>Connect KeeprPro</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.modalCloseBtn}
+                  onPress={() => setShowProPicker(false)}
+                >
+                  <Ionicons name="close" size={20} color={colors.textPrimary} />
+                </TouchableOpacity>
+              </View>
+
+              <KInput
+                value={proSearch}
+                onChangeText={setProSearch}
+                placeholder="Search KeeprPros..."
+              />
+
+              {prosLoading ? (
+                <View style={styles.inlineRow}>
+                  <ActivityIndicator size="small" />
+                  <Text style={styles.inlineText}>Loading KeeprPros...</Text>
+                </View>
+              ) : filteredPros.length === 0 ? (
+                <Text style={styles.emptyHint}>No KeeprPros found.</Text>
+              ) : (
+                <ScrollView style={styles.modalList}>
+                  {filteredPros.map((pro) => {
+                    const selected = selectedProIds.includes(String(pro.id));
+                    return (
+                      <TouchableOpacity
+                        key={pro.id}
+                        style={styles.modalOptionRow}
+                        onPress={() => toggleKeeprPro(pro.id)}
+                        activeOpacity={0.85}
+                      >
+                        <Ionicons
+                          name={selected ? "checkbox-outline" : "square-outline"}
+                          size={19}
+                          color={selected ? colors.brandBlue : colors.textMuted}
+                          style={{ marginRight: 10 }}
+                        />
+                        <View style={{ flex: 1 }}>
+                          <Text
+                            style={
+                              selected
+                                ? styles.modalOptionTextActive
+                                : styles.modalOptionText
+                            }
+                            numberOfLines={1}
+                          >
+                            {buildKeeprProLabel(pro)}
+                          </Text>
+                          {(pro.category || pro.phone || pro.email) ? (
+                            <Text style={styles.modalOptionSub} numberOfLines={1}>
+                              {[pro.category, pro.phone, pro.email]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </Text>
+                          ) : null}
+                        </View>
+                        <TouchableOpacity
+                          onPress={() => openKeeprProDetail(pro)}
+                          style={styles.modalOpenBtn}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
+                          <Ionicons
+                            name="open-outline"
+                            size={18}
+                            color={colors.textSecondary}
+                          />
+                        </TouchableOpacity>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              )}
+
+              <View style={styles.modalFooterRow}>
+                <TouchableOpacity
+                  style={styles.modalSecondaryBtn}
+                  onPress={clearKeeprPros}
+                  disabled={!selectedProIds.length}
+                >
+                  <Text style={styles.modalSecondaryText}>Clear</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.modalPrimaryBtn}
+                  onPress={() => setShowProPicker(false)}
+                >
+                  <Text style={styles.modalPrimaryText}>Done</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -1107,6 +1429,19 @@ settingsSubtitle: {
   color: colors.textMuted,
   marginTop: 2,
 },
+  inlineActionBtn: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    backgroundColor: colors.surfaceSubtle,
+  },
+  inlineActionText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: colors.textPrimary,
+  },
 
   section: {
     paddingHorizontal: spacing.lg,
@@ -1147,6 +1482,21 @@ settingsSubtitle: {
     fontSize: 11,
     color: colors.textSecondary,
     marginTop: 4,
+  },
+  inlineRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: spacing.md,
+  },
+  inlineText: {
+    marginLeft: spacing.sm,
+    color: colors.textSecondary,
+    fontSize: 12,
+  },
+  emptyHint: {
+    marginTop: spacing.md,
+    color: colors.textMuted,
+    fontSize: 13,
   },
 
   errorCard: {
@@ -1210,5 +1560,109 @@ modeText: {
 
 modeTextActive: {
   color: "#fff",
+},
+modalBackdrop: {
+  flex: 1,
+  backgroundColor: "rgba(15, 23, 42, 0.48)",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: spacing.lg,
+},
+modalCard: {
+  width: "100%",
+  maxWidth: 560,
+  maxHeight: "86%",
+  borderRadius: radius.lg,
+  backgroundColor: colors.surface,
+  padding: spacing.lg,
+  borderWidth: 1,
+  borderColor: colors.borderSubtle,
+  ...shadows.subtle,
+},
+modalHeader: {
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "space-between",
+  marginBottom: spacing.md,
+},
+modalKicker: {
+  fontSize: 11,
+  color: colors.textMuted,
+  fontWeight: "800",
+  textTransform: "uppercase",
+},
+modalTitle: {
+  fontSize: 18,
+  fontWeight: "900",
+  color: colors.textPrimary,
+  marginTop: 2,
+},
+modalCloseBtn: {
+  width: 36,
+  height: 36,
+  borderRadius: 18,
+  alignItems: "center",
+  justifyContent: "center",
+  backgroundColor: colors.surfaceSubtle,
+},
+modalList: {
+  marginTop: spacing.md,
+  maxHeight: 360,
+},
+modalOptionRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  paddingVertical: spacing.sm,
+  borderBottomWidth: 1,
+  borderBottomColor: colors.borderSubtle,
+},
+modalOptionText: {
+  fontSize: 14,
+  fontWeight: "700",
+  color: colors.textPrimary,
+},
+modalOptionTextActive: {
+  fontSize: 14,
+  fontWeight: "900",
+  color: colors.brandBlue,
+},
+modalOptionSub: {
+  marginTop: 2,
+  fontSize: 12,
+  color: colors.textMuted,
+},
+modalOpenBtn: {
+  width: 34,
+  height: 34,
+  borderRadius: 17,
+  alignItems: "center",
+  justifyContent: "center",
+},
+modalFooterRow: {
+  flexDirection: "row",
+  justifyContent: "flex-end",
+  gap: spacing.sm,
+  marginTop: spacing.lg,
+},
+modalSecondaryBtn: {
+  borderRadius: radius.md,
+  borderWidth: 1,
+  borderColor: colors.borderSubtle,
+  paddingHorizontal: spacing.md,
+  paddingVertical: spacing.sm,
+},
+modalSecondaryText: {
+  color: colors.textSecondary,
+  fontWeight: "800",
+},
+modalPrimaryBtn: {
+  borderRadius: radius.md,
+  backgroundColor: colors.brandBlue,
+  paddingHorizontal: spacing.md,
+  paddingVertical: spacing.sm,
+},
+modalPrimaryText: {
+  color: colors.brandWhite,
+  fontWeight: "900",
 },
 });

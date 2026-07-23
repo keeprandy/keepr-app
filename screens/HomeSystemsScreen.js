@@ -26,6 +26,7 @@ import { colors, radius, shadows, spacing, typography } from "../styles/theme";
 import homeKsc from "../data/home_ksc.json";
 import { supabase } from "../lib/supabaseClient";
 import { formatKeeprDate } from "../lib/dateFormat";
+import { buildServiceActionRouteParams } from "../lib/serviceActionPrefill";
 
 const IS_WEB = Platform.OS === "web";
 
@@ -564,17 +565,14 @@ const HomeSystemsScreen = ({ route, navigation }) => {
   const handleAddServiceForSystem = (system) => {
     if (!system?.id || !homeId) return;
 
-    navigation.navigate("AddTimelineRecord", {
-      source: "homeSystem",
+    navigation.navigate("CreateReminder", buildServiceActionRouteParams({
       assetId: homeId,
       assetName: homeLabel,
       systemId: system.id,
       systemName: getDisplayName(system),
-      defaultCategory: "service",
-      defaultTitle: getDisplayName(system)
-        ? `${getDisplayName(system)} service`
-        : "Service",
-    });
+      assetType: "home",
+      sourceScreen: "home_systems",
+    }));
   };
 
   /* ----------------- SHARED CONFIRM (WEB) ----------------- */

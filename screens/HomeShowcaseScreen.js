@@ -30,6 +30,7 @@ import {
 } from "../lib/attachmentsApi";
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import { confirmRemove } from "../lib/confirmRemove";
+import { buildServiceActionRouteParams } from "../lib/serviceActionPrefill";
 import LightboxModal from "../components/LightboxModal";
 import ShowcaseAttachmentsSection from "../components/showcase/ShowcaseAttachmentsSection";
 
@@ -167,12 +168,12 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
 
   const goToAddServiceRecord = () => {
     if (!currentHome?.id) return;
-    navigation.navigate("AddServiceRecord", {
-      source: "home",
+    navigation.navigate("CreateReminder", buildServiceActionRouteParams({
       assetId: currentHome.id,
-      homeId: currentHome.id,
       assetName: currentHome.name,
-    });
+      assetType: "home",
+      sourceScreen: "home_showcase",
+    }));
   };
 
   const goToEditHome = () => {

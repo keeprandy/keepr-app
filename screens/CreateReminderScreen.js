@@ -2194,11 +2194,15 @@ const canSave = useMemo(
   /* ---------------------- UI helpers --------------------------------- */
 
   const linkedContextLabel = () => {
-    if (assetName && systemName) return `${assetName} • ${systemName}`;
-    if (assetName) return assetName;
     if (systemName) return systemName;
+    if (assetName) return assetName;
     if (recordId) return "Linked to a record";
     return "No link yet";
+  };
+
+  const linkedParentContextLabel = () => {
+    if (systemName && assetName) return assetName;
+    return "";
   };
 
   const canGoBack = !!navigation?.canGoBack?.() && navigation.canGoBack();
@@ -2256,7 +2260,7 @@ const canSave = useMemo(
           )}
 
           <Text style={styles.topTitle}>
-            {isEdit ? "Edit reminder" : "New reminder"}
+            {isEdit ? "Edit Action" : "New Action"}
           </Text>
 
           <View style={{ width: 44 }} />
@@ -2268,7 +2272,7 @@ const canSave = useMemo(
           showsVerticalScrollIndicator={false}
         >
           <Text style={styles.subtitle}>
-            Set a reminder that can be linked to a Keepr asset or system. When
+            Set an Action that can be linked to a Keepr asset or system. When
             it fires, you’ll jump straight back into this context.
           </Text>
 
@@ -2545,6 +2549,11 @@ const canSave = useMemo(
             <Text style={styles.contextMain} numberOfLines={2}>
               {linkedContextLabel()}
             </Text>
+            {!!linkedParentContextLabel() && (
+              <Text style={styles.contextLine}>
+                Parent asset: {linkedParentContextLabel()}
+              </Text>
+            )}
 
             <Text style={styles.contextLine}>
               Asset: {assetName || (assetId ? assetId : "—")}

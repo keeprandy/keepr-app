@@ -32,8 +32,9 @@ import KeeprProgressCard, {
 } from "../components/KeeprProgressCard";
 import PublicStoryCard from "../components/PublicStoryCard";
 import KeeprProCommunicationCard, {
-  getAssetKeeprProFromMetadata,
+  getAssetKeeprProsFromMetadata,
 } from "../components/KeeprProCommunicationCard";
+import { buildPrivateKeeprProActionPrefill } from "../lib/keeprProEngagement";
 
 // ✅ low-level upload helper (NOT a hook)
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
@@ -1043,24 +1044,37 @@ const meta = {
 
   const vehicleDisplayName =
   `${vehicle?.year || ""} ${vehicle?.make || ""} ${vehicle?.model || ""}`.trim() || "Vehicle";
-  const assetKeeprPro = useMemo(() => getAssetKeeprProFromMetadata(vehicle), [vehicle]);
+  const assetKeeprPros = useMemo(() => getAssetKeeprProsFromMetadata(vehicle), [vehicle]);
+  const openKeeprPro = useCallback(
+    (keeprPro) => {
+      if (!navigation?.navigate || !keeprPro?.id) return;
+      navigation.navigate("KeeprProDetail", {
+        pro: keeprPro,
+        assetId: vehicle?.id || null,
+        assetName: vehicleName,
+        assetType: "vehicle",
+        assignmentScope: "asset",
+      });
+    },
+    [navigation, vehicle?.id, vehicleName]
+  );
   const requestAssetServiceFromKeeprPro = useCallback(
     (pro) => {
-      const publicKac = vehicle?.kac || vehicle?.kac_code || vehicle?.kac_id || vehicle?.kacId || null;
-      if (!publicKac) {
-        Alert.alert("Public link needed", "Create a Keepr public link before requesting service this way.");
-        return;
-      }
-      navigation.navigate("PublicAction", {
-        kac: publicKac,
-        actionType: "request_service",
+      const prefill = buildPrivateKeeprProActionPrefill({
         assetId: vehicle?.id || null,
+        assetName: vehicleName,
         keeprProId: pro?.id || null,
+        keeprProLabel: pro?.name || pro?.label || null,
         assignmentScope: "asset",
         sourceScreen: "vehicle_story",
       });
+      navigation.navigate("CreateReminder", {
+        prefill,
+        assetId: vehicle?.id || null,
+        afterSave: "Notifications",
+      });
     },
-    [navigation, vehicle]
+    [navigation, vehicle?.id, vehicleName]
   );
 
 
@@ -1424,13 +1438,18 @@ const meta = {
               />
             </View>
             )}
-            {assetKeeprPro ? (
-              <KeeprProCommunicationCard
-                keeprPro={assetKeeprPro}
-                assignmentScope="asset"
-                assetName={vehicleName}
-                onRequestService={() => requestAssetServiceFromKeeprPro(assetKeeprPro)}
-              />
+            {assetKeeprPros.length ? (
+              assetKeeprPros.map((assetKeeprPro) => (
+                <KeeprProCommunicationCard
+                  key={assetKeeprPro.id || assetKeeprPro.name}
+                  keeprPro={assetKeeprPro}
+                  assignmentScope="asset"
+                  assetName={vehicleName}
+                  relationshipLabel="Linked Service Partner"
+                  onRequestService={() => requestAssetServiceFromKeeprPro(assetKeeprPro)}
+                  onViewKeeprPro={() => openKeeprPro(assetKeeprPro)}
+                />
+              ))
             ) : null}
             <TouchableOpacity
             style={styles.primaryAddBtn}
@@ -1807,10 +1826,16 @@ const styles = StyleSheet.create({
   heroImageWrap: {
     width: "100%",
     aspectRatio: HERO_ASPECT,
+    maxHeight: 620,
+    overflow: "hidden",
     backgroundColor: colors.surfaceSubtle,
-     borderRadius: radius.lg,
+    borderRadius: radius.lg,
   },
-  heroImage: { width: "100%", height: "100%" },
+  heroImage: {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+  },
 
   heroTouchable: {
   width: "100%",

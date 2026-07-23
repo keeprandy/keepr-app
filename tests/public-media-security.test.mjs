@@ -166,6 +166,15 @@ test("public story screen normalizes current safe media rows to proxy URLs", () 
   assert.equal(source.includes("PUBLIC STORY MEDIA JSON"), false);
 });
 
+test("local Public Story review uses configured public media host instead of localhost API fallback", () => {
+  const source = read("screens/PublicKeeprStoryScreen.js");
+
+  assert.match(source, /function getPublicStoryBaseUrl/);
+  assert.match(source, /EXPO_PUBLIC_KEEPR_BASE_URL/);
+  assert.match(source, /isLocalOrigin/);
+  assert.match(source, /localhost\|127\\\.0\\\.0\\\.1/);
+});
+
 test("public story screen normalizes Showcase files to proxy URLs without browser signing", () => {
   const source = read("screens/PublicKeeprStoryScreen.js");
 
@@ -183,6 +192,14 @@ test("public Showcase links remain external links and are not proxied", () => {
 
   assert.match(source, /showcaseLinks:\s*Array\.isArray\(json\?\.showcaseLinks\) \? json\.showcaseLinks : \[\]/);
   assert.doesNotMatch(source, /showcaseLinks:\s*normalizePublicStoryFileRows/);
+});
+
+test("public showcase documents iframe only public-media PDF URLs", () => {
+  const source = read("components/showcase/ShowcaseAttachmentsSection.js");
+
+  assert.match(source, /const isPublicMediaUrl/);
+  assert.match(source, /pathname\.startsWith\("\/api\/public-media\/"\)/);
+  assert.match(source, /variant !== "public" \|\| isPublicMediaUrl\(previewUrl\)/);
 });
 
 test("public hub story cards consume only proxy-compatible media rows", () => {

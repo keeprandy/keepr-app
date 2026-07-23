@@ -29,6 +29,63 @@ export function normalizeKeeprProContact(pro) {
 }
 
 export function getAssetKeeprProFromMetadata(asset) {
+  const pros = getAssetKeeprProsFromMetadata(asset);
+  if (pros.length) return pros[0];
+
+  const meta = asset?.extra_metadata || asset?.metadata || {};
+  const candidate =
+    meta?.keeprPro ||
+    meta?.keepr_pro ||
+    meta?.assigned_keepr_pro ||
+    meta?.asset_keepr_pro ||
+    asset?.keepr_pro ||
+    null;
+
+  if (candidate && typeof candidate === "object") return normalizeKeeprProContact(candidate);
+
+  const label =
+    meta?.keepr_pro_label ||
+    meta?.assigned_keepr_pro_label ||
+    meta?.provider_label ||
+    asset?.keepr_pro_label ||
+    null;
+
+  return label ? normalizeKeeprProContact({ name: label }) : null;
+}
+
+export function getAssetKeeprProsFromMetadata(asset) {
+  const meta = asset?.metadata || asset?.extra_metadata || {};
+  const standard = meta?.standard && typeof meta.standard === "object" ? meta.standard : {};
+  const relationships =
+    standard?.relationships && typeof standard.relationships === "object"
+      ? standard.relationships
+      : meta?.relationships && typeof meta.relationships === "object"
+      ? meta.relationships
+      : {};
+
+  const assignments = Array.isArray(relationships?.keepr_pro_assignments)
+    ? relationships.keepr_pro_assignments
+    : Array.isArray(relationships?.keeprProAssignments)
+    ? relationships.keeprProAssignments
+    : [];
+
+  const normalized = assignments
+    .map((assignment) =>
+      normalizeKeeprProContact({
+        ...assignment,
+        id: assignment?.id || assignment?.keepr_pro_id || assignment?.keeprProId,
+        name: assignment?.name || assignment?.label,
+      })
+    )
+    .filter(Boolean);
+
+  if (normalized.length) return normalized;
+
+  const legacy = getAssetKeeprProFromLegacyMetadata(asset);
+  return legacy ? [legacy] : [];
+}
+
+function getAssetKeeprProFromLegacyMetadata(asset) {
   const meta = asset?.extra_metadata || asset?.metadata || {};
   const candidate =
     meta?.keeprPro ||
@@ -55,6 +112,7 @@ export default function KeeprProCommunicationCard({
   assignmentScope = "asset",
   assetName = "",
   systemName = "",
+  relationshipLabel = "Your KeeprPro",
   onRequestService,
   onViewKeeprPro,
   compact = false,
@@ -66,6 +124,12 @@ export default function KeeprProCommunicationCard({
     assignmentScope === "system" && systemName
       ? `${systemName}${assetName ? ` on ${assetName}` : ""}`
       : assetName || systemName || "this asset";
+  const canOpenDetail = !!onViewKeeprPro && !!pro.id;
+
+  const openDetail = () => {
+    if (!canOpenDetail) return;
+    onViewKeeprPro(pro.raw || pro);
+  };
 
   const openPhone = () => {
     if (!pro.phone) return;
@@ -80,14 +144,25 @@ export default function KeeprProCommunicationCard({
   return (
     <View style={[styles.card, compact && styles.compactCard]}>
       <View style={styles.headerRow}>
-        <View style={styles.iconWrap}>
+        <TouchableOpacity
+          style={styles.iconWrap}
+          onPress={openDetail}
+          disabled={!canOpenDetail}
+          activeOpacity={0.85}
+        >
           <Ionicons name="person-circle-outline" size={22} color={colors.primary} />
-        </View>
+        </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <Text style={styles.kicker}>Your KeeprPro</Text>
-          <Text style={styles.name} numberOfLines={1}>
-            {pro.name}
-          </Text>
+          <Text style={styles.kicker}>{relationshipLabel || "Your KeeprPro"}</Text>
+          <TouchableOpacity
+            onPress={openDetail}
+            disabled={!canOpenDetail}
+            activeOpacity={0.85}
+          >
+            <Text style={[styles.name, canOpenDetail && styles.nameLink]} numberOfLines={1}>
+              {pro.name}
+            </Text>
+          </TouchableOpacity>
           <Text style={styles.context} numberOfLines={2}>
             Supports {contextLabel}
           </Text>
@@ -167,6 +242,9 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "900",
     color: colors.textPrimary,
+  },
+  nameLink: {
+    color: colors.primary,
   },
   context: {
     marginTop: 2,

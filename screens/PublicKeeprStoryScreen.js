@@ -107,15 +107,19 @@ function getEffectivePublicActions({ actionConfig, allowedActions, mode }) {
 }
 
 function getPublicStoryBaseUrl() {
-  if (Platform.OS === "web" && typeof window !== "undefined") {
-    return window.location.origin;
-  }
-
-  return (
+  const configuredBase = (
     process.env.EXPO_PUBLIC_KEEPR_BASE_URL ||
     process.env.PUBLIC_KEEPR_BASE_URL ||
-    "https://app.keeprhome.com"
-  );
+    ""
+  ).replace(/\/+$/, "");
+
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    const origin = window.location.origin;
+    const isLocalOrigin = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(origin);
+    return isLocalOrigin && configuredBase ? configuredBase : origin;
+  }
+
+  return configuredBase || "https://app.keeprhome.com";
 }
 
 function toPublicMediaUrl(publicMediaIdOrUrl) {

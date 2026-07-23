@@ -24,6 +24,8 @@ import { colors, spacing, radius, typography, shadows } from "../styles/theme";
 import { useBoats } from "../context/BoatsContext";
 import { supabase } from "../lib/supabaseClient";
 import { createOrReuseServiceReadyLink } from "../lib/systemServiceReadyLinks";
+import { buildServiceActionRouteParams } from "../lib/serviceActionPrefill";
+import { buildPrivateKeeprProActionPrefill } from "../lib/keeprProEngagement";
 
 import { useAttachments } from "../hooks/useAttachments";
 import { ATTACHMENT_BUCKET, getSignedUrl } from "../lib/attachmentsApi";
@@ -514,6 +516,18 @@ export default function BoatSystemStoryScreen(props) {
 
   const goToAddService = useCallback(() => {
     if (!navigation?.navigate || !system || !assetId) return;
+    navigation.navigate("CreateReminder", buildServiceActionRouteParams({
+      assetId,
+      assetName,
+      systemId: system.id,
+      systemName: system.name,
+      assetType: "boat",
+      sourceScreen: "boat_system_story",
+    }));
+  }, [navigation, system, assetId, assetName]);
+
+  const goToAddTimelineRecord = useCallback(() => {
+    if (!navigation?.navigate || !system || !assetId) return;
     navigation.navigate("AddTimelineRecord", {
       source: "system",
       assetId,
@@ -636,35 +650,38 @@ const handleShareServiceReady = useCallback(async () => {
 }, [assetId, generateFreshServiceReadyLink, serviceReadyUrl, system?.name, systemId]);
 
 const handleRequestServiceFromKeeprPro = useCallback(async (pro) => {
-  try {
-    const result = await createOrReuseServiceReadyLink({
-      supabase,
+    const prefill = buildPrivateKeeprProActionPrefill({
       assetId,
+      assetName,
       systemId,
-      systemName: system?.name,
-      forceNew: true,
-    });
-
-    navigation.navigate("PublicAction", {
-      token: result.token,
-      actionType: "request_service",
-      systemId,
-      assetId,
+      systemName: system?.name || null,
       keeprProId: pro?.id || null,
+      keeprProLabel: pro?.name || pro?.label || null,
       assignmentScope: "system",
       sourceScreen: "boat_system_story",
     });
-  } catch (e) {
-    Alert.alert("Could not start service request", e?.message || "Please try again.");
-  }
-}, [navigation, assetId, systemId, system?.name]);
+    navigation.navigate("CreateReminder", {
+      prefill,
+      assetId,
+      systemId,
+      afterSave: "Notifications",
+    });
+}, [navigation, assetId, assetName, systemId, system?.name]);
 
   const openKeeprPro = useCallback(
     (keeprPro) => {
       if (!navigation?.navigate || !keeprPro?.id) return;
-      navigation.navigate("KeeprProDetail", { pro: keeprPro });
+      navigation.navigate("KeeprProDetail", {
+        pro: keeprPro,
+        assetId,
+        assetName,
+        assetType: "boat",
+        systemId,
+        systemName: system?.name || route?.params?.systemName || null,
+        assignmentScope: "system",
+      });
     },
-    [navigation]
+    [navigation, assetId, assetName, systemId, system?.name, route?.params?.systemName]
   );
 
   // ---- hero selection ----
@@ -1344,7 +1361,7 @@ const handleRequestServiceFromKeeprPro = useCallback(async (pro) => {
                 <Text style={styles.emptyStateText}>
                   No service records yet. Add your first service event to start the story.
                 </Text>
-                <TouchableOpacity style={styles.primaryAction} onPress={goToAddService} activeOpacity={0.85}>
+                <TouchableOpacity style={styles.primaryAction} onPress={goToAddTimelineRecord} activeOpacity={0.85}>
                   <Ionicons
                     name="add-circle-outline"
                     size={16}

@@ -29,6 +29,7 @@ import {
   removePlacementById,
 } from "../lib/attachmentsApi";
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
+import { buildServiceActionRouteParams } from "../lib/serviceActionPrefill";
 import LightboxModal from "../components/LightboxModal";
 import ShowcaseAttachmentsSection from "../components/showcase/ShowcaseAttachmentsSection";
 
@@ -218,12 +219,12 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
 
   const goToAddServiceRecord = () => {
     if (!currentBoat?.id) return;
-    navigation.navigate("AddServiceRecord", {
-      source: "boat",
+    navigation.navigate("CreateReminder", buildServiceActionRouteParams({
       assetId: currentBoat.id,
-      boatId: currentBoat.id,
       assetName: currentBoat.name,
-    });
+      assetType: "boat",
+      sourceScreen: "boat_showcase",
+    }));
   };
 
   const goToEditBoat = () => {

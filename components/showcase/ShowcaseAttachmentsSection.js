@@ -26,6 +26,15 @@ const isPdfFile = (file = {}) => {
   return mime.includes("pdf") || name.endsWith(".pdf");
 };
 
+const isPublicMediaUrl = (url) => {
+  try {
+    const parsed = new URL(String(url || ""), "https://app.keeprhome.com");
+    return parsed.pathname.startsWith("/api/public-media/");
+  } catch (_) {
+    return false;
+  }
+};
+
 function ShowcaseCard({ icon, title, subtitle, actionLabel, onPress }) {
   return (
     <TouchableOpacity style={styles.card} activeOpacity={0.9} onPress={onPress}>
@@ -79,7 +88,11 @@ export default function ShowcaseAttachmentsSection({
     setPreviewLoading(false);
   };
 
-  const canEmbedPdf = Platform.OS === "web" && previewUrl && isPdfFile(previewFile);
+  const canEmbedPdf =
+    Platform.OS === "web" &&
+    previewUrl &&
+    isPdfFile(previewFile) &&
+    (variant !== "public" || isPublicMediaUrl(previewUrl));
   const canPreviewImage = previewUrl && isImageFile(previewFile);
 
   return (
