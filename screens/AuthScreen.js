@@ -1,7 +1,7 @@
 // screens/AuthScreen.js
 
 import { Ionicons } from "@expo/vector-icons";
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useRef, useState, useEffect } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -74,7 +74,9 @@ export default function AuthScreen({ navigation, route }) {
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const passwordInputRef = useRef(null);
 
   const [touched, setTouched] = useState({
     email: false,
@@ -97,6 +99,7 @@ export default function AuthScreen({ navigation, route }) {
 
   const isSignUp = mode === "signup";
   const isForgot = mode === "forgot";
+  const showPasswordToggle = isWeb && !isSignUp && !isForgot;
 
   const iosUrl = "https://apps.apple.com/us/app/keepr-home-asset-care/id6761725280";
   const androidUrl = "https://play.google.com/store/apps/details?id=com.keeprhome.app";
@@ -128,6 +131,13 @@ export default function AuthScreen({ navigation, route }) {
   const passwordErr = useMemo(() => (isForgot ? null : validatePassword(password)), [isForgot, password]);
 
   const canSubmit = !submitting && !emailErr && !passwordErr;
+
+  const toggleLoginPasswordVisibility = () => {
+    setShowLoginPassword((visible) => !visible);
+    if (Platform.OS === "web" && typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => passwordInputRef.current?.focus?.());
+    }
+  };
 
   const ensureProfile = async (userId) => {
     const { error } = await supabase.from("profiles").upsert(
@@ -462,18 +472,54 @@ if (continued) return;
         {!isForgot && (
           <>
             <Text style={[styles.label, { marginTop: spacing.md }]}>Password</Text>
-            <TextInput
-              value={password}
-              onChangeText={(v) => {
-                setPassword(v);
-                if (formError) setFormError("");
-              }}
-              onBlur={() => setTouched((t) => ({ ...t, password: true }))}
-              style={[styles.input, touched.password && passwordErr ? styles.inputError : null]}
-              secureTextEntry
-              placeholder="••••••••"
-              placeholderTextColor={colors.textMuted}
-            />
+            {showPasswordToggle ? (
+              <View
+                style={[
+                  styles.passwordInputWrap,
+                  touched.password && passwordErr ? styles.inputError : null,
+                ]}
+              >
+                <TextInput
+                  ref={passwordInputRef}
+                  value={password}
+                  onChangeText={(v) => {
+                    setPassword(v);
+                    if (formError) setFormError("");
+                  }}
+                  onBlur={() => setTouched((t) => ({ ...t, password: true }))}
+                  style={[styles.input, styles.passwordInput]}
+                  secureTextEntry={!showLoginPassword}
+                  placeholder="••••••••"
+                  placeholderTextColor={colors.textMuted}
+                />
+                <TouchableOpacity
+                  onPress={toggleLoginPasswordVisibility}
+                  style={styles.passwordToggle}
+                  activeOpacity={0.75}
+                  accessibilityRole="button"
+                  accessibilityLabel={showLoginPassword ? "Hide password" : "Show password"}
+                >
+                  <Ionicons
+                    name={showLoginPassword ? "eye-off-outline" : "eye-outline"}
+                    size={20}
+                    color={colors.textSecondary}
+                  />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TextInput
+                value={password}
+                onChangeText={(v) => {
+                  setPassword(v);
+                  if (formError) setFormError("");
+                }}
+                onBlur={() => setTouched((t) => ({ ...t, password: true }))}
+                style={[styles.input, touched.password && passwordErr ? styles.inputError : null]}
+                secureTextEntry
+                placeholder="••••••••"
+                placeholderTextColor={colors.textMuted}
+              />
+            )}
             {touched.password && passwordErr ? <Text style={styles.errorText}>{passwordErr}</Text> : null}
             {isSignUp ? (
               <Text style={styles.hintText}>
@@ -911,6 +957,29 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.textPrimary,
     backgroundColor: colors.surface,
+  },
+
+  passwordInputWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    backgroundColor: colors.surface,
+  },
+
+  passwordInput: {
+    flex: 1,
+    borderWidth: 0,
+    backgroundColor: "transparent",
+  },
+
+  passwordToggle: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 44,
+    minWidth: 44,
+    paddingHorizontal: 12,
   },
 
   inputError: {
