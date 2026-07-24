@@ -13,6 +13,9 @@
 
 create extension if not exists pgcrypto;
 
+alter table public.profiles
+  add column if not exists acquisition_source_slug text;
+
 create unique index if not exists activation_sources_one_user_identity_uidx
   on public.activation_sources (owner_user_id)
   where source_type = 'user' and owner_user_id is not null;

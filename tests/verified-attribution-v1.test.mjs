@@ -111,6 +111,7 @@ test("completion RPC is authenticated, idempotent, and consumes sessions atomica
 test("legacy compatibility and authoritative source boundaries are preserved", () => {
   const sql = read(migrationPath);
 
+  assert.match(sql, /alter table public\.profiles[\s\S]*add column if not exists acquisition_source_slug text/);
   assert.match(sql, /public\.resolve_activation_source_slug\(chosen_source_slug\)/);
   assert.match(sql, /resolved\.resolution_state in \('canonical', 'alias'\)/);
   assert.match(sql, /record_status := 'legacy_fallback'/);
