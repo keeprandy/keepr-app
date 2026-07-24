@@ -5,6 +5,8 @@ import test from "node:test";
 
 const repoRoot = path.resolve(new URL("..", import.meta.url).pathname);
 const migrationPath = "supabase/migrations/20260724123000_share_actions_foundation.sql";
+const digestHotfixMigrationPath =
+  "supabase/migrations/20260724183500_qualify_share_action_digest.sql";
 
 function read(relativePath) {
   return fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
@@ -202,6 +204,17 @@ test("opening a share creates or reuses a contextual activation session", () => 
   assert.match(sql, /share_row\.id,\s*share_row\.shared_object_type,\s*share_row\.shared_object_id,\s*share_row\.intended_action/);
   assert.match(sql, /source_slug_snapshot := inserted_session\.source_slug_snapshot/);
   assert.match(sql, /activation_session_public_token := inserted_session\.public_token/);
+});
+
+test("share action open hotfix keeps locked search_path and qualifies pgcrypto digest", () => {
+  const sql = read(digestHotfixMigrationPath);
+
+  assert.match(sql, /create or replace function public\.open_share_action/);
+  assert.match(sql, /security definer/);
+  assert.match(sql, /set search_path = public/);
+  assert.match(sql, /extensions\.digest\(/);
+  assert.doesNotMatch(sql, /[^.]digest\(/);
+  assert.match(sql, /grant execute on function public\.open_share_action/);
 });
 
 test("link scanners can be ignored but cannot create verified outcomes by themselves", () => {
