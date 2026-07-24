@@ -54,7 +54,7 @@ test("activation session migration creates table, constraints, RLS, and controll
   const sql = read(migrationPath);
 
   assert.match(sql, /create table if not exists public\.activation_sessions/);
-  assert.match(sql, /public_token text not null unique default encode\(gen_random_bytes\(32\), 'hex'\)/);
+  assert.match(sql, /public_token text not null unique default encode\(extensions\.gen_random_bytes\(32\), 'hex'\)/);
   assert.match(sql, /activation_source_id uuid null references public\.activation_sources\(id\)/);
   assert.match(sql, /resolution_state in \('canonical', 'alias', 'legacy_fallback', 'unresolved'\)/);
   for (const method of [
@@ -137,6 +137,8 @@ test("idempotency reuses active matching sessions and avoids reuse after expirat
   assert.match(sql, /stable_client_key := lower\(nullif\(coalesce\(normalized_anonymous_id, normalized_posthog_distinct_id\), ''\)\)/);
   assert.match(sql, /digest\(/);
   assert.doesNotMatch(sql, /stable_client_key := encode\(gen_random_bytes\(16\), 'hex'\)/);
+  assert.doesNotMatch(sql, /encode\(gen_random_bytes\(/);
+  assert.match(sql, /new\.public_token := encode\(extensions\.gen_random_bytes\(32\), 'hex'\)/);
   assert.match(sql, /'unkeyed'/);
   assert.match(sql, /coalesce\(sanitized_landing_url, ''\)/);
   assert.match(sql, /coalesce\(resolved_source_id::text, resolved_state\)/);

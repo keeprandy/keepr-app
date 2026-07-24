@@ -61,7 +61,7 @@ test("share action migration creates durable table, context columns, RLS, and RP
   const sql = read(migrationPath);
 
   assert.match(sql, /create table if not exists public\.share_actions/);
-  assert.match(sql, /public_token text not null unique default encode\(gen_random_bytes\(16\), 'hex'\)/);
+  assert.match(sql, /public_token text not null unique default encode\(extensions\.gen_random_bytes\(16\), 'hex'\)/);
   assert.match(sql, /activation_source_id uuid not null references public\.activation_sources/);
   assert.match(sql, /actor_user_id uuid null references public\.profiles/);
   assert.match(sql, /root_share_action_id uuid null references public\.share_actions/);
@@ -107,6 +107,8 @@ test("share action migration creates durable table, context columns, RLS, and RP
   assert.match(sql, /create or replace function public\.open_share_action/);
   assert.match(sql, /security definer/);
   assert.match(sql, /set search_path = public/);
+  assert.doesNotMatch(sql, /encode\(gen_random_bytes\(/);
+  assert.match(sql, /new\.public_token := encode\(extensions\.gen_random_bytes\(16\), 'hex'\)/);
 });
 
 test("share creation is server-authoritative and direct shares root to self", () => {

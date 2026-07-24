@@ -26,7 +26,7 @@ create extension if not exists pgcrypto;
 
 create table if not exists public.share_actions (
   id uuid primary key default gen_random_uuid(),
-  public_token text not null unique default encode(gen_random_bytes(16), 'hex'),
+  public_token text not null unique default encode(extensions.gen_random_bytes(16), 'hex'),
   activation_source_id uuid not null references public.activation_sources(id) on delete restrict,
   actor_user_id uuid null references public.profiles(id) on delete set null,
   actor_profile_id uuid null references public.profiles(id) on delete set null,
@@ -182,7 +182,7 @@ set search_path = public
 as $$
 begin
   if new.public_token is null or new.public_token !~ '^[a-f0-9]{32,128}$' then
-    new.public_token := encode(gen_random_bytes(16), 'hex');
+    new.public_token := encode(extensions.gen_random_bytes(16), 'hex');
   end if;
 
   new.shared_object_slug_snapshot := public.normalize_activation_slug(new.shared_object_slug_snapshot);

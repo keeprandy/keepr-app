@@ -25,7 +25,7 @@ create extension if not exists pgcrypto;
 
 create table if not exists public.activation_sessions (
   id uuid primary key default gen_random_uuid(),
-  public_token text not null unique default encode(gen_random_bytes(32), 'hex'),
+  public_token text not null unique default encode(extensions.gen_random_bytes(32), 'hex'),
   activation_source_id uuid null references public.activation_sources(id) on delete set null,
   source_slug_snapshot text,
   resolution_state text not null check (
@@ -194,7 +194,7 @@ set search_path = public
 as $$
 begin
   if new.public_token is null or length(new.public_token) < 48 then
-    new.public_token := encode(gen_random_bytes(32), 'hex');
+    new.public_token := encode(extensions.gen_random_bytes(32), 'hex');
   end if;
 
   new.landing_url := public.sanitize_activation_url(new.landing_url);
