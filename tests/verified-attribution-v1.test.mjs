@@ -5,6 +5,8 @@ import test from "node:test";
 
 const repoRoot = path.resolve(new URL("..", import.meta.url).pathname);
 const migrationPath = "supabase/migrations/20260724083431_verified_attribution_identity_foundation.sql";
+const identityProjectionMigrationPath =
+  "supabase/migrations/20260724135000_user_activation_identities_projection.sql";
 
 function read(relativePath) {
   return fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
@@ -86,6 +88,21 @@ test("every verified user gets one privacy-safe activation identity and personal
   assert.match(sql, /profile_json->>'inbox_name'/);
   assert.match(sql, /is_valid_personal_activation_slug/);
   assert.doesNotMatch(sql, /email.*canonical/i);
+});
+
+test("user activation identity projection is read-only and derived from activation sources", () => {
+  const sql = read(identityProjectionMigrationPath);
+
+  assert.match(sql, /create or replace view public\.user_activation_identities/);
+  assert.match(sql, /with \(security_invoker = true\)/);
+  assert.match(sql, /from public\.activation_sources src/);
+  assert.match(sql, /where src\.source_type = 'user'/);
+  assert.match(sql, /src\.owner_user_id as user_id/);
+  assert.match(sql, /src\.id as activation_source_id/);
+  assert.match(sql, /canonical\.slug as canonical_slug/);
+  assert.match(sql, /s\.slug_kind = 'canonical'/);
+  assert.match(sql, /revoke all on table public\.user_activation_identities from anon/);
+  assert.match(sql, /grant select on table public\.user_activation_identities to authenticated/);
 });
 
 test("completion RPC is authenticated, idempotent, and consumes sessions atomically", () => {
