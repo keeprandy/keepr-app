@@ -333,8 +333,11 @@ test("Share Keepr and routing use the short-link foundation without removing leg
   assert.match(app, /ShareAction: "s\/:token"/);
   assert.match(app, /function ShareActionRedirectScreen/);
   assert.match(app, /function extractShareActionTokenFromUrl/);
+  assert.match(app, /const shareActionOpenPromises = new Map\(\)/);
+  assert.match(app, /async function captureShareActionToken/);
   assert.match(app, /async function captureShareActionFromUrl/);
   assert.match(app, /await openShareAction/);
+  assert.match(app, /shareActionOpenPromises\.has\(token\)/);
   assert.match(app, /await captureShareActionFromUrl\(initialUrl\)/);
   assert.match(app, /captureShareActionFromUrl\(window\.location\?\.href\)/);
   assert.match(app, /captureShareActionFromUrl\(url\)/);

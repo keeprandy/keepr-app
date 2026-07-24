@@ -1117,7 +1117,7 @@ function KeeprIntelligenceWrapper(props) {
 
 console.log("✅ Enhance configured: ASSURANCE (no edge functions)");
 
-const shareActionsOpenedThisRuntime = new Set();
+const shareActionOpenPromises = new Map();
 
 function InviteRedirectScreen() {
   return <SplashIntroScreen />;
@@ -1146,14 +1146,7 @@ function ShareActionRedirectScreen({ navigation, route }) {
       }
 
       try {
-        const opened = await openShareAction({
-          supabase,
-          token,
-          clientPlatform: Platform.OS,
-          storage: AsyncStorage,
-        });
-
-        trackShareActionOpened(opened);
+        const opened = await captureShareActionToken(token);
 
         if (!mounted) return;
         navigation.replace("Invite", {
@@ -1239,11 +1232,13 @@ function extractShareActionTokenFromUrl(url) {
   }
 }
 
-async function captureShareActionFromUrl(url) {
-  const token = extractShareActionTokenFromUrl(url);
-  if (!token || shareActionsOpenedThisRuntime.has(token)) return null;
+async function captureShareActionToken(token) {
+  if (!token) return null;
+  if (shareActionOpenPromises.has(token)) {
+    return shareActionOpenPromises.get(token);
+  }
 
-  try {
+  const openPromise = (async () => {
     const opened = await openShareAction({
       supabase,
       token,
@@ -1251,9 +1246,20 @@ async function captureShareActionFromUrl(url) {
       storage: AsyncStorage,
     });
 
-    shareActionsOpenedThisRuntime.add(token);
     trackShareActionOpened(opened);
     return opened;
+  })();
+
+  shareActionOpenPromises.set(token, openPromise);
+  return openPromise;
+}
+
+async function captureShareActionFromUrl(url) {
+  const token = extractShareActionTokenFromUrl(url);
+  if (!token) return null;
+
+  try {
+    return await captureShareActionToken(token);
   } catch (e) {
     console.log("Share action link capture failed:", e?.message || e);
     return null;
