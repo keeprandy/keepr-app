@@ -23,6 +23,7 @@ import { colors, radius, spacing, typography } from "../styles/theme";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { track, identifyUser } from "../lib/analytics";
 import { claimPendingActionsForEmail } from "../lib/hubsApi";
+import { completeSignupAttribution, getStoredLegacySourceSlug } from "../lib/verifiedAttribution";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -313,45 +314,59 @@ if (sessionUserId) {
     email: normalizedEmail,
   });
 
- const continued = await continueActivationJourney();
-if (continued) return;
-
   // 🔥 Attribution capture
   let sourceSlug = null;
+  let verifiedAttribution = null;
 
   try {
-    sourceSlug =
-      (await AsyncStorage.getItem("keepr_acquisition_source_slug")) ||
-      (await AsyncStorage.getItem("keepr_invite_slug")) ||
-      null;
+    sourceSlug = await getStoredLegacySourceSlug({ storage: AsyncStorage });
   } catch (e) {
     console.log("[AuthScreen] attribution read failed:", e?.message || e);
   }
 
-  // 🔥 Persist to profile
-  if (sourceSlug) {
-    try {
-      await supabase
-        .from("profiles")
-        .update({
-          acquisition_source_slug: sourceSlug,
-        })
-        .eq("id", sessionUserId);
-    } catch (e) {
-      console.log("[AuthScreen] attribution save failed:", e?.message || e);
+  try {
+    verifiedAttribution = await completeSignupAttribution({
+      supabase,
+      storage: AsyncStorage,
+      sourceSlug,
+      intendedAction: "signup",
+    });
+  } catch (e) {
+    console.log("[AuthScreen] verified attribution failed:", e?.message || e);
+
+    if (sourceSlug) {
+      try {
+        await supabase
+          .from("profiles")
+          .update({
+            acquisition_source_slug: sourceSlug,
+          })
+          .eq("id", sessionUserId);
+      } catch (profileError) {
+        console.log("[AuthScreen] attribution save failed:", profileError?.message || profileError);
+      }
     }
   }
+
+ const continued = await continueActivationJourney();
+if (continued) return;
 
   // 🔥 Identify + track
   try {
     identifyUser(sessionUserId, {
       email: user?.email || null,
       acquisition_source_slug: sourceSlug,
+      activation_attribution_id: verifiedAttribution?.attribution_record_id || null,
+      activation_identity_slug: verifiedAttribution?.canonical_slug || null,
     });
 
     track("user_signed_up", {
       source_slug: sourceSlug,
       has_attribution: !!sourceSlug,
+      attribution_record_id: verifiedAttribution?.attribution_record_id || null,
+      activation_session_id: verifiedAttribution?.activation_session_id || null,
+      activation_source_id: verifiedAttribution?.activation_source_id || null,
+      activation_identity_slug: verifiedAttribution?.canonical_slug || null,
       platform: Platform.OS,
     });
   } catch (e) {
