@@ -342,7 +342,8 @@ test("Share Keepr and routing use the short-link foundation without removing leg
   assert.match(app, /captureShareActionFromUrl\(window\.location\?\.href\)/);
   assert.match(app, /captureShareActionFromUrl\(url\)/);
   assert.match(app, /track\("share_link_opened"/);
-  assert.match(app, /navigation\.replace\("Invite"/);
+  assert.match(app, /await flushAnalytics\(\)/);
+  assert.match(app, /navigation\.replace\("Auth"/);
 
   assert.match(inviteLinks, /buildUserInviteUrl/);
   assert.match(inviteLinks, /buildShortShareUrl/);

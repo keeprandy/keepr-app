@@ -74,7 +74,7 @@ import TeamScreen from "./screens/TeamScreen";
 
 // Supabase
 import { supabase } from "./lib/supabaseClient";
-import { track } from "./lib/analytics";
+import { flushAnalytics, track } from "./lib/analytics";
 import { openShareAction } from "./lib/shareActions";
 
 // Theme
@@ -1123,7 +1123,7 @@ function InviteRedirectScreen() {
   return <SplashIntroScreen />;
 }
 
-function trackShareActionOpened(opened) {
+async function trackShareActionOpened(opened) {
   track("share_link_opened", {
     share_action_id: opened?.id || null,
     activation_source_id: opened?.activationSourceId || null,
@@ -1131,6 +1131,7 @@ function trackShareActionOpened(opened) {
     intended_action: opened?.intendedAction || null,
     activation_session_status: opened?.activationSessionStatus || null,
   });
+  await flushAnalytics();
 }
 
 function ShareActionRedirectScreen({ navigation, route }) {
@@ -1149,7 +1150,7 @@ function ShareActionRedirectScreen({ navigation, route }) {
         const opened = await captureShareActionToken(token);
 
         if (!mounted) return;
-        navigation.replace("Invite", {
+        navigation.replace("Auth", {
           slug: opened?.sourceSlugSnapshot || opened?.sharedObjectSlugSnapshot || null,
         });
       } catch (e) {
@@ -1246,7 +1247,7 @@ async function captureShareActionToken(token) {
       storage: AsyncStorage,
     });
 
-    trackShareActionOpened(opened);
+    await trackShareActionOpened(opened);
     return opened;
   })();
 
