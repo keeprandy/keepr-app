@@ -5,9 +5,12 @@ import QRCode from "react-native-qrcode-svg";
 import * as Clipboard from "expo-clipboard";
 import { supabase } from "../lib/supabaseClient";
 import { track } from "../lib/analytics";
+import { buildUserInviteUrl } from "../lib/inviteLinks";
+import { createShareAction } from "../lib/shareActions";
 
 export default function ShareKeeprScreen({ navigation }) {
   const [inviteUrl, setInviteUrl] = useState("");
+  const [qrShareAction, setQrShareAction] = useState(null);
 
   useEffect(() => {
     buildInvite();
@@ -18,6 +21,39 @@ export default function ShareKeeprScreen({ navigation }) {
     buildInvite();
   }, [])
 );
+
+  const createLegacyInvite = (user, profile) => {
+  const fallbackSlug = `u_${user.id.slice(0, 8)}`;
+
+  const slug =
+    profile?.username ||
+    profile?.inbox_name ||
+    fallbackSlug;
+
+  return {
+    slug,
+    url: buildUserInviteUrl({ sourceSlug: slug }),
+  };
+};
+
+const createKeeprShareAction = async (channel) => {
+  const action = await createShareAction({
+    supabase,
+    sharedObjectType: "keepr",
+    intendedAction: "signup",
+    channel,
+  });
+
+  track("share_action_created", {
+    share_action_id: action?.id,
+    activation_source_id: action?.activationSourceId,
+    shared_object_type: action?.sharedObjectType,
+    intended_action: action?.intendedAction,
+    channel: action?.channel,
+  });
+
+  return action;
+};
 
   const buildInvite = async () => {
   const { data } = await supabase.auth.getUser();
@@ -35,21 +71,35 @@ export default function ShareKeeprScreen({ navigation }) {
     console.log("Profile fetch error:", error);
   }
 
-  const fallbackSlug = `u_${user.id.slice(0, 8)}`;
+  const legacyInvite = createLegacyInvite(user, profile);
+  let url = legacyInvite.url;
+  let slug = legacyInvite.slug;
+  let action = null;
 
-  const slug =
-    profile?.username ||
-    profile?.inbox_name ||
-    fallbackSlug;
-
-  const url = `https://www.keeprhome.com/invite/${slug}`;
+  try {
+    action = await createKeeprShareAction("qr");
+    if (action?.shareUrl) {
+      url = action.shareUrl;
+      slug = action.sharedObjectSlugSnapshot || slug;
+    }
+  } catch (e) {
+    console.log("Share action QR creation failed; using legacy invite link:", e?.message || e);
+  }
 
   setInviteUrl(url);
   setSourceSlug(slug);
+  setQrShareAction(action);
 
   track("share_keepr_qr_viewed", {
   invite_url: url,
   source_slug: slug,
+});
+
+  track("share_qr_viewed", {
+  share_action_id: action?.id || null,
+  activation_source_id: action?.activationSourceId || null,
+  shared_object_type: action?.sharedObjectType || "keepr",
+  intended_action: action?.intendedAction || "signup",
 });
 
   const { data: events, error: statsError } = await supabase
@@ -79,13 +129,30 @@ if (statsError) {
 const handleShare = async () => {
   if (!inviteUrl) return;
 
+  let shareUrl = inviteUrl;
+  let action = qrShareAction;
+
+  try {
+    action = await createKeeprShareAction("native_share");
+    shareUrl = action?.shareUrl || shareUrl;
+  } catch (e) {
+    console.log("Share action native creation failed; using current invite link:", e?.message || e);
+  }
+
   track("share_keepr_share_clicked", {
-  invite_url: inviteUrl,
+  invite_url: shareUrl,
   source_slug: sourceSlug,
 });
 
+  track("share_native_opened", {
+  share_action_id: action?.id || null,
+  activation_source_id: action?.activationSourceId || null,
+  shared_object_type: action?.sharedObjectType || "keepr",
+  intended_action: action?.intendedAction || "signup",
+});
+
   await Share.share({
-    message: `I’m a keepr. You should be too.\n\n${inviteUrl}`,
+    message: `I’m a keepr. You should be too.\n\n${shareUrl}`,
   });
 };
 
@@ -101,12 +168,29 @@ const [showCopied, setShowCopied] = useState(false);
   const handleCopy = async () => {
     if (!inviteUrl) return;
 
+   let copyUrl = inviteUrl;
+   let action = qrShareAction;
+
+   try {
+    action = await createKeeprShareAction("copy_link");
+    copyUrl = action?.shareUrl || copyUrl;
+   } catch (e) {
+    console.log("Share action copy creation failed; using current invite link:", e?.message || e);
+   }
+
    track("share_keepr_copy_link_clicked", {
-  invite_url: inviteUrl,
+  invite_url: copyUrl,
   source_slug: sourceSlug,
 });
 
-    await Clipboard.setStringAsync(inviteUrl);
+    track("share_link_copied", {
+  share_action_id: action?.id || null,
+  activation_source_id: action?.activationSourceId || null,
+  shared_object_type: action?.sharedObjectType || "keepr",
+  intended_action: action?.intendedAction || "signup",
+});
+
+    await Clipboard.setStringAsync(copyUrl);
     setShowCopied(true);
 
     setTimeout(() => {

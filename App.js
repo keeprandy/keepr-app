@@ -74,6 +74,8 @@ import TeamScreen from "./screens/TeamScreen";
 
 // Supabase
 import { supabase } from "./lib/supabaseClient";
+import { track } from "./lib/analytics";
+import { openShareAction } from "./lib/shareActions";
 
 // Theme
 import { colors } from "./styles/theme";
@@ -255,6 +257,7 @@ const linking = {
   screens: {
     ResetPassword: "reset",
     Auth: "auth",
+    ShareAction: "s/:token",
     
     PublicKeeprStory: "k/:kac",
     PublicAction: "k/:kac/actions",
@@ -1117,6 +1120,56 @@ function InviteRedirectScreen() {
   return <SplashIntroScreen />;
 }
 
+function ShareActionRedirectScreen({ navigation, route }) {
+  React.useEffect(() => {
+    let mounted = true;
+
+    const openShare = async () => {
+      const token = route?.params?.token;
+
+      if (!token) {
+        navigation.replace("Auth");
+        return;
+      }
+
+      try {
+        const opened = await openShareAction({
+          supabase,
+          token,
+          clientPlatform: Platform.OS,
+          storage: AsyncStorage,
+        });
+
+        track("share_link_opened", {
+          share_action_id: opened?.id || null,
+          activation_source_id: opened?.activationSourceId || null,
+          shared_object_type: opened?.sharedObjectType || null,
+          intended_action: opened?.intendedAction || null,
+          activation_session_status: opened?.activationSessionStatus || null,
+        });
+
+        if (!mounted) return;
+        navigation.replace("Invite", {
+          slug: opened?.sourceSlugSnapshot || opened?.sharedObjectSlugSnapshot || null,
+        });
+      } catch (e) {
+        console.log("Share action open failed:", e?.message || e);
+        if (mounted) {
+          navigation.replace("Auth");
+        }
+      }
+    };
+
+    openShare();
+
+    return () => {
+      mounted = false;
+    };
+  }, [navigation, route?.params?.token]);
+
+  return <SplashIntroScreen />;
+}
+
 /* ----------------- ROOT WITH AUTH + ROLE GATE ----------------- */
 
 function extractInviteSlugFromUrl(url) {
@@ -1883,6 +1936,7 @@ if (!user) {
           <RootStack.Screen name="AddHubStory" component={AddHubStoryScreen} />
           <RootStack.Screen name="KeeprStoryInternal" component={PublicKeeprStoryScreen}/>
           
+          <RootStack.Screen name="ShareAction" component={ShareActionRedirectScreen} />
           <RootStack.Screen name="Invite" component={InviteRedirectScreen} />
           <RootStack.Screen name="Auth" component={AuthScreen} />
           <RootStack.Screen
@@ -1931,11 +1985,12 @@ const initialRouteName = isResetLink
         }
         onReady={() => setIsNavReady(true)}
         onStateChange={handleNavStateChange}
-      >
+          >
           <RootStack.Navigator
             screenOptions={{ headerShown: false }}
             initialRouteName={initialRouteName}
           >
+          <RootStack.Screen name="ShareAction" component={ShareActionRedirectScreen} />
           <RootStack.Screen name="Invite" component={InviteRedirectScreen} />
           <RootStack.Screen name="Auth" component={AuthScreen} />
           <RootStack.Screen
@@ -2370,6 +2425,7 @@ const hideSidebarRoutes = [
   "ResetPassword",
   "PublicKeeprStory",
   "KeeprHub",
+  "ShareAction",
   "PublicAction",
   "KacRoute",
   "KacResolve",
