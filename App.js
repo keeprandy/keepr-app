@@ -1117,8 +1117,20 @@ function KeeprIntelligenceWrapper(props) {
 
 console.log("✅ Enhance configured: ASSURANCE (no edge functions)");
 
+const shareActionsOpenedThisRuntime = new Set();
+
 function InviteRedirectScreen() {
   return <SplashIntroScreen />;
+}
+
+function trackShareActionOpened(opened) {
+  track("share_link_opened", {
+    share_action_id: opened?.id || null,
+    activation_source_id: opened?.activationSourceId || null,
+    shared_object_type: opened?.sharedObjectType || null,
+    intended_action: opened?.intendedAction || null,
+    activation_session_status: opened?.activationSessionStatus || null,
+  });
 }
 
 function ShareActionRedirectScreen({ navigation, route }) {
@@ -1141,13 +1153,7 @@ function ShareActionRedirectScreen({ navigation, route }) {
           storage: AsyncStorage,
         });
 
-        track("share_link_opened", {
-          share_action_id: opened?.id || null,
-          activation_source_id: opened?.activationSourceId || null,
-          shared_object_type: opened?.sharedObjectType || null,
-          intended_action: opened?.intendedAction || null,
-          activation_session_status: opened?.activationSessionStatus || null,
-        });
+        trackShareActionOpened(opened);
 
         if (!mounted) return;
         navigation.replace("Invite", {
@@ -1198,6 +1204,58 @@ function extractInviteSlugFromUrl(url) {
     return null;
   } catch (e) {
     console.log("Invite slug parse failed:", e?.message || e);
+    return null;
+  }
+}
+
+function extractShareActionTokenFromUrl(url) {
+  if (!url || typeof url !== "string") return null;
+
+  try {
+    let path = "";
+
+    if (typeof URL !== "undefined") {
+      try {
+        path = new URL(url).pathname || "";
+      } catch {
+        path = "";
+      }
+    }
+
+    if (!path) {
+      const parsed = ExpoLinking.parse(url);
+      path = parsed?.path || "";
+    }
+
+    const parts = path.split("/").filter(Boolean);
+    const shareIndex = parts.indexOf("s");
+    const token = shareIndex >= 0 ? parts[shareIndex + 1] : null;
+
+    if (!token) return null;
+    return decodeURIComponent(String(token));
+  } catch (e) {
+    console.log("Share action token parse failed:", e?.message || e);
+    return null;
+  }
+}
+
+async function captureShareActionFromUrl(url) {
+  const token = extractShareActionTokenFromUrl(url);
+  if (!token || shareActionsOpenedThisRuntime.has(token)) return null;
+
+  try {
+    const opened = await openShareAction({
+      supabase,
+      token,
+      clientPlatform: Platform.OS,
+      storage: AsyncStorage,
+    });
+
+    shareActionsOpenedThisRuntime.add(token);
+    trackShareActionOpened(opened);
+    return opened;
+  } catch (e) {
+    console.log("Share action link capture failed:", e?.message || e);
     return null;
   }
 }
@@ -2448,7 +2506,13 @@ React.useEffect(() => {
     try {
       const initialUrl = await ExpoLinking.getInitialURL();
       if (!mounted) return;
+      await captureShareActionFromUrl(initialUrl);
       await captureInviteSourceFromUrl(initialUrl);
+
+      if (Platform.OS === "web" && typeof window !== "undefined") {
+        await captureShareActionFromUrl(window.location?.href);
+        await captureInviteSourceFromUrl(window.location?.href);
+      }
     } catch (e) {
       console.log("Initial invite link capture failed:", e?.message || e);
     }
@@ -2458,6 +2522,7 @@ React.useEffect(() => {
 
 const subscription = ExpoLinking.addEventListener("url", ({ url }) => {
   console.log("🔥 URL RECEIVED:", url);
+  captureShareActionFromUrl(url);
   captureInviteSourceFromUrl(url);
 });
 
