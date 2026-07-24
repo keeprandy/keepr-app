@@ -257,6 +257,7 @@ const linking = {
   screens: {
     ResetPassword: "reset",
     Auth: "auth",
+    ShareKeepr: "share-keepr",
     ShareAction: "s/:token",
     
     PublicKeeprStory: "k/:kac",
