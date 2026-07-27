@@ -120,6 +120,7 @@ import SplashIntroScreen from "./screens/SplashIntroScreen";
 import KacResolveScreen from "./screens/KacResolveScreen";
 import KacRouteScreen from "./screens/KacRouteScreen";
 import ShareKeeprScreen from "./screens/ShareKeeprScreen";
+import KeeprEffectScreen from "./screens/KeeprEffectScreen";
 
 // Home
 import AddHomeAssetScreen from "./screens/AddHomeAssetScreen";
@@ -265,6 +266,7 @@ const linking = {
     Auth: "auth",
     Invite: "invite/:slug",
     ShareKeepr: "share-keepr",
+    KeeprEffect: "keepr-effect",
     ShareAction: "s/:token",
     
     PublicKeeprStory: "k/:kac",
@@ -1321,6 +1323,25 @@ function extractShareActionTokenFromUrl(url) {
   }
 }
 
+function extractInviteChannelFromUrl(url) {
+  if (!url || typeof url !== "string") return null;
+
+  try {
+    const parsed = ExpoLinking.parse(url);
+    const rawChannel =
+      parsed?.queryParams?.channel ||
+      parsed?.queryParams?.utm_source ||
+      null;
+
+    const channel = String(rawChannel || "").trim().toLowerCase();
+    if (!channel) return null;
+    return channel === "text" ? "sms" : channel;
+  } catch (e) {
+    console.log("Invite channel parse failed:", e?.message || e);
+    return null;
+  }
+}
+
 async function captureShareActionToken(token) {
   if (!token) return null;
   if (shareActionOpenPromises.has(token)) {
@@ -1348,6 +1369,7 @@ async function captureShareActionToken(token) {
 async function captureInviteSourceFromUrl(url) {
   const slug = extractInviteSlugFromUrl(url);
   if (!slug) return;
+  const channel = extractInviteChannelFromUrl(url);
   
 
   try {
@@ -1359,9 +1381,11 @@ async function captureInviteSourceFromUrl(url) {
       landingUrl: url,
       referrer:
         typeof document !== "undefined" ? document.referrer || null : null,
+      utm: channel ? { channel } : {},
       clientPlatform: Platform.OS,
       storage: AsyncStorage,
       posthogDistinctId,
+      metadata: channel ? { share_channel: channel } : {},
     });
 
     await AsyncStorage.setItem("keepr_acquisition_source_slug", slug);
@@ -1372,6 +1396,7 @@ async function captureInviteSourceFromUrl(url) {
       activation_session_status: activationSession?.status || null,
       resolution_state: activationSession?.resolution_state || null,
       source_slug: activationSession?.source_slug_snapshot || slug,
+      channel,
     });
     await flushAnalytics();
 
@@ -2211,6 +2236,7 @@ const initialRouteName = isResetLink
           <RootStack.Screen name="OnboardingStack" component={OnboardingStack} />
           <RootStack.Screen name="Profile" component={ProfileScreen} />
           <RootStack.Screen name="ShareKeepr" component={ShareKeeprScreen} />
+          <RootStack.Screen name="KeeprEffect" component={KeeprEffectScreen} />
 
           <RootStack.Screen name="ChangePassword" component={ChangePasswordScreen} />
           <RootStack.Screen name="AdminSettings" component={SettingsScreen} />

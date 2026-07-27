@@ -1042,13 +1042,13 @@ if (Platform.OS !== "ios") {
 
                     <ModeWidget
                         icon="share-social-outline"
-                        title="Help Grow Keepr"
-                        subtitle="Share Keepr with a link or QR code"
+                        title="Your Keepr Effect"
+                        subtitle="See the impact from your invite and share Keepr."
                         onPress={() => {
-                          track("share_keepr_opened", {
+                          track("keepr_effect_opened", {
                             source: "dashboard",
                           });
-                          navigation.navigate("ShareKeepr");
+                          navigation.navigate("KeeprEffect");
                         }}
                       />
 
@@ -1122,9 +1122,14 @@ if (Platform.OS !== "ios") {
                   </View>
                   <ModeWidget
                     icon="share-social-outline"
-                    title="Help Grow Keepr"
-                    subtitle="Share Keepr with a link or QR code"
-                    onPress={() => navigation.navigate("ShareKeepr")}
+                    title="Your Keepr Effect"
+                    subtitle="See the impact from your invite and share Keepr."
+                    onPress={() => {
+                      track("keepr_effect_opened", {
+                        source: "dashboard",
+                      });
+                      navigation.navigate("KeeprEffect");
+                    }}
                   />
 
                   {/* System modes (subtle) */}

@@ -7,6 +7,8 @@ const repoRoot = path.resolve(new URL("..", import.meta.url).pathname);
 const migrationPath = "supabase/migrations/20260724123000_share_actions_foundation.sql";
 const digestHotfixMigrationPath =
   "supabase/migrations/20260724183500_qualify_share_action_digest.sql";
+const socialChannelsMigrationPath =
+  "supabase/migrations/20260727223000_share_actions_social_channels.sql";
 
 function read(relativePath) {
   return fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
@@ -139,6 +141,26 @@ test("share action reuse is narrow and channel-aware", () => {
   assert.match(sql, /s\.intended_action = normalized_intended_action/);
   assert.match(sql, /s\.channel = normalized_channel/);
   assert.match(sql, /s\.created_at >= now\(\) - greatest\(p_reuse_window, interval '5 minutes'\)/);
+});
+
+test("explicit social share channels are durable and attributable", () => {
+  const migration = read(socialChannelsMigrationPath);
+  const helper = read("lib/shareActions.js");
+  const effectScreen = read("screens/KeeprEffectScreen.js");
+
+  assert.match(migration, /share_actions_channel_check/);
+  assert.match(migration, /'facebook'/);
+  assert.match(migration, /'linkedin'/);
+  assert.match(migration, /create or replace function public\.create_share_action/);
+  assert.match(helper, /"facebook"/);
+  assert.match(helper, /"linkedin"/);
+  assert.match(effectScreen, /channel: "facebook"/);
+  assert.match(effectScreen, /channel: "linkedin"/);
+  assert.match(effectScreen, /buildUserInviteUrlWithChannel/);
+  assert.match(effectScreen, /getChannelInviteUrl\(channel\)/);
+  assert.doesNotMatch(effectScreen, /action\?\.shareUrl \|\| inviteUrl/);
+  assert.match(read("lib/inviteLinks.js"), /utm_source/);
+  assert.match(read("lib/inviteLinks.js"), /utm_medium/);
 });
 
 test("public resolver returns safe projection fields and not private actor metadata", () => {
@@ -358,5 +380,6 @@ test("Share Keepr and routing use the share foundation without removing legacy i
   assert.match(app, /track\("invite_link_opened"/);
 
   assert.match(inviteLinks, /buildUserInviteUrl/);
+  assert.match(inviteLinks, /buildUserInviteUrlWithChannel/);
   assert.match(inviteLinks, /buildShortShareUrl/);
 });

@@ -9,6 +9,16 @@ const identityProjectionMigrationPath =
   "supabase/migrations/20260724135000_user_activation_identities_projection.sql";
 const memberInviteMigrationPath =
   "supabase/migrations/20260727153000_member_invite_share_workflow.sql";
+const keeprEffectMigrationPath =
+  "supabase/migrations/20260727213000_keepr_effect_email_slug_base.sql";
+const userHandleBackfillMigrationPath =
+  "supabase/migrations/20260727214500_backfill_user_activation_identities_for_profile_handles.sql";
+const knownAttributionSeedMigrationPath =
+  "supabase/migrations/20260727220000_seed_known_person_attributions_drake_keeprandy.sql";
+const keeprEffectRecentWindowMigrationPath =
+  "supabase/migrations/20260727221500_keepr_effect_recent_window.sql";
+const keeprEffectChannelConversionsMigrationPath =
+  "supabase/migrations/20260727224500_keepr_effect_slug_channel_conversions.sql";
 
 function read(relativePath) {
   return fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
@@ -235,4 +245,107 @@ test("member invite workflow exposes clean-link preview metadata and join notifi
 
   assert.match(vercel, /"source": "\/invite\/:slug"/);
   assert.match(vercel, /"destination": "\/api\/og\/invite\/:slug"/);
+});
+
+test("Keepr Effect report is authenticated, ledger-backed, and privacy-safe", () => {
+  const sql = read(keeprEffectMigrationPath);
+
+  assert.match(sql, /create or replace function public\.get_my_keepr_effect\(\)/);
+  assert.match(sql, /security definer/);
+  assert.match(sql, /current_user_id := auth\.uid\(\)/);
+  assert.match(sql, /raise exception 'authentication required'/);
+  assert.match(sql, /from public\.attribution_records ar/);
+  assert.match(sql, /ar\.activation_source_id = source_row\.id/);
+  assert.match(sql, /ar\.status = 'verified'/);
+  assert.match(sql, /ar\.attribution_model = 'person'/);
+  assert.match(sql, /from public\.assets a/);
+  assert.match(sql, /from public\.attachments att/);
+  assert.match(sql, /from public\.share_actions sa/);
+  assert.match(sql, /jsonb_build_object/);
+  assert.match(sql, /actor_display_name/);
+  assert.match(sql, /actor_photo_url/);
+  assert.match(sql, /email_local_slug/);
+  assert.match(sql, /p\.profile_photo_attachment_id/);
+  assert.match(sql, /s\.normalized_slug !~ '\^u_\[0-9a-f\]\{8\}\$'/);
+  assert.match(sql, /became a Keepr/);
+  assert.match(sql, /created an asset/);
+  assert.match(sql, /preserved an ownership record/);
+  assert.doesNotMatch(sql, /@[^']*actor_display_name/i);
+  assert.doesNotMatch(sql, /att\.file_name|['"]file_name['"]/i);
+  assert.doesNotMatch(sql, /serial/i);
+  assert.doesNotMatch(sql, /vin/i);
+  assert.doesNotMatch(sql, /address/i);
+  assert.match(sql, /grant execute on function public\.get_my_keepr_effect\(\) to authenticated/);
+});
+
+test("profile handle backfill materializes invite identities without attribution credit", () => {
+  const sql = read(userHandleBackfillMigrationPath);
+
+  assert.match(sql, /public\.is_valid_personal_activation_slug\(p\.username\)/);
+  assert.match(sql, /public\.is_valid_personal_activation_slug\(p\.inbox_name\)/);
+  assert.match(sql, /public\.ensure_user_activation_identity/);
+  assert.match(sql, /https:\/\/www\.keeprhome\.com\/invite/);
+  assert.doesNotMatch(sql, /insert into public\.attribution_records/i);
+  assert.doesNotMatch(sql, /update public\.attribution_records/i);
+  assert.doesNotMatch(sql, /profiles[\s\S]*acquisition_source_slug[\s\S]*=/i);
+});
+
+test("known historical attribution seed is audited and limited to member sources", () => {
+  const sql = read(knownAttributionSeedMigrationPath);
+
+  assert.match(sql, /andy_approved_historical_seed/);
+  assert.match(sql, /Andy supplied known legitimate referral list/);
+  assert.match(sql, /insert into public\.attribution_records/);
+  assert.match(sql, /on conflict \(user_id\) do nothing/);
+  assert.match(sql, /where not exists/);
+  assert.match(sql, /lower\(p\.email\) = lower\(seed\.expected_email\)/);
+  assert.match(sql, /source\.source_type = 'user'/);
+  assert.match(sql, /source_slug_snapshot/);
+  assert.match(sql, /'person'/);
+  assert.match(sql, /'verified'/);
+  assert.match(sql, /set acquisition_source_slug = seed\.source_slug/);
+  assert.doesNotMatch(sql, /'web'/);
+});
+
+test("Keepr Effect recent impact supports a sticky 30-day default window", () => {
+  const sql = read(keeprEffectRecentWindowMigrationPath);
+  const helper = read("lib/keeprEffect.js");
+  const screen = read("screens/KeeprEffectScreen.js");
+
+  assert.match(sql, /p_recent_window text default '30d'/);
+  assert.match(sql, /when 'today' then date_trunc\('day', now\(\)\)/);
+  assert.match(sql, /when '7d' then now\(\) - interval '7 days'/);
+  assert.match(sql, /when '30d' then now\(\) - interval '30 days'/);
+  assert.match(sql, /where happened_at >= recent_since/);
+  assert.match(sql, /grant execute on function public\.get_my_keepr_effect\(text\) to authenticated/);
+
+  assert.match(helper, /DEFAULT_KEEPR_EFFECT_RECENT_WINDOW = "30d"/);
+  assert.match(helper, /p_recent_window: normalizeKeeprEffectRecentWindow\(recentWindow\)/);
+  assert.match(screen, /RECENT_WINDOW_STORAGE_KEY/);
+  assert.match(screen, /Last 30 days/);
+  assert.match(screen, /AsyncStorage\.setItem\(RECENT_WINDOW_STORAGE_KEY, value\)/);
+});
+
+test("Keepr Effect channel conversions join verified attribution to share actions and slug channels", () => {
+  const sql = read(keeprEffectChannelConversionsMigrationPath);
+  const helper = read("lib/keeprEffect.js");
+  const screen = read("screens/KeeprEffectScreen.js");
+
+  assert.match(sql, /create or replace function public\.get_my_keepr_effect_channel_conversions/);
+  assert.match(sql, /owner_user_id = auth\.uid\(\)/);
+  assert.match(sql, /join public\.attribution_records ar/);
+  assert.match(sql, /join public\.activation_sessions session/);
+  assert.match(sql, /left join public\.share_actions sa/);
+  assert.match(sql, /session\.id = ar\.activation_session_id/);
+  assert.match(sql, /sa\.id = session\.share_action_id/);
+  assert.match(sql, /session\.utm->>'channel'/);
+  assert.match(sql, /session\.metadata->>'share_channel'/);
+  assert.match(sql, /\[\?&\]channel=\(\[\^&#\]\+\)/);
+  assert.match(sql, /grant execute on function public\.get_my_keepr_effect_channel_conversions\(\) to authenticated/);
+
+  assert.match(helper, /get_my_keepr_effect_channel_conversions/);
+  assert.match(helper, /conversionsByChannel/);
+  assert.match(screen, /conversionCounts/);
+  assert.match(screen, /buildUserInviteUrlWithChannel/);
+  assert.match(screen, /joined/);
 });

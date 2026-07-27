@@ -7,6 +7,7 @@ import { supabase } from "../lib/supabaseClient";
 import { track } from "../lib/analytics";
 import { buildUserInviteUrl } from "../lib/inviteLinks";
 import { createShareAction } from "../lib/shareActions";
+import { trackMemberInviteShareInitiated } from "../lib/keeprEffect";
 
 export default function ShareKeeprScreen({ navigation }) {
   const [inviteUrl, setInviteUrl] = useState("");
@@ -98,6 +99,12 @@ const getCleanInviteUrlForSlug = (slug, fallbackUrl) => {
   source_slug: slug,
 });
 
+  trackMemberInviteShareInitiated({
+    sourceSlug: slug,
+    activationSourceId: action?.activationSourceId || null,
+    channel: "qr",
+  });
+
   track("share_qr_viewed", {
   share_action_id: action?.id || null,
   activation_source_id: action?.activationSourceId || null,
@@ -154,6 +161,12 @@ const handleShare = async () => {
   intended_action: action?.intendedAction || "signup",
 });
 
+  trackMemberInviteShareInitiated({
+    sourceSlug,
+    activationSourceId: action?.activationSourceId || null,
+    channel: "native_share",
+  });
+
   await Share.share({
     message: `I’m a keepr. You should be too.\n\n${shareUrl}`,
   });
@@ -192,6 +205,12 @@ const [showCopied, setShowCopied] = useState(false);
   shared_object_type: action?.sharedObjectType || "keepr",
   intended_action: action?.intendedAction || "signup",
 });
+
+    trackMemberInviteShareInitiated({
+      sourceSlug,
+      activationSourceId: action?.activationSourceId || null,
+      channel: "copy_link",
+    });
 
     await Clipboard.setStringAsync(copyUrl);
     setShowCopied(true);
