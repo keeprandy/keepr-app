@@ -55,3 +55,9 @@ app-example
 supabase/.temp/.tmp.drivedownload/
 supabase/.temp/
 .vercel
+
+# Playwright generated artifacts
+playwright-report/
+test-results/
+blob-report/
+playwright/.cache/

@@ -8,6 +8,8 @@
     "build:web": "npx expo export --platform web",
     "web": "expo start --web",
     "web:8081": "expo start --web --port 8081",
+    "test:web:smoke": "npm run build:web && playwright test",
+    "test:web:smoke:headed": "npm run build:web && playwright test --headed",
     "codi:preflight": "node scripts/codi-preflight.mjs",
     "codi:verify": "node scripts/codi-verify.mjs"
   },
@@ -67,6 +69,7 @@
   },
   "private": true,
   "devDependencies": {
+    "@playwright/test": "^1.62.0",
     "@types/react": "~19.1.10",
     "madge": "^8.0.0",
     "typescript": "~5.9.2"
