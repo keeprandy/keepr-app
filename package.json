@@ -6,7 +6,10 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "build:web": "npx expo export --platform web",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "web:8081": "expo start --web --port 8081",
+    "codi:preflight": "node scripts/codi-preflight.mjs",
+    "codi:verify": "node scripts/codi-verify.mjs"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
