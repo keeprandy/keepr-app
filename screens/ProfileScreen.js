@@ -19,6 +19,7 @@ import * as ImagePicker from "expo-image-picker";
 
 import { supabase } from "../lib/supabaseClient";
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
+import { DEFAULT_MEMBER_AVATAR } from "../lib/memberAvatar";
 import { colors, radius, spacing } from "../styles/theme";
 
 
@@ -587,13 +588,13 @@ useEffect(() => {
                 else handleSelectPhoto();
               }}
             >
-              {avatarUrl ? (
-                <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
-              ) : (
-                <Text style={styles.avatarText}>
-                  {initialsFromName(fullName, userEmail)}
-                </Text>
-              )}
+              <Image
+                source={avatarUrl ? { uri: avatarUrl } : DEFAULT_MEMBER_AVATAR}
+                style={styles.avatarImage}
+                onError={() => {
+                  if (avatarUrl) setAvatarUrl(null);
+                }}
+              />
 
               <View style={styles.avatarEditBadge}>
                 <Ionicons name="camera" size={12} color="#fff" />
@@ -899,17 +900,14 @@ useEffect(() => {
       </View>
 
       <View style={styles.avatarModalImageWrap}>
-        {avatarUrl ? (
-          <Image
-            source={{ uri: avatarUrl }}
-            style={styles.avatarModalImage}
-            resizeMode="cover"
-          />
-        ) : (
-          <View style={styles.avatarModalEmpty}>
-            <Ionicons name="person-outline" size={40} color={colors.textSecondary} />
-          </View>
-        )}
+        <Image
+          source={avatarUrl ? { uri: avatarUrl } : DEFAULT_MEMBER_AVATAR}
+          style={styles.avatarModalImage}
+          resizeMode="cover"
+          onError={() => {
+            if (avatarUrl) setAvatarUrl(null);
+          }}
+        />
       </View>
 
       <View style={styles.avatarModalActions}>

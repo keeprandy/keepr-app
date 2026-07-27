@@ -13,6 +13,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
 import { supabase } from "../lib/supabaseClient";
+import { DEFAULT_MEMBER_AVATAR } from "../lib/memberAvatar";
 import { colors, spacing, radius, typography, shadows } from "../styles/theme";
 import { navigationRef } from "../navigationRoot";
 import { useFocusEffect } from "@react-navigation/native";
@@ -328,9 +329,10 @@ if (orgRow?.owner_user_id) {
             members.map((m) => (
               <View key={m.user_id} style={styles.memberRow}>
                 <View style={styles.avatar}>
-                  <Text style={styles.avatarText}>
-                    {initials(m.display)}
-                  </Text>
+                  <Image
+                    source={DEFAULT_MEMBER_AVATAR}
+                    style={styles.avatarImage}
+                  />
                 </View>
 
                 <View style={{ flex: 1 }}>
@@ -556,7 +558,9 @@ manageText: {
     justifyContent: "center",
     borderWidth: 1,
     borderColor: colors.borderSubtle || "#E5E7EB",
+    overflow: "hidden",
   },
+  avatarImage: { width: 36, height: 36 },
   avatarText: { fontSize: 12, fontWeight: "900", color: colors.textPrimary },
   memberName: { fontSize: 13, fontWeight: "900", color: colors.textPrimary },
   memberMeta: { fontSize: 12, color: colors.textMuted, marginTop: 2 },

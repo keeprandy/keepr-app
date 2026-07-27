@@ -21,6 +21,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useAssets } from "../hooks/useAssets";
 import { getSignedUrl } from "../lib/attachmentsApi";
 import { supabase } from "../lib/supabaseClient";
+import { DEFAULT_MEMBER_AVATAR } from "../lib/memberAvatar";
 import { ROUTES } from "../navigation/routes";
 import { cardStyles } from "../styles/cards";
 import { layoutStyles } from "../styles/layout";
@@ -273,6 +274,7 @@ export default function DashboardScreen({ navigation }) {
 
   // Identity / achievements (for avatar + accomplishments card)
   const [avatarUrl, setAvatarUrl] = useState(null);
+  const [avatarResolving, setAvatarResolving] = useState(true);
   const [profileName, setProfileName] = useState("");
   const [meId, setMeId] = useState(null);
   const [ach, setAch] = useState(null);
@@ -538,15 +540,43 @@ const shouldShowKeeprProgress =
     [setAvatarUrl]
   );
 
+  const renderAvatarImage = useCallback(
+    (wide = false) => {
+      const imageStyle = wide ? styles.avatarImgWide : styles.avatarImg;
+
+      if (typeof avatarUrl === "string" && avatarUrl.length > 0) {
+        return (
+          <Image
+            source={{ uri: avatarUrl }}
+            style={imageStyle}
+            onError={() => {
+              setAvatarUrl(null);
+              setAvatarResolving(false);
+            }}
+          />
+        );
+      }
+
+      if (avatarResolving) {
+        return <View style={wide ? styles.avatarResolvingWide : styles.avatarResolving} />;
+      }
+
+      return <Image source={DEFAULT_MEMBER_AVATAR} style={imageStyle} />;
+    },
+    [avatarResolving, avatarUrl]
+  );
+
   
   const loadIdentityAndAchievements = useCallback(async () => {
     try {
+      setAvatarResolving(true);
       const { data: userRes, error: userErr } = await supabase.auth.getUser();
       if (userErr) throw userErr;
       const u = userRes?.user || null;
       if (!u?.id) {
         setProfileName("");
         setAvatarUrl(null);
+        setAvatarResolving(false);
         setMeId(null);
         setAch(null);
         return;
@@ -570,6 +600,7 @@ const shouldShowKeeprProgress =
       } else {
         setAvatarUrl(null);
       }
+      setAvatarResolving(false);
 
       setAchLoading(true);
 /*
@@ -590,6 +621,7 @@ setAch(null);
 
     } catch (e) {
       console.log("Dashboard identity/achievements load error", e);
+      setAvatarResolving(false);
     } finally {
       setAchLoading(false);
     }
@@ -964,13 +996,7 @@ if (Platform.OS !== "ios") {
                         accessibilityRole="button"
                         accessibilityLabel="Open profile"
                       >
-                        {typeof avatarUrl === "string" && avatarUrl.length > 0 ? (
-                            <Image source={{ uri: avatarUrl }} style={isWide ? styles.avatarImgWide : styles.avatarImg} />
-                          ) : (
-                          <View style={styles.avatarStub}>
-                            <Ionicons name="person-outline" size={30} color={colors.textMuted} />
-                          </View>
-                        )}
+                        {renderAvatarImage(isWide)}
                       </TouchableOpacity>
 
                       <View style={styles.headerTextBlock}>
@@ -1040,13 +1066,7 @@ if (Platform.OS !== "ios") {
                       accessibilityRole="button"
                       accessibilityLabel="Open profile"
                     >
-                      {typeof avatarUrl === "string" && avatarUrl.length > 0 ? (
-                          <Image source={{ uri: avatarUrl }} style={isWide ? styles.avatarImgWide : styles.avatarImg} />
-                        ) : (
-                        <View style={styles.avatarStub}>
-                          <Ionicons name="person" size={20} color={colors.textMuted} />
-                        </View>
-                      )}
+                      {renderAvatarImage(isWide)}
                     </TouchableOpacity>
 
  
@@ -1732,10 +1752,16 @@ headerWebRow: {
     ...cardStyles.shadowSoft,
   },
   avatarImg: {
-    width: 44,
-    height: 44,
+    width: 40,
+    height: 40,
     borderRadius: 44,
     alignItems: "center",
+  },
+  avatarResolving: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(148, 163, 184, 0.16)",
   },
   avatarStub: {
     width: 88,
@@ -2235,7 +2261,13 @@ modeSubtitle: {
 
   // Wide avatar sizing (match asset circles)
   avatarBtnWide: { width: 70, height: 70, borderRadius: 80, overflow: "hidden" },
-  avatarImgWide: { width: 80, height: 80, },
+  avatarImgWide: { width: 64, height: 64 },
+  avatarResolvingWide: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "rgba(148, 163, 184, 0.16)",
+  },
 
   modalOverlay: {
     flex: 1,

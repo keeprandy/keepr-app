@@ -1,7 +1,18 @@
 {
+  "functions": {
+    "api/og/member-node-default.js": {
+      "includeFiles": "assets/kog/member-node-default.png"
+    },
+    "api/og/invite-card/[slug].js": {
+      "includeFiles": "assets/kog/member-node-default.png"
+    }
+  },
   "rewrites": [
     { "source": "/api/og/k/:kac", "destination": "/api/og/k/:kac" },
     { "source": "/api/og/invite/:slug", "destination": "/api/og/invite/:slug" },
+    { "source": "/api/og/invite-card/:slug", "destination": "/api/og/invite-card/:slug" },
+    { "source": "/og/member-node-default.png", "destination": "/api/og/member-node-default" },
+    { "source": "/og/invite/:slug.png", "destination": "/api/og/invite-card/:slug" },
     { "source": "/invite/:slug", "destination": "/api/og/invite/:slug" },
     { "source": "/k/:kac/actions", "destination": "/" },
     { "source": "/k/:kac", "destination": "/api/og/k/:kac" },

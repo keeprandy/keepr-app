@@ -5,6 +5,7 @@ import React, { useMemo, useRef, useState, useEffect } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   Platform,
   ScrollView,
   StyleSheet,
@@ -24,6 +25,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { track, identifyUser } from "../lib/analytics";
 import { claimPendingActionsForEmail } from "../lib/hubsApi";
 import { completeSignupAttribution, getStoredLegacySourceSlug } from "../lib/verifiedAttribution";
+import { DEFAULT_MEMBER_AVATAR } from "../lib/memberAvatar";
+import { useAuth } from "../context/AuthContext";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -70,13 +73,35 @@ function getResetRedirectTo() {
   return "keepr://reset";
 }
 
+function isUsableInviteName(value) {
+  const name = String(value || "").trim();
+  return !!name && name.toLowerCase() !== "keepr member";
+}
+
+function resolveInviteDisplayName(invitation) {
+  return isUsableInviteName(invitation?.display_name)
+    ? invitation.display_name.trim()
+    : null;
+}
+
+function isValidImageUrl(value) {
+  return /^https?:\/\//i.test(String(value || "").trim());
+}
+
 export default function AuthScreen({ navigation, route }) {
-  const [mode, setMode] = useState("signin"); // "signin" | "signup" | "forgot"
+  const { user } = useAuth();
+  const [mode, setMode] = useState(route?.params?.mode === "signup" ? "signup" : "signin"); // "signin" | "signup" | "forgot"
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [inviteContext, setInviteContext] = useState(route?.params?.invitation || null);
+  const [inviteLoading, setInviteLoading] = useState(!!route?.params?.invitationLoading);
+  const [inviteImageBroken, setInviteImageBroken] = useState(false);
+  const [mobileWebAuthEnabled, setMobileWebAuthEnabled] = useState(false);
+  const scrollRef = useRef(null);
+  const formAnchorRef = useRef(null);
   const passwordInputRef = useRef(null);
 
   const [touched, setTouched] = useState({
@@ -90,31 +115,103 @@ export default function AuthScreen({ navigation, route }) {
   const { width } = useWindowDimensions();
 
   const isWeb = Platform.OS === "web";
-  const isMobileWeb =
-    isWeb &&
+  const mobileUserAgent =
     typeof navigator !== "undefined" &&
     /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-
-  const isNarrow = width < 920;
-  const showDesktopSplit = isWeb && !isMobileWeb && !isNarrow;
+  const isMobileWeb = isWeb && (mobileUserAgent || width < 760);
+  const isIOSMobileWeb =
+    isMobileWeb &&
+    typeof navigator !== "undefined" &&
+    /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
   const isSignUp = mode === "signup";
   const isForgot = mode === "forgot";
   const showPasswordToggle = isWeb && !isSignUp && !isForgot;
+  const hasInviteIntent = route?.params?.source === "member_invite" || !!route?.params?.inviteSlug;
+  const isSignedInInvite = hasInviteIntent && !!user?.id;
+  const showDesktopSplit = isWeb && !isMobileWeb && !hasInviteIntent && width >= 1360;
+  const showStackedMarketing = isWeb && !isMobileWeb && !hasInviteIntent && !showDesktopSplit;
+  const desktopGap = width < 1360 ? 24 : 40;
+  const desktopPadding = width < 1360 ? 24 : 48;
+  const desktopVerticalPadding = width < 1360 ? 24 : 32;
+  const desktopBrandMax = width < 1360 ? 520 : 620;
+  const desktopLoginMax = width < 1360 ? 640 : 700;
+  const marketingImageRatio = 1024 / 1536;
+  const stackedMarketingWidth = Math.min(Math.max(width - 48, 0), 760);
+  const stackedMarketingHeight = Math.min(
+    Math.round(stackedMarketingWidth * marketingImageRatio),
+    360
+  );
+
+  const inviterName = resolveInviteDisplayName(inviteContext);
+  const inviteTitle = inviterName
+    ? `${inviterName} invited you to Keepr`
+    : "A Keepr member invited you.";
+  const invitePhotoUrl = isValidImageUrl(inviteContext?.image_url) && !inviteImageBroken
+    ? inviteContext.image_url.trim()
+    : null;
+  const shouldShowWebAuth = !isSignedInInvite && (!isMobileWeb || mobileWebAuthEnabled);
+
+  useEffect(() => {
+    if (route?.params?.mode === "signup") setMode("signup");
+    if (route?.params?.mode === "signin") setMode("signin");
+  }, [route?.params?.mode]);
+
+  useEffect(() => {
+    if (route?.params?.invitation) {
+      setInviteContext(route.params.invitation);
+      setInviteLoading(!!route?.params?.invitationLoading);
+      setInviteImageBroken(false);
+    }
+  }, [route?.params?.invitation, route?.params?.invitationLoading]);
+
+  useEffect(() => {
+    let mounted = true;
+    const slug = route?.params?.inviteSlug;
+
+    if (!slug || route?.params?.invitation) return undefined;
+
+    const loadInvite = async () => {
+      setInviteLoading(true);
+      try {
+        const { data } = await supabase.rpc("resolve_member_invite_link", {
+          p_slug: slug,
+        });
+        if (!mounted) return;
+        setInviteContext(Array.isArray(data) ? data[0] || null : data || null);
+        setInviteImageBroken(false);
+      } catch (e) {
+        console.log("[AuthScreen] invitation load failed:", e?.message || e);
+      } finally {
+        if (mounted) setInviteLoading(false);
+      }
+    };
+
+    loadInvite();
+    return () => {
+      mounted = false;
+    };
+  }, [route?.params?.inviteSlug, route?.params?.invitation]);
 
   const iosUrl = "https://apps.apple.com/us/app/keepr-home-asset-care/id6761725280";
   const androidUrl = "https://play.google.com/store/apps/details?id=com.keeprhome.app";
 
   const title = useMemo(() => {
     if (isForgot) return "Reset your password";
-    if (isSignUp) return "Become a Keepr™";
+    if (isSignUp) return "Become a Keepr";
     return "Sign in to Keepr™";
   }, [isForgot, isSignUp]);
 
   const subtitle = useMemo(() => {
     if (Platform.OS === "web") {
+      if (hasInviteIntent && isSignUp) {
+        return "Become a Keepr and carry the invitation forward.";
+      }
+      if (hasInviteIntent && !isForgot) {
+        return "Sign in to continue from this invitation.";
+      }
       if (isSignUp) {
-        return "Create your Keepr™ account and start building the story of what you own.";
+        return "Become a Keepr and start building the story of what you own.";
       }
       if (isForgot) {
         return "Enter your email and we’ll send a reset link.";
@@ -125,7 +222,7 @@ export default function AuthScreen({ navigation, route }) {
     if (isSignUp) return "Get started.";
     if (isForgot) return "Enter your email to reset your password.";
     return "Continue your ownership story.";
-  }, [isForgot, isSignUp]);
+  }, [hasInviteIntent, isForgot, isSignUp]);
 
   const normalizedEmail = useMemo(() => email.trim().toLowerCase(), [email]);
   const emailErr = useMemo(() => validateEmail(normalizedEmail), [normalizedEmail]);
@@ -165,8 +262,92 @@ export default function AuthScreen({ navigation, route }) {
 
   const openAppStore = () => {
     if (typeof navigator === "undefined") return;
-    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-    window.location.href = isIOS ? iosUrl : androidUrl;
+    window.location.href = isIOSMobileWeb ? iosUrl : androidUrl;
+  };
+
+  const openKeeprApp = () => {
+    const slug = route?.params?.inviteSlug || inviteContext?.slug || inviteContext?.normalized_slug || null;
+    const invitePath = slug ? `/invite/${encodeURIComponent(slug)}` : "";
+    const appUrl = `keepr://${invitePath}`;
+
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      window.location.href = appUrl;
+      return;
+    }
+
+    Linking.openURL(appUrl).catch(() => {});
+  };
+
+  const continueOnWeb = () => {
+    setMobileWebAuthEnabled(true);
+    setMode(hasInviteIntent ? "signup" : mode);
+    setFormError("");
+    requestAnimationFrame(() => {
+      formAnchorRef.current?.scrollIntoView?.({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  };
+
+  const continueToKeepr = () => {
+    navigation.reset?.({
+      index: 0,
+      routes: [{ name: "RootTabs" }],
+    });
+  };
+
+  const signInAsSomeoneElse = async () => {
+    try {
+      setSubmitting(true);
+      await supabase.auth.signOut();
+      setMode("signin");
+      setMobileWebAuthEnabled(true);
+      setFormError("");
+    } catch (e) {
+      setFormError(e?.message || "Could not sign out.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const openKeeprHome = () => {
+    if (Platform.OS !== "web") {
+      Linking.openURL("https://keeprhome.com").catch(() => {});
+      return;
+    }
+
+    try {
+      window.location.href = "https://keeprhome.com";
+    } catch (_) {
+      Linking.openURL("https://keeprhome.com").catch(() => {});
+    }
+  };
+
+  const jumpToAuthForm = () => {
+    if (!hasInviteIntent) return;
+
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      if (!showDesktopSplit) {
+        requestAnimationFrame(() => {
+          const firstFormInput =
+            typeof document !== "undefined"
+              ? document.querySelector('input[type="email"]') ||
+                document.querySelector('input[placeholder="Keepr"]')
+              : null;
+
+          (firstFormInput || formAnchorRef.current)?.scrollIntoView?.({
+            behavior: "smooth",
+            block: "center",
+          });
+        });
+      }
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo?.({ y: 360, animated: true });
+    });
   };
 
 const continueActivationJourney = async () => {
@@ -391,7 +572,174 @@ if (continued) return;
 
   const renderAuthCardContent = () => (
     <>
-      <View style={styles.header}>
+      {hasInviteIntent ? (
+        <View style={styles.inviteCard}>
+          <View style={styles.inviteImageFrame}>
+            <Image
+              source={invitePhotoUrl ? { uri: invitePhotoUrl } : DEFAULT_MEMBER_AVATAR}
+              style={[
+                styles.inviteImage,
+                !invitePhotoUrl && styles.inviteFallbackImage,
+              ]}
+              onError={() => {
+                if (invitePhotoUrl) setInviteImageBroken(true);
+              }}
+            />
+          </View>
+
+          <View style={styles.inviteContent}>
+            <View style={styles.inviteBrandRow}>
+              <Text style={styles.inviteBrand}>Keepr</Text>
+              <View style={styles.inviteMark}>
+                <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+              </View>
+            </View>
+            <Text style={styles.inviteTitle}>{inviteTitle}</Text>
+            <Text style={styles.inviteTagline}>I’m a Keepr. Become one.</Text>
+            <Text style={styles.inviteBody}>
+              Start with a trusted place for the records, proof, and stories behind what you own.
+            </Text>
+
+            {inviteLoading ? (
+              <ActivityIndicator
+                color={colors.brandBlue || "#2563EB"}
+                style={styles.inviteLoader}
+              />
+            ) : null}
+
+            {isSignedInInvite ? (
+              <>
+                <Text style={styles.inviteSignedInText}>You’re already a Keepr.</Text>
+                <TouchableOpacity
+                  style={styles.invitePrimary}
+                  onPress={continueToKeepr}
+                  activeOpacity={0.9}
+                  disabled={submitting}
+                >
+                  <Text style={styles.invitePrimaryText}>Continue to Keepr</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.inviteSecondary}
+                  onPress={signInAsSomeoneElse}
+                  activeOpacity={0.85}
+                  disabled={submitting}
+                >
+                  <Text style={styles.inviteSecondaryText}>Sign in as someone else</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <TouchableOpacity
+                  style={styles.invitePrimary}
+                  onPress={() => {
+                    if (isMobileWeb) {
+                      openKeeprApp();
+                      return;
+                    }
+                    setMode("signup");
+                    setFormError("");
+                    jumpToAuthForm();
+                  }}
+                  activeOpacity={0.9}
+                  disabled={submitting}
+                >
+                  <Text style={styles.invitePrimaryText}>
+                    {isMobileWeb ? "Open in Keepr" : "Become a Keepr"}
+                  </Text>
+                </TouchableOpacity>
+                {isMobileWeb ? (
+                  <>
+                    <TouchableOpacity
+                      style={styles.inviteStoreButton}
+                      onPress={openAppStore}
+                      activeOpacity={0.9}
+                    >
+                      <Text style={styles.inviteStoreButtonText}>
+                        {isIOSMobileWeb ? "Get Keepr for iPhone" : "Get Keepr for Android"}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.inviteSecondary}
+                      onPress={continueOnWeb}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.inviteSecondaryText}>Continue on the web</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.inviteSecondary}
+                    onPress={() => {
+                      setMode("signin");
+                      setFormError("");
+                      jumpToAuthForm();
+                    }}
+                    activeOpacity={0.85}
+                    disabled={submitting}
+                  >
+                    <Text style={styles.inviteSecondaryText}>Already a Keepr? Sign in</Text>
+                  </TouchableOpacity>
+                )}
+              </>
+            )}
+            <TouchableOpacity
+              style={styles.inviteLearnLink}
+              onPress={openKeeprHome}
+              activeOpacity={0.75}
+            >
+              <Text style={styles.inviteLearnText}>
+                {isMobileWeb ? "Learn more about Keepr" : "Learn more at keeprhome.com"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
+
+      {isMobileWeb && !hasInviteIntent ? (
+        <View style={styles.mobileAppGate}>
+          <Image
+            source={require("../assets/app_logo_icon.png")}
+            style={styles.logo}
+          />
+          <Text style={styles.mobileAppGateTitle}>Get Keepr on your phone</Text>
+          <Text style={styles.mobileAppGateBody}>
+            Keepr on mobile is the place to capture photos, records, proof, and stories as you go.
+          </Text>
+          <TouchableOpacity
+            style={styles.mobileAppGateButton}
+            onPress={openAppStore}
+            activeOpacity={0.9}
+          >
+            <Ionicons
+              name="download-outline"
+              size={18}
+              color={colors.brandWhite}
+              style={{ marginRight: 6 }}
+            />
+            <Text style={styles.mobileAppGateButtonText}>
+              {isIOSMobileWeb ? "Get Keepr for iPhone" : "Get Keepr for Android"}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.mobileWebContinueButton}
+            onPress={continueOnWeb}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.mobileWebContinueText}>Continue on the web</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.inviteLearnLink}
+            onPress={openKeeprHome}
+            activeOpacity={0.75}
+          >
+            <Text style={styles.inviteLearnText}>Learn more about Keepr</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {shouldShowWebAuth ? (
+        <>
+      <View ref={formAnchorRef} style={styles.header}>
         <View style={styles.brandRow}>
           <Image
             source={require("../assets/app_logo_icon.png")}
@@ -443,7 +791,7 @@ if (continued) return;
                 mode === "signup" && styles.modePillTextActive,
               ]}
             >
-              Create Account
+              Become a Keepr
             </Text>
           </TouchableOpacity>
         </View>
@@ -569,7 +917,7 @@ if (continued) return;
                 style={{ marginRight: 6 }}
               />
               <Text style={styles.buttonText}>
-                {isForgot ? "Send reset link" : isSignUp ? "Create account" : "Sign in"}
+                {isForgot ? "Send reset link" : isSignUp ? "Become a Keepr" : "Sign in"}
               </Text>
             </>
           )}
@@ -620,6 +968,8 @@ if (continued) return;
           </>
         )}
       </View>
+        </>
+      ) : null}
     </>
   );
 
@@ -627,54 +977,40 @@ if (continued) return;
     <SafeAreaView style={layoutStyles.screen}>
       {isMobileWeb ? (
         <ScrollView
+          ref={scrollRef}
           style={styles.mobileScroll}
           contentContainerStyle={styles.mobileScrollContent}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.mobileBanner}>
-            <Text style={styles.mobileBannerTitle}>
-              Capture on mobile. Manage on web.
-            </Text>
-
-            <Text style={styles.mobileBannerBody}>
-              Download the app for faster capture, photos, and on-the-go access. Continue on web if you want to sign in or do deeper setup.
-            </Text>
-
-            <View style={styles.mobileBannerActions}>
-              <TouchableOpacity
-                onPress={openAppStore}
-                style={styles.mobileBannerButton}
-                activeOpacity={0.9}
-              >
-                <Text style={styles.mobileBannerButtonText}>Download App</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity activeOpacity={0.85}>
-                <Text style={styles.mobileContinueText}>Continue on web</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
           <View style={styles.mobileCardWrap}>
             <View style={[styles.authCard, styles.authCardMobileWeb]}>
               {renderAuthCardContent()}
             </View>
           </View>
         </ScrollView>
-      ) : (
-        <View
-          style={[
-            styles.container,
-            showDesktopSplit ? styles.webContainer : styles.singleColumnContainer,
-          ]}
+      ) : showStackedMarketing ? (
+        <ScrollView
+          style={styles.webStackScroll}
+          contentContainerStyle={styles.webStackScrollContent}
         >
-          {showDesktopSplit && (
-            <View style={styles.brandPanel}>
-              <View style={styles.brandContent}>
+          <View style={[styles.container, styles.singleColumnContainer]}>
+            <View
+              style={[
+                styles.brandPanel,
+                styles.brandPanelStacked,
+                { minHeight: stackedMarketingHeight + 190 },
+              ]}
+            >
+              <View style={[styles.brandContent, styles.brandContentStacked]}>
                 <Image
                   source={require("../assets/login_image_keepr.png")}
-                  style={styles.heroImage}
+                  style={[
+                    styles.heroImage,
+                    {
+                      height: stackedMarketingHeight,
+                    },
+                  ]}
                 />
                 <Text style={styles.brandHeadline}>
                   Everything you own has a story.
@@ -684,7 +1020,71 @@ if (continued) return;
                   Keepr records the life of the things you care about — homes, vehicles, boats, and more.
                 </Text>
 
-                <Text style={styles.brandTag}>Become a keepr.</Text>
+              </View>
+            </View>
+
+            <View
+              style={[
+                styles.loginPanel,
+                styles.loginPanelSingle,
+                styles.loginPanelStacked,
+              ]}
+            >
+              <View style={[styles.authCard, styles.authCardSingle]}>
+                {renderAuthCardContent()}
+              </View>
+            </View>
+          </View>
+        </ScrollView>
+      ) : (
+        <View
+          style={[
+            styles.container,
+            styles.webContainer,
+            {
+              gap: desktopGap,
+              paddingHorizontal: desktopPadding,
+              paddingVertical: desktopVerticalPadding,
+            },
+          ]}
+        >
+          {(showDesktopSplit || showStackedMarketing) && (
+            <View
+              style={[
+                styles.brandPanel,
+                showDesktopSplit
+                  ? { maxWidth: desktopBrandMax }
+                  : styles.brandPanelStacked,
+              ]}
+            >
+              <View
+                style={[
+                  styles.brandContent,
+                  showDesktopSplit
+                    ? { maxWidth: desktopBrandMax }
+                    : styles.brandContentStacked,
+                ]}
+              >
+                <Image
+                  source={require("../assets/login_image_keepr.png")}
+                  style={[
+                    styles.heroImage,
+                    showDesktopSplit && {
+                      height: Math.round(desktopBrandMax * marketingImageRatio),
+                    },
+                    showStackedMarketing && {
+                      height: Math.round(stackedMarketingWidth * marketingImageRatio),
+                    },
+                  ]}
+                />
+                <Text style={styles.brandHeadline}>
+                  Everything you own has a story.
+                </Text>
+
+                <Text style={styles.brandMessage}>
+                  Keepr records the life of the things you care about — homes, vehicles, boats, and more.
+                </Text>
+
               </View>
             </View>
           )}
@@ -692,6 +1092,7 @@ if (continued) return;
           <View
             style={[
               styles.loginPanel,
+              showDesktopSplit && { maxWidth: desktopLoginMax },
               !showDesktopSplit && styles.loginPanelSingle,
             ]}
           >
@@ -711,6 +1112,163 @@ if (continued) return;
 }
 
 const styles = StyleSheet.create({
+  inviteCard: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 18,
+    padding: 16,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#DCE7FB",
+    backgroundColor: "#F6F9FF",
+    marginBottom: 22,
+  },
+
+  inviteImageFrame: {
+    width: "44%",
+    minWidth: 176,
+    maxWidth: 260,
+    height: 214,
+    borderRadius: 16,
+    overflow: "hidden",
+    backgroundColor: "#E6EEFF",
+    borderWidth: 1,
+    borderColor: "#FFFFFF",
+  },
+
+  inviteImage: {
+    width: "100%",
+    height: "100%",
+    resizeMode: "cover",
+  },
+
+  inviteFallbackImage: {
+    resizeMode: "contain",
+  },
+
+  inviteContent: {
+    flex: 1,
+    minWidth: 230,
+    justifyContent: "center",
+  },
+
+  inviteBrandRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 8,
+  },
+
+  inviteBrand: {
+    fontSize: 13,
+    fontWeight: "900",
+    color: "#2563EB",
+    textTransform: "uppercase",
+  },
+
+  inviteMark: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#2563EB",
+    opacity: 0.78,
+  },
+
+  inviteTitle: {
+    fontSize: 24,
+    lineHeight: 29,
+    fontWeight: "900",
+    color: "#0F172A",
+  },
+
+  inviteTagline: {
+    marginTop: 8,
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: "850",
+    color: "#2563EB",
+  },
+
+  inviteBody: {
+    marginTop: 8,
+    fontSize: 13,
+    lineHeight: 19,
+    color: "#475569",
+  },
+
+  inviteSignedInText: {
+    marginTop: 12,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: "800",
+    color: "#0F172A",
+  },
+
+  inviteLoader: {
+    alignSelf: "flex-start",
+    marginTop: 10,
+  },
+
+  invitePrimary: {
+    alignSelf: "flex-start",
+    minHeight: 40,
+    justifyContent: "center",
+    borderRadius: 999,
+    backgroundColor: "#2563EB",
+    paddingHorizontal: 18,
+    marginTop: 14,
+  },
+
+  invitePrimaryText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+
+  inviteStoreButton: {
+    alignSelf: "flex-start",
+    minHeight: 38,
+    justifyContent: "center",
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#2563EB",
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 16,
+    marginTop: 10,
+  },
+
+  inviteStoreButtonText: {
+    color: "#2563EB",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+
+  inviteSecondary: {
+    alignSelf: "flex-start",
+    minHeight: 34,
+    justifyContent: "center",
+    marginTop: 6,
+  },
+
+  inviteSecondaryText: {
+    color: "#0F172A",
+    fontSize: 13,
+    fontWeight: "800",
+  },
+
+  inviteLearnLink: {
+    alignSelf: "flex-start",
+    marginTop: 2,
+  },
+
+  inviteLearnText: {
+    color: "#64748B",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+
   container: {
     flex: 1,
     paddingHorizontal: spacing.xl,
@@ -719,19 +1277,31 @@ const styles = StyleSheet.create({
   },
 
   singleColumnContainer: {
-    flex: 1,
+    width: "100%",
     justifyContent: "flex-start",
     alignItems: "center",
     paddingHorizontal: 24,
     paddingVertical: 24,
   },
 
+  webStackScroll: {
+    flex: 1,
+  },
+
+  webStackScrollContent: {
+    alignItems: "center",
+    paddingBottom: 40,
+  },
+
   webContainer: {
     flex: 1,
+    width: "100%",
+    maxWidth: 1440,
+    alignSelf: "center",
     flexDirection: "row",
     justifyContent: "center",
-    alignItems: "center",
-    gap: 48,
+    alignItems: "flex-start",
+    gap: 40,
     paddingHorizontal: 48,
   },
 
@@ -798,21 +1368,86 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
 
-  brandPanel: {
-    width: 700,
+  mobileAppGate: {
+    alignItems: "flex-start",
+  },
+
+  mobileAppGateTitle: {
+    fontSize: 22,
+    lineHeight: 28,
+    fontWeight: "900",
+    color: colors.textPrimary,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+
+  mobileAppGateBody: {
+    fontSize: 15,
+    lineHeight: 22,
+    color: colors.textSecondary,
+    marginBottom: 16,
+  },
+
+  mobileAppGateButton: {
+    minHeight: 48,
+    width: "100%",
+    borderRadius: 999,
+    backgroundColor: "#2563EB",
+    alignItems: "center",
     justifyContent: "center",
+    flexDirection: "row",
+    paddingHorizontal: 18,
+  },
+
+  mobileAppGateButtonText: {
+    color: colors.brandWhite,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+
+  mobileWebContinueButton: {
+    alignSelf: "center",
+    minHeight: 38,
+    justifyContent: "center",
+    marginTop: 12,
+  },
+
+  mobileWebContinueText: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: "800",
+  },
+
+  brandPanel: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: "flex-start",
   },
 
   brandContent: {
-    maxWidth: 700,
-    minWidth: 700,
+    width: "100%",
+    maxWidth: 620,
+    minWidth: 0,
   },
 
   heroImage: {
-    width: 700,
-    height: 415,
+    width: "100%",
     marginBottom: 24,
     resizeMode: "contain",
+  },
+
+  brandPanelStacked: {
+    flex: 0,
+    width: "100%",
+    maxWidth: 760,
+    alignSelf: "center",
+    marginBottom: 24,
+  },
+
+  brandContentStacked: {
+    width: "100%",
+    maxWidth: 760,
+    minWidth: 0,
   },
 
   brandHeadline: {
@@ -836,7 +1471,8 @@ const styles = StyleSheet.create({
   },
 
   loginPanel: {
-    width: 760,
+    flex: 1,
+    minWidth: 0,
     maxWidth: "100%",
     justifyContent: "center",
   },
@@ -844,6 +1480,11 @@ const styles = StyleSheet.create({
   loginPanelSingle: {
     width: "100%",
     maxWidth: 640,
+  },
+
+  loginPanelStacked: {
+    flex: 0,
+    justifyContent: "flex-start",
   },
 
   authCard: {

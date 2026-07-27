@@ -1121,8 +1121,61 @@ console.log("✅ Enhance configured: ASSURANCE (no edge functions)");
 
 const shareActionOpenPromises = new Map();
 
-function InviteRedirectScreen() {
-  return <SplashIntroScreen />;
+function InviteRedirectScreen({ navigation, route }) {
+  const { user } = useAuth();
+  const slug = route?.params?.slug || extractInviteSlugFromUrl(
+    Platform.OS === "web" && typeof window !== "undefined" ? window.location.href : ""
+  );
+  const [invite, setInvite] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    let mounted = true;
+
+    const loadInvite = async () => {
+      setLoading(true);
+      try {
+        if (!user && Platform.OS === "web" && typeof window !== "undefined") {
+          await captureInviteSourceFromUrl(window.location.href);
+        }
+
+        if (slug) {
+          const { data } = await supabase.rpc("resolve_member_invite_link", {
+            p_slug: slug,
+          });
+          if (!mounted) return;
+          setInvite(Array.isArray(data) ? data[0] || null : data || null);
+        }
+      } catch (e) {
+        console.log("Invite landing load failed:", e?.message || e);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    loadInvite();
+    return () => {
+      mounted = false;
+    };
+  }, [slug, user]);
+
+  const authRoute = React.useMemo(
+    () => ({
+      ...route,
+      name: "Auth",
+      params: {
+        ...(route?.params || {}),
+        mode: route?.params?.mode || "signup",
+        inviteSlug: slug || invite?.slug || invite?.normalized_slug || null,
+        source: "member_invite",
+        invitation: invite,
+        invitationLoading: loading,
+      },
+    }),
+    [invite, loading, route, slug]
+  );
+
+  return <AuthScreen navigation={navigation} route={authRoute} />;
 }
 
 async function trackShareActionOpened(opened) {
@@ -1545,6 +1598,39 @@ function Root({ onRouteChange, setCurrentRouteName, currentRouteName }) {
 const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntent();
 
 React.useEffect(() => {
+  if (user?.id) return;
+
+  let mounted = true;
+
+  const captureInitialInvite = async () => {
+    try {
+      const initialUrl = await ExpoLinking.getInitialURL();
+      if (!mounted) return;
+      await captureInviteSourceFromUrl(initialUrl);
+
+      if (Platform.OS === "web" && typeof window !== "undefined") {
+        await captureInviteSourceFromUrl(window.location?.href);
+      }
+    } catch (e) {
+      console.log("Initial invite link capture failed:", e?.message || e);
+    }
+  };
+
+  captureInitialInvite();
+
+  const subscription = ExpoLinking.addEventListener("url", ({ url }) => {
+    console.log("🔥 URL RECEIVED:", url);
+    if (user?.id) return;
+    captureInviteSourceFromUrl(url);
+  });
+
+  return () => {
+    mounted = false;
+    subscription?.remove?.();
+  };
+}, [user?.id]);
+
+React.useEffect(() => {
   if (!user?.id) return;
   if (!hasShareIntent || !shareIntent) return;
   if (!navigationRef?.isReady?.()) return;
@@ -1815,6 +1901,7 @@ if (
   path.startsWith("/h/") ||
   path.startsWith("/hub/") ||
   path.startsWith("/story/") ||
+  path.startsWith("/invite/") ||
   path.startsWith("/resolve/") ||
   path.startsWith("/inbox") ||
   path.startsWith("/CreateReminder") ||
@@ -2079,6 +2166,7 @@ const initialRouteName = isResetLink
           !window.location.pathname.startsWith("/h/") &&
           !window.location.pathname.startsWith("/hub/") &&
           !window.location.pathname.startsWith("/story/") &&
+          !window.location.pathname.startsWith("/invite/") &&
           !window.location.pathname.startsWith("/inbox") &&
           !window.location.pathname.startsWith("/CreateReminder") &&
           !window.location.pathname.startsWith("/Notifications") &&
@@ -2542,36 +2630,6 @@ React.useEffect(() => {
     platform: Platform.OS,
     timestamp: new Date().toISOString(),
   });
-}, []);
-
-  React.useEffect(() => {
-  let mounted = true;
-
-  const captureInitialInvite = async () => {
-    try {
-      const initialUrl = await ExpoLinking.getInitialURL();
-      if (!mounted) return;
-      await captureInviteSourceFromUrl(initialUrl);
-
-      if (Platform.OS === "web" && typeof window !== "undefined") {
-        await captureInviteSourceFromUrl(window.location?.href);
-      }
-    } catch (e) {
-      console.log("Initial invite link capture failed:", e?.message || e);
-    }
-  };
-
-  captureInitialInvite();
-
-const subscription = ExpoLinking.addEventListener("url", ({ url }) => {
-  console.log("🔥 URL RECEIVED:", url);
-  captureInviteSourceFromUrl(url);
-});
-
-  return () => {
-    mounted = false;
-    subscription?.remove?.();
-  };
 }, []);
 
   /* Global handler for tapping push/local notifications

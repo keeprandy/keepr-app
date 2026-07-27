@@ -54,11 +54,11 @@ export default async function handler(req, res) {
   const rawSlug = req.query?.slug;
   const slug = Array.isArray(rawSlug) ? rawSlug[0] : rawSlug;
   const shareUrl = `${baseUrl}/invite/${encodeURIComponent(slug || "")}`;
-  const fallbackOgImage = `${baseUrl}/og/keepr-og-default.png`;
+  const memberCardImage = `${baseUrl}/og/invite/${encodeURIComponent(slug || "")}.png`;
 
   let title = "Join Keepr";
   let description = "Start building the story of what you own.";
-  let image = fallbackOgImage;
+  let image = memberCardImage;
 
   try {
     const SUPABASE_URL =
@@ -78,12 +78,12 @@ export default async function handler(req, res) {
 
       title = row?.title || title;
       description = row?.description || description;
-      image = row?.image_url || image;
+      image = memberCardImage;
     }
   } catch (_) {
     title = "Join Keepr";
     description = "Start building the story of what you own.";
-    image = fallbackOgImage;
+    image = memberCardImage;
   }
 
   res.setHeader("Content-Type", "text/html; charset=utf-8");
