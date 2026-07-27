@@ -315,15 +315,22 @@ test("client helper opens a share and stores only activation session token plus 
   assert.equal(await storage.getItem(LEGACY_INVITE_SLUG_KEY), "u_12345678");
 });
 
-test("Share Keepr and routing use the short-link foundation without removing legacy invite compatibility", () => {
+test("Share Keepr and routing use the share foundation without removing legacy invite compatibility", () => {
   const shareScreen = read("screens/ShareKeeprScreen.js");
   const app = read("App.js");
   const inviteLinks = read("lib/inviteLinks.js");
 
   assert.match(shareScreen, /import \{ createShareAction \} from "\.\.\/lib\/shareActions"/);
+  assert.match(shareScreen, /getCleanInviteUrlForSlug/);
+  assert.match(shareScreen, /buildUserInviteUrl\(\{ sourceSlug: slug \}\)/);
+  assert.match(shareScreen, /profile\?\.acquisition_source_slug/);
+  assert.match(shareScreen, /select\("username, inbox_name, acquisition_source_slug"\)/);
   assert.match(shareScreen, /createKeeprShareAction\("qr"\)/);
   assert.match(shareScreen, /createKeeprShareAction\("native_share"\)/);
   assert.match(shareScreen, /createKeeprShareAction\("copy_link"\)/);
+  assert.doesNotMatch(shareScreen, /slug = action\.sharedObjectSlugSnapshot/);
+  assert.match(shareScreen, /getCleanInviteUrlForSlug\(sourceSlug, shareUrl\)/);
+  assert.match(shareScreen, /getCleanInviteUrlForSlug\(sourceSlug, copyUrl\)/);
   assert.match(shareScreen, /track\("share_action_created"/);
   assert.match(shareScreen, /track\("share_qr_viewed"/);
   assert.match(shareScreen, /track\("share_native_opened"/);
@@ -331,19 +338,24 @@ test("Share Keepr and routing use the short-link foundation without removing leg
   assert.match(shareScreen, /Share action QR creation failed; using legacy invite link/);
 
   assert.match(app, /ShareAction: "s\/:token"/);
+  assert.match(app, /Invite: "invite\/:slug"/);
+  assert.match(app, /import \{ startActivationSession \} from "\.\/lib\/activationSessions"/);
   assert.match(app, /function ShareActionRedirectScreen/);
   assert.match(app, /function extractShareActionTokenFromUrl/);
   assert.match(app, /const shareActionOpenPromises = new Map\(\)/);
   assert.match(app, /async function captureShareActionToken/);
-  assert.match(app, /async function captureShareActionFromUrl/);
   assert.match(app, /await openShareAction/);
   assert.match(app, /shareActionOpenPromises\.has\(token\)/);
-  assert.match(app, /await captureShareActionFromUrl\(initialUrl\)/);
-  assert.match(app, /captureShareActionFromUrl\(window\.location\?\.href\)/);
-  assert.match(app, /captureShareActionFromUrl\(url\)/);
+  assert.doesNotMatch(app, /captureShareActionFromUrl/);
   assert.match(app, /track\("share_link_opened"/);
   assert.match(app, /await flushAnalytics\(\)/);
-  assert.match(app, /navigation\.replace\("Auth"/);
+  assert.match(app, /opened\?\.routePath/);
+  assert.match(app, /navigation\.replace\("Invite", \{ slug: destinationSlug \}/);
+  assert.match(app, /Share link unavailable/);
+  assert.match(app, /async function captureInviteSourceFromUrl/);
+  assert.match(app, /await startActivationSession\(/);
+  assert.match(app, /entryMethod: "invite_link"/);
+  assert.match(app, /track\("invite_link_opened"/);
 
   assert.match(inviteLinks, /buildUserInviteUrl/);
   assert.match(inviteLinks, /buildShortShareUrl/);

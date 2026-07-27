@@ -28,6 +28,7 @@ export default function ShareKeeprScreen({ navigation }) {
   const slug =
     profile?.username ||
     profile?.inbox_name ||
+    profile?.acquisition_source_slug ||
     fallbackSlug;
 
   return {
@@ -55,6 +56,11 @@ const createKeeprShareAction = async (channel) => {
   return action;
 };
 
+const getCleanInviteUrlForSlug = (slug, fallbackUrl) => {
+  if (!slug) return fallbackUrl;
+  return buildUserInviteUrl({ sourceSlug: slug });
+};
+
   const buildInvite = async () => {
   const { data } = await supabase.auth.getUser();
   const user = data?.user;
@@ -63,7 +69,7 @@ const createKeeprShareAction = async (channel) => {
 
   const { data: profile, error } = await supabase
     .from("profiles")
-    .select("username, inbox_name")
+    .select("username, inbox_name, acquisition_source_slug")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -78,10 +84,7 @@ const createKeeprShareAction = async (channel) => {
 
   try {
     action = await createKeeprShareAction("qr");
-    if (action?.shareUrl) {
-      url = action.shareUrl;
-      slug = action.sharedObjectSlugSnapshot || slug;
-    }
+    url = getCleanInviteUrlForSlug(slug, url);
   } catch (e) {
     console.log("Share action QR creation failed; using legacy invite link:", e?.message || e);
   }
@@ -134,7 +137,7 @@ const handleShare = async () => {
 
   try {
     action = await createKeeprShareAction("native_share");
-    shareUrl = action?.shareUrl || shareUrl;
+    shareUrl = getCleanInviteUrlForSlug(sourceSlug, shareUrl);
   } catch (e) {
     console.log("Share action native creation failed; using current invite link:", e?.message || e);
   }
@@ -173,7 +176,7 @@ const [showCopied, setShowCopied] = useState(false);
 
    try {
     action = await createKeeprShareAction("copy_link");
-    copyUrl = action?.shareUrl || copyUrl;
+    copyUrl = getCleanInviteUrlForSlug(sourceSlug, copyUrl);
    } catch (e) {
     console.log("Share action copy creation failed; using current invite link:", e?.message || e);
    }

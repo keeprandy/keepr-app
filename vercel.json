@@ -1,6 +1,8 @@
 {
   "rewrites": [
     { "source": "/api/og/k/:kac", "destination": "/api/og/k/:kac" },
+    { "source": "/api/og/invite/:slug", "destination": "/api/og/invite/:slug" },
+    { "source": "/invite/:slug", "destination": "/api/og/invite/:slug" },
     { "source": "/k/:kac/actions", "destination": "/" },
     { "source": "/k/:kac", "destination": "/api/og/k/:kac" },
     { "source": "/((?!api/).*)", "destination": "/" }

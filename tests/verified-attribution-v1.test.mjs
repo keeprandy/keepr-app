@@ -7,6 +7,8 @@ const repoRoot = path.resolve(new URL("..", import.meta.url).pathname);
 const migrationPath = "supabase/migrations/20260724083431_verified_attribution_identity_foundation.sql";
 const identityProjectionMigrationPath =
   "supabase/migrations/20260724135000_user_activation_identities_projection.sql";
+const memberInviteMigrationPath =
+  "supabase/migrations/20260727153000_member_invite_share_workflow.sql";
 
 function read(relativePath) {
   return fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
@@ -205,4 +207,32 @@ test("AuthScreen integrates verified attribution without changing signup analyti
   assert.match(source, /source_slug: sourceSlug/);
   assert.match(source, /has_attribution: !!sourceSlug/);
   assert.doesNotMatch(source, /ShareKeeprScreen/);
+});
+
+test("member invite workflow exposes clean-link preview metadata and join notification trigger", () => {
+  const sql = read(memberInviteMigrationPath);
+  const api = read("api/og/invite/[slug].js");
+  const vercel = read("vercel.json");
+
+  assert.match(sql, /create or replace function public\.resolve_member_invite_link/);
+  assert.match(sql, /from public\.resolve_activation_source_slug\(p_slug\)/);
+  assert.match(sql, /grant execute on function public\.resolve_member_invite_link\(text\) to anon, authenticated/);
+  assert.match(sql, /route_path := '\/invite\/' \|\| coalesce/);
+  assert.match(sql, /create or replace function public\.notify_member_invite_attribution/);
+  assert.match(sql, /new\.status <> 'verified'/);
+  assert.match(sql, /new\.attribution_model <> 'person'/);
+  assert.match(sql, /to_regclass\('public\.notifications'\) is null/);
+  assert.match(sql, /source_row\.owner_user_id = new\.user_id/);
+  assert.match(sql, /'member_invite_joined'/);
+  assert.match(sql, /after insert on public\.attribution_records/);
+  assert.doesNotMatch(sql, /delete from public\.attribution_records/i);
+
+  assert.match(api, /resolve_member_invite_link/);
+  assert.match(api, /og:title/);
+  assert.match(api, /og:description/);
+  assert.match(api, /og:image/);
+  assert.match(api, /Cache-Control/);
+
+  assert.match(vercel, /"source": "\/invite\/:slug"/);
+  assert.match(vercel, /"destination": "\/api\/og\/invite\/:slug"/);
 });

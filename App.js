@@ -75,6 +75,7 @@ import TeamScreen from "./screens/TeamScreen";
 // Supabase
 import { supabase } from "./lib/supabaseClient";
 import { flushAnalytics, track } from "./lib/analytics";
+import { startActivationSession } from "./lib/activationSessions";
 import { openShareAction } from "./lib/shareActions";
 
 // Theme
@@ -257,6 +258,7 @@ const linking = {
   screens: {
     ResetPassword: "reset",
     Auth: "auth",
+    Invite: "invite/:slug",
     ShareKeepr: "share-keepr",
     ShareAction: "s/:token",
     
@@ -1135,6 +1137,8 @@ async function trackShareActionOpened(opened) {
 }
 
 function ShareActionRedirectScreen({ navigation, route }) {
+  const [errorMessage, setErrorMessage] = React.useState(null);
+
   React.useEffect(() => {
     let mounted = true;
 
@@ -1142,7 +1146,7 @@ function ShareActionRedirectScreen({ navigation, route }) {
       const token = route?.params?.token;
 
       if (!token) {
-        navigation.replace("Auth");
+        setErrorMessage("This share link is missing its token.");
         return;
       }
 
@@ -1150,13 +1154,23 @@ function ShareActionRedirectScreen({ navigation, route }) {
         const opened = await captureShareActionToken(token);
 
         if (!mounted) return;
-        navigation.replace("Auth", {
-          slug: opened?.sourceSlugSnapshot || opened?.sharedObjectSlugSnapshot || null,
-        });
+        const destinationPath = opened?.routePath || null;
+        const destinationSlug =
+          extractInviteSlugFromUrl(destinationPath) ||
+          opened?.sourceSlugSnapshot ||
+          opened?.sharedObjectSlugSnapshot ||
+          null;
+
+        if (destinationSlug) {
+          navigation.replace("Invite", { slug: destinationSlug });
+          return;
+        }
+
+        setErrorMessage("This share link opened, but Keepr could not determine where to send you next.");
       } catch (e) {
         console.log("Share action open failed:", e?.message || e);
         if (mounted) {
-          navigation.replace("Auth");
+          setErrorMessage("This share link could not be opened. Please try again or ask the sender for a new link.");
         }
       }
     };
@@ -1167,6 +1181,22 @@ function ShareActionRedirectScreen({ navigation, route }) {
       mounted = false;
     };
   }, [navigation, route?.params?.token]);
+
+  if (errorMessage) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>Share link unavailable</Text>
+        <Text style={styles.subtitle}>{errorMessage}</Text>
+        <TouchableOpacity
+          style={styles.button}
+          onPress={() => navigation.replace("Auth")}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.buttonText}>Continue to Keepr</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   return <SplashIntroScreen />;
 }
@@ -1255,26 +1285,34 @@ async function captureShareActionToken(token) {
   return openPromise;
 }
 
-async function captureShareActionFromUrl(url) {
-  const token = extractShareActionTokenFromUrl(url);
-  if (!token) return null;
-
-  try {
-    return await captureShareActionToken(token);
-  } catch (e) {
-    console.log("Share action link capture failed:", e?.message || e);
-    return null;
-  }
-}
-
 async function captureInviteSourceFromUrl(url) {
   const slug = extractInviteSlugFromUrl(url);
   if (!slug) return;
   
 
   try {
+    const activationSession = await startActivationSession({
+      supabase,
+      slug,
+      entryMethod: "invite_link",
+      landingUrl: url,
+      referrer:
+        typeof document !== "undefined" ? document.referrer || null : null,
+      clientPlatform: Platform.OS,
+      storage: AsyncStorage,
+    });
+
     await AsyncStorage.setItem("keepr_acquisition_source_slug", slug);
     await AsyncStorage.setItem("keepr_invite_slug", slug);
+
+    track("invite_link_opened", {
+      activation_source_id: activationSession?.activation_source_id || null,
+      activation_session_status: activationSession?.status || null,
+      resolution_state: activationSession?.resolution_state || null,
+      source_slug: activationSession?.source_slug_snapshot || slug,
+    });
+    await flushAnalytics();
+
     console.log("✅ Captured invite source:", slug);
   } catch (e) {
     console.log("Failed to save invite source:", e?.message || e);
@@ -2513,11 +2551,9 @@ React.useEffect(() => {
     try {
       const initialUrl = await ExpoLinking.getInitialURL();
       if (!mounted) return;
-      await captureShareActionFromUrl(initialUrl);
       await captureInviteSourceFromUrl(initialUrl);
 
       if (Platform.OS === "web" && typeof window !== "undefined") {
-        await captureShareActionFromUrl(window.location?.href);
         await captureInviteSourceFromUrl(window.location?.href);
       }
     } catch (e) {
@@ -2529,7 +2565,6 @@ React.useEffect(() => {
 
 const subscription = ExpoLinking.addEventListener("url", ({ url }) => {
   console.log("🔥 URL RECEIVED:", url);
-  captureShareActionFromUrl(url);
   captureInviteSourceFromUrl(url);
 });
 
