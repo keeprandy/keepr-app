@@ -21,7 +21,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { layoutStyles } from "../styles/layout";
 import { colors, spacing, radius, typography } from "../styles/theme";
 import { supabase } from "../lib/supabaseClient";
-import { posthog } from "../lib/posthog";
+import { track } from "../lib/analytics";
+import { trackWithAcquisition } from "../lib/acquisitionContext";
 import { createAssetWithDefaults } from "../lib/assetsService";
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import { normalizeImageAssetForUpload } from "../lib/imagePickerAssets";
@@ -240,9 +241,9 @@ export default function AddMarineAssetScreen({ navigation }) {
 async function handleSaveBoat() {
   setError(null);
 
-  posthog.capture("asset_creation_started", {
-  asset_type: "vehicle",
-});
+  track("asset_creation_started", {
+    asset_type: "boat",
+  });
 
   const v = validate();
   if (!v.ok) {
@@ -300,7 +301,7 @@ async function handleSaveBoat() {
     const assetId = created?.id;
     if (!assetId) throw new Error("Asset create did not return an id.");
 
-    posthog.capture("asset_created", {
+    await trackWithAcquisition("asset_created", {
       asset_id: assetId,
       asset_type: "boat",
       make: trimmedMake,
@@ -310,7 +311,7 @@ async function handleSaveBoat() {
       asset_mode: assetMode,
       has_hero_photo: !!photoLocal?.uri,
       source: "manual_creation",
-    });
+    }, { userId });
 
     let heroUrl = null;
     let heroPlacementId = null;
@@ -318,11 +319,11 @@ async function handleSaveBoat() {
     if (photoLocal?.uri) {
       setUploadingPhoto(true);
 
-      posthog.capture("hero_photo_uploaded", {
-      asset_id: assetId,
-      asset_type: "boat",
-      source_context: "add_marine_asset",
-    });
+      track("hero_photo_uploaded", {
+  asset_id: assetId,
+  asset_type: "boat",
+  source_context: "add_marine_asset",
+});
 
       const receipt = await uploadAttachmentFromUri({
         userId,
@@ -384,16 +385,16 @@ async function handleSaveBoat() {
 
     if (upErr) throw upErr;
 
-    posthog.capture("asset_story_opened", {
+    await trackWithAcquisition("asset_story_opened", {
       asset_id: assetId,
       asset_type: "boat",
-    });
+    }, { userId });
 
     navigation.replace("BoatStory", { assetId });
   } catch (e) {
     console.log("AddMarineAssetScreen save failed", e);
-    posthog.capture("asset_creation_failed", {
-  asset_type: "vehicle",
+    track("asset_creation_failed", {
+  asset_type: "boat",
   error: e?.message || "unknown_error",
 });
     const msg = e?.message || "Could not save boat. Please try again.";

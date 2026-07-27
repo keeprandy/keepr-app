@@ -4,7 +4,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { DefaultTheme, NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { posthog } from "./lib/posthog";
 
 function safeParseStoredAsset(value) {
   if (!value || typeof value !== "string") return null;
@@ -74,7 +73,13 @@ import TeamScreen from "./screens/TeamScreen";
 
 // Supabase
 import { supabase } from "./lib/supabaseClient";
-import { flushAnalytics, track } from "./lib/analytics";
+import {
+  flushAnalytics,
+  getPostHogAnonymousId,
+  resetAnalytics,
+  track,
+} from "./lib/analytics";
+import { identifyUserWithAcquisition } from "./lib/acquisitionContext";
 import { startActivationSession } from "./lib/activationSessions";
 import { openShareAction } from "./lib/shareActions";
 
@@ -1323,11 +1328,13 @@ async function captureShareActionToken(token) {
   }
 
   const openPromise = (async () => {
+    const posthogDistinctId = await getPostHogAnonymousId();
     const opened = await openShareAction({
       supabase,
       token,
       clientPlatform: Platform.OS,
       storage: AsyncStorage,
+      posthogDistinctId,
     });
 
     await trackShareActionOpened(opened);
@@ -1344,6 +1351,7 @@ async function captureInviteSourceFromUrl(url) {
   
 
   try {
+    const posthogDistinctId = await getPostHogAnonymousId();
     const activationSession = await startActivationSession({
       supabase,
       slug,
@@ -1353,6 +1361,7 @@ async function captureInviteSourceFromUrl(url) {
         typeof document !== "undefined" ? document.referrer || null : null,
       clientPlatform: Platform.OS,
       storage: AsyncStorage,
+      posthogDistinctId,
     });
 
     await AsyncStorage.setItem("keepr_acquisition_source_slug", slug);
@@ -1781,11 +1790,11 @@ const [assetCount, setAssetCount] = React.useState(0);
 
   React.useEffect(() => {
   if (!user?.id) {
-    posthog.reset();
+    resetAnalytics();
     return;
   }
 
-  const identifyUser = async () => {
+  const identifyCurrentUser = async () => {
   let sourceSlug = null;
 
   try {
@@ -1796,7 +1805,7 @@ const [assetCount, setAssetCount] = React.useState(0);
     console.log("Failed to load acquisition source slug", e);
   }
 
-  posthog.identify(user.id, {
+  await identifyUserWithAcquisition(user.id, {
     email: user.email,
     role,
     onboarding_state: onboardingState,
@@ -1807,7 +1816,7 @@ const [assetCount, setAssetCount] = React.useState(0);
   });
 };
 
-identifyUser();
+identifyCurrentUser();
 
 }, [user?.id, role, onboardingState, assetCount]);
 
@@ -2061,7 +2070,7 @@ const handleNavStateChange = React.useCallback(
 
     lastTrackedScreen.current = route.name;
 
-    posthog.capture("screen_viewed", {
+    track("screen_viewed", {
       screen: route.name,
       params: route.params || {},
       role,
@@ -2626,7 +2635,7 @@ const hideSidebarRoutes = [
 React.useEffect(() => {
   console.log("POSTHOG TEST EVENT FIRING");
 
-  posthog.capture("debug_app_loaded", {
+  track("debug_app_loaded", {
     platform: Platform.OS,
     timestamp: new Date().toISOString(),
   });

@@ -22,9 +22,13 @@ import { supabase } from "../lib/supabaseClient";
 import { layoutStyles } from "../styles/layout";
 import { colors, radius, spacing, typography } from "../styles/theme";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { track, identifyUser } from "../lib/analytics";
+import { track } from "../lib/analytics";
 import { claimPendingActionsForEmail } from "../lib/hubsApi";
 import { completeSignupAttribution, getStoredLegacySourceSlug } from "../lib/verifiedAttribution";
+import {
+  identifyUserWithAcquisition,
+  rememberAcquisitionContext,
+} from "../lib/acquisitionContext";
 import { DEFAULT_MEMBER_AVATAR } from "../lib/memberAvatar";
 import { useAuth } from "../context/AuthContext";
 
@@ -534,8 +538,14 @@ if (continued) return;
 
   // 🔥 Identify + track
   try {
-    identifyUser(sessionUserId, {
-      email: user?.email || null,
+    const acquisitionContext = rememberAcquisitionContext(sessionUserId, {
+      ...verifiedAttribution,
+      acquisition_source_slug: verifiedAttribution?.source_slug_snapshot || sourceSlug || null,
+      acquisition_workflow_intent: "signup",
+    });
+
+    await identifyUserWithAcquisition(sessionUserId, {
+      email: normalizedEmail || user?.email || null,
       acquisition_source_slug: sourceSlug,
       activation_attribution_id: verifiedAttribution?.attribution_record_id || null,
       activation_identity_slug: verifiedAttribution?.canonical_slug || null,
@@ -548,6 +558,11 @@ if (continued) return;
       activation_session_id: verifiedAttribution?.activation_session_id || null,
       activation_source_id: verifiedAttribution?.activation_source_id || null,
       activation_identity_slug: verifiedAttribution?.canonical_slug || null,
+      acquisition_source_slug: acquisitionContext.acquisition_source_slug,
+      acquisition_source_id: acquisitionContext.acquisition_source_id,
+      acquisition_session_id: acquisitionContext.acquisition_session_id,
+      acquisition_attribution_record_id: acquisitionContext.acquisition_attribution_record_id,
+      acquisition_workflow_intent: acquisitionContext.acquisition_workflow_intent,
       platform: Platform.OS,
     });
   } catch (e) {

@@ -21,7 +21,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { layoutStyles } from "../styles/layout";
 import { colors, spacing, radius, typography } from "../styles/theme";
 import { supabase } from "../lib/supabaseClient";
-import { posthog } from "../lib/posthog";
+import { track } from "../lib/analytics";
+import { trackWithAcquisition } from "../lib/acquisitionContext";
 import { createAssetWithDefaults } from "../lib/assetsService";
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import { normalizeImageAssetForUpload } from "../lib/imagePickerAssets";
@@ -199,9 +200,9 @@ export default function AddHomeAssetScreen({ navigation, route }) {
   async function handleSaveHome() {
     setError(null);
 
-    posthog.capture("asset_creation_started", {
-  asset_type: "vehicle",
-});
+    track("asset_creation_started", {
+      asset_type: "home",
+    });
 
     const v = validate();
     if (!v.ok) {
@@ -252,14 +253,14 @@ export default function AddHomeAssetScreen({ navigation, route }) {
       const assetId = created?.id;
       if (!assetId) throw new Error("Asset create did not return an id.");
 
-      posthog.capture("asset_created", {
-  asset_id: assetId,
-  asset_type: "home",
-  asset_mode: assetMode,
-  has_hero_photo: !!photoLocal?.uri,
-  year_built: yearNumber,
-  source: "manual_creation",
-});
+      await trackWithAcquisition("asset_created", {
+        asset_id: assetId,
+        asset_type: "home",
+        asset_mode: assetMode,
+        has_hero_photo: !!photoLocal?.uri,
+        year_built: yearNumber,
+        source: "manual_creation",
+      }, { userId });
 
       // 2) Upload hero photo (DB-backed)
  let heroUrl = null;
@@ -268,7 +269,7 @@ let heroPlacementId = null;
 if (photoLocal?.uri) {
   setUploadingPhoto(true);
 
-  posthog.capture("hero_photo_uploaded", {
+  track("hero_photo_uploaded", {
   asset_id: assetId,
   asset_type: "home",
   source_context: "add_home_asset",
@@ -335,17 +336,17 @@ if (photoLocal?.uri) {
           .eq("id", userId);
       }
 
-    posthog.capture("asset_story_opened", {
+    await trackWithAcquisition("asset_story_opened", {
       asset_id: assetId,
       asset_type: "home",
-    });
+    }, { userId });
 
       // 5) Navigate (keep your existing route behavior)
      navigation.replace("HomeStory", { assetId });
     } catch (e) {
       console.log("AddHomeAssetScreen save failed", e);
-      posthog.capture("asset_creation_failed", {
-        asset_type: "vehicle",
+      track("asset_creation_failed", {
+        asset_type: "home",
         error: e?.message || "unknown_error",
       });
       const raw = String(e?.message || "");
