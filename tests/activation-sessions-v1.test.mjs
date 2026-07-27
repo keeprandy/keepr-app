@@ -5,6 +5,8 @@ import test from "node:test";
 
 const repoRoot = path.resolve(new URL("..", import.meta.url).pathname);
 const migrationPath = "supabase/migrations/20260724064109_activation_sessions.sql";
+const digestHotfixMigrationPath =
+  "supabase/migrations/20260727154500_qualify_activation_session_digest.sql";
 
 function read(relativePath) {
   return fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
@@ -284,4 +286,15 @@ test("client helper reuses stored token and clears terminal sessions", async () 
   });
 
   assert.equal(await storage.getItem(ACTIVATION_SESSION_TOKEN_KEY), null);
+});
+
+test("activation session hotfix keeps locked search_path and qualifies pgcrypto digest", () => {
+  const sql = read(digestHotfixMigrationPath);
+
+  assert.match(sql, /create or replace function public\.create_activation_session/);
+  assert.match(sql, /security definer/);
+  assert.match(sql, /set search_path = public/);
+  assert.match(sql, /extensions\.digest\(/);
+  assert.doesNotMatch(sql, /[^.]digest\(/);
+  assert.match(sql, /grant execute on function public\.create_activation_session/);
 });
