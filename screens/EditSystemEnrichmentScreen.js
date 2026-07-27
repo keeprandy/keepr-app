@@ -21,6 +21,7 @@ import { useOperationFeedback } from "../context/OperationFeedbackContext";
 import { layoutStyles } from "../styles/layout";
 import { colors, radius, spacing } from "../styles/theme";
 import KeeprDateField from "../components/KeeprDateField";
+import { formatMoneyInput, parseMoneyInput } from "../lib/money";
 
 const IS_WEB = Platform.OS === "web";
 const SYSTEMS_TABLE = "systems";
@@ -48,6 +49,7 @@ const Field = ({
   keyboardType = "default",
   multiline = false,
   rows = 3,
+  onBlur,
 }) => (
   <View style={styles.fieldRow}>
     <Text style={styles.fieldLabel}>{label}</Text>
@@ -57,6 +59,7 @@ const Field = ({
       placeholder={placeholder}
       placeholderTextColor={colors.textMuted}
       keyboardType={keyboardType}
+      onBlur={onBlur}
       multiline={multiline}
       numberOfLines={rows}
       style={[styles.fieldInput, multiline && styles.fieldInputMultiline]}
@@ -88,11 +91,7 @@ function safeStr(v) {
 
 
 function toNumberOrNull(s) {
-  const raw = safeStr(s).trim();
-  if (!raw) return null;
-  const n = Number(raw.replace(/,/g, ""));
-  if (!Number.isFinite(n)) return null;
-  return n;
+  return parseMoneyInput(s);
 }
 
 
@@ -784,15 +783,17 @@ export default function EditSystemEnrichmentScreen({ route, navigation }) {
               label="Estimated replacement (USD)"
               value={replacementUsd}
               onChange={setReplacementUsd}
+              onBlur={() => setReplacementUsd(formatMoneyInput(replacementUsd))}
               placeholder="e.g., 2500"
-              keyboardType="numeric"
+              keyboardType="default"
             />
             <Field
               label="Verified value (USD)"
               value={verifiedUsd}
               onChange={setVerifiedUsd}
+              onBlur={() => setVerifiedUsd(formatMoneyInput(verifiedUsd))}
               placeholder="If you have an invoice / appraisal..."
-              keyboardType="numeric"
+              keyboardType="default"
             />
             <Field
               label="Confidence score (0–1)"
@@ -1371,4 +1372,3 @@ const styles = StyleSheet.create({
   },
 
 });
-

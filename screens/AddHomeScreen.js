@@ -17,6 +17,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../lib/supabaseClient";
 import { layoutStyles } from "../styles/layout";
 import { colors, spacing, radius, shadows, typography } from "../styles/theme";
+import { formatMoneyInput, parseMoneyInput } from "../lib/money";
 
 export default function AddHomeScreen({ navigation, route }) {
   const preset = route?.params || {};
@@ -48,13 +49,7 @@ export default function AddHomeScreen({ navigation, route }) {
   }, [name, saving]);
 
   const parseNumber = (v) => {
-    if (v == null) return null;
-    const s = String(v).trim();
-    if (!s) return null;
-    const cleaned = s.replace(/[^0-9.]/g, "");
-    if (!cleaned) return null;
-    const num = Number(cleaned);
-    return Number.isFinite(num) ? num : null;
+    return parseMoneyInput(v);
   };
 
   const parseIntSafe = (v) => {
@@ -186,7 +181,7 @@ export default function AddHomeScreen({ navigation, route }) {
                 placeholder="3"
                 placeholderTextColor={colors.textMuted}
                 style={styles.input}
-                keyboardType={Platform.OS === "ios" ? "numbers-and-punctuation" : "numeric"}
+                keyboardType="default"
               />
             </View>
             <View style={{ width: 12 }} />
@@ -198,7 +193,7 @@ export default function AddHomeScreen({ navigation, route }) {
                 placeholder="2.5"
                 placeholderTextColor={colors.textMuted}
                 style={styles.input}
-                keyboardType={Platform.OS === "ios" ? "numbers-and-punctuation" : "numeric"}
+                keyboardType="default"
               />
             </View>
           </View>
@@ -235,6 +230,7 @@ export default function AddHomeScreen({ navigation, route }) {
               <TextInput
                 value={purchasePrice}
                 onChangeText={setPurchasePrice}
+                onBlur={() => setPurchasePrice(formatMoneyInput(purchasePrice))}
                 placeholder="$210,000"
                 placeholderTextColor={colors.textMuted}
                 style={styles.input}
@@ -247,6 +243,7 @@ export default function AddHomeScreen({ navigation, route }) {
               <TextInput
                 value={estimatedValue}
                 onChangeText={setEstimatedValue}
+                onBlur={() => setEstimatedValue(formatMoneyInput(estimatedValue))}
                 placeholder="$265,000"
                 placeholderTextColor={colors.textMuted}
                 style={styles.input}

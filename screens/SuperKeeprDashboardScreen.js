@@ -26,6 +26,7 @@ import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { getSignedUrl } from "../lib/attachmentsApi";
 import { useFocusEffect } from "@react-navigation/native";
+import { parseMoneyInput } from "../lib/money";
 
 const LIFECYCLE_STATES = [
   "Fully Operational",
@@ -485,9 +486,7 @@ const openAsset = useCallback(
       const name = row.name || address || "Imported Home";
       const location = [city, st, zip].filter(Boolean).join(" ");
 
-      const purchasePrice = row.purchase_price
-        ? Number(String(row.purchase_price).replace(/[^0-9.]/g, ""))
-        : null;
+      const purchasePrice = parseMoneyInput(row.purchase_price);
 
       const md = {
         address_line1: address,

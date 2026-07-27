@@ -33,18 +33,13 @@ import { getSignedUrl, listAttachmentsForTarget, removePlacementById } from "../
 import { createLinkAttachment, uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import KeeprDateField from "../components/KeeprDateField";
 import AttachmentViewerModal from "../components/AttachmentViewerModal";
+import { formatMoneyInput, parseMoneyInput } from "../lib/money";
 
 /* ---------------- helpers ---------------- */
 
 
 function safeMoney(raw) {
-  if (raw == null) return null;
-  const cleaned = String(raw).replace(/[^0-9.,-]/g, "");
-  if (!cleaned) return null;
-  const normalized = cleaned.replace(/,/g, "");
-  const n = Number(normalized);
-  if (Number.isNaN(n)) return null;
-  return n;
+  return parseMoneyInput(raw);
 }
 
 const COST_CATEGORIES = [
@@ -1040,8 +1035,9 @@ if (serviceType === "cost") {
                     placeholder="$0"
                     value={cost}
                     onChangeText={setCost}
+                    onBlur={() => setCost(formatMoneyInput(cost))}
                     placeholderTextColor={colors.textMuted}
-                    keyboardType="decimal-pad"
+                    keyboardType="default"
                   />
                 </View>
                 <View style={{ flex: 1 }}>

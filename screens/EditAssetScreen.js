@@ -26,6 +26,7 @@ import {
   typography,
 } from "../styles/theme";
 import KeeprDateField from "../components/KeeprDateField";
+import { formatMoneyInput, parseMoneyInput } from "../lib/money";
 
 /** ---------- Keepr input wrapper ---------- **/
 const KInput = (props) => {
@@ -362,9 +363,7 @@ export default function EditAssetScreen({ route, navigation }) {
   };
 
   const parseNumber = (value) => {
-    if (!value) return null;
-    const n = Number(String(value).replace(/,/g, ""));
-    return Number.isFinite(n) ? n : null;
+    return parseMoneyInput(value);
   };
 
   const selectedPros = useMemo(() => {
@@ -753,9 +752,10 @@ export default function EditAssetScreen({ route, navigation }) {
             <View style={styles.field}>
               <Text style={styles.fieldLabel}>Purchase price</Text>
               <KInput
-                keyboardType="numeric"
+                keyboardType="default"
                 value={purchasePrice}
                 onChangeText={setPurchasePrice}
+                onBlur={() => setPurchasePrice(formatMoneyInput(purchasePrice))}
                 placeholder="e.g. 525000"
               />
             </View>
@@ -763,9 +763,10 @@ export default function EditAssetScreen({ route, navigation }) {
             <View style={styles.field}>
               <Text style={styles.fieldLabel}>Estimated value</Text>
               <KInput
-                keyboardType="numeric"
+                keyboardType="default"
                 value={estimatedValue}
                 onChangeText={setEstimatedValue}
+                onBlur={() => setEstimatedValue(formatMoneyInput(estimatedValue))}
                 placeholder="e.g. 1100000"
               />
             </View>

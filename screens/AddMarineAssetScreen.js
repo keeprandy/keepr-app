@@ -24,6 +24,7 @@ import { supabase } from "../lib/supabaseClient";
 import { posthog } from "../lib/posthog";
 import { createAssetWithDefaults } from "../lib/assetsService";
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
+import { normalizeImageAssetForUpload } from "../lib/imagePickerAssets";
 
 const IS_WEB = Platform.OS === "web";
 const HERO_BUCKET = "asset-files";
@@ -148,12 +149,7 @@ export default function AddMarineAssetScreen({ navigation }) {
       const a = result.assets?.[0];
       if (!a?.uri) return;
 
-      setPhotoLocal({
-        uri: a.uri,
-        fileName: a.fileName || a.uri.split("/").pop() || "boat.jpg",
-        mimeType: a.mimeType || "image/jpeg",
-        fileSize: a.fileSize || null,
-      });
+      setPhotoLocal(await normalizeImageAssetForUpload(a, "boat.jpg"));
     } catch (e) {
       console.log("pickPhotoFromLibrary failed", e);
       openModal("Couldn’t open photos", "Try again, or use Take photo.");
@@ -183,12 +179,7 @@ export default function AddMarineAssetScreen({ navigation }) {
       const a = result.assets?.[0];
       if (!a?.uri) return;
 
-      setPhotoLocal({
-        uri: a.uri,
-        fileName: a.fileName || a.uri.split("/").pop() || "boat.jpg",
-        mimeType: a.mimeType || "image/jpeg",
-        fileSize: a.fileSize || null,
-      });
+      setPhotoLocal(await normalizeImageAssetForUpload(a, "boat.jpg"));
     } catch (e) {
       console.log("takePhoto failed", e);
       openModal(

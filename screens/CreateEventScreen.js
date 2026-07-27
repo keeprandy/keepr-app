@@ -29,6 +29,7 @@ import { colors, radius, shadows, spacing } from "../styles/theme";
 // Shared attachments engine
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import KeeprDateField from "../components/KeeprDateField";
+import { centsToDollarsInput, dollarsToCentsInput, formatMoneyInput } from "../lib/money";
 
 const EVENT_ATTACHMENTS_BUCKET = "asset-files";
 
@@ -50,22 +51,6 @@ const todayISO = () => {
 /* ------------------------------------------------------------------ */
 /* Money helpers                                                      */
 /* ------------------------------------------------------------------ */
-
-const dollarsToCents = (s) => {
-  if (!s) return null;
-  const cleaned = String(s).replace(/[^0-9.]/g, "");
-  if (!cleaned) return null;
-  const n = Number(cleaned);
-  if (!Number.isFinite(n)) return null;
-  return Math.round(n * 100);
-};
-
-const centsToDollars = (cents) => {
-  if (cents == null) return "";
-  const n = Number(cents);
-  if (!Number.isFinite(n)) return "";
-  return (n / 100).toFixed(2);
-};
 
 /* ------------------------------------------------------------------ */
 /* File helpers                                                       */
@@ -223,7 +208,7 @@ export default function CreateEventScreen({ navigation, route }) {
       const iso = ev?.occurred_at || todayISO();
       setOccurredAtISO((iso || "").slice(0, 10));
 
-      setAmountDollars(centsToDollars(ev?.amount_cents));
+      setAmountDollars(centsToDollarsInput(ev?.amount_cents));
 
       setAssetId(ev?.asset_id || null);
       setSystemId(ev?.system_id || null);
@@ -508,7 +493,7 @@ export default function CreateEventScreen({ navigation, route }) {
   const upsertEventRow = useCallback(
     async ({ nextStatus }) => {
       const iso = occurredAtISO || todayISO();
-      const amount_cents = dollarsToCents(amountDollars);
+      const amount_cents = dollarsToCentsInput(amountDollars);
 
       // Preserve existing context and extend with mode if provided
       const baseContext =
@@ -919,12 +904,11 @@ export default function CreateEventScreen({ navigation, route }) {
               <TextInput
                 value={amountDollars}
                 onChangeText={setAmountDollars}
+                onBlur={() => setAmountDollars(formatMoneyInput(amountDollars))}
                 placeholder="0.00"
                 placeholderTextColor={colors.textMuted}
                 style={styles.input}
-                keyboardType={
-                  Platform.OS === "ios" ? "decimal-pad" : "numeric"
-                }
+                keyboardType="default"
               />
             </View>
           </View>

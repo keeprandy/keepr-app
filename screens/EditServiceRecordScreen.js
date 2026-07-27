@@ -28,6 +28,7 @@ import { colors, spacing, radius, shadows } from "../styles/theme";
 import { supabase } from "../lib/supabaseClient";
 import { uploadLocalImageToSupabase } from "../lib/imageUpload";
 import { deleteServiceRecordAttachment } from "../lib/attachmentsEngine";
+import { formatMoneyInput, parseMoneyInput } from "../lib/money";
 
 import AttachmentsStrip from "../components/AttachmentsStrip";
 
@@ -76,12 +77,7 @@ function isoDateToUS(value) {
 }
 
 function safeNumberOrNull(raw) {
-  if (raw == null) return null;
-  const trimmed = String(raw).trim();
-  if (!trimmed) return null;
-  const n = Number(trimmed.replace(/[^0-9.]/g, ""));
-  if (Number.isNaN(n)) return null;
-  return n;
+  return parseMoneyInput(raw);
 }
 
 function sanitizeName(name) {
@@ -884,10 +880,11 @@ export default function EditServiceRecordScreen({ navigation, route }) {
                   <TextInput
                     value={cost}
                     onChangeText={setCost}
+                    onBlur={() => setCost(formatMoneyInput(cost))}
                     placeholder="$0.00"
                     placeholderTextColor={colors.textMuted}
                     style={styles.input}
-                    keyboardType="decimal-pad"
+                    keyboardType="default"
                   />
                 </View>
                 <View style={[styles.fieldGroup, { flex: 1.2 }]}>

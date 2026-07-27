@@ -9,6 +9,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -275,6 +276,7 @@ export default function DashboardScreen({ navigation }) {
   // Identity / achievements (for avatar + accomplishments card)
   const [avatarUrl, setAvatarUrl] = useState(null);
   const [avatarResolving, setAvatarResolving] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [profileName, setProfileName] = useState("");
   const [meId, setMeId] = useState(null);
   const [ach, setAch] = useState(null);
@@ -656,10 +658,20 @@ const reloadDashboard = useCallback(async () => {
   loadIdentityAndAchievements,
   loadSystemModeSummary,
 ]);
+
+const onRefresh = useCallback(async () => {
+  setRefreshing(true);
+  try {
+    await reloadDashboard();
+  } finally {
+    setRefreshing(false);
+  }
+}, [reloadDashboard]);
+
 useFocusEffect(
   React.useCallback(() => {
-    loadSystemModeSummary?.();
-  }, [loadSystemModeSummary])
+    reloadDashboard();
+  }, [reloadDashboard])
 );
 
   const goProfile = useCallback(() => {
@@ -981,7 +993,11 @@ if (Platform.OS !== "ios") {
         <BackgroundWash />
 
         <View style={{ flex: 1 }}>
-          <ScrollView contentContainerStyle={scrollContainerStyle} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            contentContainerStyle={scrollContainerStyle}
+            showsVerticalScrollIndicator={false}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          >
             {/* Header */}
             <View style={styles.headerWrap}>
               {isWide ? (
@@ -1155,6 +1171,23 @@ if (Platform.OS !== "ios") {
                       <ActivityIndicator size="small" color={colors.textMuted} />
                       <Text style={styles.syncText}>Syncing</Text>
                     </View>
+                  ) : null}
+                  {Platform.OS === "web" ? (
+                    <TouchableOpacity
+                      style={styles.refreshBtn}
+                      onPress={onRefresh}
+                      disabled={refreshing}
+                      activeOpacity={0.9}
+                      accessibilityRole="button"
+                      accessibilityLabel="Refresh dashboard"
+                    >
+                      {refreshing ? (
+                        <ActivityIndicator size="small" color={colors.textMuted} />
+                      ) : (
+                        <Ionicons name="refresh-outline" size={16} color={colors.textMuted} />
+                      )}
+                      <Text style={styles.refreshBtnText}>Refresh</Text>
+                    </TouchableOpacity>
                   ) : null}
                       <TouchableOpacity
                         style={styles.iconBtn}
@@ -1864,6 +1897,23 @@ headerWebRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+  },
+
+  refreshBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    backgroundColor: "#ffffff",
+  },
+  refreshBtnText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: colors.textSecondary,
   },
 
   viewAllBtn: {

@@ -16,6 +16,7 @@ import { colors, spacing, radius, typography } from "../styles/theme";
 import { useVehicles } from "../context/VehiclesContext";
 import { useBoats } from "../context/BoatsContext";
 import { HOME_SYSTEMS } from "../data/homeSystems";
+import { formatMoneyInput, parseMoneyInput } from "../lib/money";
 
 export default function AddDIYEntry({ route, navigation }) {
   const {
@@ -80,7 +81,7 @@ export default function AddDIYEntry({ route, navigation }) {
       type: "diy",
       title: title || "DIY maintenance",
       provider: "Owner DIY",
-      cost: cost || null,
+      cost: parseMoneyInput(cost),
       notes: notes || "",
     };
 
@@ -175,9 +176,10 @@ export default function AddDIYEntry({ route, navigation }) {
                 style={styles.input}
                 placeholder="$0.00"
                 placeholderTextColor={colors.textMuted}
-                keyboardType="numeric"
+                keyboardType="default"
                 value={cost}
                 onChangeText={setCost}
+                onBlur={() => setCost(formatMoneyInput(cost))}
               />
             </View>
 

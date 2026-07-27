@@ -23,6 +23,7 @@ import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { createAssetWithDefaults } from "../lib/assetsService";
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
+import { normalizeImageAssetForUpload } from "../lib/imagePickerAssets";
 
 const IS_WEB = Platform.OS === "web";
 
@@ -261,11 +262,7 @@ export default function AddAssetScreen({ navigation, route }) {
         const a = result.assets?.[0];
         if (!a?.uri) return;
 
-        picked = {
-          uri: a.uri,
-          fileName: a.fileName || `photo-${Date.now()}.jpg`,
-          mimeType: a.mimeType || "image/jpeg",
-        };
+        picked = await normalizeImageAssetForUpload(a, `photo-${Date.now()}.jpg`);
       }
 
       if (!picked) return;
@@ -292,11 +289,7 @@ export default function AddAssetScreen({ navigation, route }) {
       const a = result.assets?.[0];
       if (!a?.uri) return;
 
-      setPickedHero({
-        uri: a.uri,
-        fileName: a.fileName || `photo-${Date.now()}.jpg`,
-        mimeType: a.mimeType || "image/jpeg",
-      });
+      setPickedHero(await normalizeImageAssetForUpload(a, `photo-${Date.now()}.jpg`));
     } catch (e) {
       showAlert("Camera unavailable", e?.message || "Couldn’t open the camera.");
     } finally {

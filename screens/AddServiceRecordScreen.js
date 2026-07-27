@@ -32,6 +32,7 @@ import {
   uploadInvoicePhotoForServiceRecord,
 } from "../lib/invoicePhotos";
 import { addServiceRecordAttachment } from "../lib/attachmentsEngine";
+import { formatMoneyInput, parseMoneyInput } from "../lib/money";
 
 /* =======================================================
    Helpers
@@ -56,15 +57,6 @@ function formatDateForInput(dateObj) {
     const { yyyy, mm, dd } = getTodayPieces();
     return `${mm}-${dd}-${yyyy}`;
   }
-}
-
-function parseMoneyToNumber(raw) {
-  if (!raw) return null;
-  const cleaned = raw.replace(/[^0-9.,-]/g, "");
-  if (!cleaned) return null;
-  const normalized = cleaned.replace(/,/g, "");
-  const num = Number(normalized);
-  return Number.isNaN(num) ? null : num;
 }
 
 // Accept MM-DD-YYYY, MM/DD/YYYY, or YYYY-MM-DD → YYYY-MM-DD (local-safe)
@@ -360,7 +352,7 @@ export default function AddServiceRecordScreen({ route, navigation }) {
     }
 
     const performedAt = parseUSDateToISO(date);
-    const costNumber = parseMoneyToNumber(cost);
+    const costNumber = parseMoneyInput(cost);
 
     const selectedSystemName =
       selectedSystemId
@@ -802,7 +794,8 @@ export default function AddServiceRecordScreen({ route, navigation }) {
                 placeholder="$250.00"
                 value={cost}
                 onChangeText={setCost}
-                keyboardType="decimal-pad"
+                onBlur={() => setCost(formatMoneyInput(cost))}
+                keyboardType="default"
                 placeholderTextColor={colors.textMuted}
               />
             </View>

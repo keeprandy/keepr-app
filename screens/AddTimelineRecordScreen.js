@@ -29,6 +29,7 @@ import { Linking } from "react-native";
 import RenderHTML from "react-native-render-html";
 import { useWindowDimensions } from "react-native";
 import AttachmentViewerModal from "../components/AttachmentViewerModal";
+import { formatMoneyInput, parseMoneyInput } from "../lib/money";
 
 /* ---------------- helpers ---------------- */
 async function openContactUrl(url, fallbackMessage) {
@@ -54,13 +55,7 @@ async function copyContact(source) {
 }
 
 function safeMoney(raw) {
-  if (raw == null) return null;
-  const cleaned = String(raw).replace(/[^0-9.,-]/g, "");
-  if (!cleaned) return null;
-  const normalized = cleaned.replace(/,/g, "");
-  const n = Number(normalized);
-  if (Number.isNaN(n)) return null;
-  return n;
+  return parseMoneyInput(raw);
 }
 
 const COST_CATEGORIES = [
@@ -1316,7 +1311,8 @@ const deleteInboxAttachment = async (attachmentId) => {
                     placeholder="$0"
                     value={cost}
                     onChangeText={setCost}
-                    keyboardType="decimal-pad"
+                    onBlur={() => setCost(formatMoneyInput(cost))}
+                    keyboardType="default"
                   />
 
                   <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
@@ -1355,8 +1351,9 @@ const deleteInboxAttachment = async (attachmentId) => {
                             style={styles.input}
                             value={cost}
                             onChangeText={setCost}
+                            onBlur={() => setCost(formatMoneyInput(cost))}
                             placeholder="$0"
-                            keyboardType="decimal-pad"
+                            keyboardType="default"
                           />
                           <TextInput
                             style={[styles.input, { minHeight: 90, marginTop: 8 }]}
@@ -1387,8 +1384,9 @@ const deleteInboxAttachment = async (attachmentId) => {
                               style={styles.input}
                               value={row.amount}
                               onChangeText={(t) => updateBackfillAmount(idx, t)}
+                              onBlur={() => updateBackfillAmount(idx, formatMoneyInput(row.amount))}
                               placeholder="$0"
-                              keyboardType="decimal-pad"
+                              keyboardType="default"
                             />
                             <TextInput
                               style={[styles.input, { minHeight: 90, marginTop: 8 }]}
@@ -1424,8 +1422,9 @@ const deleteInboxAttachment = async (attachmentId) => {
                         placeholder="$0"
                         value={cost}
                         onChangeText={setCost}
+                        onBlur={() => setCost(formatMoneyInput(cost))}
                         placeholderTextColor={colors.textMuted}
-                        keyboardType="decimal-pad"
+                        keyboardType="default"
                       />
                     </View>
 

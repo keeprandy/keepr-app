@@ -24,6 +24,7 @@ import { colors, spacing, radius, typography, shadows } from "../styles/theme";
 import { supabase } from "../lib/supabaseClient";
 import { createAssetWithDefaults } from "../lib/assetsService";
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
+import { normalizeImageAssetForUpload } from "../lib/imagePickerAssets";
 
 const IS_WEB = Platform.OS === "web";
 const HERO_BUCKET = "asset-files";
@@ -411,12 +412,7 @@ const config = useMemo(
       const a = result.assets?.[0];
       if (!a?.uri) return;
 
-      setPhotoLocal({
-        uri: a.uri,
-        fileName: a.fileName || a.uri.split("/").pop() || "asset.jpg",
-        mimeType: a.mimeType || "image/jpeg",
-        fileSize: a.fileSize || null,
-      });
+      setPhotoLocal(await normalizeImageAssetForUpload(a, "asset.jpg"));
     } catch (e) {
       console.log("AddAssetChatScreen pickPhotoFromLibrary failed", e);
       openModal("Couldn’t open photos", "Try again.");
@@ -443,12 +439,7 @@ const config = useMemo(
       const a = result.assets?.[0];
       if (!a?.uri) return;
 
-      setPhotoLocal({
-        uri: a.uri,
-        fileName: a.fileName || a.uri.split("/").pop() || "asset.jpg",
-        mimeType: a.mimeType || "image/jpeg",
-        fileSize: a.fileSize || null,
-      });
+      setPhotoLocal(await normalizeImageAssetForUpload(a, "asset.jpg"));
     } catch (e) {
       console.log("AddAssetChatScreen takePhoto failed", e);
       openModal("Couldn’t open camera", "Try again.");

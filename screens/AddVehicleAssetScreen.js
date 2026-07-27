@@ -24,6 +24,7 @@ import { posthog } from "../lib/posthog";
 import { createAssetWithDefaults } from "../lib/assetsService";
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import * as DocumentPicker from "expo-document-picker";
+import { normalizeImageAssetForUpload } from "../lib/imagePickerAssets";
 
 const IS_WEB = Platform.OS === "web";
 const HERO_BUCKET = "asset-files"; // keep hero photos in asset-files bucket (your standard)
@@ -142,12 +143,7 @@ async function pickPhotoFromLibrary() {
     const a = result.assets?.[0];
     if (!a?.uri) return;
 
-    setPhotoLocal({
-      uri: a.uri,
-      fileName: a.fileName || a.uri.split("/").pop() || "vehicle.jpg",
-      mimeType: a.mimeType || "image/jpeg",
-      fileSize: a.fileSize || null,
-    });
+    setPhotoLocal(await normalizeImageAssetForUpload(a, "vehicle.jpg"));
   } catch (e) {
     console.log("pickPhotoFromLibrary failed", e);
     openModal("Couldn’t open photos", "Try again, or use Take photo.");
@@ -173,12 +169,7 @@ async function pickPhotoFromLibrary() {
       const a = result.assets?.[0];
       if (!a?.uri) return;
 
-      setPhotoLocal({
-        uri: a.uri,
-        fileName: a.fileName || a.uri.split("/").pop() || "vehicle.jpg",
-        mimeType: a.mimeType || "image/jpeg",
-        fileSize: a.fileSize || null,
-      });
+      setPhotoLocal(await normalizeImageAssetForUpload(a, "vehicle.jpg"));
     } catch (e) {
       console.log("takePhoto failed", e);
       openModal("Couldn’t open camera", "Try again, or choose a photo from your library.");
