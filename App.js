@@ -101,6 +101,7 @@ import KeeprActionScreen from "./screens/KeeprActionScreen";
 import SendToKeeprScreen from "./screens/SendToKeeprScreen";
 import SendToKeeprAssetPicker from "./screens/SendToKeeprAssetPicker";
 import PublicKeeprStoryScreen from "./screens/PublicKeeprStoryScreen";
+import PublicSystemStoryScreen from "./screens/PublicSystemStoryScreen";
 import KeeprHubScreen from "./screens/KeeprHubScreen";
 import HubDetailScreen from "./screens/HubDetailScreen";
 import EditHubScreen from "./screens/EditHubScreen";
@@ -269,6 +270,7 @@ const linking = {
     KeeprEffect: "keepr-effect",
     ShareAction: "s/:token",
     
+    PublicSystemStory: "k/:kac/n/:nodeId",
     PublicKeeprStory: "k/:kac",
     PublicAction: "k/:kac/actions",
     KeeprHubInternal: "KeeprHubInternal",
@@ -2149,6 +2151,7 @@ if (!user) {
           <RootStack.Screen name="PublicAction" component={PublicActionScreen} />
           <RootStack.Screen name="KeeprAction" component={KeeprActionScreen} options={{ headerShown: false }} />
           <RootStack.Screen name="KacResolve" component={KacResolveScreen} />
+          <RootStack.Screen name="PublicSystemStory" component={PublicSystemStoryScreen}/>
           <RootStack.Screen name="PublicKeeprStory" component={PublicKeeprStoryScreen}/>
           <RootStack.Screen name="KeeprHub" component={KeeprHubScreen}/>
           <RootStack.Screen name="HubDetail" component={HubDetailScreen} />
@@ -2246,6 +2249,7 @@ const initialRouteName = isResetLink
           <RootStack.Screen name="ManageTeam" component={ManageTeamScreen} />
           <RootStack.Screen name="PublicConfig" component={PublicConfigScreen} />
           <RootStack.Screen name="PublicConfigAssetPicker" component={PublicConfigAssetPickerScreen} />
+          <RootStack.Screen name="PublicSystemStory" component={PublicSystemStoryScreen} />
           <RootStack.Screen name="PublicKeeprStory" component={PublicKeeprStoryScreen} />
           <RootStack.Screen name="KeeprHub" component={KeeprHubScreen}/>
           <RootStack.Screen name="HubDetail" component={HubDetailScreen} />

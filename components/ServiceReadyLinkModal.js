@@ -19,6 +19,11 @@ export default function ServiceReadyLinkModal({
   visible,
   url,
   systemName,
+  kicker = "Service Ready",
+  title,
+  note = "Keepr stores only a secure token hash. This usable link is available for this session.",
+  copiedAlertTitle = "Service Ready link copied",
+  downloadNamePrefix,
   onClose,
 }) {
   const qrRef = useRef(null);
@@ -26,7 +31,7 @@ export default function ServiceReadyLinkModal({
   const copyLink = async () => {
     if (!url) return;
     await Clipboard.setStringAsync(url);
-    Alert.alert("Service Ready link copied", url);
+    Alert.alert(copiedAlertTitle, url);
   };
 
   const shareQr = async () => {
@@ -44,7 +49,8 @@ export default function ServiceReadyLinkModal({
             .replace(/^-|-$/g, "")
             .slice(0, 64) || "service-ready";
           anchor.href = dataUrl;
-          anchor.download = `${safeName}-qr.png`;
+          const prefix = downloadNamePrefix || safeName || "service-ready";
+          anchor.download = `${prefix}-qr.png`;
           anchor.click();
           return;
         }
@@ -70,8 +76,8 @@ export default function ServiceReadyLinkModal({
         <View style={styles.card}>
           <View style={styles.headerRow}>
             <View>
-              <Text style={styles.kicker}>Service Ready</Text>
-              <Text style={styles.title}>{systemName || "System"} QR & Link</Text>
+              <Text style={styles.kicker}>{kicker}</Text>
+              <Text style={styles.title}>{title || `${systemName || "System"} QR & Link`}</Text>
             </View>
             <Pressable onPress={onClose} style={styles.closeButton}>
               <Text style={styles.closeText}>x</Text>
@@ -83,9 +89,7 @@ export default function ServiceReadyLinkModal({
           </View>
 
           <Text style={styles.urlText}>{url || "No active session link yet."}</Text>
-          <Text style={styles.note}>
-            Keepr stores only a secure token hash. This usable link is available for this session.
-          </Text>
+          <Text style={styles.note}>{note}</Text>
 
           <View style={styles.actions}>
             <TouchableOpacity style={styles.primaryButton} onPress={copyLink} disabled={!url}>
@@ -115,7 +119,9 @@ const styles = StyleSheet.create({
     width: "100%",
     maxWidth: 420,
     borderRadius: radius.lg,
-    backgroundColor: colors.card,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
     padding: spacing.lg,
     ...shadows.card,
     gap: spacing.md,
@@ -154,7 +160,9 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     padding: spacing.md,
     borderRadius: radius.md,
-    backgroundColor: "#fff",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
   },
   urlText: {
     color: colors.textPrimary,

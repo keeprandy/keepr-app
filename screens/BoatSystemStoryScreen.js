@@ -23,7 +23,6 @@ import { colors, spacing, radius, typography, shadows } from "../styles/theme";
 
 import { useBoats } from "../context/BoatsContext";
 import { supabase } from "../lib/supabaseClient";
-import { createOrReuseServiceReadyLink } from "../lib/systemServiceReadyLinks";
 import { buildServiceActionRouteParams } from "../lib/serviceActionPrefill";
 import { buildPrivateKeeprProActionPrefill } from "../lib/keeprProEngagement";
 
@@ -154,10 +153,19 @@ export default function BoatSystemStoryScreen(props) {
     currentBoat?.name ??
     "My boat";
 
+  const assetKacFromRoute =
+    route?.params?.kac ??
+    route?.params?.kac_id ??
+    route?.params?.assetKac ??
+    currentBoat?.kac_id ??
+    currentBoat?.kac ??
+    null;
+
   const assetId = assetIdFromRoute;
   const assetName = assetNameFromRoute;
 
   const [system, setSystem] = useState(null);
+  const [publicAssetKac, setPublicAssetKac] = useState(assetKacFromRoute);
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -225,6 +233,15 @@ export default function BoatSystemStoryScreen(props) {
       if (!sys) throw new Error("System not found.");
       setSystem(sys);
 
+      if (!assetKacFromRoute && sys.asset_id) {
+        const { data: assetRow } = await supabase
+          .from("assets")
+          .select("kac_id")
+          .eq("id", sys.asset_id)
+          .maybeSingle();
+        setPublicAssetKac(assetRow?.kac_id || null);
+      }
+
       const { data: recRows, error: recErr } = await supabase
         .from("service_records")
         .select(
@@ -262,7 +279,7 @@ export default function BoatSystemStoryScreen(props) {
       setError(e?.message || "Failed to load system.");
       setLoading(false);
     }
-  }, [systemId]);
+  }, [assetKacFromRoute, systemId]);
 
   // Initial load
   useEffect(() => {
@@ -376,6 +393,16 @@ export default function BoatSystemStoryScreen(props) {
 
   const { photos, files, links } = attachmentCounts;
   const hasAnyAttachments = photos + files + links > 0;
+  const assetKac = assetKacFromRoute || publicAssetKac || null;
+
+  const publicSystemStoryUrl = useMemo(() => {
+    if (!assetKac || !systemId) return null;
+    const path = `/k/${encodeURIComponent(assetKac)}/n/${encodeURIComponent(systemId)}`;
+    if (IS_WEB && typeof window !== "undefined" && window.location?.origin) {
+      return `${window.location.origin}${path}`;
+    }
+    return `https://app.keeprhome.com${path}`;
+  }, [assetKac, systemId]);
 
   const heroAttachment = useMemo(() => {
     if (!attachmentPreview.length) return null;
@@ -586,68 +613,33 @@ const handlePrint = useCallback(async () => {
   }
 }, [systemId, navigation]);
 
-const generateFreshServiceReadyLink = useCallback(async () => {
-  try {
-    const result = await createOrReuseServiceReadyLink({
-      supabase,
-      assetId,
-      systemId,
-      systemName: system?.name,
-      forceNew: true,
-    });
-
-    if (!result?.url) throw new Error("No Service Ready URL returned.");
-    setServiceReadyUrl(result.url);
-    await Clipboard.setStringAsync(result.url);
-    setServiceReadyQrVisible(true);
-    Alert.alert("New Service Ready link copied", result.url);
-  } catch (e) {
-    console.error("Service Ready link failed", e);
-    Alert.alert("Could not create Service Ready link", e?.message || "Please try again.");
+const handleViewSystemKeeprStory = useCallback(() => {
+  if (!systemId || !assetKac) {
+    Alert.alert("Public Story unavailable", "This system needs a connected asset KAC before Keepr can open its public story.");
+    return;
   }
-}, [assetId, systemId, system?.name]);
+
+  if (IS_WEB && typeof window !== "undefined" && publicSystemStoryUrl) {
+    window.open(publicSystemStoryUrl, "_blank", "noopener,noreferrer");
+    return;
+  }
+
+  navigation.navigate("PublicSystemStory", {
+    kac: assetKac,
+    nodeId: systemId,
+  });
+}, [assetKac, navigation, publicSystemStoryUrl, systemId]);
 
 const handleShareServiceReady = useCallback(async () => {
-  try {
-    const result = await createOrReuseServiceReadyLink({
-      supabase,
-      assetId,
-      systemId,
-      systemName: system?.name,
-      sessionUrl: serviceReadyUrl,
-    });
-
-    if (result?.url) {
-      setServiceReadyUrl(result.url);
-      Alert.alert("Service Ready link", "Use the current session link.", [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Copy Link",
-          onPress: async () => {
-            await Clipboard.setStringAsync(result.url);
-            Alert.alert("Service Ready link copied", result.url);
-          },
-        },
-        { text: "Show QR", onPress: () => setServiceReadyQrVisible(true) },
-      ]);
-      return;
-    }
-
-    Alert.alert(
-      "Service Ready is active",
-      result?.activeLinkCount > 1
-        ? "Multiple active Service Ready links exist for this system. Keepr cannot recover their original URLs from stored token hashes, but you can generate a fresh QR and link without changing the existing ones."
-        : "An active Service Ready projection already exists. Keepr cannot recover its original URL from the stored token hash, but you can generate a fresh QR and link without changing the existing one.",
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Generate New QR & Link", onPress: generateFreshServiceReadyLink },
-      ]
-    );
-  } catch (e) {
-    console.error("Service Ready link failed", e);
-    Alert.alert("Could not inspect Service Ready link", e?.message || "Please try again.");
+  if (!publicSystemStoryUrl) {
+    Alert.alert("Public Story unavailable", "This system needs a connected asset KAC before Keepr can create its public QR.");
+    return;
   }
-}, [assetId, generateFreshServiceReadyLink, serviceReadyUrl, system?.name, systemId]);
+  setServiceReadyUrl(publicSystemStoryUrl);
+  await Clipboard.setStringAsync(publicSystemStoryUrl);
+  setServiceReadyQrVisible(true);
+  Alert.alert("Public System Story link copied", publicSystemStoryUrl);
+}, [publicSystemStoryUrl]);
 
 const handleRequestServiceFromKeeprPro = useCallback(async (pro) => {
     const prefill = buildPrivateKeeprProActionPrefill({
@@ -854,6 +846,11 @@ const handleRequestServiceFromKeeprPro = useCallback(async (pro) => {
             <Ionicons name="create-outline" size={18} color={colors.textPrimary} style={{ marginRight: 6 }} />
             <Text style={styles.chipLabel}>Edit System Info</Text>
           </TouchableOpacity>
+
+          <TouchableOpacity style={styles.chip} onPress={handleViewSystemKeeprStory}>
+            <Ionicons name="globe-outline" size={14} color={colors.textSecondary} style={{ marginRight: 6 }} />
+            <Text style={styles.chipLabel}>View KeeprStory</Text>
+          </TouchableOpacity>
                     <TouchableOpacity style={styles.chip} onPress={handlePrint}>
                     <Ionicons name="print-outline" size={14} />
                     <Text style={styles.chipLabel}> Print report</Text>
@@ -866,7 +863,7 @@ const handleRequestServiceFromKeeprPro = useCallback(async (pro) => {
               color={colors.textSecondary}
               style={{ marginRight: 6 }}
             />
-            <Text style={styles.chipLabel}>Service Ready</Text>
+            <Text style={styles.chipLabel}>Share / QR</Text>
           </TouchableOpacity>
         </View>
 
@@ -1452,6 +1449,11 @@ const handleRequestServiceFromKeeprPro = useCallback(async (pro) => {
         visible={serviceReadyQrVisible}
         url={serviceReadyUrl}
         systemName={system?.name}
+        kicker="Public Story"
+        title={`${system?.name || "System"} Share / QR`}
+        note={`This QR opens the public system story for ${system?.name || "this system"}.`}
+        copiedAlertTitle="Public System Story link copied"
+        downloadNamePrefix="public-system-story"
         onClose={() => setServiceReadyQrVisible(false)}
       />
     </SafeAreaView>

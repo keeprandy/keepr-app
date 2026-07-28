@@ -14,8 +14,9 @@
     { "source": "/og/member-node-default.png", "destination": "/api/og/member-node-default" },
     { "source": "/og/invite/:slug.png", "destination": "/api/og/invite-card/:slug" },
     { "source": "/invite/:slug", "destination": "/api/og/invite/:slug" },
+    { "source": "/k/:kac/n/:nodeId", "destination": "/" },
     { "source": "/k/:kac/actions", "destination": "/" },
     { "source": "/k/:kac", "destination": "/api/og/k/:kac" },
-    { "source": "/((?!api/).*)", "destination": "/" }
+    { "source": "/((?!api/|_expo/|assets/).*)", "destination": "/" }
   ]
 }
