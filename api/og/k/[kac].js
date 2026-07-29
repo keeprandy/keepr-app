@@ -1,107 +1,23 @@
 // api/og/k/[kac].js
-import { createClient } from "@supabase/supabase-js";
-import fs from "fs";
-import path from "path";
-
-function esc(s) {
-  return String(s ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function getBaseUrl(req) {
-  const proto = req.headers["x-forwarded-proto"] || "https";
-  const host = req.headers["x-forwarded-host"] || req.headers.host;
-  return `${proto}://${host}`;
-}
-
-function pickFirst(...vals) {
-  for (const v of vals) {
-    if (typeof v === "string" && v.trim()) return v.trim();
-  }
-  return null;
-}
-
-function toPublicMediaOgUrl(baseUrl, row) {
-  const publicMediaId = row?.public_media_id || row?.placement_id || null;
-  const imageUrl = String(row?.image_url || "").trim();
-
-  if (publicMediaId) {
-    return `${baseUrl}/api/public-media/${encodeURIComponent(String(publicMediaId))}`;
-  }
-
-  if (imageUrl.startsWith("/api/public-media/")) {
-    return `${baseUrl}${imageUrl}`;
-  }
-
-  if (/^https?:\/\//i.test(imageUrl) && imageUrl.includes("/api/public-media/")) {
-    return imageUrl;
-  }
-
-  return null;
-}
-
-function buildHtml({ title, description, url, image }) {
-  const t = esc(title);
-  const d = esc(description);
-  const u = esc(url);
-  const i = esc(image);
-
-  const candidates = [
-    path.join(process.cwd(), "dist", "index.html"),
-    path.join(process.cwd(), "index.html"),
-  ];
-
-  const indexPath = candidates.find((p) => fs.existsSync(p));
-
-  if (!indexPath) {
-    return `<!doctype html><html><head>
-      <title>${t}</title>
-      <meta property="og:title" content="${t}" />
-      <meta property="og:description" content="${d}" />
-      <meta property="og:url" content="${u}" />
-      <meta property="og:image" content="${i}" />
-      <meta property="og:image:width" content="1200" />
-      <meta property="og:image:height" content="630" />
-      <meta name="twitter:card" content="summary_large_image" />
-      <meta name="twitter:title" content="${t}" />
-      <meta name="twitter:description" content="${d}" />
-      <meta name="twitter:image" content="${i}" />
-    </head><body><a href="${u}">Open in Keepr</a></body></html>`;
-  }
-
-  const appHtml = fs.readFileSync(indexPath, "utf8");
-
-  const tags = `
-    <title>${t}</title>
-    <meta name="description" content="${d}" />
-    <meta property="og:type" content="website" />
-    <meta property="og:title" content="${t}" />
-    <meta property="og:description" content="${d}" />
-    <meta property="og:url" content="${u}" />
-    <meta property="og:image" content="${i}" />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="${t}" />
-    <meta name="twitter:description" content="${d}" />
-    <meta name="twitter:image" content="${i}" />
-  `;
-
-  return appHtml.replace("</head>", `${tags}</head>`);
-}
+import {
+  buildOgHtml,
+  canonicalUrl,
+  getRequestBaseUrl,
+  getSupabaseClient,
+} from "../_shared.js";
 
 export default async function handler(req, res) {
   try {
-    const baseUrl = getBaseUrl(req);
+    const baseUrl = getRequestBaseUrl(req);
     const kac = req.query?.kac;
 
     // Always fall back to the human URL the user asked for:
-    const shareUrl = `${baseUrl}/k/${encodeURIComponent(kac || "")}`;
+    const sharePath = `/k/${encodeURIComponent(kac || "")}`;
+    const shareUrl = canonicalUrl(sharePath);
 
     // Default Keepr-branded OG card fallback
     // (You can point this to any stable image you host in the app repo /public or a CDN)
-    const fallbackOgImage = `${baseUrl}/og/keepr-og-default.png`;
+    const fallbackOgImage = `${baseUrl}/og/k/${encodeURIComponent(kac || "")}.png`;
 
     let title = "Keepr™";
     let description = "Owner-Curated Keepr Story.";
@@ -112,7 +28,7 @@ export default async function handler(req, res) {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.setHeader("Cache-Control", "public, max-age=60, s-maxage=300");
       return res.status(200).send(
-        buildHtml({
+        buildOgHtml({
           title,
           description,
           url: shareUrl,
@@ -121,20 +37,20 @@ export default async function handler(req, res) {
       );
     }
 
-const SUPABASE_URL =
-  process.env.SUPABASE_URL ||
-  process.env.EXPO_PUBLIC_SUPABASE_URL;
+    const SUPABASE_URL =
+      process.env.SUPABASE_URL ||
+      process.env.EXPO_PUBLIC_SUPABASE_URL;
+    const SUPABASE_ANON_KEY =
+      process.env.SUPABASE_ANON_KEY ||
+      process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+    const supabase = getSupabaseClient();
 
-const SUPABASE_ANON_KEY =
-  process.env.SUPABASE_ANON_KEY ||
-  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
-
-    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !supabase) {
       // Don’t fail hard; previews should still work with fallback metadata.
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.setHeader("Cache-Control", "public, max-age=60, s-maxage=300");
       return res.status(200).send(
-        buildHtml({
+        buildOgHtml({
           title,
           description,
           url: shareUrl,
@@ -142,10 +58,6 @@ const SUPABASE_ANON_KEY =
         })
       );
     }
-
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: { persistSession: false },
-    });
 
 const { data: summaryRow } = await supabase
   .from("public_asset_story_summary")
@@ -161,40 +73,14 @@ if (summaryRow) {
 
   title = assetName;
   description = "Owner-curated Keepr Story.";
-
-  try {
-    const mediaRes = await fetch(`${SUPABASE_URL}/functions/v1/public-story-media`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: SUPABASE_ANON_KEY,
-        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-      },
-      body: JSON.stringify({ kac }),
-    });
-
-    const mediaJson = await mediaRes.json();
-    const mediaRows = Array.isArray(mediaJson?.media) ? mediaJson.media : [];
-
-    const heroPlacement =
-      mediaRows.find(
-        (x) => String(x.public_media_id || x.placement_id) === String(summaryRow.hero_placement_id)
-      ) ||
-      mediaRows.find((x) => x.role === "hero") ||
-      mediaRows.find((x) => !!x.image_url) ||
-      null;
-
-    image = toPublicMediaOgUrl(baseUrl, heroPlacement) || fallbackOgImage;
-  } catch (_) {
-    image = fallbackOgImage;
-  }
+  image = `${baseUrl}/og/k/${encodeURIComponent(kac || "")}.png`;
 }
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     // Cache: ok to cache a little at the edge; keep it short while you iterate.
     res.setHeader("Cache-Control", "public, max-age=60, s-maxage=300");
 
     return res.status(200).send(
-      buildHtml({
+      buildOgHtml({
         title,
         description,
         url: shareUrl,
@@ -203,15 +89,14 @@ if (summaryRow) {
     );
   } catch (e) {
     // Last-resort fallback (never return a blank)
-    const baseUrl = getBaseUrl(req);
     const kac = req.query?.kac;
-    const shareUrl = `${baseUrl}/k/${encodeURIComponent(kac || "")}`;
-    const fallbackOgImage = `${baseUrl}/og/keepr-og-default.png`;
+    const shareUrl = canonicalUrl(`/k/${encodeURIComponent(kac || "")}`);
+    const fallbackOgImage = `${getRequestBaseUrl(req)}/og/k/${encodeURIComponent(kac || "")}.png`;
 
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=30, s-maxage=60");
     return res.status(200).send(
-      buildHtml({
+      buildOgHtml({
         title: "Keepr™",
         description: "Owner-Curated Keepr Story.",
         url: shareUrl,

@@ -1,63 +1,26 @@
 import { createClient } from "@supabase/supabase-js";
-import fs from "fs";
-import path from "path";
+import {
+  buildOgHtml,
+  canonicalUrl,
+  getRequestBaseUrl,
+  safeString,
+} from "../_shared.js";
 
-function esc(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function getBaseUrl(req) {
-  const proto = req.headers["x-forwarded-proto"] || "https";
-  const host = req.headers["x-forwarded-host"] || req.headers.host;
-  return `${proto}://${host}`;
-}
-
-function buildHtml({ title, description, url, image }) {
-  const t = esc(title);
-  const d = esc(description);
-  const u = esc(url);
-  const i = esc(image);
-  const candidates = [
-    path.join(process.cwd(), "dist", "index.html"),
-    path.join(process.cwd(), "index.html"),
-  ];
-  const indexPath = candidates.find((p) => fs.existsSync(p));
-  const tags = `
-    <title>${t}</title>
-    <meta name="description" content="${d}" />
-    <meta property="og:type" content="website" />
-    <meta property="og:title" content="${t}" />
-    <meta property="og:description" content="${d}" />
-    <meta property="og:url" content="${u}" />
-    <meta property="og:image" content="${i}" />
-    <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="630" />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="${t}" />
-    <meta name="twitter:description" content="${d}" />
-    <meta name="twitter:image" content="${i}" />
-  `;
-
-  if (!indexPath) {
-    return `<!doctype html><html><head>${tags}</head><body><a href="${u}">Open Keepr</a></body></html>`;
-  }
-
-  return fs.readFileSync(indexPath, "utf8").replace("</head>", `${tags}</head>`);
+function inviteTitle(displayName) {
+  const name = safeString(displayName);
+  return name ? `${name} invited you to become a Keepr` : "A Keepr member invited you";
 }
 
 export default async function handler(req, res) {
-  const baseUrl = getBaseUrl(req);
+  const baseUrl = getRequestBaseUrl(req);
   const rawSlug = req.query?.slug;
   const slug = Array.isArray(rawSlug) ? rawSlug[0] : rawSlug;
-  const shareUrl = `${baseUrl}/invite/${encodeURIComponent(slug || "")}`;
+  const invitePath = `/invite/${encodeURIComponent(slug || "")}`;
+  const shareUrl = canonicalUrl(invitePath);
   const memberCardImage = `${baseUrl}/og/invite/${encodeURIComponent(slug || "")}.png`;
 
   let title = "Join Keepr";
-  let description = "Start building the story of what you own.";
+  let description = "Organize, protect, and operate everything you own.";
   let image = memberCardImage;
 
   try {
@@ -76,20 +39,20 @@ export default async function handler(req, res) {
       });
       const row = Array.isArray(data) ? data[0] : data;
 
-      title = row?.title || title;
-      description = row?.description || description;
+      title = inviteTitle(row?.display_name) || row?.title || title;
+      description = "Organize, protect, and operate everything you own.";
       image = memberCardImage;
     }
   } catch (_) {
     title = "Join Keepr";
-    description = "Start building the story of what you own.";
+    description = "Organize, protect, and operate everything you own.";
     image = memberCardImage;
   }
 
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.setHeader("Cache-Control", "public, max-age=60, s-maxage=300");
   return res.status(200).send(
-    buildHtml({
+    buildOgHtml({
       title,
       description,
       url: shareUrl,

@@ -1,11 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import React from "react";
-
-function getBaseUrl(req) {
-  const proto = req.headers["x-forwarded-proto"] || "https";
-  const host = req.headers["x-forwarded-host"] || req.headers.host;
-  return `${proto}://${host}`;
-}
+import { getRequestBaseUrl, h, sendImageResponse } from "../_shared.js";
 
 function isUsableDisplayName(value) {
   const name = String(value || "").trim();
@@ -14,10 +8,6 @@ function isUsableDisplayName(value) {
 
 function isHttpUrl(value) {
   return /^https?:\/\//i.test(String(value || "").trim());
-}
-
-function h(type, props, ...children) {
-  return React.createElement(type, props, ...children);
 }
 
 async function canFetchImage(url) {
@@ -132,7 +122,7 @@ function buildCardElement({ displayName, imageUrl, isFallback }) {
                 fontWeight: 800,
               },
             },
-            "Keepr"
+                "Keepr Invitation"
           ),
           h(
             "div",
@@ -232,8 +222,7 @@ function buildCardElement({ displayName, imageUrl, isFallback }) {
 }
 
 export default async function handler(req, res) {
-  const { ImageResponse } = await import("@vercel/og");
-  const baseUrl = getBaseUrl(req);
+  const baseUrl = getRequestBaseUrl(req);
   const rawSlug = req.query?.slug;
   const slug = Array.isArray(rawSlug) ? rawSlug[0] : rawSlug;
   const fallbackImage = `${baseUrl}/og/member-node-default.png`;
@@ -266,17 +255,12 @@ export default async function handler(req, res) {
   const useProfileImage = await canFetchImage(candidateImage);
   const imageUrl = useProfileImage ? candidateImage.trim() : fallbackImage;
 
-  const imageResponse = new ImageResponse(
+  return sendImageResponse(
+    res,
     buildCardElement({
       displayName,
       imageUrl,
       isFallback: !useProfileImage,
-    }),
-    { width: 1200, height: 630 }
+    })
   );
-  const buffer = Buffer.from(await imageResponse.arrayBuffer());
-
-  res.setHeader("Content-Type", "image/png");
-  res.setHeader("Cache-Control", "public, max-age=60, s-maxage=300");
-  return res.status(200).send(buffer);
 }
