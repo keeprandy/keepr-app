@@ -36,6 +36,7 @@ import { useHome } from "../context/HomeContext";
 import { supabase } from "../lib/supabaseClient";
 import { buildServiceActionRouteParams } from "../lib/serviceActionPrefill";
 import { buildPrivateKeeprProActionPrefill } from "../lib/keeprProEngagement";
+import { buildMessagesNavigationParams } from "../lib/messagesService";
 
 import { useAttachments } from "../hooks/useAttachments";
 import { ATTACHMENT_BUCKET, getSignedUrl } from "../lib/attachmentsApi";
@@ -812,6 +813,33 @@ const setHeroAttachment = useCallback(
     Alert.alert("Public System Story link copied", publicSystemStoryUrl);
   }, [publicSystemStoryUrl]);
 
+  const handleOpenMessages = useCallback(() => {
+    if (!assetId || !systemId) {
+      Alert.alert("Messages unavailable", "Keepr needs the asset and system context before opening messages.");
+      return;
+    }
+    const pro = assignedPros?.[0] || null;
+    navigation.navigate("RootTabs", { screen: "Messages", params: buildMessagesNavigationParams({
+      scope: "system",
+      assetId,
+      assetName,
+      parentAssetKac: assetKac,
+      systemId,
+      systemName: system?.name || systemNameFromRoute || "System",
+      keeprProId: pro?.id || null,
+      keeprProName: pro?.name || pro?.label || null,
+      backRoute: "HomeSystemStory",
+      backParams: {
+        assetId,
+        homeId: assetId,
+        assetName,
+        systemId,
+        systemName: system?.name || systemNameFromRoute || null,
+        assetKac,
+      },
+    }) });
+  }, [assetId, assetKac, assetName, assignedPros, navigation, system?.name, systemId, systemNameFromRoute]);
+
   const handleRequestServiceFromKeeprPro = useCallback(
     async (pro) => {
       const prefill = buildPrivateKeeprProActionPrefill({
@@ -1069,6 +1097,19 @@ const warrantyStarts = warrantyMeta?.starts_on || warrantyMeta?.start_on || warr
               style={{ marginRight: 6 }}
             />
             <Text style={styles.chipLabel}>Share / QR</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.chip}
+            onPress={handleOpenMessages}
+          >
+            <Ionicons
+              name="chatbubbles-outline"
+              size={14}
+              color={colors.textSecondary}
+              style={{ marginRight: 6 }}
+            />
+            <Text style={styles.chipLabel}>Messages</Text>
           </TouchableOpacity>
         </View>
 

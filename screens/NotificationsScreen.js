@@ -35,6 +35,7 @@ import {
   getReminderResponsibilityLabel,
   getReminderVisibilityScope,
 } from "../lib/teamActions";
+import { buildMessagesNavigationParams } from "../lib/messagesService";
 
 
 /* --------------------------- helpers --------------------------- */
@@ -55,6 +56,8 @@ function resolveInboxAction(ev, attachments) {
 
   const source = String(ev?.source_type || "").toLowerCase();
   const origin = String(ev?.origin_type || "").toLowerCase();
+
+  if (ev?.asset_thread_id) return "conversation";
 
   const hasAttachment = safeAttachments.length > 0;
   const hasMoney = Number(ev?.cost || 0) > 0;
@@ -88,6 +91,14 @@ function resolveInboxAction(ev, attachments) {
 
 function getModalConfig(action) {
   switch (action) {
+    case "conversation":
+      return {
+        primaryLabel: "Open Message",
+        helperText:
+          "This notification links to the authoritative Keepr Messages conversation.",
+        tone: "brand",
+      };
+
     case "timeline":
       return {
         primaryLabel: "Add to Timeline",
@@ -1170,6 +1181,24 @@ const remindersByDate = useMemo(() => {
   const handlePrimaryModalAction = () => {
   if (!selectedEvent) return;
 
+  if (selectedAction === "conversation" && selectedEvent.asset_thread_id) {
+    closeModal();
+    navigation.navigate("RootTabs", { screen: "Messages", params: buildMessagesNavigationParams({
+      scope: selectedEvent.system_id ? "system" : "asset",
+      assetId: selectedEvent.asset_id || null,
+      parentAssetKac:
+        selectedEvent.context?.resource_ref?.parent_asset_kac ||
+        selectedEvent.context?.public_action?.kac ||
+        null,
+      systemId: selectedEvent.system_id || null,
+      assetName: selectedEvent.asset_id ? assetNameById[selectedEvent.asset_id] || null : null,
+      systemName: selectedEvent.system_id ? systemNameById[selectedEvent.system_id] || null : null,
+      threadId: selectedEvent.asset_thread_id,
+      backRoute: "Notifications",
+    }) });
+    return;
+  }
+
   if (selectedAction === "timeline") {
     submitEventToTimeline(selectedEvent);
     return;
@@ -1441,6 +1470,23 @@ return (
       style={[styles.card, isSelected && styles.cardSelected]}
       activeOpacity={0.9}
       onPress={() => {
+  if (ev.asset_thread_id) {
+    navigation.navigate("RootTabs", { screen: "Messages", params: buildMessagesNavigationParams({
+      scope: ev.system_id ? "system" : "asset",
+      assetId: ev.asset_id || null,
+      parentAssetKac:
+        ev.context?.resource_ref?.parent_asset_kac ||
+        ev.context?.public_action?.kac ||
+        null,
+      systemId: ev.system_id || null,
+      assetName: ev.asset_id ? assetNameById[ev.asset_id] || null : null,
+      systemName: ev.system_id ? systemNameById[ev.system_id] || null : null,
+      threadId: ev.asset_thread_id,
+      backRoute: "Notifications",
+    }) });
+    return;
+  }
+
   const prefill = buildTimelinePrefillFromEmailText({
     subject: ev.title,
     textBody: ev.context?.original_email?.raw_text || ev.notes || "",
@@ -2755,17 +2801,8 @@ Use this for your own forwarding or with trusted sources.
                       </View>
 
                       <View style={styles.senderRow}>
-                        <Text style={styles.senderLabel}>Email</Text>
-                        <Text style={styles.senderValue}>
-                          {selectedEventPublicSender?.email || "—"}
-                        </Text>
-                      </View>
-
-                      <View style={styles.senderRow}>
-                        <Text style={styles.senderLabel}>Phone</Text>
-                        <Text style={styles.senderValue}>
-                          {selectedEventPublicSender?.phone || "—"}
-                        </Text>
+                        <Text style={styles.senderLabel}>Type</Text>
+                        <Text style={styles.senderValue}>Public visitor</Text>
                       </View>
 
                       <View style={styles.senderRow}>
@@ -2779,22 +2816,33 @@ Use this for your own forwarding or with trusted sources.
                         </Text>
                       </View>
 
-                      {selectedEventPublicSender?.email ? (
+                      {selectedEvent?.asset_thread_id ? (
                         <TouchableOpacity
                           style={styles.replyLinkBtn}
                           activeOpacity={0.85}
-                          onPress={() =>
-                            Linking.openURL(`mailto:${selectedEventPublicSender.email}`).catch(() => {
-                              Alert.alert("Can’t open email", selectedEventPublicSender.email);
-                            })
-                          }
+                          onPress={() => {
+                            closeModal();
+                            navigation.navigate("RootTabs", { screen: "Messages", params: buildMessagesNavigationParams({
+                              scope: selectedEvent.system_id ? "system" : "asset",
+                              assetId: selectedEvent.asset_id || null,
+                              parentAssetKac:
+                                selectedEvent.context?.resource_ref?.parent_asset_kac ||
+                                selectedEvent.context?.public_action?.kac ||
+                                null,
+                              systemId: selectedEvent.system_id || null,
+                              assetName: selectedEvent.asset_id ? assetNameById[selectedEvent.asset_id] || null : null,
+                              systemName: selectedEvent.system_id ? systemNameById[selectedEvent.system_id] || null : null,
+                              threadId: selectedEvent.asset_thread_id,
+                              backRoute: "Notifications",
+                            }) });
+                          }}
                         >
                           <Ionicons
-                            name="mail-outline"
+                            name="chatbubbles-outline"
                             size={14}
                             color="rgb(45, 125, 227)"
                           />
-                          <Text style={styles.replyLinkText}>Reply by email</Text>
+                          <Text style={styles.replyLinkText}>Open in Messages</Text>
                         </TouchableOpacity>
                       ) : null}
                     </View>

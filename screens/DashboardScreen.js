@@ -1052,6 +1052,13 @@ if (Platform.OS !== "ios") {
                         }}
                       />
 
+                    <ModeWidget
+                      icon="chatbubbles-outline"
+                      title="Messages"
+                      subtitle="Review conversations across your assets and systems."
+                      onPress={() => navigation.navigate("RootTabs", { screen: "Messages", params: { scope: "global" } })}
+                    />
+
                     {shouldShowKeeprProgress ? (
                     <View style={{ marginTop: spacing.md, maxWidth: 640 }}>
                       <KeeprProgressCard
@@ -1130,6 +1137,13 @@ if (Platform.OS !== "ios") {
                       });
                       navigation.navigate("KeeprEffect");
                     }}
+                  />
+
+                  <ModeWidget
+                    icon="chatbubbles-outline"
+                    title="Messages"
+                    subtitle="Review conversations across your assets and systems."
+                    onPress={() => navigation.navigate("RootTabs", { screen: "Messages", params: { scope: "global" } })}
                   />
 
                   {/* System modes (subtle) */}

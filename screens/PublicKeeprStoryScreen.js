@@ -29,6 +29,7 @@ import ShowcaseAttachmentsSection from "../components/showcase/ShowcaseAttachmen
 
 import { supabase } from "../lib/supabaseClient";
 import { formatKeeprDate } from "../lib/dateFormat";
+import { buildMessagesNavigationParams } from "../lib/messagesService";
 const keeprEnabledMark = require("../assets/public/keepr-enabled-mark-180.png");
 const keeprEnabledWatermark = require("../assets/public/keepr-enabled-mark-120.png");
 const keeprLogo = require("../assets/app_logo_icon.png");
@@ -1161,15 +1162,24 @@ return (
                 ownerId: asset?.ownerId,
                 originHubId,
               });
-              navigation.navigate("KeeprAction", {
+              navigation.navigate("RootTabs", { screen: "Messages", params: buildMessagesNavigationParams({
+                scope: "asset",
                 assetId: asset?.asset_id || asset?.id,
-                kac: asset?.kac_id || kac,
+                parentAssetKac: asset?.kac_id || kac,
                 assetName: asset?.name,
                 assetOwnerId: asset?.owner_id || asset?.ownerId || null,
                 hubId: originHubId,
                 hubName: originHubName,
                 mode: "internal",
-              });
+                backRoute: "KeeprStoryInternal",
+                backParams: {
+                  assetId: asset?.asset_id || asset?.id,
+                  kac: asset?.kac_id || kac,
+                  mode: "internal",
+                  hubId: originHubId,
+                  hubName: originHubName,
+                },
+              }) });
                 return;
               }
 

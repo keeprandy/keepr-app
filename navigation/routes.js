@@ -11,6 +11,7 @@ export const ROUTES = {
   GARAGE: "Garage",        // Garage tab
   BOATS: "Boats",          // Boats tab
   KEEPR_PROS: "KeeprPros",
+  MESSAGES: "Messages",
   SETTINGS: "Settings",
 
   /* =========================

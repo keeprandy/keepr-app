@@ -289,6 +289,7 @@ const linking = {
             InboxHome: "",
           },
         },
+        Messages: "messages",
         KeeprPros: "pros",
         Settings: "settings",
       },
@@ -604,6 +605,13 @@ React.useEffect(() => {
       name="Notifications"
       component={NotificationsStack}
       options={{ title: "Inbox" }}
+    />
+
+    <Tab.Screen
+      name="Messages"
+      component={KeeprActionScreen}
+      initialParams={{ scope: "global" }}
+      options={{ title: "Messages" }}
     />
 
     <Tab.Screen
@@ -2205,6 +2213,7 @@ const initialRouteName = isResetLink
           !window.location.pathname.startsWith("/story/") &&
           !window.location.pathname.startsWith("/invite/") &&
           !window.location.pathname.startsWith("/inbox") &&
+          !window.location.pathname.startsWith("/messages") &&
           !window.location.pathname.startsWith("/CreateReminder") &&
           !window.location.pathname.startsWith("/Notifications") &&
           !window.location.pathname.startsWith("/resolve/")

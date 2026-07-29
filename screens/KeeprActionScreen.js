@@ -1,882 +1,643 @@
-import React from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
-  ScrollView,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { colors, spacing, radius } from "../styles/theme";
-import { supabase } from "../lib/supabaseClient";
 
-export default function KeeprActionScreen({ route, navigation }) {
-    const {
-      assetId,
-      kac,
-      assetName,
-      assetOwnerId: routeAssetOwnerId,
-      hubId,
-      hubName,
-    } = route?.params || {};
+import { colors, radius, shadows, spacing } from "../styles/theme";
+import {
+  MESSAGE_SCOPES,
+  buildMessageResourceRef,
+  createMemberThread,
+  formatMessageTime,
+  getMessageSenderLabel,
+  groupThreadsByAsset,
+  loadAuthorizedAssets,
+  loadEligibleRecipientsForAsset,
+  loadMessageWorkspace,
+  loadSystemsForAsset,
+  normalizeMessageScope,
+  sendThreadReply,
+} from "../lib/messagesService";
 
-    const [message, setMessage] = React.useState("");
-    const [threads, setThreads] = React.useState([]);
-    const [replyByThreadId, setReplyByThreadId] = React.useState({});
-    const [loadingContext, setLoadingContext] = React.useState(true);
-    const [currentUserId, setCurrentUserId] = React.useState(null);
-   const [assetOwnerId, setAssetOwnerId] = React.useState(routeAssetOwnerId || null);
-    const [resolvedAssetId, setResolvedAssetId] = React.useState(assetId || null);
-    const [resolvedAssetName, setResolvedAssetName] = React.useState(assetName || null);
-    const [isOwner, setIsOwner] = React.useState(false);
-    const [profilesById, setProfilesById] = React.useState({});
-    const [collapsedThreadIds, setCollapsedThreadIds] = React.useState({});
-
-React.useEffect(() => {
-  let active = true;
-
-  const loadContext = async () => {
-    try {
-      setLoadingContext(true);
-
-      const { data: authData } = await supabase.auth.getUser();
-      const uid = authData?.user?.id || null;
-
-      let query = supabase
-        .from("assets")
-        .select("id, owner_id, name, kac_id");
-
-      if (assetId) {
-        query = query.eq("id", assetId);
-      } else if (kac) {
-        query = query.eq("kac_id", kac);
-      } else {
-        throw new Error("Missing asset context.");
-      }
-
-      const { data: assetRow, error } = await query.maybeSingle();
-
-      console.log("ASSET ROW", assetRow);
-      console.log("OWNER", assetRow?.owner_id);
-      console.log("ERROR", error);
-
-      if (error) throw error;
-
-      if (!active) return;
-
-      setCurrentUserId(uid);
-      setResolvedAssetId(assetRow?.id || assetId || null);
-      setResolvedAssetName(assetRow?.name || assetName || null);
-      setAssetOwnerId(assetRow?.owner_id || routeAssetOwnerId || null);
-      const effectiveOwnerId = assetRow?.owner_id || routeAssetOwnerId || null;
-
-      setIsOwner(
-        !!uid &&
-          !!effectiveOwnerId &&
-          String(uid) === String(effectiveOwnerId)
-      );
-    } catch (e) {
-      console.log("KeeprAction context load failed:", e?.message || e);
-    } finally {
-      if (active) setLoadingContext(false);
-    }
-  };
-
-  loadContext();
-
-  return () => {
-    active = false;
-  };
-}, [assetId, kac, assetName]);
-
-  
-const handleSendQuestion = async () => {
-  console.log("SEND QUESTION BUTTON FIRED", {
-    message,
-    assetId,
-    resolvedAssetId,
-    kac,
-    currentUserId,
-    assetOwnerId,
-    isOwner,
-    hubId,
-  });
-
-  const cleanMessage = String(message || "").trim();
-
-  if (!cleanMessage) {
-    console.log("SEND QUESTION BLOCKED: empty message");
-    Alert.alert("Add a message", "Type your question first.");
-    return;
-  }
-
-  if (!currentUserId) {
-    console.log("SEND QUESTION BLOCKED: no current user");
-    Alert.alert("Not ready", "You need to be signed in.");
-    return;
-  }
-
-    const effectiveOwnerId = assetOwnerId || routeAssetOwnerId || null;
-
-    if (!effectiveOwnerId) {
-      console.log("SEND QUESTION BLOCKED: no asset owner", {
-        assetOwnerId,
-        routeAssetOwnerId,
-      });
-      Alert.alert("Not ready", "We could not resolve the owner for this asset.");
-      return;
-    }
-
-  const threadAssetId = resolvedAssetId || assetId;
-
-  if (!threadAssetId) {
-    console.log("SEND QUESTION BLOCKED: no resolved asset id");
-    Alert.alert("Not ready", "We could not resolve this asset.");
-    return;
-  }
-
-  try {
-    console.log("CREATING THREAD", {
-      threadAssetId,
-      hubId,
-      assetOwnerId,
-      currentUserId,
-      subject: resolvedAssetName || assetName || "Asset question",
-    });
-
-    const { data: thread, error: threadError } = await supabase
-      .from("asset_threads")
-      .insert({
-        asset_id: threadAssetId,
-        hub_id: hubId || null,
-        owner_id: effectiveOwnerId,
-        created_by: currentUserId,
-        subject: resolvedAssetName || assetName || "Asset question",
-        status: "open",
-      })
-      .select("id")
-      .single();
-
-    console.log("THREAD INSERT RESULT", { thread, threadError });
-
-    if (threadError) throw threadError;
-    if (!thread?.id) throw new Error("Thread was not created.");
-
-    const { error: msgError } = await supabase
-      .from("asset_thread_messages")
-      .insert({
-        thread_id: thread.id,
-        from_user_id: currentUserId,
-        body: cleanMessage,
-      });
-
-    console.log("MESSAGE INSERT RESULT", { msgError });
-
-    if (msgError) throw msgError;
-
-    setMessage("");
-    await loadThreads();
-  } catch (e) {
-    console.log("SEND QUESTION ERROR", e);
-    Alert.alert("Could not send", e?.message || "Try again.");
-  }
-};
-
-    const handleSendReply = async (threadId) => {
-  const body = String(replyByThreadId[threadId] || "").trim();
-
-  if (!body) {
-    Alert.alert("Add a reply", "Type your reply first.");
-    return;
-  }
-
-  if (!currentUserId) {
-    Alert.alert("Not ready", "You need to be signed in.");
-    return;
-  }
-
-  if (!resolvedAssetId) {
-  Alert.alert("Not ready", "We could not resolve this asset.");
-  return;
+function contextLabel(thread) {
+  const systemName = thread?.system?.name || null;
+  const assetName = thread?.asset?.name || "Unknown asset";
+  const proName = thread?.keeprPro?.name || null;
+  if (systemName && proName) return `${systemName} · ${proName}`;
+  if (systemName) return systemName;
+  if (proName) return `General · ${proName}`;
+  return thread?.subject || `General · ${assetName}`;
 }
 
-  try {
-    const { error } = await supabase
-      .from("asset_thread_messages")
-      .insert({
-        thread_id: threadId,
-        from_user_id: currentUserId,
-        body,
+function sourceLabel(thread) {
+  if (thread?.source_type === "public_system_story") return "Public System Story";
+  if (thread?.source_type === "public_asset_story") return "Public Asset Story";
+  if (thread?.hub_id) return "KeeprHub";
+  return "Member";
+}
+
+function statusStyle(label) {
+  if (label === "New inbound") return styles.statusNew;
+  if (label === "Resolved") return styles.statusResolved;
+  return styles.statusOpen;
+}
+
+export default function KeeprActionScreen({ route, navigation }) {
+  const params = route?.params || {};
+  const requestedScope = params.scope || normalizeMessageScope(params);
+  const assetId = params.assetId || params.asset_id || null;
+  const systemId = params.systemId || params.system_id || null;
+  const kac = params.kac || null;
+  const initialThreadId = params.threadId || params.assetThreadId || params.asset_thread_id || null;
+  const { width } = useWindowDimensions();
+  const compact = width < 900;
+
+  const [loading, setLoading] = useState(true);
+  const [workspace, setWorkspace] = useState({
+    currentUserId: null,
+    asset: null,
+    system: null,
+    profilesById: {},
+    threads: [],
+  });
+  const [selectedThreadId, setSelectedThreadId] = useState(null);
+  const [replyByThreadId, setReplyByThreadId] = useState({});
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [assets, setAssets] = useState([]);
+  const [systems, setSystems] = useState([]);
+  const [recipients, setRecipients] = useState([]);
+  const [draft, setDraft] = useState({
+    assetId: assetId || "",
+    systemId: systemId || "",
+    recipientId: "",
+    subject: "",
+    body: "",
+  });
+
+  const scope = requestedScope || MESSAGE_SCOPES.GLOBAL;
+  const isGlobal = scope === MESSAGE_SCOPES.GLOBAL && !assetId && !systemId;
+  const isSystem = !!assetId && !!systemId;
+  const title = isGlobal ? "All Messages" : isSystem ? `${params.systemName || workspace.system?.name || "System"} Messages` : `${params.assetName || workspace.asset?.name || "Asset"} Messages`;
+  const emptyText = isGlobal
+    ? "No conversations yet."
+    : isSystem
+      ? "No conversations about this system yet."
+      : "No conversations about this asset yet.";
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const next = await loadMessageWorkspace({
+        scope,
+        assetId,
+        kac,
+        systemId,
+      });
+      setWorkspace(next);
+      setSelectedThreadId((prev) => {
+        if (initialThreadId && next.threads?.some((t) => t.id === initialThreadId)) {
+          return initialThreadId;
+        }
+        if (prev && next.threads?.some((t) => t.id === prev)) return prev;
+        return next.threads?.[0]?.id || null;
       });
 
-    if (error) throw error;
+      const visibleAssets = await loadAuthorizedAssets();
+      setAssets(visibleAssets);
 
-    await supabase
-      .from("asset_threads")
-      .update({ updated_at: new Date().toISOString() })
-      .eq("id", threadId);
-
-    setReplyByThreadId((prev) => ({
-      ...prev,
-      [threadId]: "",
-    }));
-
-    await loadThreads();
-  } catch (e) {
-    Alert.alert("Could not reply", e?.message || "Try again.");
-  }
-};
-
-const loadThreads = React.useCallback(async () => {
-  const threadAssetId = resolvedAssetId || assetId;
-  if (!threadAssetId) return;
-
-  const { data: authData } = await supabase.auth.getUser();
-  const uid = authData?.user?.id || null;
-
-  const { data: assetRow, error: assetError } = await supabase
-    .from("assets")
-    .select("id, owner_id, name")
-    .eq("id", threadAssetId)
-    .maybeSingle();
-
-  if (assetError) throw assetError;
-
-  const ownerId = assetRow?.owner_id || routeAssetOwnerId || null;
-
-  setCurrentUserId(uid);
-  setAssetOwnerId(ownerId);
-  setResolvedAssetName(assetRow?.name || assetName || null);
-  setIsOwner(!!uid && !!ownerId && String(uid) === String(ownerId));
-
-  const { data: threadRows, error: threadError } = await supabase
-    .from("asset_threads")
-    .select(`
-      id,
-      asset_id,
-      hub_id,
-      owner_id,
-      created_by,
-      subject,
-      status,
-      created_at,
-      updated_at,
-      asset_thread_messages (
-        id,
-        from_user_id,
-        body,
-        created_at
-      )
-    `)
-    .eq("asset_id", threadAssetId)
-    .order("updated_at", { ascending: false });
-
-  if (threadError) throw threadError;
-
-  const rows = threadRows || [];
-
-  const userIds = Array.from(
-    new Set(
-      rows
-        .flatMap((t) => [
-          t.owner_id,
-          t.created_by,
-          ...(t.asset_thread_messages || []).map((m) => m.from_user_id),
-        ])
-        .filter(Boolean)
-    )
-  );
-
-  if (userIds.length) {
-    const result = await supabase
-      .from("profiles")
-      .select("id, display_name, full_name, email")
-      .in("id", userIds);
-
-    console.log("PROFILE QUERY", {
-      userIds,
-      data: result.data,
-      error: result.error,
-    });
-
-    if (!result.error) {
-      const map = {};
-      (result.data || []).forEach((p) => {
-        map[p.id] = p;
-      });
-
-      console.log("PROFILE MAP", map);
-      setProfilesById(map);
+      const effectiveAssetId = assetId || draft.assetId || next.asset?.id || "";
+      if (effectiveAssetId) {
+        const [systemRows, recipientRows] = await Promise.all([
+          loadSystemsForAsset(effectiveAssetId),
+          loadEligibleRecipientsForAsset(effectiveAssetId, next.currentUserId),
+        ]);
+        setSystems(systemRows);
+        setRecipients(recipientRows);
+      } else {
+        setSystems([]);
+        setRecipients([]);
+      }
+    } catch (e) {
+      Alert.alert("Messages unavailable", e?.message || "Could not load messages.");
+    } finally {
+      setLoading(false);
     }
-  }
+  }, [assetId, draft.assetId, initialThreadId, kac, scope, systemId]);
 
-  setThreads(rows);
-}, [resolvedAssetId, assetId, assetName, routeAssetOwnerId]);
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
+  useEffect(() => {
+    setDraft((prev) => ({
+      ...prev,
+      assetId: assetId || prev.assetId || "",
+      systemId: systemId || prev.systemId || "",
+      subject:
+        prev.subject ||
+        params.systemName ||
+        params.assetName ||
+        workspace.system?.name ||
+        workspace.asset?.name ||
+        "",
+    }));
+  }, [assetId, params.assetName, params.systemName, systemId, workspace.asset?.name, workspace.system?.name]);
 
-React.useEffect(() => {
-  loadThreads().catch((e) => {
-    console.log("Load asset threads failed:", e?.message || e);
-  });
-}, [loadThreads]);
+  const groups = useMemo(() => groupThreadsByAsset(workspace.threads), [workspace.threads]);
+  const selectedThread = useMemo(
+    () => workspace.threads.find((t) => t.id === selectedThreadId) || workspace.threads[0] || null,
+    [selectedThreadId, workspace.threads]
+  );
+  const canStart = !!workspace.currentUserId && (!!assetId || !!draft.assetId) && recipients.length > 0;
 
-React.useEffect(() => {
-  const threadAssetId = resolvedAssetId || assetId;
-  if (!threadAssetId) return;
-
-  const channel = supabase
-    .channel(`asset-thread-messages-${threadAssetId}`)
-    .on(
-      "postgres_changes",
-      {
-        event: "*",
-        schema: "public",
-        table: "asset_thread_messages",
-      },
-      () => {
-        loadThreads();
-      }
-    )
-    .on(
-      "postgres_changes",
-      {
-        event: "*",
-        schema: "public",
-        table: "asset_threads",
-        filter: `asset_id=eq.${threadAssetId}`,
-      },
-      () => {
-        loadThreads();
-      }
-    )
-    .subscribe();
-
-  return () => {
-    supabase.removeChannel(channel);
+  const handleAssetChoice = async (nextAssetId) => {
+    setDraft((prev) => ({ ...prev, assetId: nextAssetId, systemId: "", recipientId: "" }));
+    const [systemRows, recipientRows] = await Promise.all([
+      loadSystemsForAsset(nextAssetId),
+      loadEligibleRecipientsForAsset(nextAssetId, workspace.currentUserId),
+    ]);
+    setSystems(systemRows);
+    setRecipients(recipientRows);
   };
-}, [resolvedAssetId, assetId, loadThreads]);
 
-    const formatNameFromEmail = (email) => {
-    if (!email) return "Keepr Member";
-    return email.split("@")[0];
-    };
+  const handleCreateThread = async () => {
+    try {
+      const chosenAssetId = assetId || draft.assetId;
+      const chosenAsset = assets.find((a) => a.id === chosenAssetId) || workspace.asset || null;
+      const chosenSystemId = systemId || draft.systemId || null;
+      const chosenSystem = systems.find((s) => s.id === chosenSystemId) || workspace.system || null;
+      const subject = draft.subject || chosenSystem?.name || chosenAsset?.name || "Keepr conversation";
+      await createMemberThread({
+        assetId: chosenAssetId,
+        systemId: chosenSystemId,
+        keeprProId: params.keeprProId || null,
+        ownerId: chosenAsset?.owner_id || workspace.asset?.owner_id,
+        recipientId: draft.recipientId,
+        subject,
+        body: draft.body,
+        resourceRef: params.canonicalResource || buildMessageResourceRef({
+          parentAssetKac: params.kac || chosenAsset?.kac_id || workspace.asset?.kac_id || null,
+          assetId: chosenAssetId,
+          systemId: chosenSystemId,
+        }),
+      });
+      setDraft((prev) => ({ ...prev, body: "", subject: "" }));
+      setComposerOpen(false);
+      await refresh();
+    } catch (e) {
+      Alert.alert("Could not start conversation", e?.message || "Try again.");
+    }
+  };
 
-    const formatMessageTime = (iso) => {
-  if (!iso) return "";
-  return new Date(iso).toLocaleString([], {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-};
+  const handleReply = async (threadId) => {
+    try {
+      await sendThreadReply(threadId, replyByThreadId[threadId]);
+      setReplyByThreadId((prev) => ({ ...prev, [threadId]: "" }));
+      await refresh();
+    } catch (e) {
+      Alert.alert("Could not reply", e?.message || "Try again.");
+    }
+  };
+
+  const goBack = () => {
+    if (params.backRoute) {
+      navigation.navigate(params.backRoute, params.backParams || {});
+      return;
+    }
+    if (navigation.canGoBack?.()) {
+      navigation.goBack();
+      return;
+    }
+    navigation.navigate("RootTabs", { screen: "Dashboard" });
+  };
 
   return (
     <SafeAreaView style={styles.safe} edges={["top", "left", "right", "bottom"]}>
-      <ScrollView contentContainerStyle={styles.shell}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() =>
-            navigation.navigate("KeeprStoryInternal", {
-              assetId,
-              kac,
-              hubId,
-              hubName,
-              mode: "internal",
-            })
-          }
-        >
-          <Ionicons name="chevron-back-outline" size={18} color={colors.textPrimary} />
-          <Text style={styles.backText}>Back to {assetName || "Story"}</Text>
-        </TouchableOpacity>
-
+      <View style={styles.shell}>
         <View style={styles.header}>
-          <Text style={styles.kicker}>MESSAGES</Text>
-          <Text style={styles.title}>{assetName || "Asset Actions"}</Text>
-          <Text style={styles.subtitle}>
-            Ask the owner a question or start a lightweight Keepr conversation around this asset.
-          </Text>
+          <TouchableOpacity style={styles.backButton} onPress={goBack}>
+            <Ionicons name="chevron-back-outline" size={18} color={colors.textPrimary} />
+            <Text style={styles.backText}>Back</Text>
+          </TouchableOpacity>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.kicker}>MESSAGES</Text>
+            <Text style={styles.title}>{title}</Text>
+            <Text style={styles.subtitle}>
+              Conversations stay attached to the asset and system context that created them.
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={[styles.newButton, !canStart && styles.newButtonQuiet]}
+            onPress={() => setComposerOpen((prev) => !prev)}
+            disabled={!canStart}
+          >
+            <Ionicons name="create-outline" size={16} color={canStart ? "white" : colors.textMuted} />
+            <Text style={[styles.newButtonText, !canStart && styles.newButtonTextQuiet]}>New conversation</Text>
+          </TouchableOpacity>
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>
-            {isOwner ? "Owner Actions" : "Ask Owner"}
+        {params.keeprProName ? (
+          <View style={styles.truthCard}>
+            <Ionicons name="information-circle-outline" size={18} color={colors.primary} />
+            <Text style={styles.truthText}>
+              {params.keeprProName} is connected to this system but is not yet participating in Keepr Messages.
             </Text>
+          </View>
+        ) : null}
 
-            <Text style={styles.cardHint}>
-            {isOwner
-                ? "You own this asset. Manage incoming questions, public actions, and story settings here."
-                : "Use this for quick member-to-member questions about this asset."}
-            </Text>
+        {composerOpen ? (
+          <View style={styles.composerCard}>
+            <Text style={styles.cardTitle}>Start a conversation</Text>
+            {isGlobal ? (
+              <>
+                <Text style={styles.label}>Asset</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.choiceRow}>
+                  {assets.map((asset) => (
+                    <TouchableOpacity
+                      key={asset.id}
+                      style={[styles.choicePill, draft.assetId === asset.id && styles.choicePillActive]}
+                      onPress={() => handleAssetChoice(asset.id)}
+                    >
+                      <Text style={[styles.choiceText, draft.assetId === asset.id && styles.choiceTextActive]}>{asset.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </>
+            ) : null}
 
-            {!isOwner ? (
-            <>
-                <TextInput
-                value={message}
-                onChangeText={setMessage}
-                placeholder="Example: Which IMS bearing kit did you use?"
-                placeholderTextColor={colors.textMuted}
-                multiline
-                textAlignVertical="top"
-                style={styles.textArea}
-                />
-
-               <TouchableOpacity
-  style={styles.primaryButton}
-  onPress={() => {
-    console.log("SEND QUESTION TOUCHABLE PRESSED");
-    handleSendQuestion();
-  }}
->
-                <Text style={styles.primaryButtonText}>Send Question</Text>
+            <Text style={styles.label}>System context</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.choiceRow}>
+              <TouchableOpacity
+                style={[styles.choicePill, !draft.systemId && !systemId && styles.choicePillActive]}
+                onPress={() => setDraft((prev) => ({ ...prev, systemId: "" }))}
+              >
+                <Text style={[styles.choiceText, !draft.systemId && !systemId && styles.choiceTextActive]}>General</Text>
+              </TouchableOpacity>
+              {systems.map((system) => (
+                <TouchableOpacity
+                  key={system.id}
+                  style={[styles.choicePill, (draft.systemId || systemId) === system.id && styles.choicePillActive]}
+                  onPress={() => setDraft((prev) => ({ ...prev, systemId: system.id, subject: system.name }))}
+                  disabled={!!systemId}
+                >
+                  <Text style={[styles.choiceText, (draft.systemId || systemId) === system.id && styles.choiceTextActive]}>{system.name}</Text>
                 </TouchableOpacity>
-            </>
+              ))}
+            </ScrollView>
+
+            <Text style={styles.label}>Eligible participant</Text>
+            {recipients.length ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.choiceRow}>
+                {recipients.map((recipient) => (
+                  <TouchableOpacity
+                    key={recipient.id}
+                    style={[styles.choicePill, draft.recipientId === recipient.id && styles.choicePillActive]}
+                    onPress={() => setDraft((prev) => ({ ...prev, recipientId: recipient.id }))}
+                  >
+                    <Text style={[styles.choiceText, draft.recipientId === recipient.id && styles.choiceTextActive]}>{recipient.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
             ) : (
-            <View style={styles.ownerActionList}>
-                <TouchableOpacity style={styles.ownerActionRow}>
-                <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.textPrimary} />
-                <Text style={styles.ownerActionText}>View Incoming Messages</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.ownerActionRow}>
-                <Ionicons name="settings-outline" size={18} color={colors.textPrimary} />
-                <Text style={styles.ownerActionText}>Configure Public Actions</Text>
-                </TouchableOpacity>
-            </View>
+              <Text style={styles.emptySmall}>No eligible authenticated participant is available for this context yet.</Text>
             )}
 
-            <View style={styles.card}>
-            <Text style={styles.cardTitle}>
-                {isOwner ? "Incoming Messages" : "Private Messages about this asset"}
-            </Text>
+            <TextInput
+              value={draft.subject}
+              onChangeText={(subject) => setDraft((prev) => ({ ...prev, subject }))}
+              placeholder="Subject"
+              placeholderTextColor={colors.textMuted}
+              style={styles.input}
+            />
+            <TextInput
+              value={draft.body}
+              onChangeText={(body) => setDraft((prev) => ({ ...prev, body }))}
+              placeholder="Write the first message..."
+              placeholderTextColor={colors.textMuted}
+              multiline
+              textAlignVertical="top"
+              style={[styles.input, styles.textArea]}
+            />
+            <TouchableOpacity style={styles.primaryButton} onPress={handleCreateThread}>
+              <Text style={styles.primaryButtonText}>Send first message</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
 
-            <Text style={styles.cardHint}>
-                {threads.length
-                ? "Questions and replies stay connected to this asset. Only you and the asset owner can see this thread."
-                : isOwner
-                ? "No incoming messages yet."
-                : "No messages yet. Ask the owner a question to start one."}
-            </Text>
-
-            {threads.map((thread) => {
-            const messages = thread.asset_thread_messages || [];
-
-            const participantMessage = messages.find(
-            (m) => String(m.from_user_id) !== String(currentUserId)
-            );
-
-            const participantId = isOwner
-            ? participantMessage?.from_user_id || thread.created_by
-            : thread.owner_id;
-
-            const participantProfile = profilesById[participantId] || {};
-
-            const otherEmail = participantProfile.email || "";
-            
-            const otherName =
-            participantProfile.full_name ||
-            participantProfile.display_name ||
-            participantProfile.email ||
-            formatNameFromEmail(otherEmail);
-
-
-            const collapsed = !!collapsedThreadIds[thread.id];
-            const lastMessage = messages[messages.length - 1];
-            const lastProfile = lastMessage ? profilesById[lastMessage.from_user_id] || {} : {};
-            const lastSenderName =
-            lastProfile.full_name ||
-            lastProfile.display_name ||
-            formatNameFromEmail(lastProfile.email);
-
-            const lastPreview = lastMessage?.body || "No messages yet";
-            const lastTime = lastMessage?.created_at ? formatMessageTime(lastMessage.created_at) : "";
-
-            return (
-                <View key={thread.id} style={styles.threadCard}>
-                <TouchableOpacity
-                    style={styles.threadHeader}
-                    onPress={() =>
-                    setCollapsedThreadIds((prev) => ({
-                        ...prev,
-                        [thread.id]: !prev[thread.id],
-                    }))
-                    }
-                >
-                    <View style={styles.avatarCircle}>
-                    <Text style={styles.avatarText}>
-                        {otherName.slice(0, 2).toUpperCase()}
-                    </Text>
-                    </View>
-
-                    <View style={{ flex: 1 }}>
-                    <Text style={styles.threadSubject}>
-                    {otherName}
-                    {otherEmail ? ` • ${otherEmail}` : ""}
-                    </Text>
-
-                    <Text style={styles.threadParticipant}>
-                    {thread.subject || assetName}
-                    </Text>
-
-                    <Text style={styles.threadPreview} numberOfLines={1}>
-                    Last: {lastSenderName}: “{lastPreview}”
-                    </Text>
-
-                    {!!lastTime && (
-                    <Text style={styles.threadTime}>{lastTime}</Text>
-                    )}
-                    {!!otherEmail && (
-                        <Text style={styles.threadEmail}>{otherEmail}</Text>
-                    )}
-                    </View>
-
-                    <Ionicons
-                    name={collapsed ? "chevron-down-outline" : "chevron-up-outline"}
-                    size={18}
-                    color={colors.textMuted}
-                    />
-                </TouchableOpacity>
-
-                {!collapsed && (
-                    <>
-                    {(thread.asset_thread_messages || []).map((m) => {
-                        const mine = String(m.from_user_id) === String(currentUserId);
-                        const profile = profilesById[m.from_user_id] || {};
-
-                        const displayName =
-                        profile.full_name ||
-                        profile.display_name ||
-                        formatNameFromEmail(profile.email);
-
-                        const roleLabel =
-                        String(m.from_user_id) === String(assetOwnerId)
-                            ? "Owner"
-                            : "Member";
-
-                        return (
-                        <View
-                            key={m.id}
-                            style={[
-                            styles.messageBubble,
-                            mine ? styles.messageBubbleMine : styles.messageBubbleOther,
-                            ]}
-                        >
-                            <Text style={[styles.messageMeta, mine && styles.messageMetaMine]}>
-                            {mine ? "You" : displayName} · {roleLabel}
-                            {profile.email ? ` • ${profile.email}` : ""}
-                            {m.created_at ? ` • ${formatMessageTime(m.created_at)}` : ""}
-                            </Text>
-
-
-
-                            <Text style={[styles.messageBody, mine && styles.messageBodyMine]}>
-                            {m.body}
-                            </Text>
-                        </View>
-                        );
-                    })}
-
-                    <TextInput
-                        value={replyByThreadId[thread.id] || ""}
-                        onChangeText={(txt) =>
-                        setReplyByThreadId((prev) => ({
-                            ...prev,
-                            [thread.id]: txt,
-                        }))
-                        }
-                        placeholder="Write a reply..."
-                        placeholderTextColor={colors.textMuted}
-                        multiline
-                        textAlignVertical="top"
-                        style={styles.replyBox}
-                    />
-
+        {loading ? (
+          <View style={styles.loadingCard}>
+            <ActivityIndicator />
+            <Text style={styles.emptySmall}>Loading messages...</Text>
+          </View>
+        ) : workspace.threads.length === 0 ? (
+          <View style={styles.loadingCard}>
+            <Ionicons name="chatbubble-ellipses-outline" size={28} color={colors.textMuted} />
+            <Text style={styles.emptyTitle}>{emptyText}</Text>
+            {canStart ? <Text style={styles.emptySmall}>Start a conversation when you need context preserved.</Text> : null}
+          </View>
+        ) : (
+          <View style={[styles.workspace, compact && styles.workspaceCompact]}>
+            <ScrollView style={[styles.threadPane, compact && styles.threadPaneCompact]} contentContainerStyle={styles.threadPaneContent}>
+              {groups.map((group) => (
+                <View key={group.assetId || "unknown"} style={styles.groupBlock}>
+                  <Text style={styles.groupTitle}>{group.assetName}</Text>
+                  {group.threads.map((thread) => (
                     <TouchableOpacity
-                        style={styles.secondaryButton}
-                        onPress={() => handleSendReply(thread.id)}
+                      key={thread.id}
+                      style={[styles.threadRow, selectedThread?.id === thread.id && styles.threadRowActive]}
+                      onPress={() => setSelectedThreadId(thread.id)}
                     >
-                        <Text style={styles.secondaryButtonText}>Reply</Text>
+                      <View style={styles.threadTopLine}>
+                        <Text style={styles.threadContext} numberOfLines={1}>{contextLabel(thread)}</Text>
+                        <View style={[styles.statusPill, statusStyle(thread.attentionState)]}>
+                          <Text style={styles.statusText}>{thread.attentionState}</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.participant} numberOfLines={1}>{thread.participantLabel}</Text>
+                      <Text style={styles.preview} numberOfLines={1}>
+                        {(thread.messages || [])[Math.max((thread.messages || []).length - 1, 0)]?.body || "No messages yet"}
+                      </Text>
+                      <Text style={styles.timeText}>{formatMessageTime(thread.updated_at || thread.created_at)}</Text>
                     </TouchableOpacity>
-                    </>
-                )}
+                  ))}
                 </View>
-            );
-            })}
+              ))}
+            </ScrollView>
 
-            </View>
-            </View>
-      </ScrollView>
+            <ScrollView style={[styles.conversationPane, compact && styles.conversationPaneCompact]} contentContainerStyle={styles.conversationContent}>
+              {selectedThread ? (
+                <>
+                  <View style={styles.conversationHeader}>
+                    <Text style={styles.conversationTitle}>{contextLabel(selectedThread)}</Text>
+                    <Text style={styles.conversationSubtitle}>
+                      {selectedThread.asset?.name || "Asset"}
+                      {selectedThread.system?.name ? ` · ${selectedThread.system.name}` : ""}
+                      {selectedThread.keeprPro?.name ? ` · ${selectedThread.keeprPro.name}` : ""}
+                    </Text>
+                    <Text style={styles.sourceText}>
+                      {selectedThread.participantLabel} · {sourceLabel(selectedThread)}
+                    </Text>
+                  </View>
+
+                  {(selectedThread.messages || []).map((m) => {
+                    const mine = m.from_user_id && String(m.from_user_id) === String(workspace.currentUserId);
+                    const label = mine ? "You" : getMessageSenderLabel(m, workspace.profilesById);
+                    return (
+                      <View key={m.id} style={[styles.messageBubble, mine ? styles.messageMine : styles.messageOther]}>
+                        <Text style={[styles.messageMeta, mine && styles.messageMetaMine]}>
+                          {label}
+                          {m.created_at ? ` · ${formatMessageTime(m.created_at)}` : ""}
+                        </Text>
+                        <Text style={[styles.messageBody, mine && styles.messageBodyMine]}>{m.body}</Text>
+                      </View>
+                    );
+                  })}
+
+                  <View style={styles.replyDock}>
+                    <TextInput
+                      value={replyByThreadId[selectedThread.id] || ""}
+                      onChangeText={(txt) => setReplyByThreadId((prev) => ({ ...prev, [selectedThread.id]: txt }))}
+                      placeholder="Write a reply..."
+                      placeholderTextColor={colors.textMuted}
+                      multiline
+                      textAlignVertical="top"
+                      style={styles.replyBox}
+                    />
+                    <TouchableOpacity style={styles.replyButton} onPress={() => handleReply(selectedThread.id)}>
+                      <Ionicons name="send-outline" size={16} color="white" />
+                      <Text style={styles.replyButtonText}>Reply</Text>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              ) : null}
+            </ScrollView>
+          </View>
+        )}
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
+  safe: { flex: 1, backgroundColor: colors.background },
   shell: {
+    flex: 1,
     width: "100%",
-    maxWidth: 1180,
+    maxWidth: 1280,
     alignSelf: "center",
-    paddingHorizontal: 14,
-    paddingBottom: spacing.xl,
+    padding: spacing.lg,
   },
-ownerActionList: {
-  marginTop: spacing.md,
-  gap: 10,
-},
-
-ownerActionRow: {
-  flexDirection: "row",
-  alignItems: "center",
-  gap: 10,
-  borderWidth: 1,
-  borderColor: colors.borderSubtle,
-  backgroundColor: colors.background,
-  borderRadius: radius.lg,
-  paddingHorizontal: spacing.md,
-  paddingVertical: 13,
-},
-
-ownerActionText: {
-  fontSize: 14,
-  fontWeight: "900",
-  color: colors.textPrimary,
-},
-
-messageEmail: {
-  fontSize: 10,
-  fontWeight: "700",
-  color: colors.textMuted,
-  marginBottom: 4,
-},
-
-messageEmailMine: {
-  color: "rgba(255,255,255,0.75)",
-},
-
-threadCard: {
-  marginTop: spacing.md,
-  borderWidth: 1,
-  borderColor: colors.borderSubtle,
-  borderRadius: radius.lg,
-  backgroundColor: colors.background,
-  padding: spacing.md,
-},
-
-threadSubject: {
-  fontSize: 13,
-  fontWeight: "900",
-  color: colors.textPrimary,
-  marginBottom: spacing.sm,
-},
-
-threadHeader: {
-  flexDirection: "row",
-  alignItems: "center",
-  gap: 12,
-  marginBottom: spacing.sm,
-},
-
-threadPreview: {
-  marginTop: 3,
-  fontSize: 12,
-  fontWeight: "700",
-  color: colors.textSecondary,
-},
-
-threadTime: {
-  marginTop: 2,
-  fontSize: 11,
-  fontWeight: "700",
-  color: colors.textMuted,
-},
-
-avatarCircle: {
-  width: 38,
-  height: 38,
-  borderRadius: 19,
-  backgroundColor: colors.surface,
-  borderWidth: 1,
-  borderColor: colors.borderSubtle,
-  alignItems: "center",
-  justifyContent: "center",
-},
-
-avatarText: {
-  fontSize: 12,
-  fontWeight: "900",
-  color: colors.textPrimary,
-},
-
-threadParticipant: {
-  marginTop: 3,
-  fontSize: 12,
-  fontWeight: "800",
-  color: colors.textSecondary,
-},
-
-threadEmail: {
-  marginTop: 2,
-  fontSize: 11,
-  fontWeight: "700",
-  color: colors.textMuted,
-},
-
-messageMetaMine: {
-  color: "rgba(255,255,255,0.82)",
-},
-
-messageBodyMine: {
-  color: "white",
-},
-
-messageBubble: {
-  marginTop: 8,
-  borderRadius: radius.lg,
-  paddingHorizontal: spacing.md,
-  paddingVertical: 10,
-  maxWidth: "82%",
-},
-
-messageBubbleMine: {
-  alignSelf: "flex-end",
-  backgroundColor: colors.brandBlue,
-},
-
-messageBubbleOther: {
-  alignSelf: "flex-start",
-  backgroundColor: colors.surface,
-  borderWidth: 1,
-  borderColor: colors.borderSubtle,
-},
-
-messageMeta: {
-  fontSize: 10,
-  fontWeight: "900",
-  color: colors.textMuted,
-  marginBottom: 4,
-},
-
-messageBody: {
-  fontSize: 13,
-  fontWeight: "700",
-  color: colors.textPrimary,
-},
-
-replyBox: {
-  marginTop: spacing.md,
-  minHeight: 76,
-  borderWidth: 1,
-  borderColor: colors.borderSubtle,
-  borderRadius: radius.lg,
-  paddingHorizontal: spacing.md,
-  paddingVertical: spacing.sm,
-  backgroundColor: colors.surface,
-  color: colors.textPrimary,
-  fontSize: 13,
-},
-
-secondaryButton: {
-  marginTop: spacing.sm,
-  alignSelf: "flex-end",
-  borderRadius: radius.pill,
-  backgroundColor: colors.textPrimary,
-  paddingHorizontal: 18,
-  paddingVertical: 10,
-},
-
-secondaryButtonText: {
-  color: "white",
-  fontSize: 13,
-  fontWeight: "900",
-},
-
-  backButton: {
-    alignSelf: "flex-start",
+  header: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
+    gap: spacing.md,
+    marginBottom: spacing.md,
+  },
+  backButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
     borderRadius: radius.pill,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
-    marginTop: spacing.md,
-    marginBottom: spacing.lg,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
   },
-  backText: {
-    fontSize: 13,
-    fontWeight: "900",
-    color: colors.textPrimary,
+  backText: { fontSize: 13, fontWeight: "900", color: colors.textPrimary },
+  kicker: { fontSize: 11, fontWeight: "900", color: colors.textMuted },
+  title: { fontSize: 28, fontWeight: "900", color: colors.textPrimary },
+  subtitle: { marginTop: 4, fontSize: 13, lineHeight: 18, color: colors.textSecondary },
+  newButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    borderRadius: radius.pill,
+    backgroundColor: colors.brandBlue,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
   },
-  header: {
-    marginBottom: spacing.lg,
-  },
-  kicker: {
-    fontSize: 11,
-    fontWeight: "900",
-    color: colors.textMuted,
-    letterSpacing: 0.8,
-  },
-  title: {
-    marginTop: 4,
-    fontSize: 26,
-    fontWeight: "900",
-    color: colors.textPrimary,
-  },
-  subtitle: {
-    marginTop: 6,
-    fontSize: 14,
-    lineHeight: 20,
-    color: colors.textSecondary,
-  },
-  card: {
+  newButtonQuiet: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.borderSubtle },
+  newButtonText: { color: "white", fontSize: 13, fontWeight: "900" },
+  newButtonTextQuiet: { color: colors.textMuted },
+  truthCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
     backgroundColor: colors.surface,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  truthText: { flex: 1, fontSize: 13, lineHeight: 18, color: colors.textSecondary, fontWeight: "700" },
+  composerCard: {
     borderRadius: radius.xl,
-    padding: spacing.lg,
-    marginBottom: spacing.lg,
-  },
-  cardTitle: {
-    fontSize: 16,
-    fontWeight: "900",
-    color: colors.textPrimary,
-  },
-  cardHint: {
-    marginTop: 6,
-    fontSize: 13,
-    lineHeight: 19,
-    color: colors.textSecondary,
-  },
-  textArea: {
-    marginTop: spacing.md,
-    minHeight: 120,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
+    backgroundColor: colors.surface,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+    ...shadows.subtle,
+  },
+  cardTitle: { fontSize: 16, fontWeight: "900", color: colors.textPrimary },
+  label: { marginTop: spacing.md, marginBottom: 7, fontSize: 12, fontWeight: "900", color: colors.textMuted },
+  choiceRow: { gap: 8, paddingBottom: 2 },
+  choicePill: {
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    backgroundColor: colors.background,
+    paddingHorizontal: 13,
+    paddingVertical: 9,
+  },
+  choicePillActive: { borderColor: colors.brandBlue, backgroundColor: "#EFF6FF" },
+  choiceText: { color: colors.textSecondary, fontWeight: "800", fontSize: 12 },
+  choiceTextActive: { color: colors.brandBlue },
+  input: {
+    marginTop: spacing.sm,
     borderRadius: radius.lg,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
     backgroundColor: colors.background,
     color: colors.textPrimary,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 12,
     fontSize: 14,
   },
+  textArea: { minHeight: 92 },
   primaryButton: {
     marginTop: spacing.md,
     borderRadius: radius.pill,
     backgroundColor: colors.brandBlue,
-    paddingVertical: 13,
     alignItems: "center",
+    paddingVertical: 13,
   },
-  primaryButtonText: {
-    color: "white",
-    fontSize: 14,
-    fontWeight: "900",
+  primaryButtonText: { color: "white", fontWeight: "900" },
+  loadingCard: {
+    flex: 1,
+    minHeight: 360,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    backgroundColor: colors.surface,
+    gap: spacing.sm,
   },
+  emptyTitle: { fontSize: 18, color: colors.textPrimary, fontWeight: "900" },
+  emptySmall: { fontSize: 13, color: colors.textSecondary, fontWeight: "700" },
+  workspace: {
+    flex: 1,
+    minHeight: 560,
+    flexDirection: "row",
+    gap: spacing.md,
+  },
+  workspaceCompact: {
+    flexDirection: "column",
+  },
+  threadPane: {
+    width: 390,
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    backgroundColor: colors.surface,
+  },
+  threadPaneCompact: {
+    width: "100%",
+    maxHeight: 340,
+  },
+  threadPaneContent: { padding: spacing.md, gap: spacing.md },
+  groupBlock: { gap: spacing.sm },
+  groupTitle: { fontSize: 13, fontWeight: "900", color: colors.textPrimary },
+  threadRow: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    backgroundColor: colors.background,
+    padding: spacing.md,
+  },
+  threadRowActive: { borderColor: colors.brandBlue, backgroundColor: "#F8FBFF" },
+  threadTopLine: { flexDirection: "row", alignItems: "center", gap: 8 },
+  threadContext: { flex: 1, fontSize: 13, fontWeight: "900", color: colors.textPrimary },
+  statusPill: { borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 4 },
+  statusNew: { backgroundColor: "#DBEAFE" },
+  statusOpen: { backgroundColor: "#ECFDF5" },
+  statusResolved: { backgroundColor: "#F3F4F6" },
+  statusText: { fontSize: 10, fontWeight: "900", color: colors.textPrimary },
+  participant: { marginTop: 8, fontSize: 12, fontWeight: "800", color: colors.textSecondary },
+  preview: { marginTop: 4, fontSize: 12, color: colors.textSecondary },
+  timeText: { marginTop: 5, fontSize: 11, color: colors.textMuted, fontWeight: "700" },
+  conversationPane: {
+    flex: 1,
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    backgroundColor: colors.surface,
+  },
+  conversationPaneCompact: {
+    minHeight: 420,
+  },
+  conversationContent: { padding: spacing.lg },
+  conversationHeader: {
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderSubtle,
+    paddingBottom: spacing.md,
+    marginBottom: spacing.md,
+  },
+  conversationTitle: { fontSize: 20, fontWeight: "900", color: colors.textPrimary },
+  conversationSubtitle: { marginTop: 4, fontSize: 13, fontWeight: "800", color: colors.textSecondary },
+  sourceText: { marginTop: 5, fontSize: 12, fontWeight: "800", color: colors.textMuted },
+  messageBubble: {
+    marginTop: spacing.sm,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 10,
+    maxWidth: "82%",
+  },
+  messageMine: { alignSelf: "flex-end", backgroundColor: colors.brandBlue },
+  messageOther: {
+    alignSelf: "flex-start",
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+  },
+  messageMeta: { fontSize: 10, fontWeight: "900", color: colors.textMuted, marginBottom: 4 },
+  messageMetaMine: { color: "rgba(255,255,255,0.82)" },
+  messageBody: { fontSize: 13, lineHeight: 19, color: colors.textPrimary, fontWeight: "700" },
+  messageBodyMine: { color: "white" },
+  replyDock: { marginTop: spacing.lg },
+  replyBox: {
+    minHeight: 82,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    backgroundColor: colors.background,
+    color: colors.textPrimary,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  replyButton: {
+    marginTop: spacing.sm,
+    alignSelf: "flex-end",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    borderRadius: radius.pill,
+    backgroundColor: colors.textPrimary,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+  },
+  replyButtonText: { color: "white", fontWeight: "900" },
 });

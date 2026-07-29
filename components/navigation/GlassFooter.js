@@ -18,7 +18,7 @@ export default function GlassFooter({
 
   const visibleTabs = [
     "Dashboard",
-    "Notifications",
+    "Messages",
     "Create",
     "KeeprPros",
     "More",
@@ -85,6 +85,8 @@ case "Dashboard":
   return focused ? "grid" : "grid-outline";
 case "Notifications":
   return focused ? "mail" : "mail-outline";
+case "Messages":
+  return focused ? "chatbubbles" : "chatbubbles-outline";
 case "KeeprPros":
   return focused ? "shield-checkmark" : "shield-checkmark-outline";
 case "More":
