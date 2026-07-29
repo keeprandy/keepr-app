@@ -17,6 +17,7 @@ import {
 import QRCode from "react-native-qrcode-svg";
 
 import PublicShell from "../components/public/PublicShell";
+import { keeprApiRequest } from "../lib/keeprApi";
 import { colors, radius, shadows, spacing } from "../styles/theme";
 
 const IS_WEB = Platform.OS === "web";
@@ -57,15 +58,6 @@ function sentenceName(value) {
   return text ? text.toLowerCase() : "system";
 }
 
-async function readJson(res) {
-  const text = await res.text();
-  try {
-    return text ? JSON.parse(text) : {};
-  } catch {
-    return {};
-  }
-}
-
 export default function PublicSystemStoryScreen({ route }) {
   const { width } = useWindowDimensions();
   const isWide = IS_WEB && width >= 980;
@@ -104,9 +96,9 @@ export default function PublicSystemStoryScreen({ route }) {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`/api/public-node/${encodeURIComponent(kac)}/${encodeURIComponent(nodeId)}`);
-      const json = await readJson(res);
-      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
+      const json = await keeprApiRequest(
+        `/api/public-node/${encodeURIComponent(kac)}/${encodeURIComponent(nodeId)}`
+      );
       setStory(json);
       const displayName = json?.node?.display_name || json?.node?.name || "System";
       setForm((prev) => {
@@ -157,10 +149,9 @@ export default function PublicSystemStoryScreen({ route }) {
 
     setSubmitting(true);
     try {
-      const res = await fetch("/api/public-node-action", {
+      const json = await keeprApiRequest("/api/public-node-action", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: {
           kac,
           node_id: nodeId,
           keepr_pro_id: primaryPro?.id || null,
@@ -172,10 +163,8 @@ export default function PublicSystemStoryScreen({ route }) {
             email: form.email.trim(),
             phone: form.phone.trim() || null,
           },
-        }),
+        },
       });
-      const json = await readJson(res);
-      if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
       setSubmitted(json);
     } catch (e) {
       Alert.alert("Could not send", e?.message || "Please try again.");
