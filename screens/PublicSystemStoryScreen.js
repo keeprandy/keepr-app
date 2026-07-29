@@ -18,6 +18,7 @@ import QRCode from "react-native-qrcode-svg";
 
 import PublicShell from "../components/public/PublicShell";
 import { keeprApiRequest } from "../lib/keeprApi";
+import { supabase } from "../lib/supabaseClient";
 import { colors, radius, shadows, spacing } from "../styles/theme";
 
 const IS_WEB = Platform.OS === "web";
@@ -68,6 +69,7 @@ export default function PublicSystemStoryScreen({ route }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [story, setStory] = useState(null);
+  const [viewer, setViewer] = useState({ loading: true, user: null, label: "Public visitor" });
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(null);
   const [form, setForm] = useState({
@@ -85,6 +87,48 @@ export default function PublicSystemStoryScreen({ route }) {
     }
     return `https://app.keeprhome.com/k/${encodeURIComponent(kac)}/n/${encodeURIComponent(nodeId)}`;
   }, [kac, nodeId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadViewer() {
+      try {
+        const { data } = await supabase.auth.getUser();
+        const user = data?.user || null;
+        if (!user?.id) {
+          if (!cancelled) setViewer({ loading: false, user: null, label: "Public visitor" });
+          return;
+        }
+
+        let label = "Keepr member";
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("display_name, full_name")
+          .eq("id", user.id)
+          .maybeSingle();
+        const displayName = String(profile?.display_name || profile?.full_name || "").trim();
+        if (displayName) label = displayName;
+
+        if (!cancelled) setViewer({ loading: false, user, label });
+      } catch {
+        if (!cancelled) setViewer({ loading: false, user: null, label: "Public visitor" });
+      }
+    }
+    loadViewer();
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      const user = session?.user || null;
+      setViewer((prev) => ({
+        loading: false,
+        user,
+        label: user ? prev.label === "Public visitor" ? "Keepr member" : prev.label : "Public visitor",
+      }));
+      if (user) loadViewer();
+    });
+
+    return () => {
+      cancelled = true;
+      sub?.subscription?.unsubscribe?.();
+    };
+  }, []);
 
   const load = useCallback(async () => {
     if (!kac || !nodeId) {
@@ -178,9 +222,18 @@ export default function PublicSystemStoryScreen({ route }) {
       kac={kac}
       contextTitle={node?.name || "Public System Story"}
       contextSubtitle={asset?.name ? `${asset.name} system` : "Keepr System Story"}
-      viewerLabel="Public visitor"
-      primaryActionLabel="What's Keepr?"
+      viewerLabel={viewer.label}
+      primaryActionLabel={viewer.user ? "Open in Keepr" : "What's Keepr?"}
       onPrimaryAction={() => {
+        if (viewer.user) {
+          if (IS_WEB && typeof window !== "undefined") {
+            const params = new URLSearchParams();
+            if (asset?.id) params.set("assetId", asset.id);
+            if (node?.id || nodeId) params.set("systemId", node?.id || nodeId);
+            window.location.href = `/messages${params.toString() ? `?${params.toString()}` : ""}`;
+          }
+          return;
+        }
         if (IS_WEB && typeof window !== "undefined") {
           window.open("https://www.keeprhome.com/", "_blank", "noopener,noreferrer");
         }

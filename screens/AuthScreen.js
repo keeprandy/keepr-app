@@ -33,6 +33,7 @@ import { DEFAULT_MEMBER_AVATAR } from "../lib/memberAvatar";
 import { useAuth } from "../context/AuthContext";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PENDING_MESSAGE_TOKEN_KEY = "keepr_pending_message_token";
 
 function validateEmail(email) {
   const v = (email || "").trim();
@@ -355,6 +356,18 @@ export default function AuthScreen({ navigation, route }) {
   };
 
 const continueActivationJourney = async () => {
+  const messageToken =
+    route?.params?.messageToken ||
+    (await AsyncStorage.getItem(PENDING_MESSAGE_TOKEN_KEY).catch(() => null));
+
+  if (messageToken) {
+    navigation.replace("MessageLink", {
+      token: messageToken,
+      intent: "claim_message_link",
+    });
+    return true;
+  }
+
   const intent = route?.params?.intent;
 
   if (intent !== "accept_hub_invite") return false;

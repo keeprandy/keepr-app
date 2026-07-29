@@ -42,6 +42,7 @@ import { getSignedUrl, listAttachmentsForTarget } from "../lib/attachmentsApi";
 import EventPill from "../components/EventPill";
 import ReportsModal from "../components/ReportsModal";
 import { getAssetDefinition, formatAssetMetaValue } from "../lib/assetDefinitions";
+import { buildMessagesNavigationParams } from "../lib/messagesService";
 
 const HERO_ASPECT = 4 / 3;
 const IS_WEB = Platform.OS === "web";
@@ -665,6 +666,24 @@ useEffect(() => {
       assetName: asset.name || "Asset",
       sourceType: "other",
       initialTab: "file",
+    });
+  };
+
+  const goToMessages = () => {
+    if (!asset?.id) return;
+    navigation.navigate("RootTabs", {
+      screen: "Messages",
+      params: buildMessagesNavigationParams({
+        scope: "asset",
+        assetId: asset.id,
+        assetName: asset.name || "Asset",
+        parentAssetKac: asset.kac_id || asset.kac || null,
+        launchComposer: true,
+        contextImageUri: heroUri || null,
+        contextType: "Asset",
+        backRoute: "OtherAssetStory",
+        backParams: { assetId: asset.id },
+      }),
     });
   };
   const goToAttachmentsMobile = () => {
@@ -1325,6 +1344,11 @@ const filteredTimelineItems = useMemo(() => {
               label="Attachments"
               icon="attach-outline"
               onPress={goToAttachments}
+            />
+            <QuickActionChip
+              label="Message"
+              icon="chatbubble-ellipses-outline"
+              onPress={goToMessages}
             />
             <QuickActionChip
               label="Add to Timeline"

@@ -1171,6 +1171,9 @@ return (
                 hubId: originHubId,
                 hubName: originHubName,
                 mode: "internal",
+                launchComposer: true,
+                contextImageUri: heroUri || null,
+                contextType: "Asset",
                 backRoute: "KeeprStoryInternal",
                 backParams: {
                   assetId: asset?.asset_id || asset?.id,

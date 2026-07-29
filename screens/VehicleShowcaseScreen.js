@@ -31,6 +31,7 @@ import {
   removePlacementById,
 } from "../lib/attachmentsApi";
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
+import { MEDIA_VARIANTS, getAttachmentVariantUrl } from "../lib/mediaVariants";
 
 /* ---------- quick action chip (nav only, like BoatShowcase) ---------- */
 function QuickActionChip({ icon, label, onPress, isPrimary }) {
@@ -237,10 +238,7 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
 
           if (!url && row.bucket && row.storage_path) {
             try {
-              url = await getSignedUrl({
-                bucket: row.bucket,
-                path: row.storage_path,
-              });
+              url = await getAttachmentVariantUrl(row, MEDIA_VARIANTS.GALLERY_TILE);
             } catch (e) {
               console.log("VehicleShowcase getSignedUrl error", e);
             }
@@ -488,16 +486,8 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
   const buildHeroThumbUrl = async (photo) => {
     if (!photo?.bucket || !photo?.storage_path) return null;
 
-    return await getSignedUrl({
-      bucket: photo.bucket,
-      path: photo.storage_path,
+    return await getAttachmentVariantUrl(photo, MEDIA_VARIANTS.GALLERY_TILE, {
       expiresIn: 60 * 60 * 24 * 7,
-      transform: {
-        width: 320,
-        height: 320,
-        resize: "cover",
-        quality: 75,
-      },
     });
   };
 

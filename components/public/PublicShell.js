@@ -32,13 +32,6 @@ export default function PublicShell({
   const { width } = useWindowDimensions();
 const isMobile = width < 720;
 
-
-  console.log("PUBLIC SHELL", {
-  contextTitle,
-  viewerLabel,
-  primaryActionLabel,
-  hasAction: !!onPrimaryAction,
-});
   return (
     
   <View style={styles.screen}>

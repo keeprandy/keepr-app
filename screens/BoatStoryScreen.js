@@ -35,6 +35,7 @@ import KeeprProCommunicationCard, {
   getAssetKeeprProsFromMetadata,
 } from "../components/KeeprProCommunicationCard";
 import { buildPrivateKeeprProActionPrefill } from "../lib/keeprProEngagement";
+import { buildMessagesNavigationParams } from "../lib/messagesService";
 
 // ✅ low-level upload helper (NOT a hook)
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
@@ -575,6 +576,24 @@ try {
       assetName: boat.name || "Boat",
       sourceType: "boat",
       initialTab: "file",
+    });
+  };
+
+  const goToMessages = () => {
+    if (!boat?.id) return;
+    navigation.navigate("RootTabs", {
+      screen: "Messages",
+      params: buildMessagesNavigationParams({
+        scope: "asset",
+        assetId: boat.id,
+        assetName: boatName || boat.name || "Boat",
+        parentAssetKac: boat.kac_id || boat.kac || null,
+        launchComposer: true,
+        contextImageUri: heroUri || null,
+        contextType: "Asset",
+        backRoute: "BoatStory",
+        backParams: { boatId: boat.id, assetId: boat.id },
+      }),
     });
   };
 
@@ -1297,6 +1316,11 @@ const meta = {
               label="Attachments"
               icon="attach-outline"
               onPress={goToAttachments}
+            />
+            <QuickActionChip
+              label="Message"
+              icon="chatbubble-ellipses-outline"
+              onPress={goToMessages}
             />
             <QuickActionChip
               label="Add to Timeline"

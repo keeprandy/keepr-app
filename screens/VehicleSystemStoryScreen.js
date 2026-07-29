@@ -714,6 +714,9 @@ export default function VehicleSystemStoryScreen(props) {
       systemName: system?.name || "System",
       keeprProId: pro?.id || null,
       keeprProName: pro?.name || pro?.label || null,
+      launchComposer: true,
+      contextImageUri: heroAttachment?.previewUrl || null,
+      contextType: "System",
       backRoute: "VehicleSystemStory",
       backParams: {
         assetId,

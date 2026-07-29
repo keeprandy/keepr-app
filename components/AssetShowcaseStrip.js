@@ -1,5 +1,5 @@
 // components/AssetShowcaseStrip.js
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -16,6 +16,7 @@ import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import { setPlacementShowcase } from "../lib/attachmentsApi";
 import * as ImagePicker from "expo-image-picker";
 import { colors, spacing, radius, shadows } from "../styles/theme";
+import { MEDIA_VARIANTS, getAttachmentVariantUrl } from "../lib/mediaVariants";
 
 const IS_WEB = Platform.OS === "web";
 
@@ -29,6 +30,7 @@ export default function AssetShowcaseStrip({
     error,
     refresh,
   } = useAttachments("asset", assetId);
+  const [variantUrls, setVariantUrls] = useState({});
 
   const showcasePhotos = useMemo(() => {
     return (items || []).filter(
@@ -41,6 +43,25 @@ export default function AssetShowcaseStrip({
   }, [items, assetId]);
 
   const hero = showcasePhotos[0] || null;
+
+  useEffect(() => {
+    let cancelled = false;
+    async function resolveUrls() {
+      const next = {};
+      await Promise.all(
+        (showcasePhotos || []).map(async (row) => {
+          const key = row.placement_id || row.attachment_id || row.id;
+          if (!key) return;
+          next[key] = await getAttachmentVariantUrl(row, MEDIA_VARIANTS.GALLERY_TILE);
+        })
+      );
+      if (!cancelled) setVariantUrls(next);
+    }
+    resolveUrls();
+    return () => {
+      cancelled = true;
+    };
+  }, [showcasePhotos]);
 
   const pickPhoto = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -126,8 +147,9 @@ export default function AssetShowcaseStrip({
           <Image
             source={{
               uri:
-                hero.public_url ||
+                variantUrls[hero.placement_id || hero.attachment_id || hero.id] ||
                 hero.thumbnail_url ||
+                hero.public_url ||
                 hero.url ||
                 "",
             }}
@@ -163,8 +185,9 @@ export default function AssetShowcaseStrip({
             <Image
               source={{
                 uri:
-                  row.public_url ||
+                  variantUrls[row.placement_id || row.attachment_id || row.id] ||
                   row.thumbnail_url ||
+                  row.public_url ||
                   row.url ||
                   "",
               }}

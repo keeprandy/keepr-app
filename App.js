@@ -102,6 +102,7 @@ import SendToKeeprScreen from "./screens/SendToKeeprScreen";
 import SendToKeeprAssetPicker from "./screens/SendToKeeprAssetPicker";
 import PublicKeeprStoryScreen from "./screens/PublicKeeprStoryScreen";
 import PublicSystemStoryScreen from "./screens/PublicSystemStoryScreen";
+import MessageLinkScreen from "./screens/MessageLinkScreen";
 import KeeprHubScreen from "./screens/KeeprHubScreen";
 import HubDetailScreen from "./screens/HubDetailScreen";
 import EditHubScreen from "./screens/EditHubScreen";
@@ -266,6 +267,7 @@ const linking = {
     ResetPassword: "reset",
     Auth: "auth",
     Invite: "invite/:slug",
+    MessageLink: "m/:token",
     ShareKeepr: "share-keepr",
     KeeprEffect: "keepr-effect",
     ShareAction: "s/:token",
@@ -2161,6 +2163,7 @@ if (!user) {
           <RootStack.Screen name="KacResolve" component={KacResolveScreen} />
           <RootStack.Screen name="PublicSystemStory" component={PublicSystemStoryScreen}/>
           <RootStack.Screen name="PublicKeeprStory" component={PublicKeeprStoryScreen}/>
+          <RootStack.Screen name="MessageLink" component={MessageLinkScreen} />
           <RootStack.Screen name="KeeprHub" component={KeeprHubScreen}/>
           <RootStack.Screen name="HubDetail" component={HubDetailScreen} />
           <RootStack.Screen name="EditHub" component={EditHubScreen} />
@@ -2212,6 +2215,7 @@ const initialRouteName = isResetLink
           !window.location.pathname.startsWith("/hub/") &&
           !window.location.pathname.startsWith("/story/") &&
           !window.location.pathname.startsWith("/invite/") &&
+          !window.location.pathname.startsWith("/m/") &&
           !window.location.pathname.startsWith("/inbox") &&
           !window.location.pathname.startsWith("/messages") &&
           !window.location.pathname.startsWith("/CreateReminder") &&
@@ -2260,6 +2264,7 @@ const initialRouteName = isResetLink
           <RootStack.Screen name="PublicConfigAssetPicker" component={PublicConfigAssetPickerScreen} />
           <RootStack.Screen name="PublicSystemStory" component={PublicSystemStoryScreen} />
           <RootStack.Screen name="PublicKeeprStory" component={PublicKeeprStoryScreen} />
+          <RootStack.Screen name="MessageLink" component={MessageLinkScreen} />
           <RootStack.Screen name="KeeprHub" component={KeeprHubScreen}/>
           <RootStack.Screen name="HubDetail" component={HubDetailScreen} />
           <RootStack.Screen name="EditHub" component={EditHubScreen} />

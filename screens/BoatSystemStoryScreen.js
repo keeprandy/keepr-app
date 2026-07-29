@@ -657,6 +657,9 @@ const handleOpenMessages = useCallback(() => {
     systemName: system?.name || "System",
     keeprProId: pro?.id || null,
     keeprProName: pro?.name || pro?.label || null,
+    launchComposer: true,
+    contextImageUri: heroAttachment?.previewUrl || null,
+    contextType: "System",
     backRoute: "BoatSystemStory",
     backParams: {
       assetId,

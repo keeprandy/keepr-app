@@ -35,6 +35,7 @@ import KeeprProCommunicationCard, {
   getAssetKeeprProsFromMetadata,
 } from "../components/KeeprProCommunicationCard";
 import { buildPrivateKeeprProActionPrefill } from "../lib/keeprProEngagement";
+import { buildMessagesNavigationParams } from "../lib/messagesService";
 
 // ✅ low-level upload helper (NOT a hook)
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
@@ -578,6 +579,24 @@ useEffect(() => {
       assetName: vehicle.name || "Vehicle",
       sourceType: "vehicle",
       initialTab: "file",
+    });
+  };
+
+  const goToMessages = () => {
+    if (!vehicle?.id) return;
+    navigation.navigate("RootTabs", {
+      screen: "Messages",
+      params: buildMessagesNavigationParams({
+        scope: "asset",
+        assetId: vehicle.id,
+        assetName: vehicleName || vehicle.name || "Vehicle",
+        parentAssetKac: vehicle.kac_id || vehicle.kac || null,
+        launchComposer: true,
+        contextImageUri: heroUri || null,
+        contextType: "Asset",
+        backRoute: "VehicleStory",
+        backParams: { vehicleId: vehicle.id, assetId: vehicle.id },
+      }),
     });
   };
   const goToAttachmentsMobile = () => {
@@ -1281,6 +1300,11 @@ const meta = {
               label="Attachments"
               icon="attach-outline"
               onPress={goToAttachments}
+            />
+            <QuickActionChip
+              label="Message"
+              icon="chatbubble-ellipses-outline"
+              onPress={goToMessages}
             />
             <QuickActionChip
               label="Add to Timeline"

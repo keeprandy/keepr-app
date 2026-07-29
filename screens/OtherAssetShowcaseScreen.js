@@ -31,6 +31,7 @@ import {
   removePlacementById,
 } from "../lib/attachmentsApi";
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
+import { MEDIA_VARIANTS, getAttachmentVariantUrl } from "../lib/mediaVariants";
 
 const TILE_ASPECT = 4 / 3;
 
@@ -228,10 +229,7 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
 
           if (!url && row.bucket && row.storage_path) {
             try {
-              url = await getSignedUrl({
-                bucket: row.bucket,
-                path: row.storage_path,
-              });
+              url = await getAttachmentVariantUrl(row, MEDIA_VARIANTS.GALLERY_TILE);
             } catch (e) {
               console.log("OtherAssetShowcase getSignedUrl error", e);
             }

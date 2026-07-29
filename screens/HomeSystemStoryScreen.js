@@ -828,6 +828,9 @@ const setHeroAttachment = useCallback(
       systemName: system?.name || systemNameFromRoute || "System",
       keeprProId: pro?.id || null,
       keeprProName: pro?.name || pro?.label || null,
+      launchComposer: true,
+      contextImageUri: heroAttachment?.previewUrl || null,
+      contextType: "System",
       backRoute: "HomeSystemStory",
       backParams: {
         assetId,
