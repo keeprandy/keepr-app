@@ -44,7 +44,7 @@
     <key>AppGroupIdentifier</key>
     <string>group.com.keeprhome.app</string>
     <key>CFBundleVersion</key>
-    <string>4</string>
+    <string>5</string>
     <key>CFBundleShortVersionString</key>
     <string>1.0.10</string>
   </dict>
