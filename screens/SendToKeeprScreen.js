@@ -2,6 +2,7 @@ import React, { useEffect } from "react";
 import { View, ActivityIndicator } from "react-native";
 import { useShareIntent } from "expo-share-intent";
 import { navigationRef } from "../navigationRoot";
+import { normalizeShareIntentPayload } from "../lib/shareIntentPayload";
 
 export default function SendToKeeprScreen() {
   const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntent();
@@ -9,17 +10,8 @@ export default function SendToKeeprScreen() {
   useEffect(() => {
     if (!hasShareIntent || !shareIntent) return;
 
-    const file = shareIntent?.files?.[0];
-    const text = shareIntent?.text;
-    const url = shareIntent?.webUrl;
-
-    // Normalize into something your system understands
-    const payload = {
-      type: file ? "file" : url ? "link" : text ? "text" : null,
-      file,
-      url,
-      text,
-    };
+    const payload = normalizeShareIntentPayload(shareIntent);
+    if (!payload) return;
 
     setTimeout(() => {
       navigationRef.navigate("SendToKeeprAssetPicker", {

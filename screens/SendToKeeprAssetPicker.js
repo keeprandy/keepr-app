@@ -10,6 +10,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../lib/supabaseClient";
 import { navigationRef } from "../navigationRoot";
+import { isSharedFileImage } from "../lib/shareIntentPayload";
 
 export default function SendToKeeprAssetPicker({ route }) {
   const incomingShare = route?.params?.incomingShare;
@@ -111,7 +112,13 @@ export default function SendToKeeprAssetPicker({ route }) {
       const optimisticItem = {
         id: tempId,
         attachment_id: tempId,
-        kind: payload?.file ? "photo" : payload?.url ? "link" : "file",
+        kind: payload?.file
+          ? isSharedFileImage(payload.file)
+            ? "photo"
+            : "file"
+          : payload?.url
+          ? "link"
+          : "file",
         title:
           payload?.file?.fileName ||
           payload?.file?.name ||

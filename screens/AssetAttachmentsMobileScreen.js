@@ -23,8 +23,10 @@ import { useAssetAttachments } from "../hooks/useAttachments";
 import { supabase } from "../lib/supabaseClient";
 import {
   createLinkAttachment,
+  createTextAttachment,
   uploadAttachmentFromUri,
 } from "../lib/attachmentsUploader";
+import { inferSharedFileMimeType, isSharedFileImage } from "../lib/shareIntentPayload";
 
 import { useFocusEffect } from "@react-navigation/native";
 
@@ -523,13 +525,15 @@ useEffect(() => {
 
       if (fileUri) {
         const mimeType =
-        file?.mimeType ||
-        file?.type ||
-        file?.mime ||
-        (fileUri?.match(/\.jpg|\.jpeg/i) ? "image/jpeg" :
-        fileUri?.match(/\.png/i) ? "image/png" :
-        "application/octet-stream");
-        const isPhoto = String(mimeType).startsWith("image/");
+        inferSharedFileMimeType({
+          ...file,
+          uri: fileUri,
+        });
+        const isPhoto = isSharedFileImage({
+          ...file,
+          uri: fileUri,
+          mimeType,
+        });
 
         await uploadAttachmentFromUri({
           userId,
@@ -563,6 +567,14 @@ useEffect(() => {
           url: text,
           title: text,
           notes: null,
+          placements: buildPlacements(),
+        });
+      } else if (text) {
+        await createTextAttachment({
+          userId,
+          assetId,
+          text,
+          title: "Shared text",
           placements: buildPlacements(),
         });
       } else {

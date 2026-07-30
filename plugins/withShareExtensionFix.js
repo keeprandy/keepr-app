@@ -30,9 +30,9 @@ module.exports = function withShareExtensionFix(config) {
           <key>NSExtensionActivationSupportsWebPageWithMaxCount</key>
           <integer>1</integer>
           <key>NSExtensionActivationSupportsImageWithMaxCount</key>
-          <integer>10</integer>
+          <integer>1</integer>
           <key>NSExtensionActivationSupportsFileWithMaxCount</key>
-          <integer>10</integer>
+          <integer>1</integer>
         </dict>`
       );
 

@@ -82,6 +82,7 @@ import {
 import { identifyUserWithAcquisition } from "./lib/acquisitionContext";
 import { startActivationSession } from "./lib/activationSessions";
 import { openShareAction } from "./lib/shareActions";
+import { normalizeShareIntentPayload } from "./lib/shareIntentPayload";
 
 // Theme
 import { colors } from "./styles/theme";
@@ -1642,6 +1643,9 @@ function Root({ onRouteChange, setCurrentRouteName, currentRouteName }) {
   }, [user?.id]);
 
 const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntent();
+const pendingShareIntentKey = user?.id
+  ? `pendingShareIntent:${user.id}`
+  : "pendingShareIntent:anonymous";
 
 React.useEffect(() => {
   if (user?.id) return;
@@ -1677,23 +1681,20 @@ React.useEffect(() => {
 }, [user?.id]);
 
 React.useEffect(() => {
-  if (!user?.id) return;
   if (!hasShareIntent || !shareIntent) return;
-  if (!navigationRef?.isReady?.()) return;
-
-  const file = shareIntent?.files?.[0] || null;
-  const text = shareIntent?.text || null;
-  const url = shareIntent?.webUrl || shareIntent?.url || null;
-
-  const payload = {
-    type: file ? "file" : url ? "link" : text ? "text" : null,
-    file,
-    url,
-    text,
-  };
+  const payload = normalizeShareIntentPayload(shareIntent);
+  if (!payload) return;
 
   console.log("📥 RAW shareIntent:", JSON.stringify(shareIntent, null, 2));
   console.log("📥 Normalized payload:", JSON.stringify(payload, null, 2));
+
+  if (!user?.id || !navigationRef?.isReady?.()) {
+    AsyncStorage.setItem("pendingShareIntent:anonymous", JSON.stringify(payload)).catch((e) => {
+      console.log("Pending share save failed:", e?.message || e);
+    });
+    resetShareIntent();
+    return;
+  }
 
   navigationRef.current?.navigate("SendToKeeprAssetPicker", {
     incomingShare: payload,
@@ -1701,6 +1702,41 @@ React.useEffect(() => {
 
   resetShareIntent();
 }, [user?.id, hasShareIntent, shareIntent, resetShareIntent]);
+
+React.useEffect(() => {
+  if (!user?.id) return;
+  if (!navigationRef?.isReady?.()) return;
+
+  let cancelled = false;
+
+  const restorePendingShare = async () => {
+    try {
+      const userValue = await AsyncStorage.getItem(pendingShareIntentKey);
+      const anonymousValue = await AsyncStorage.getItem("pendingShareIntent:anonymous");
+      const raw = userValue || anonymousValue;
+      if (!raw || cancelled) return;
+
+      const payload = JSON.parse(raw);
+      await AsyncStorage.multiRemove([
+        pendingShareIntentKey,
+        "pendingShareIntent:anonymous",
+      ]);
+
+      if (cancelled) return;
+      navigationRef.current?.navigate("SendToKeeprAssetPicker", {
+        incomingShare: payload,
+      });
+    } catch (e) {
+      console.log("Pending share restore failed:", e?.message || e);
+    }
+  };
+
+  restorePendingShare();
+
+  return () => {
+    cancelled = true;
+  };
+}, [user?.id, pendingShareIntentKey, isNavReady]);
 
 React.useEffect(() => {
   if (Platform.OS === "web") return;
