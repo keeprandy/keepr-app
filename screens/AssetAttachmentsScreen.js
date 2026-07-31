@@ -43,6 +43,8 @@ import {
 } from "../lib/attachmentsUploader";
 
 import { getSignedUrl } from "../lib/attachmentsApi";
+import LinkCoverCard from "../components/LinkCoverCard";
+import { enrichLinkAttachment, shouldEnrichLinkAttachment } from "../lib/linkCover";
 
 
 import AttachmentViewerModal from "../components/AttachmentViewerModal";
@@ -957,6 +959,7 @@ const isWide = IS_WEB && width >= 980;
   const [heroUrl, setHeroUrl] = useState(null);
   const [heroIsPdf, setHeroIsPdf] = useState(false);
   const [heroLoading, setHeroLoading] = useState(false);
+  const [linkCoverLoading, setLinkCoverLoading] = useState({});
   // Web: default to preview OFF to prioritize list + editor; user can toggle on.
   const [showPreview, setShowPreview] = useState(!IS_WEB);
 
@@ -1472,6 +1475,45 @@ const isWide = IS_WEB && width >= 980;
 
     return out;
   }, [normalized, q, roleFilter, systemFilterId, sort, tab, effectiveScopeType, effectiveScopeId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const visibleLinks = (filtered || [])
+      .filter((row) => row?.kind === "link")
+      .filter((row) => shouldEnrichLinkAttachment(row))
+      .slice(0, 6);
+
+    if (visibleLinks.length === 0) return () => {
+      cancelled = true;
+    };
+
+    (async () => {
+      for (const row of visibleLinks) {
+        if (cancelled) break;
+        const id = row.attachment_id || row.id;
+        if (!id) continue;
+        setLinkCoverLoading((prev) => ({ ...prev, [id]: true }));
+        try {
+          await enrichLinkAttachment(row);
+          if (!cancelled) await refresh();
+        } catch (e) {
+          console.log("Link cover enrichment failed", e?.message || e);
+        } finally {
+          if (!cancelled) {
+            setLinkCoverLoading((prev) => {
+              const next = { ...prev };
+              delete next[id];
+              return next;
+            });
+          }
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [filtered, refresh]);
 
   const active = selected || filtered?.[0] || null;
 
@@ -2486,44 +2528,12 @@ return (
                 </View>
               ) : active.kind === "link" ? (
                 <View style={styles.previewLinkCard}>
-                  <View style={styles.previewLinkTop}>
-                    <View style={styles.previewLinkIcon}>
-                      <Ionicons
-                        name="link-outline"
-                        size={18}
-                        color={colors.textPrimary}
-                      />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text
-                        style={styles.previewLinkTitle}
-                        numberOfLines={1}
-                      >
-                        {safeStr(active.title) ||
-                          titleFromUrl(active.url || "")}
-                      </Text>
-                      <Text
-                        style={styles.previewLinkSub}
-                        numberOfLines={1}
-                      >
-                        {safeStr(active.url)}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.previewLinkActions}>
-                    <TouchableOpacity
-                      onPress={() => openAttachment(active)}
-                      style={styles.saveBtn}
-                    >
-                      <Ionicons
-                        name="open-outline"
-                        size={18}
-                        color="#fff"
-                      />
-                      <Text style={styles.saveBtnText}>Open</Text>
-                    </TouchableOpacity>
-                  </View>
+                  <LinkCoverCard
+                    attachment={active}
+                    loading={!!linkCoverLoading[active.attachment_id || active.id]}
+                    onPress={() => openAttachment(active)}
+                    onOpen={() => openAttachment(active)}
+                  />
                 </View>
               ) : active._isPhoto ? (
                 <TouchableOpacity
@@ -2764,6 +2774,53 @@ return (
                     {filtered.map((row) => {
                       const isSel = selected?.attachment_id === row.attachment_id;
                       // OR: selected?.asset_placement_id === row.asset_placement_id
+
+                      if (row.kind === "link") {
+                        return (
+                          <LinkCoverCard
+                            key={row.asset_placement_id || row.placement_id || row.attachment_id}
+                            attachment={row}
+                            selected={isSel}
+                            loading={!!linkCoverLoading[row.attachment_id || row.id]}
+                            onPress={() => setSelected(row)}
+                            onOpen={() => openAttachment(row)}
+                            rightActions={(
+                              <>
+                                <TouchableOpacity
+                                  style={styles.rowAction}
+                                  onPress={() =>
+                                    navigation.navigate("ProofBuilder", {
+                                      assetId,
+                                      attachmentId: row.attachment_id || row.id,
+                                      role: row.role,
+                                    })
+                                  }
+                                  accessibilityLabel="Proof Builder"
+                                >
+                                  <Ionicons name="document-text-outline" size={18} color={colors.textSecondary} />
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  style={styles.rowAction}
+                                  onPress={() => openAttachment(row)}
+                                  accessibilityLabel="Open attachment"
+                                >
+                                  <Ionicons name="open-outline" size={18} color={colors.textSecondary} />
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  style={styles.rowAction}
+                                  onPress={(e) => {
+                                    e?.stopPropagation?.();
+                                    removeFromThisAsset(row);
+                                  }}
+                                  accessibilityLabel="Remove attachment"
+                                >
+                                  <Ionicons name="trash-outline" size={18} color={colors.textSecondary} />
+                                </TouchableOpacity>
+                              </>
+                            )}
+                          />
+                        );
+                      }
 
                       return (
                         <TouchableOpacity
@@ -3314,6 +3371,37 @@ return (
                     {filtered.map((row) => {
                       const isSel = selected?.attachment_id === row.attachment_id;
                       // OR: selected?.asset_placement_id === row.asset_placement_id
+                      if (row.kind === "link") {
+                        return (
+                          <LinkCoverCard
+                            key={row.asset_placement_id || row.placement_id || row.attachment_id}
+                            attachment={row}
+                            selected={isSel}
+                            loading={!!linkCoverLoading[row.attachment_id || row.id]}
+                            compact
+                            onPress={() => setSelected(row)}
+                            onOpen={() => openAttachment(row)}
+                            rightActions={(
+                              <>
+                                <TouchableOpacity
+                                  style={styles.eyeBtn}
+                                  onPress={() => navigation.navigate("ProofBuilder", { assetId, attachmentId: row.attachment_id || row.id, role: row.role })}
+                                  accessibilityLabel="Proof Builder"
+                                >
+                                  <Ionicons name="document-text-outline" size={18} color={colors.textSecondary} />
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  style={styles.eyeBtn}
+                                  onPress={() => openAttachment(row)}
+                                  accessibilityLabel="Open attachment"
+                                >
+                                  <Ionicons name="open-outline" size={18} color={colors.textSecondary} />
+                                </TouchableOpacity>
+                              </>
+                            )}
+                          />
+                        );
+                      }
                       return (
                         <TouchableOpacity
                           key={row.asset_placement_id || row.placement_id || row.attachment_id}

@@ -9,6 +9,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  Linking,
   Platform,
   Modal,
 } from "react-native";
@@ -27,6 +28,8 @@ import {
   uploadAttachmentFromUri,
 } from "../lib/attachmentsUploader";
 import { inferSharedFileMimeType, isSharedFileImage } from "../lib/shareIntentPayload";
+import LinkCoverCard from "../components/LinkCoverCard";
+import { enrichLinkAttachment, shouldEnrichLinkAttachment } from "../lib/linkCover";
 
 import { useFocusEffect } from "@react-navigation/native";
 
@@ -87,6 +90,7 @@ export default function AssetAttachmentsMobileScreen({ route, navigation }) {
   const [showWebLinkModal, setShowWebLinkModal] = useState(false);
   const [webLinkValue, setWebLinkValue] = useState("");
   const [optimisticItems, setOptimisticItems] = useState([]);
+  const [linkCoverLoading, setLinkCoverLoading] = useState({});
 
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase();
@@ -113,6 +117,45 @@ export default function AssetAttachmentsMobileScreen({ route, navigation }) {
         return db.localeCompare(da);
       });
  }, [hookItems, optimisticItems, q, tab]);
+
+useEffect(() => {
+  let cancelled = false;
+  const visibleLinks = (filtered || [])
+    .filter((row) => row?.kind === "link")
+    .filter((row) => shouldEnrichLinkAttachment(row))
+    .slice(0, 4);
+
+  if (visibleLinks.length === 0) return () => {
+    cancelled = true;
+  };
+
+  (async () => {
+    for (const row of visibleLinks) {
+      if (cancelled) break;
+      const id = row.attachment_id || row.id;
+      if (!id) continue;
+      setLinkCoverLoading((prev) => ({ ...prev, [id]: true }));
+      try {
+        await enrichLinkAttachment(row);
+        if (!cancelled) await refresh();
+      } catch (e) {
+        console.log("Link cover enrichment failed", e?.message || e);
+      } finally {
+        if (!cancelled) {
+          setLinkCoverLoading((prev) => {
+            const next = { ...prev };
+            delete next[id];
+            return next;
+          });
+        }
+      }
+    }
+  })();
+
+  return () => {
+    cancelled = true;
+  };
+}, [filtered, refresh]);
 
 const buildPlacements = useCallback(() => {
   const placements = [];
@@ -688,6 +731,18 @@ useEffect(() => {
     [assetId, assetName, navigation, returnToAttachmentsParams]
   );
 
+  const openOriginalLink = useCallback(async (row) => {
+    const url = normalizeUrl(row?.url || "");
+    if (!url) return;
+    try {
+      const ok = await Linking.canOpenURL(url);
+      if (!ok) throw new Error("Cannot open this URL on this device.");
+      await Linking.openURL(url);
+    } catch (e) {
+      Alert.alert("Open failed", e?.message || "Could not open link.");
+    }
+  }, []);
+
   return (
     
     <SafeAreaView style={[layoutStyles.screen, styles.screen]}>
@@ -784,11 +839,21 @@ useEffect(() => {
             </View>
           ) : (
             filtered.map((row) => (
-              <TouchableOpacity
-                key={row.attachment_id || row.id}
-                style={styles.row}
-                onPress={() => openDetail(row)}
-              >
+              row.kind === "link" ? (
+                <LinkCoverCard
+                  key={row.attachment_id || row.id}
+                  attachment={row}
+                  compact
+                  loading={!!linkCoverLoading[row.attachment_id || row.id]}
+                  onPress={() => openDetail(row)}
+                  onOpen={() => openOriginalLink(row)}
+                />
+              ) : (
+                <TouchableOpacity
+                  key={row.attachment_id || row.id}
+                  style={styles.row}
+                  onPress={() => openDetail(row)}
+                >
                 <View style={styles.rowIcon}>
                   <Ionicons
                     name={
@@ -818,7 +883,8 @@ useEffect(() => {
                 </View>
 
                 <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-              </TouchableOpacity>
+                </TouchableOpacity>
+              )
             ))
           )}
         </ScrollView>
