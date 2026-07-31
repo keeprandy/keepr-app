@@ -27,6 +27,7 @@ import KeeprDateField from "../components/KeeprDateField";
 import { isoToMDY, mdyToISO } from "../lib/dateFormat";
 import { WebView } from "react-native-webview";
 import { useFocusEffect } from "@react-navigation/native";
+import LinkCoverCard from "../components/LinkCoverCard";
 
 const IS_WEB = Platform.OS === "web";
 const PREVIEW_BUCKET_FALLBACK = "asset-files";
@@ -76,6 +77,10 @@ function isPdfLike(att) {
   const mime = safeStr(att.mime_type || "").toLowerCase();
   const ext = getExt(att.file_name || att.name || "");
   return mime === "application/pdf" || ext === "pdf";
+}
+
+function isLinkLike(att) {
+  return safeStr(att?.kind).toLowerCase() === "link" || !!safeStr(att?.url);
 }
 
 function inferName(att) {
@@ -261,21 +266,30 @@ export default function ProofBuilderScreen({ route, navigation }) {
   const [newSystemName, setNewSystemName] = useState("");
 
   const exitToAttachmentContext = useCallback(() => {
+    if (navigation.canGoBack?.()) {
+      navigation.goBack();
+      return;
+    }
+
     if (returnRoute) {
-      navigation.navigate(returnRoute, returnParams || {});
+      if (navigation.replace) {
+        navigation.replace(returnRoute, returnParams || {});
+      } else {
+        navigation.navigate(returnRoute, returnParams || {});
+      }
       return;
     }
 
     if (assetId) {
-      navigation.navigate("AssetAttachmentsMobile", {
+      const fallbackParams = {
         assetId,
         assetName: route?.params?.assetName || assetName || "Asset",
-      });
-      return;
-    }
-
-    if (navigation.canGoBack()) {
-      navigation.goBack();
+      };
+      if (navigation.replace) {
+        navigation.replace("AssetAttachmentsMobile", fallbackParams);
+      } else {
+        navigation.navigate("AssetAttachmentsMobile", fallbackParams);
+      }
       return;
     }
 
@@ -1242,44 +1256,54 @@ const androidPdfViewerUrl =
             {evidenceTitle}
           </Text>
           <Text style={styles.evidenceMeta} numberOfLines={1}>
-            {isPdfLike(attachment) ? "PDF document" : isImageLike(attachment) ? "Image" : "Document"}
+            {isLinkLike(attachment) ? "Link" : isPdfLike(attachment) ? "PDF document" : isImageLike(attachment) ? "Image" : "Document"}
           </Text>
 
-          <View style={styles.previewWrap}>
-          {previewLoading ? (
-            <View style={styles.previewCenter}>
-              <ActivityIndicator />
+          {isLinkLike(attachment) ? (
+            <View style={styles.linkCoverWrap}>
+              <LinkCoverCard
+                attachment={attachment}
+                onPress={openEvidence}
+                onOpen={openEvidence}
+              />
             </View>
-          ) : isImageLike(attachment) && pdfUrl ? (
-            <Image source={{ uri: pdfUrl }} style={styles.previewImage} resizeMode="contain" />
-          ) : isPdfLike(attachment) && pdfUrl ? (
-            IS_WEB ? (
-              // eslint-disable-next-line react/no-unknown-property
-              <iframe title="pdf" src={pdfUrl} style={styles.webIframe} />
-            ) : Platform.OS === "android" ? (
-              <WebView
-                source={{ uri: androidPdfViewerUrl }}
-                style={{ flex: 1 }}
-                originWhitelist={["*"]}
-                startInLoadingState
-                javaScriptEnabled
-                domStorageEnabled
-              />
-            ) : (
-              <WebView
-                source={{ uri: pdfUrl }}
-                style={{ flex: 1 }}
-                originWhitelist={["*"]}
-                startInLoadingState
-              />
-            )
           ) : (
-            <TouchableOpacity style={styles.previewFallback} onPress={openEvidence}>
-              <Ionicons name="document-text-outline" size={22} color={colors.textMuted} />
-              <Text style={styles.previewFallbackText}>Open attachment</Text>
-            </TouchableOpacity>
+            <View style={styles.previewWrap}>
+              {previewLoading ? (
+                <View style={styles.previewCenter}>
+                  <ActivityIndicator />
+                </View>
+              ) : isImageLike(attachment) && pdfUrl ? (
+                <Image source={{ uri: pdfUrl }} style={styles.previewImage} resizeMode="contain" />
+              ) : isPdfLike(attachment) && pdfUrl ? (
+                IS_WEB ? (
+                  // eslint-disable-next-line react/no-unknown-property
+                  <iframe title="pdf" src={pdfUrl} style={styles.webIframe} />
+                ) : Platform.OS === "android" ? (
+                  <WebView
+                    source={{ uri: androidPdfViewerUrl }}
+                    style={{ flex: 1 }}
+                    originWhitelist={["*"]}
+                    startInLoadingState
+                    javaScriptEnabled
+                    domStorageEnabled
+                  />
+                ) : (
+                  <WebView
+                    source={{ uri: pdfUrl }}
+                    style={{ flex: 1 }}
+                    originWhitelist={["*"]}
+                    startInLoadingState
+                  />
+                )
+              ) : (
+                <TouchableOpacity style={styles.previewFallback} onPress={openEvidence}>
+                  <Ionicons name="document-text-outline" size={22} color={colors.textMuted} />
+                  <Text style={styles.previewFallbackText}>Open attachment</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           )}
-        </View>
         </View>
               {attachment ? (
   <View style={styles.card}>
@@ -1742,6 +1766,10 @@ const styles = StyleSheet.create({
 
   evidenceName: { marginTop: spacing.sm, fontSize: 14, fontWeight: "800", color: colors.textPrimary },
   evidenceMeta: { marginTop: 2, fontSize: 12, color: colors.textMuted },
+
+  linkCoverWrap: {
+    marginTop: spacing.sm,
+  },
 
   previewWrap: {
     marginTop: spacing.sm,
