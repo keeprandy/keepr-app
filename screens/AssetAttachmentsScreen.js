@@ -1700,6 +1700,24 @@ const isWide = IS_WEB && width >= 980;
     }
   }, [ensureSignedUrlForRow]);
 
+  const retryLinkCover = useCallback(async (row) => {
+    const id = row?.attachment_id || row?.id;
+    if (!id) return;
+    setLinkCoverLoading((prev) => ({ ...prev, [id]: true }));
+    try {
+      await enrichLinkAttachment(row, { force: true });
+      await refresh();
+    } catch (e) {
+      Alert.alert("Preview unavailable", e?.message || "Could not refresh this link preview.");
+    } finally {
+      setLinkCoverLoading((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }
+  }, [refresh]);
+
   const ensureMediaPermission = useCallback(async () => {
     if (IS_WEB) return true;
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -2533,6 +2551,7 @@ return (
                     loading={!!linkCoverLoading[active.attachment_id || active.id]}
                     onPress={() => openAttachment(active)}
                     onOpen={() => openAttachment(active)}
+                    onRetry={() => retryLinkCover(active)}
                   />
                 </View>
               ) : active._isPhoto ? (
@@ -2784,6 +2803,7 @@ return (
                             loading={!!linkCoverLoading[row.attachment_id || row.id]}
                             onPress={() => setSelected(row)}
                             onOpen={() => openAttachment(row)}
+                            onRetry={() => retryLinkCover(row)}
                             rightActions={(
                               <>
                                 <TouchableOpacity
@@ -3381,6 +3401,7 @@ return (
                             compact
                             onPress={() => setSelected(row)}
                             onOpen={() => openAttachment(row)}
+                            onRetry={() => retryLinkCover(row)}
                             rightActions={(
                               <>
                                 <TouchableOpacity

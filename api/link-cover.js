@@ -50,18 +50,25 @@ function titleContent(html) {
 
 function firstIcon(html, baseUrl) {
   const links = html.match(/<link\b[^>]*>/gi) || [];
+  const candidates = [];
   for (const tag of links) {
     const rel = getAttr(tag, "rel").toLowerCase();
     if (!rel.includes("icon")) continue;
     const href = getAttr(tag, "href");
     if (!href) continue;
     try {
-      return new URL(href, baseUrl).toString();
+      candidates.push({
+        url: new URL(href, baseUrl).toString(),
+        score:
+          rel.includes("apple-touch-icon") ? 3 :
+          rel.includes("shortcut") ? 2 :
+          1,
+      });
     } catch {
-      return "";
+      // keep looking for another usable icon
     }
   }
-  return "";
+  return candidates.sort((a, b) => b.score - a.score)[0]?.url || "";
 }
 
 function isPrivateAddress(address) {
@@ -122,6 +129,76 @@ function normalizeImage(imageUrl, baseUrl) {
     return url.toString();
   } catch {
     return "";
+  }
+}
+
+function fallbackCover(rawUrl, error) {
+  try {
+    const url = new URL(String(rawUrl || ""));
+    if (!["http:", "https:"].includes(url.protocol)) throw new Error("bad_url");
+    const domain = url.hostname.replace(/^www\./, "");
+    return {
+      display_title: domain || "Saved link",
+      display_description: "",
+      preview_image_url: "",
+      favicon_url: "",
+      source_name: domain,
+      source_domain: domain,
+      content_kind: "webpage",
+      canonical_url: url.toString(),
+      enrichment_status: "failed",
+      enrichment_error: cleanText(error?.message || "Unable to enrich link.", 180),
+      enriched_at: new Date().toISOString(),
+    };
+  } catch {
+    return {
+      display_title: "",
+      display_description: "",
+      preview_image_url: "",
+      favicon_url: "",
+      source_name: "",
+      source_domain: "",
+      content_kind: "webpage",
+      canonical_url: "",
+      enrichment_status: "failed",
+      enrichment_error: cleanText(error?.message || "Unable to enrich link.", 180),
+      enriched_at: new Date().toISOString(),
+    };
+  }
+}
+
+function youtubeVideoId(url) {
+  const host = url.hostname.replace(/^www\./, "");
+  if (host === "youtu.be") return url.pathname.split("/").filter(Boolean)[0] || "";
+  if (host.endsWith("youtube.com")) return url.searchParams.get("v") || "";
+  return "";
+}
+
+async function youtubeOembed(url) {
+  const id = youtubeVideoId(url);
+  if (!id) return null;
+  const endpoint = `https://www.youtube.com/oembed?url=${encodeURIComponent(url.toString())}&format=json`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(endpoint, {
+      signal: controller.signal,
+      headers: {
+        "user-agent": "KeeprLinkPreview/1.0",
+        accept: "application/json",
+      },
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return {
+      title: cleanText(data?.title, 120),
+      sourceName: cleanText(data?.provider_name || "YouTube", 80),
+      image: normalizeImage(data?.thumbnail_url, url),
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -209,20 +286,23 @@ export default async function handler(req, res) {
       return "";
     })();
 
-    const previewImage = normalizeImage(ogImage || twitterImage || firstIcon(html, url), url);
-    const sourceName = metaContent(html, (key) => key === "og:site_name") || url.hostname.replace(/^www\./, "");
+    const youtube = await youtubeOembed(url);
+    const previewImage = normalizeImage(ogImage || twitterImage, url) || youtube?.image || "";
+    const faviconUrl = normalizeImage(firstIcon(html, url) || "/favicon.ico", url);
+    const sourceName = metaContent(html, (key) => key === "og:site_name") || youtube?.sourceName || url.hostname.replace(/^www\./, "");
 
     return json(res, 200, {
       ok: true,
       link_cover: {
-        display_title: cleanText(title || url.hostname.replace(/^www\./, ""), 120),
+        display_title: cleanText(title || youtube?.title || url.hostname.replace(/^www\./, ""), 120),
         display_description: cleanText(description, 220),
         preview_image_url: previewImage,
+        favicon_url: faviconUrl,
         source_name: cleanText(sourceName, 80),
         source_domain: url.hostname.replace(/^www\./, ""),
         content_kind: "webpage",
         canonical_url: canonical || url.toString(),
-        enrichment_status: previewImage || title || description ? "complete" : "partial",
+        enrichment_status: previewImage || faviconUrl || title || description ? "complete" : "partial",
         enrichment_error: null,
         enriched_at: new Date().toISOString(),
       },
@@ -230,18 +310,7 @@ export default async function handler(req, res) {
   } catch (error) {
     return json(res, 200, {
       ok: false,
-      link_cover: {
-        display_title: "",
-        display_description: "",
-        preview_image_url: "",
-        source_name: "",
-        source_domain: "",
-        content_kind: "webpage",
-        canonical_url: "",
-        enrichment_status: "failed",
-        enrichment_error: cleanText(error?.message || "Unable to enrich link.", 180),
-        enriched_at: new Date().toISOString(),
-      },
+      link_cover: fallbackCover(req.method === "GET" ? req.query?.url : req.body?.url, error),
     });
   }
 }

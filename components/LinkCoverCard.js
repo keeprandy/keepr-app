@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -23,6 +23,10 @@ function displayTitle(attachment, cover) {
   return safeStr(cover?.display_title) || getLinkDomain(url) || "Saved link";
 }
 
+function displaySource(cover, url) {
+  return safeStr(cover?.source_name) || safeStr(cover?.source_domain) || getLinkDomain(url) || "Link";
+}
+
 function formatDate(raw) {
   if (!raw) return "";
   try {
@@ -41,16 +45,28 @@ export default function LinkCoverCard({
   compact = false,
   onPress,
   onOpen,
+  onRetry,
   rightActions = null,
 }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const [faviconFailed, setFaviconFailed] = useState(false);
   const cover = getLinkCover(attachment);
   const url = safeStr(attachment?.url);
   const domain = safeStr(cover?.source_domain) || getLinkDomain(url);
+  const source = displaySource(cover, url);
   const title = displayTitle(attachment, cover);
   const description = safeStr(cover?.display_description);
   const imageUrl = safeStr(cover?.preview_image_url);
+  const faviconUrl = safeStr(cover?.favicon_url);
   const status = safeStr(cover?.enrichment_status).toLowerCase();
   const added = formatDate(attachment?.created_at);
+  const showImage = imageUrl && !imageFailed;
+  const showFavicon = faviconUrl && !faviconFailed;
+
+  useEffect(() => {
+    setImageFailed(false);
+    setFaviconFailed(false);
+  }, [imageUrl, faviconUrl]);
 
   return (
     <TouchableOpacity
@@ -63,12 +79,24 @@ export default function LinkCoverCard({
       ]}
     >
       <View style={[styles.media, compact && styles.mediaCompact]}>
-        {imageUrl ? (
-          <Image source={{ uri: imageUrl }} style={styles.image} resizeMode="cover" />
+        {showImage ? (
+          <Image
+            source={{ uri: imageUrl }}
+            style={styles.image}
+            resizeMode="cover"
+            onError={() => setImageFailed(true)}
+          />
         ) : (
           <View style={styles.fallback}>
             {loading ? (
               <ActivityIndicator size="small" color={colors.primary} />
+            ) : showFavicon ? (
+              <Image
+                source={{ uri: faviconUrl }}
+                style={compact ? styles.faviconCompact : styles.favicon}
+                resizeMode="contain"
+                onError={() => setFaviconFailed(true)}
+              />
             ) : (
               <Ionicons name="link-outline" size={compact ? 18 : 22} color={colors.primary} />
             )}
@@ -79,12 +107,12 @@ export default function LinkCoverCard({
       <View style={styles.body}>
         <View style={styles.labelRow}>
           <Text style={styles.label} numberOfLines={1}>
-            {domain || "Link"}
+            {source}
           </Text>
           {status === "failed" ? (
-            <Text style={styles.status}>Preview unavailable</Text>
+            <Text style={styles.status} numberOfLines={1}>Preview unavailable</Text>
           ) : loading ? (
-            <Text style={styles.status}>Loading preview</Text>
+            <Text style={styles.status} numberOfLines={1}>Loading preview</Text>
           ) : null}
         </View>
         <Text style={[styles.title, compact && styles.titleCompact]} numberOfLines={compact ? 2 : 2}>
@@ -97,9 +125,19 @@ export default function LinkCoverCard({
         ) : null}
         <View style={styles.footer}>
           <Text style={styles.url} numberOfLines={1}>
-            {url}
+            {domain || url}
           </Text>
           {added ? <Text style={styles.added}>Added {added}</Text> : null}
+          {status === "failed" && onRetry ? (
+            <TouchableOpacity
+              onPress={onRetry}
+              style={styles.retryBtn}
+              accessibilityLabel="Retry link preview"
+            >
+              <Ionicons name="refresh-outline" size={12} color={colors.primary} />
+              <Text style={styles.retryText}>Retry preview</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       </View>
 
@@ -152,6 +190,7 @@ const styles = StyleSheet.create({
   },
   media: {
     width: 112,
+    minHeight: 92,
     borderRadius: radius.md,
     overflow: "hidden",
     backgroundColor: "#EEF5FF",
@@ -159,6 +198,7 @@ const styles = StyleSheet.create({
   },
   mediaCompact: {
     width: 58,
+    minHeight: 58,
     marginRight: 10,
   },
   image: {
@@ -169,7 +209,19 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#EEF5FF",
+    backgroundColor: "#F4F8FF",
+    borderWidth: 1,
+    borderColor: "#DBEAFE",
+  },
+  favicon: {
+    width: 42,
+    height: 42,
+    borderRadius: 10,
+  },
+  faviconCompact: {
+    width: 28,
+    height: 28,
+    borderRadius: 7,
   },
   body: {
     flex: 1,
@@ -192,6 +244,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: 11,
     fontWeight: "700",
+    flexShrink: 0,
   },
   title: {
     color: colors.textPrimary,
@@ -211,16 +264,35 @@ const styles = StyleSheet.create({
   },
   footer: {
     marginTop: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
   },
   url: {
     color: colors.textSecondary,
     fontSize: 12,
+    maxWidth: "65%",
   },
   added: {
-    marginTop: 2,
+    marginLeft: 8,
     color: colors.textSecondary,
     fontSize: 11,
     fontWeight: "700",
+  },
+  retryBtn: {
+    marginLeft: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: "#EFF6FF",
+  },
+  retryText: {
+    marginLeft: 4,
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: "800",
   },
   actions: {
     justifyContent: "center",

@@ -731,6 +731,24 @@ useEffect(() => {
     [assetId, assetName, navigation, returnToAttachmentsParams]
   );
 
+  const retryLinkCover = useCallback(async (row) => {
+    const id = row?.attachment_id || row?.id;
+    if (!id) return;
+    setLinkCoverLoading((prev) => ({ ...prev, [id]: true }));
+    try {
+      await enrichLinkAttachment(row, { force: true });
+      await refresh();
+    } catch (e) {
+      Alert.alert("Preview unavailable", e?.message || "Could not refresh this link preview.");
+    } finally {
+      setLinkCoverLoading((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }
+  }, [refresh]);
+
   const openOriginalLink = useCallback(async (row) => {
     const url = normalizeUrl(row?.url || "");
     if (!url) return;
@@ -847,6 +865,7 @@ useEffect(() => {
                   loading={!!linkCoverLoading[row.attachment_id || row.id]}
                   onPress={() => openDetail(row)}
                   onOpen={() => openOriginalLink(row)}
+                  onRetry={() => retryLinkCover(row)}
                 />
               ) : (
                 <TouchableOpacity
