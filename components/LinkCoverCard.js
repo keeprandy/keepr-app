@@ -58,6 +58,8 @@ export default function LinkCoverCard({
   const description = safeStr(cover?.display_description);
   const imageUrl = safeStr(cover?.preview_image_url);
   const faviconUrl = safeStr(cover?.favicon_url);
+  const contentKind = safeStr(cover?.content_kind).toLowerCase();
+  const isVideo = contentKind === "video";
   const status = safeStr(cover?.enrichment_status).toLowerCase();
   const added = formatDate(attachment?.created_at);
   const showImage = imageUrl && !imageFailed;
@@ -80,12 +82,19 @@ export default function LinkCoverCard({
     >
       <View style={[styles.media, compact && styles.mediaCompact]}>
         {showImage ? (
-          <Image
-            source={{ uri: imageUrl }}
-            style={styles.image}
-            resizeMode="cover"
-            onError={() => setImageFailed(true)}
-          />
+          <>
+            <Image
+              source={{ uri: imageUrl }}
+              style={styles.image}
+              resizeMode="cover"
+              onError={() => setImageFailed(true)}
+            />
+            {isVideo ? (
+              <View style={styles.playBadge}>
+                <Ionicons name="play" size={compact ? 14 : 18} color="#FFFFFF" />
+              </View>
+            ) : null}
+          </>
         ) : (
           <View style={styles.fallback}>
             {loading ? (
@@ -107,7 +116,7 @@ export default function LinkCoverCard({
       <View style={styles.body}>
         <View style={styles.labelRow}>
           <Text style={styles.label} numberOfLines={1}>
-            {source}
+            {isVideo ? `${source} · Video` : source}
           </Text>
           {status === "failed" ? (
             <Text style={styles.status} numberOfLines={1}>Preview unavailable</Text>
@@ -205,6 +214,21 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%",
     backgroundColor: "#EAF2FF",
+  },
+  playBadge: {
+    position: "absolute",
+    left: "50%",
+    top: "50%",
+    width: 38,
+    height: 38,
+    marginLeft: -19,
+    marginTop: -19,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(15,23,42,0.74)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.72)",
   },
   fallback: {
     width: "100%",

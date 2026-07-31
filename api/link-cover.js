@@ -98,6 +98,11 @@ function isPrivateAddress(address) {
   );
 }
 
+function isYoutubeHost(hostname) {
+  const host = String(hostname || "").toLowerCase().replace(/^(www\.|m\.)/, "");
+  return host === "youtu.be" || host === "youtube.com" || host.endsWith(".youtube.com");
+}
+
 async function assertPublicHttpUrl(raw) {
   const url = new URL(String(raw || ""));
   if (!["http:", "https:"].includes(url.protocol)) {
@@ -112,6 +117,8 @@ async function assertPublicHttpUrl(raw) {
   ) {
     throw new Error("Private or local links cannot be enriched.");
   }
+
+  if (isYoutubeHost(host)) return url;
 
   const resolved = await dns.lookup(host, { all: true, verbatim: true });
   if ((resolved || []).some((entry) => isPrivateAddress(entry?.address))) {
@@ -167,11 +174,38 @@ function fallbackCover(rawUrl, error) {
   }
 }
 
+function normalizeYoutubeVideoId(value) {
+  const id = String(value || "").trim();
+  return /^[A-Za-z0-9_-]{6,20}$/.test(id) ? id : "";
+}
+
 function youtubeVideoId(url) {
-  const host = url.hostname.replace(/^www\./, "");
-  if (host === "youtu.be") return url.pathname.split("/").filter(Boolean)[0] || "";
-  if (host.endsWith("youtube.com")) return url.searchParams.get("v") || "";
+  const host = url.hostname.replace(/^(www\.|m\.)/, "");
+  const pathParts = url.pathname.split("/").filter(Boolean);
+  if (host === "youtu.be") return normalizeYoutubeVideoId(pathParts[0]);
+  if (!host.endsWith("youtube.com")) return "";
+  if (url.pathname === "/watch") return normalizeYoutubeVideoId(url.searchParams.get("v"));
+  if (pathParts[0] === "shorts") return normalizeYoutubeVideoId(pathParts[1]);
+  if (pathParts[0] === "embed") return normalizeYoutubeVideoId(pathParts[1]);
   return "";
+}
+
+function youtubeSourceCover(url) {
+  const id = youtubeVideoId(url);
+  if (!id) return null;
+  return {
+    display_title: "YouTube video",
+    display_description: "",
+    preview_image_url: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
+    favicon_url: "https://www.youtube.com/s/desktop/f506bd45/img/favicon_144x144.png",
+    source_name: "YouTube",
+    source_domain: "youtube.com",
+    content_kind: "video",
+    canonical_url: `https://www.youtube.com/watch?v=${id}`,
+    enrichment_status: "partial",
+    enrichment_error: null,
+    enriched_at: new Date().toISOString(),
+  };
 }
 
 async function youtubeOembed(url) {
@@ -254,7 +288,26 @@ export default async function handler(req, res) {
   try {
     const rawUrl = req.method === "GET" ? req.query?.url : req.body?.url;
     const url = await assertPublicHttpUrl(rawUrl);
-    const html = await fetchLimited(url.toString());
+    const recognizedCover = youtubeSourceCover(url);
+    const recognizedMeta = recognizedCover ? await youtubeOembed(url) : null;
+
+    let html = "";
+    try {
+      html = await fetchLimited(url.toString());
+    } catch (fetchError) {
+      if (!recognizedCover) throw fetchError;
+      return json(res, 200, {
+        ok: true,
+        link_cover: {
+          ...recognizedCover,
+          display_title: recognizedMeta?.title || recognizedCover.display_title,
+          preview_image_url: recognizedMeta?.image || recognizedCover.preview_image_url,
+          source_name: recognizedMeta?.sourceName || recognizedCover.source_name,
+          enrichment_status: recognizedMeta?.title ? "complete" : "partial",
+          enriched_at: new Date().toISOString(),
+        },
+      });
+    }
 
     const ogTitle = metaContent(html, (key) => key === "og:title");
     const twitterTitle = metaContent(html, (key) => key === "twitter:title");
@@ -286,22 +339,29 @@ export default async function handler(req, res) {
       return "";
     })();
 
-    const youtube = await youtubeOembed(url);
-    const previewImage = normalizeImage(ogImage || twitterImage, url) || youtube?.image || "";
+    const previewImage =
+      normalizeImage(ogImage || twitterImage, url) ||
+      recognizedMeta?.image ||
+      recognizedCover?.preview_image_url ||
+      "";
     const faviconUrl = normalizeImage(firstIcon(html, url) || "/favicon.ico", url);
-    const sourceName = metaContent(html, (key) => key === "og:site_name") || youtube?.sourceName || url.hostname.replace(/^www\./, "");
+    const sourceName =
+      recognizedCover?.source_name ||
+      metaContent(html, (key) => key === "og:site_name") ||
+      recognizedMeta?.sourceName ||
+      url.hostname.replace(/^www\./, "");
 
     return json(res, 200, {
       ok: true,
       link_cover: {
-        display_title: cleanText(title || youtube?.title || url.hostname.replace(/^www\./, ""), 120),
+        display_title: cleanText(title || recognizedMeta?.title || recognizedCover?.display_title || url.hostname.replace(/^www\./, ""), 120),
         display_description: cleanText(description, 220),
         preview_image_url: previewImage,
-        favicon_url: faviconUrl,
+        favicon_url: recognizedCover?.favicon_url || faviconUrl,
         source_name: cleanText(sourceName, 80),
-        source_domain: url.hostname.replace(/^www\./, ""),
-        content_kind: "webpage",
-        canonical_url: canonical || url.toString(),
+        source_domain: recognizedCover?.source_domain || url.hostname.replace(/^www\./, ""),
+        content_kind: recognizedCover?.content_kind || "webpage",
+        canonical_url: recognizedCover?.canonical_url || canonical || url.toString(),
         enrichment_status: previewImage || faviconUrl || title || description ? "complete" : "partial",
         enrichment_error: null,
         enriched_at: new Date().toISOString(),
