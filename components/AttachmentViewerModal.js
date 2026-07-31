@@ -496,7 +496,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.borderSubtle,
     ...shadowSm,
-    ...(IS_WEB ? { maxWidth: 960, maxHeight: "88%" } : { maxHeight: "88%" }),
+    ...(IS_WEB
+      ? { maxWidth: 1180, height: "88%", maxHeight: 900 }
+      : { maxHeight: "86%" }),
   },
   cardScroll: {
     flexGrow: 0,
@@ -526,12 +528,17 @@ const styles = StyleSheet.create({
   metaFileName: { marginLeft: spacing.sm, fontSize: 12, color: colors.textSecondary, maxWidth: 520 },
   counter: { marginLeft: spacing.sm, fontSize: 12, fontWeight: "800", color: colors.textSecondary },
 
-  body: { flexDirection: IS_WEB ? "column" : "column", gap: spacing.md },
+  body: {
+    flexDirection: IS_WEB ? "row" : "column",
+    gap: spacing.md,
+    flex: IS_WEB ? 1 : 0,
+    minHeight: 0,
+  },
 
 preview: {
-  flex: IS_WEB ? 3 : 0,
-  height: IS_WEB ? undefined : 420,
-  minHeight: IS_WEB ? 560 : undefined,
+  flex: IS_WEB ? 1 : 0,
+  height: IS_WEB ? undefined : 330,
+  minHeight: IS_WEB ? 0 : undefined,
   backgroundColor: "#000",
   borderRadius: radius.lg,
   overflow: "hidden",
@@ -602,13 +609,24 @@ navBtn: {
   evidenceHintRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: spacing.md },
   evidenceHint: { flex: 1, fontSize: 13, color: colors.textSecondary },
 
-  sidebar: { flex: IS_WEB ? 2 : 0, width: "100%" },
+  sidebar: {
+    flex: IS_WEB ? 0 : 1,
+    width: IS_WEB ? 300 : "100%",
+    maxWidth: IS_WEB ? 320 : undefined,
+    minHeight: IS_WEB ? 0 : 160,
+  },
 
   section: { fontSize: 14, fontWeight: "900", color: colors.textPrimary, marginBottom: spacing.sm },
   label: { fontSize: 12, fontWeight: "800", color: colors.textSecondary, marginTop: spacing.xs },
   value: { fontSize: 13, color: colors.textPrimary, marginTop: 2 },
 
-  footerActions: { flexDirection: "row", alignItems: "center", marginTop: spacing.md, gap: spacing.sm },
+  footerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    marginTop: spacing.md,
+    gap: spacing.sm,
+  },
   btn: {
     flexDirection: "row",
     alignItems: "center",
