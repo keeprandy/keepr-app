@@ -26,7 +26,7 @@
     },
     "android": {
       "package": "com.keeprhome.app",
-      "versionCode": 10905,
+      "versionCode": 10906,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
