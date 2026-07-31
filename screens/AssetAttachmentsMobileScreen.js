@@ -57,6 +57,16 @@ function asText(v) {
   return "";
 }
 
+async function apiSetPlacementShowcase({ attachment_id, target_type, target_id, is_showcase }) {
+  const { error } = await supabase
+    .from("attachment_placements")
+    .update({ is_showcase })
+    .eq("attachment_id", attachment_id)
+    .eq("target_type", target_type)
+    .eq("target_id", target_id);
+  if (error) throw error;
+}
+
 export default function AssetAttachmentsMobileScreen({ route, navigation }) {
   const assetId =
     route?.params?.assetId ||
@@ -98,6 +108,7 @@ export default function AssetAttachmentsMobileScreen({ route, navigation }) {
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
   const [viewerAttachment, setViewerAttachment] = useState(null);
+  const [showcaseBusy, setShowcaseBusy] = useState(false);
   const signedUrlCacheRef = useRef(new Map());
 
   const itemsWithCovers = useMemo(() => {
@@ -899,6 +910,54 @@ useEffect(() => {
     }
   }, []);
 
+  const toggleShowcaseForRow = useCallback(async (row) => {
+    const attachmentId = row?.attachment_id || row?.id;
+    if (!attachmentId || !assetId) return;
+    const nextValue = !row.is_showcase;
+    try {
+      setShowcaseBusy(true);
+      await apiSetPlacementShowcase({
+        attachment_id: attachmentId,
+        target_type: "asset",
+        target_id: assetId,
+        is_showcase: nextValue,
+      });
+      setViewerAttachment((prev) =>
+        prev && (prev.attachment_id || prev.id) === attachmentId
+          ? { ...prev, is_showcase: nextValue }
+          : prev
+      );
+      await refresh();
+    } catch (e) {
+      Alert.alert("Showcase update failed", e?.message || "Could not update showcase flag.");
+    } finally {
+      setShowcaseBusy(false);
+    }
+  }, [assetId, refresh]);
+
+  const renderShowcaseStar = useCallback((row) => (
+    <TouchableOpacity
+      style={[
+        styles.showcaseStarButton,
+        row?.is_showcase && styles.showcaseStarButtonActive,
+        showcaseBusy && { opacity: 0.55 },
+      ]}
+      onPress={(e) => {
+        e?.stopPropagation?.();
+        toggleShowcaseForRow(row);
+      }}
+      disabled={showcaseBusy}
+      accessibilityRole="button"
+      accessibilityLabel={row?.is_showcase ? "Remove from Showcase" : "Add to Showcase"}
+    >
+      <Ionicons
+        name={row?.is_showcase ? "star" : "star-outline"}
+        size={19}
+        color={row?.is_showcase ? "#F59E0B" : colors.textSecondary}
+      />
+    </TouchableOpacity>
+  ), [showcaseBusy, toggleShowcaseForRow]);
+
   return (
     
     <SafeAreaView style={[layoutStyles.screen, styles.screen]}>
@@ -914,6 +973,11 @@ useEffect(() => {
           setViewerVisible(false);
           openDetail(row);
         } : null}
+        onToggleShowcase={viewerAttachment ? () => {
+          const row = (filtered || [])[viewerIndex] || viewerAttachment;
+          toggleShowcaseForRow(row);
+        } : null}
+        showcaseBusy={showcaseBusy}
         assetId={assetId}
         assetName={assetName}
       />
@@ -1031,6 +1095,7 @@ useEffect(() => {
                   onPress={() => openViewerForRow(row)}
                   onOpen={() => openOriginalLink(row)}
                   onRetry={() => retryLinkCover(row)}
+                  leftAction={renderShowcaseStar(row)}
                 />
               ) : (
                 <TouchableOpacity
@@ -1038,19 +1103,7 @@ useEffect(() => {
                   style={styles.row}
                   onPress={() => openViewerForRow(row)}
                 >
-                <View style={styles.rowIcon}>
-                  <Ionicons
-                    name={
-                      row.kind === "link"
-                        ? "link-outline"
-                        : row.kind === "photo"
-                        ? "image-outline"
-                        : "document-outline"
-                    }
-                    size={18}
-                    color={colors.textPrimary}
-                  />
-                </View>
+                {renderShowcaseStar(row)}
 
                 <View style={{ flex: 1 }}>
                   <Text style={styles.rowTitle} numberOfLines={1}>
@@ -1065,6 +1118,12 @@ useEffect(() => {
                   <Text style={styles.rowSaving}>Saving to Keepr…</Text>
                 ) : null}
                 </View>
+
+                {row.badge ? (
+                  <View style={styles.typeBadge}>
+                    <Text style={styles.typeBadgeText}>{row.badge}</Text>
+                  </View>
+                ) : null}
 
                 <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
                 </TouchableOpacity>
@@ -1289,6 +1348,21 @@ modalSaveText: {
     justifyContent: "center",
     marginRight: 10,
   },
+  showcaseStarButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  showcaseStarButtonActive: {
+    backgroundColor: "#FFFBEB",
+    borderColor: "#FDE68A",
+  },
   rowTitle: {
     fontWeight: "800",
     color: colors.textPrimary,
@@ -1296,6 +1370,19 @@ modalSaveText: {
   rowSub: {
     marginTop: 2,
     fontSize: 12,
+    color: colors.textSecondary,
+  },
+  typeBadge: {
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceSubtle,
+    marginLeft: 8,
+    marginRight: 4,
+  },
+  typeBadgeText: {
+    fontSize: 11,
+    fontWeight: "900",
     color: colors.textSecondary,
   },
   centered: {

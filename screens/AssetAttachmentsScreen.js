@@ -2385,6 +2385,30 @@ const openAdd = () => {
     }
   }, [assetId, refresh]);
 
+  const renderShowcaseStar = useCallback((row, styleOverride) => (
+    <TouchableOpacity
+      style={[
+        styles.showcaseStarButton,
+        row?.is_showcase && styles.showcaseStarButtonActive,
+        showcaseBusy && { opacity: 0.55 },
+        styleOverride,
+      ]}
+      onPress={(e) => {
+        e?.stopPropagation?.();
+        toggleShowcaseForRow(row);
+      }}
+      disabled={showcaseBusy}
+      accessibilityRole="button"
+      accessibilityLabel={row?.is_showcase ? "Remove from Showcase" : "Add to Showcase"}
+    >
+      <Ionicons
+        name={row?.is_showcase ? "star" : "star-outline"}
+        size={19}
+        color={row?.is_showcase ? "#F59E0B" : colors.textSecondary}
+      />
+    </TouchableOpacity>
+  ), [showcaseBusy, toggleShowcaseForRow]);
+
 return (
   <SafeAreaView style={[layoutStyles.screen, styles.screen]}>
 
@@ -2950,6 +2974,7 @@ return (
                             onPress={() => openViewerForRow(row)}
                             onOpen={() => openAttachment(row)}
                             onRetry={() => retryLinkCover(row)}
+                            leftAction={renderShowcaseStar(row)}
                             rightActions={(
                               <>
                                 <TouchableOpacity
@@ -2995,19 +3020,7 @@ return (
                           onPress={() => openViewerForRow(row)}
                         >
                           <View style={styles.rowLeft}>
-                            <View style={styles.rowIcon}>
-                              <Ionicons
-                                name={
-                                  row.kind === "link"
-                                    ? "link-outline"
-                                    : row._isPhoto
-                                    ? "image-outline"
-                                    : "document-outline"
-                                }
-                                size={18}
-                                color={colors.textPrimary}
-                              />
-                            </View>
+                            {renderShowcaseStar(row)}
 
                             <View style={{ flex: 1 }}>
                               <Text style={styles.rowTitle} numberOfLines={1}>
@@ -3025,18 +3038,6 @@ return (
                           </View>
 
                           <View style={styles.rowRight}>
-                            {row.is_showcase && (
-                              <View style={styles.showcaseChip}>
-                                <Ionicons
-                                  name="star"
-                                  size={11}
-                                  color="#FACC15"
-                                  style={{ marginRight: 4 }}
-                                />
-                                <Text style={styles.showcaseChipText}>Showcase</Text>
-                              </View>
-                            )}
-
                             <Badge text={row.badge} />
 
                             {/* ✅ Proof Builder and Keepr Intelligence entry point */}
@@ -3560,6 +3561,7 @@ return (
                             onPress={() => openViewerForRow(row)}
                             onOpen={() => openAttachment(row)}
                             onRetry={() => retryLinkCover(row)}
+                            leftAction={renderShowcaseStar(row)}
                             rightActions={(
                               <>
                                 <TouchableOpacity
@@ -3588,19 +3590,7 @@ return (
                           onPress={() => openViewerForRow(row)}
                         >
                           <View style={styles.rowLeft}>
-                            <View style={styles.rowIcon}>
-                              <Ionicons
-                                name={
-                                  row.kind === "link"
-                                    ? "link-outline"
-                                    : row._isPhoto
-                                    ? "image-outline"
-                                    : "document-outline"
-                                }
-                                size={18}
-                                color={colors.textPrimary}
-                              />
-                            </View>
+                            {renderShowcaseStar(row)}
 
                             <View style={{ flex: 1 }}>
                               <Text style={styles.rowTitle} numberOfLines={1}>
@@ -3618,18 +3608,6 @@ return (
                           </View>
 
                           <View style={styles.rowRight}>
-                            {row.is_showcase && (
-                              <View style={styles.showcaseChip}>
-                                <Ionicons
-                                  name="star"
-                                  size={11}
-                                  color="#FACC15"
-                                  style={{ marginRight: 4 }}
-                                />
-                                <Text style={styles.showcaseChipText}>Showcase</Text>
-                              </View>
-                            )}
-
                             <Badge text={row.badge} />
 
                             {/* ✅ Proof Builder and Keepr Intelligence entry point */}
@@ -4376,6 +4354,21 @@ addMenuModal: {
     alignItems: "center",
     justifyContent: "center",
     marginRight: 10,
+  },
+  showcaseStarButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  showcaseStarButtonActive: {
+    backgroundColor: "#FFFBEB",
+    borderColor: "#FDE68A",
   },
   rowTitle: {
     fontWeight: "900",

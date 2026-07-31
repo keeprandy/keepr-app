@@ -46,6 +46,7 @@ export default function LinkCoverCard({
   onPress,
   onOpen,
   onRetry,
+  leftAction = null,
   rightActions = null,
 }) {
   const [imageFailed, setImageFailed] = useState(false);
@@ -80,7 +81,9 @@ export default function LinkCoverCard({
         selected && styles.cardSelected,
       ]}
     >
-      <View style={[styles.media, compact && styles.mediaCompact]}>
+      <View style={styles.leftSlot}>
+        {leftAction}
+        <View style={[styles.media, compact && styles.mediaCompact, leftAction && styles.mediaWithLeftAction]}>
         {showImage ? (
           <>
             <Image
@@ -111,6 +114,7 @@ export default function LinkCoverCard({
             )}
           </View>
         )}
+        </View>
       </View>
 
       <View style={styles.body}>
@@ -197,18 +201,24 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
     backgroundColor: "#F8FBFF",
   },
+  leftSlot: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginRight: spacing.md,
+  },
   media: {
     width: 112,
     height: 78,
     borderRadius: radius.md,
     overflow: "hidden",
     backgroundColor: "#EEF5FF",
-    marginRight: spacing.md,
   },
   mediaCompact: {
     width: 58,
     height: 58,
-    marginRight: 10,
+  },
+  mediaWithLeftAction: {
+    marginLeft: 8,
   },
   image: {
     width: "100%",

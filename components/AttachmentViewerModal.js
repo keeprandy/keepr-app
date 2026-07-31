@@ -410,6 +410,12 @@ export default function AttachmentViewerModal({
       </View>
 
       <View style={styles.headerActions}>
+        {IS_WEB ? (
+          <TouchableOpacity onPress={() => setProfileOpen((open) => !open)} style={styles.infoButton}>
+            <Ionicons name="information-circle-outline" size={21} color={colors.primary} />
+            <Text style={styles.infoButtonText}>{profileOpen ? "Hide details" : "Details"}</Text>
+          </TouchableOpacity>
+        ) : null}
         {IS_MOBILE ? (
           <TouchableOpacity onPress={() => setProfileOpen(true)} style={styles.infoButton}>
             <Ionicons name="information-circle-outline" size={21} color={colors.primary} />
@@ -424,7 +430,11 @@ export default function AttachmentViewerModal({
 
       <View style={styles.body}>
         <View
-          style={[styles.preview, isLink && styles.linkPreview]}
+          style={[
+            styles.preview,
+            isLink && styles.linkPreview,
+            IS_WEB && profileOpen && styles.previewWithProfile,
+          ]}
           {...(IS_MOBILE && canNav ? swipeResponder.panHandlers : {})}
         >
           {/* Prev/Next overlay */}
@@ -505,7 +515,7 @@ export default function AttachmentViewerModal({
           )}
         </View>
 
-        {IS_WEB ? profilePanel : null}
+        {IS_WEB && profileOpen ? profilePanel : null}
       </View>
       {IS_MOBILE && !profileOpen ? (
         <TouchableOpacity style={styles.infoHint} onPress={() => setProfileOpen(true)}>
@@ -573,7 +583,7 @@ const styles = StyleSheet.create({
     borderColor: colors.borderSubtle,
     ...shadowSm,
     ...(IS_WEB
-      ? { maxWidth: 1180, height: "88%", maxHeight: 900 }
+      ? { maxWidth: 1480, height: "88%", maxHeight: 900 }
       : { maxHeight: "86%" }),
   },
   cardScroll: {
@@ -630,21 +640,34 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     flex: IS_WEB ? 1 : 0,
     minHeight: 0,
+    width: "100%",
+    overflow: "hidden",
+    position: "relative",
   },
 
 preview: {
-  flex: IS_WEB ? 1 : 0,
+  flexGrow: IS_WEB ? 1 : 0,
+  flexShrink: IS_WEB ? 1 : 0,
+  flexBasis: IS_WEB ? 0 : "auto",
   height: IS_WEB ? undefined : 330,
   minHeight: IS_WEB ? 0 : undefined,
+  minWidth: IS_WEB ? 0 : undefined,
   backgroundColor: "#000",
   borderRadius: radius.lg,
   overflow: "hidden",
 },
 
+previewWithProfile: {
+  marginRight: IS_WEB ? 396 : 0,
+},
+
 linkPreview: {
-  flex: IS_WEB ? 1 : 0,
+  flexGrow: IS_WEB ? 1 : 0,
+  flexShrink: IS_WEB ? 1 : 0,
+  flexBasis: IS_WEB ? 0 : "auto",
   height: IS_WEB ? undefined : 230,
   minHeight: IS_WEB ? 260 : undefined,
+  minWidth: IS_WEB ? 0 : undefined,
   backgroundColor: colors.bg || "#F8FAFC",
 },
 
@@ -715,8 +738,18 @@ navBtn: {
 
   profilePanel: {
     flex: IS_WEB ? 0 : 1,
-    width: IS_WEB ? 300 : "100%",
-    maxWidth: IS_WEB ? 320 : undefined,
+    flexShrink: IS_WEB ? 0 : 1,
+    width: IS_WEB ? 360 : "100%",
+    maxWidth: IS_WEB ? 380 : undefined,
+    ...(IS_WEB
+      ? {
+          position: "absolute",
+          top: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: 30,
+        }
+      : null),
     minHeight: IS_WEB ? 0 : 160,
     borderRadius: radius.lg,
     borderWidth: 1,
