@@ -289,7 +289,10 @@ export default function AttachmentViewerModal({
       </View>
 
       <View style={styles.body}>
-        <View style={styles.preview} {...(IS_MOBILE && canNav ? swipeResponder.panHandlers : {})}>
+        <View
+          style={[styles.preview, isLink && styles.linkPreview]}
+          {...(IS_MOBILE && canNav ? swipeResponder.panHandlers : {})}
+        >
           {/* Prev/Next overlay */}
           {canNav ? (
             <>
@@ -542,6 +545,13 @@ preview: {
   backgroundColor: "#000",
   borderRadius: radius.lg,
   overflow: "hidden",
+},
+
+linkPreview: {
+  flex: IS_WEB ? 1 : 0,
+  height: IS_WEB ? undefined : 230,
+  minHeight: IS_WEB ? 260 : undefined,
+  backgroundColor: colors.bg || "#F8FAFC",
 },
 
 linkStage: {
