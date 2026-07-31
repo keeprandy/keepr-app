@@ -29,7 +29,7 @@ import {
 } from "../lib/attachmentsUploader";
 import { inferSharedFileMimeType, isSharedFileImage } from "../lib/shareIntentPayload";
 import LinkCoverCard from "../components/LinkCoverCard";
-import { enrichLinkAttachment, shouldEnrichLinkAttachment } from "../lib/linkCover";
+import { enrichLinkAttachment, linkCoverErrorMessage, shouldEnrichLinkAttachment } from "../lib/linkCover";
 
 import { useFocusEffect } from "@react-navigation/native";
 
@@ -792,7 +792,7 @@ useEffect(() => {
         setLinkCoverOverrides((prev) => ({ ...prev, [id]: cover }));
       }
     } catch (e) {
-      Alert.alert("Preview unavailable", e?.message || "Could not refresh this link preview.");
+      Alert.alert("Preview unavailable", linkCoverErrorMessage(e));
     } finally {
       setLinkCoverLoading((prev) => {
         const next = { ...prev };

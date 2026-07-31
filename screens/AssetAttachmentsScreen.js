@@ -44,7 +44,7 @@ import {
 
 import { getSignedUrl } from "../lib/attachmentsApi";
 import LinkCoverCard from "../components/LinkCoverCard";
-import { enrichLinkAttachment, shouldEnrichLinkAttachment } from "../lib/linkCover";
+import { enrichLinkAttachment, linkCoverErrorMessage, shouldEnrichLinkAttachment } from "../lib/linkCover";
 
 
 import AttachmentViewerModal from "../components/AttachmentViewerModal";
@@ -1729,7 +1729,7 @@ const isWide = IS_WEB && width >= 980;
         setLinkCoverOverrides((prev) => ({ ...prev, [id]: cover }));
       }
     } catch (e) {
-      Alert.alert("Preview unavailable", e?.message || "Could not refresh this link preview.");
+      Alert.alert("Preview unavailable", linkCoverErrorMessage(e));
     } finally {
       setLinkCoverLoading((prev) => {
         const next = { ...prev };
