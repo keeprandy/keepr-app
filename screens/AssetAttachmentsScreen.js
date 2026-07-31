@@ -1646,9 +1646,12 @@ const isWide = IS_WEB && width >= 980;
   const toViewerAttachment = useCallback((row, signedUrl) => {
     if (!row) return null;
     return {
+      ...row,
+      id: row.attachment_id || row.id,
       kind: row.kind,
       title: row.title,
       notes: row.notes,
+      ai_metadata: row.ai_metadata,
       mime_type: row.mime_type,
       contentType: row.mime_type,
       fileName: row.file_name,
@@ -1659,6 +1662,7 @@ const isWide = IS_WEB && width >= 980;
       created_at: row.created_at,
       placement_id: row.asset_placement_id || row.placement_id,
       attachment_id: row.attachment_id,
+      is_showcase: row.is_showcase,
     };
   }, []);
 
@@ -1666,6 +1670,7 @@ const isWide = IS_WEB && width >= 980;
     if (!row) return;
     const idx = Math.max(0, (filtered || []).findIndex((x) => x.attachment_id === row.attachment_id));
     const signed = await ensureSignedUrlForRow(row);
+    setSelected(row);
     setViewerIndex(idx >= 0 ? idx : 0);
     setViewerAttachment(toViewerAttachment(row, signed));
     setViewerVisible(true);
@@ -2327,8 +2332,76 @@ const openAdd = () => {
     }
   }, [assetId, canToggleShowcase, refresh, selected]);
 
+  const viewerRow = useMemo(() => {
+    if (!viewerVisible) return null;
+    return (filtered || [])[viewerIndex] || null;
+  }, [filtered, viewerIndex, viewerVisible]);
+
+  const editContextForRow = useCallback((row) => {
+    if (!row) return;
+    setViewerVisible(false);
+    navigation.navigate("ProofBuilder", {
+      assetId,
+      assetName,
+      attachmentId: row.attachment_id || row.id,
+      role: row.role,
+      returnRoute: "AssetAttachments",
+      returnParams: { assetId, assetName },
+    });
+  }, [assetId, assetName, navigation]);
+
+  const toggleShowcaseForRow = useCallback(async (row) => {
+    if (!row?.attachment_id || !assetId) return;
+    const nextValue = !row.is_showcase;
+    try {
+      setShowcaseBusy(true);
+      await apiSetPlacementShowcase({
+        attachment_id: row.attachment_id,
+        target_type: "asset",
+        target_id: assetId,
+        is_showcase: nextValue,
+      });
+      setViewerAttachment((prev) =>
+        prev && prev.attachment_id === row.attachment_id
+          ? { ...prev, is_showcase: nextValue }
+          : prev
+      );
+      setSelected((prev) =>
+        prev && prev.attachment_id === row.attachment_id
+          ? { ...prev, is_showcase: nextValue }
+          : prev
+      );
+      try {
+        DeviceEventEmitter.emit("keepr:attachment:updated", {
+          assetId,
+          attachmentId: row.attachment_id,
+        });
+      } catch {}
+      await refresh();
+    } catch (e) {
+      Alert.alert("Showcase update failed", e?.message || "Could not update showcase flag.");
+    } finally {
+      setShowcaseBusy(false);
+    }
+  }, [assetId, refresh]);
+
 return (
   <SafeAreaView style={[layoutStyles.screen, styles.screen]}>
+
+    <AttachmentViewerModal
+      visible={viewerVisible}
+      attachment={viewerAttachment}
+      collection={filtered}
+      index={viewerIndex}
+      onIndexChange={setViewerIndex}
+      onClose={() => setViewerVisible(false)}
+      onDelete={viewerRow ? () => removeFromThisAsset(viewerRow) : null}
+      deleteNeedsConfirmation={false}
+      onEditContext={viewerRow ? () => editContextForRow(viewerRow) : null}
+      onToggleShowcase={viewerRow ? () => toggleShowcaseForRow(viewerRow) : null}
+      showcaseBusy={showcaseBusy}
+      assetId={assetId}
+    />
 
     {IS_WEB ? (
       <View style={{ width: 0, height: 0, overflow: "hidden" }}>
@@ -2598,7 +2671,7 @@ return (
                   <LinkCoverCard
                     attachment={active}
                     loading={!!linkCoverLoading[active.attachment_id || active.id]}
-                    onPress={() => openAttachment(active)}
+                    onPress={() => openViewerForRow(active)}
                     onOpen={() => openAttachment(active)}
                     onRetry={() => retryLinkCover(active)}
                   />
@@ -2873,7 +2946,7 @@ return (
                             attachment={row}
                             selected={isSel}
                             loading={!!linkCoverLoading[row.attachment_id || row.id]}
-                            onPress={() => setSelected(row)}
+                            onPress={() => openViewerForRow(row)}
                             onOpen={() => openAttachment(row)}
                             onRetry={() => retryLinkCover(row)}
                             rightActions={(
@@ -2918,7 +2991,7 @@ return (
                         <TouchableOpacity
                           key={row.asset_placement_id || row.placement_id || row.attachment_id}
                           style={[styles.row, isSel && styles.rowSelected]}
-                          onPress={() => setSelected(row)}
+                          onPress={() => openViewerForRow(row)}
                         >
                           <View style={styles.rowLeft}>
                             <View style={styles.rowIcon}>
@@ -3483,7 +3556,7 @@ return (
                             selected={isSel}
                             loading={!!linkCoverLoading[row.attachment_id || row.id]}
                             compact
-                            onPress={() => setSelected(row)}
+                            onPress={() => openViewerForRow(row)}
                             onOpen={() => openAttachment(row)}
                             onRetry={() => retryLinkCover(row)}
                             rightActions={(
@@ -3511,7 +3584,7 @@ return (
                         <TouchableOpacity
                           key={row.asset_placement_id || row.placement_id || row.attachment_id}
                           style={[styles.row, isSel && styles.rowSelected]}
-                          onPress={() => setSelected(row)}
+                          onPress={() => openViewerForRow(row)}
                         >
                           <View style={styles.rowLeft}>
                             <View style={styles.rowIcon}>

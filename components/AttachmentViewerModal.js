@@ -1,7 +1,8 @@
 // components/AttachmentViewerModal.js
-import React, { useMemo } from "react";
+import React, { useMemo, useEffect } from "react";
 import {
   Modal,
+  PanResponder,
   Platform,
   ScrollView,
   StyleSheet,
@@ -16,9 +17,10 @@ import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, radius, shadows } from "../styles/theme";
 import { confirmAction } from "../lib/confirm";
 import { WebView } from "react-native-webview";
+import LinkCoverCard from "./LinkCoverCard";
 
 const IS_WEB = Platform.OS === "web";
-  const IS_MOBILE = Platform.OS !== "web";
+const IS_MOBILE = Platform.OS !== "web";
 
 function getExt(name) {
   const s = String(name || "").split("?")[0].split("#")[0];
@@ -119,6 +121,10 @@ export default function AttachmentViewerModal({
   onIndexChange,
   onClose,
   onDelete,
+  deleteNeedsConfirmation = true,
+  onEditContext,
+  onToggleShowcase,
+  showcaseBusy = false,
   // Optional context for launching Keepr Intelligence
   assetId,
   systemId,
@@ -127,8 +133,6 @@ export default function AttachmentViewerModal({
   // Back-compat alias
   onIntelligence,
 }) {
-  if (!attachment) return null;
-
   const url = attachment?.urls?.signed || attachment?.urls?.public || attachment?.url || null;
 
   const fileName =
@@ -177,6 +181,7 @@ export default function AttachmentViewerModal({
   const isPhoto = isPhotoLike(ext, attachment?.contentType);
   const isPdfDoc = isPdf(ext, attachment?.contentType);
   const isLink = attachment?.kind === "link" || typeLabel === "Link";
+  const isShowcase = !!(attachment?.is_showcase || attachment?.isShowcase);
 
   const badge = useMemo(
     () => ({ label: (ext || (isLink ? "LINK" : "FILE")).toUpperCase(), tone: badgeTone }),
@@ -198,6 +203,39 @@ export default function AttachmentViewerModal({
     onIndexChange?.(next);
   };
 
+  useEffect(() => {
+    if (!visible || !IS_WEB || typeof window === "undefined") return undefined;
+    const onKeyDown = (event) => {
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        goPrev();
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        goNext();
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose?.();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [visible, canNav, safeIndex, collection?.length, onClose]);
+
+  const swipeResponder = useMemo(
+    () => PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) =>
+        Math.abs(gestureState.dx) > 28 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.4,
+      onPanResponderRelease: (_, gestureState) => {
+        if (Math.abs(gestureState.dx) < 48) return;
+        if (gestureState.dx > 0) goPrev();
+        else goNext();
+      },
+    }),
+    [canNav, safeIndex, collection?.length]
+  );
+
   const handleOpen = () => {
     if (!url) return;
     safeOpen(url);
@@ -218,6 +256,10 @@ export default function AttachmentViewerModal({
 
   const confirmDelete = () => {
     if (!onDelete) return;
+    if (!deleteNeedsConfirmation) {
+      onDelete();
+      return;
+    }
     confirmAction(
       "Remove evidence?",
       "This will remove this attachment from the story.",
@@ -247,7 +289,7 @@ export default function AttachmentViewerModal({
       </View>
 
       <View style={styles.body}>
-        <View style={styles.preview}>
+        <View style={styles.preview} {...(IS_MOBILE && canNav ? swipeResponder.panHandlers : {})}>
           {/* Prev/Next overlay */}
           {canNav ? (
             <>
@@ -277,22 +319,12 @@ export default function AttachmentViewerModal({
                 />
               )
             ) : isLink && url ? (
-            <View style={styles.evidenceCard}>
-              <View style={styles.evidenceTop}>
-                <Badge label="LINK" tone="badgeMuted" />
-                <Text style={styles.evidenceTitle} numberOfLines={2}>
-                  {title}
-                </Text>
-              </View>
-              <TouchableOpacity onPress={handleOpen} activeOpacity={0.85}>
-                <Text style={[styles.evidenceSub, styles.linkText]} numberOfLines={2}>
-                  {url}
-                </Text>
-                <View style={styles.evidenceHintRow}>
-                  <Ionicons name="open-outline" size={16} color={colors.textSecondary} />
-                  <Text style={styles.evidenceHint}>Tap to open in browser</Text>
-                </View>
-              </TouchableOpacity>
+            <View style={styles.linkStage}>
+              <LinkCoverCard
+                attachment={attachment}
+                onPress={handleOpen}
+                onOpen={handleOpen}
+              />
             </View>
           ) : (
             <View style={styles.evidenceCard}>
@@ -362,6 +394,9 @@ export default function AttachmentViewerModal({
             <Text style={[styles.label, { marginTop: spacing.sm }]}>Added</Text>
             <Text style={styles.value}>{formatDate(uploadedAt)}</Text>
 
+            <Text style={[styles.label, { marginTop: spacing.sm }]}>Showcase</Text>
+            <Text style={styles.value}>{isShowcase ? "Shown in Showcase" : "Not showcased"}</Text>
+
             <Text style={[styles.label, { marginTop: spacing.sm }]}>Size</Text>
             <Text style={styles.value}>{formatSize(size)}</Text>
 
@@ -374,6 +409,24 @@ export default function AttachmentViewerModal({
                 <Ionicons name="open-outline" size={18} color={colors.surface} />
                 <Text style={styles.btnTextPrimary}>Open</Text>
               </TouchableOpacity>
+
+              {onEditContext ? (
+                <TouchableOpacity style={[styles.btn, styles.secondary]} onPress={onEditContext}>
+                  <Ionicons name="document-text-outline" size={18} color={colors.textPrimary} />
+                  <Text style={styles.btnTextSecondary}>Edit Context</Text>
+                </TouchableOpacity>
+              ) : null}
+
+              {onToggleShowcase ? (
+                <TouchableOpacity
+                  style={[styles.btn, styles.secondary, showcaseBusy && { opacity: 0.6 }]}
+                  onPress={onToggleShowcase}
+                  disabled={showcaseBusy}
+                >
+                  <Ionicons name={isShowcase ? "star" : "star-outline"} size={18} color={colors.textPrimary} />
+                  <Text style={styles.btnTextSecondary}>{isShowcase ? "Showcased" : "Showcase"}</Text>
+                </TouchableOpacity>
+              ) : null}
 
               {onDelete ? (
                 <TouchableOpacity style={[styles.btn, styles.danger]} onPress={confirmDelete}>
@@ -482,6 +535,15 @@ preview: {
   backgroundColor: "#000",
   borderRadius: radius.lg,
   overflow: "hidden",
+},
+
+linkStage: {
+  flex: 1,
+  width: "100%",
+  height: "100%",
+  backgroundColor: colors.bg || "#F8FAFC",
+  justifyContent: "center",
+  padding: IS_WEB ? spacing.xl : spacing.md,
 },
 
 image: {

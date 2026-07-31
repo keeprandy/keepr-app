@@ -1,5 +1,5 @@
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -21,6 +21,7 @@ import * as DocumentPicker from "expo-document-picker";
 import { layoutStyles } from "../styles/layout";
 import { colors, radius, spacing } from "../styles/theme";
 import { useAssetAttachments } from "../hooks/useAttachments";
+import { getSignedUrl } from "../lib/attachmentsApi";
 import { supabase } from "../lib/supabaseClient";
 import {
   createLinkAttachment,
@@ -29,11 +30,13 @@ import {
 } from "../lib/attachmentsUploader";
 import { inferSharedFileMimeType, isSharedFileImage } from "../lib/shareIntentPayload";
 import LinkCoverCard from "../components/LinkCoverCard";
+import AttachmentViewerModal from "../components/AttachmentViewerModal";
 import { enrichLinkAttachment, linkCoverErrorMessage, shouldEnrichLinkAttachment } from "../lib/linkCover";
 
 import { useFocusEffect } from "@react-navigation/native";
 
 const IS_WEB = Platform.OS === "web";
+const BUCKET = "asset-files";
 
 function safeStr(v) {
   return typeof v === "string" ? v : "";
@@ -92,6 +95,10 @@ export default function AssetAttachmentsMobileScreen({ route, navigation }) {
   const [optimisticItems, setOptimisticItems] = useState([]);
   const [linkCoverLoading, setLinkCoverLoading] = useState({});
   const [linkCoverOverrides, setLinkCoverOverrides] = useState({});
+  const [viewerVisible, setViewerVisible] = useState(false);
+  const [viewerIndex, setViewerIndex] = useState(0);
+  const [viewerAttachment, setViewerAttachment] = useState(null);
+  const signedUrlCacheRef = useRef(new Map());
 
   const itemsWithCovers = useMemo(() => {
     return ([...optimisticItems, ...(hookItems || [])]).map((row) => {
@@ -782,6 +789,84 @@ useEffect(() => {
     [assetId, assetName, navigation, returnToAttachmentsParams]
   );
 
+  const ensureSignedUrlForRow = useCallback(async (row) => {
+    if (!row) return null;
+    const key = row.attachment_id || row.id || row.storage_path || row.url || "";
+    if (!key) return null;
+    if (signedUrlCacheRef.current.has(key)) return signedUrlCacheRef.current.get(key);
+
+    if (row.kind === "link") {
+      const u = normalizeUrl(row.url || "");
+      signedUrlCacheRef.current.set(key, u || null);
+      return u || null;
+    }
+
+    if (row.storage_path) {
+      try {
+        const url = await getSignedUrl({
+          bucket: row.bucket || BUCKET,
+          path: row.storage_path,
+          expiresIn: 60 * 30,
+        });
+        signedUrlCacheRef.current.set(key, url || null);
+        return url || null;
+      } catch {
+        signedUrlCacheRef.current.set(key, null);
+        return null;
+      }
+    }
+
+    signedUrlCacheRef.current.set(key, null);
+    return null;
+  }, []);
+
+  const toViewerAttachment = useCallback((row, signedUrl) => {
+    if (!row) return null;
+    return {
+      ...row,
+      id: row.attachment_id || row.id,
+      kind: row.kind,
+      title: row.title,
+      notes: row.notes,
+      ai_metadata: row.ai_metadata,
+      mime_type: row.mime_type,
+      contentType: row.mime_type,
+      fileName: row.file_name,
+      url: row.url,
+      urls: { signed: signedUrl || null },
+      bucket: row.bucket,
+      storage_path: row.storage_path,
+      created_at: row.created_at,
+      placement_id: row.asset_placement_id || row.placement_id,
+      attachment_id: row.attachment_id,
+      is_showcase: row.is_showcase,
+    };
+  }, []);
+
+  const openViewerForRow = useCallback(async (row) => {
+    if (!row) return;
+    const idx = Math.max(0, (filtered || []).findIndex((x) => (x.attachment_id || x.id) === (row.attachment_id || row.id)));
+    const signed = await ensureSignedUrlForRow(row);
+    setViewerIndex(idx >= 0 ? idx : 0);
+    setViewerAttachment(toViewerAttachment(row, signed));
+    setViewerVisible(true);
+  }, [ensureSignedUrlForRow, filtered, toViewerAttachment]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      if (!viewerVisible) return;
+      const row = (filtered || [])[viewerIndex] || null;
+      if (!row) return;
+      const signed = await ensureSignedUrlForRow(row);
+      if (!cancelled) setViewerAttachment(toViewerAttachment(row, signed));
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [viewerVisible, viewerIndex, filtered, ensureSignedUrlForRow, toViewerAttachment]);
+
   const retryLinkCover = useCallback(async (row) => {
     const id = row?.attachment_id || row?.id;
     if (!id) return;
@@ -817,6 +902,20 @@ useEffect(() => {
   return (
     
     <SafeAreaView style={[layoutStyles.screen, styles.screen]}>
+      <AttachmentViewerModal
+        visible={viewerVisible}
+        attachment={viewerAttachment}
+        collection={filtered}
+        index={viewerIndex}
+        onIndexChange={setViewerIndex}
+        onClose={() => setViewerVisible(false)}
+        onEditContext={viewerAttachment ? () => {
+          const row = (filtered || [])[viewerIndex] || viewerAttachment;
+          setViewerVisible(false);
+          openDetail(row);
+        } : null}
+        assetId={assetId}
+      />
 <View style={styles.header}>
   <TouchableOpacity onPress={() => {
     if (navigation.canGoBack()) navigation.goBack();
@@ -928,7 +1027,7 @@ useEffect(() => {
                   attachment={row}
                   compact
                   loading={!!linkCoverLoading[row.attachment_id || row.id]}
-                  onPress={() => openDetail(row)}
+                  onPress={() => openViewerForRow(row)}
                   onOpen={() => openOriginalLink(row)}
                   onRetry={() => retryLinkCover(row)}
                 />
@@ -936,7 +1035,7 @@ useEffect(() => {
                 <TouchableOpacity
                   key={row.attachment_id || row.id}
                   style={styles.row}
-                  onPress={() => openDetail(row)}
+                  onPress={() => openViewerForRow(row)}
                 >
                 <View style={styles.rowIcon}>
                   <Ionicons
