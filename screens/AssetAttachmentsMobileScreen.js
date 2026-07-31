@@ -91,11 +91,27 @@ export default function AssetAttachmentsMobileScreen({ route, navigation }) {
   const [webLinkValue, setWebLinkValue] = useState("");
   const [optimisticItems, setOptimisticItems] = useState([]);
   const [linkCoverLoading, setLinkCoverLoading] = useState({});
+  const [linkCoverOverrides, setLinkCoverOverrides] = useState({});
+
+  const itemsWithCovers = useMemo(() => {
+    return ([...optimisticItems, ...(hookItems || [])]).map((row) => {
+      const id = row?.attachment_id || row?.id;
+      const cover = id ? linkCoverOverrides[id] : null;
+      if (!cover) return row;
+      return {
+        ...row,
+        ai_metadata: {
+          ...(row.ai_metadata && typeof row.ai_metadata === "object" ? row.ai_metadata : {}),
+          link_cover: cover,
+        },
+      };
+    });
+  }, [hookItems, linkCoverOverrides, optimisticItems]);
 
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase();
 
-    return ([...optimisticItems, ...(hookItems || [])])
+    return itemsWithCovers
       .filter((x) => {
         const kind = safeStr(x.kind).toLowerCase();
         if (tab === "all") return true;
@@ -116,7 +132,7 @@ export default function AssetAttachmentsMobileScreen({ route, navigation }) {
         const db = b.created_at || "";
         return db.localeCompare(da);
       });
- }, [hookItems, optimisticItems, q, tab]);
+ }, [itemsWithCovers, q, tab]);
 
 useEffect(() => {
   let cancelled = false;
@@ -130,32 +146,67 @@ useEffect(() => {
   };
 
   (async () => {
-    for (const row of visibleLinks) {
-      if (cancelled) break;
-      const id = row.attachment_id || row.id;
-      if (!id) continue;
-      setLinkCoverLoading((prev) => ({ ...prev, [id]: true }));
-      try {
-        await enrichLinkAttachment(row);
-        if (!cancelled) await refresh();
-      } catch (e) {
-        console.log("Link cover enrichment failed", e?.message || e);
-      } finally {
-        if (!cancelled) {
-          setLinkCoverLoading((prev) => {
-            const next = { ...prev };
-            delete next[id];
-            return next;
-          });
+    const batchSize = 2;
+    const queue = [...visibleLinks];
+    const worker = async () => {
+      while (queue.length && !cancelled) {
+        const row = queue.shift();
+        const id = row.attachment_id || row.id;
+        if (!id) continue;
+        setLinkCoverLoading((prev) => ({ ...prev, [id]: true }));
+        try {
+          const cover = await enrichLinkAttachment(row);
+          if (!cancelled && cover) {
+            setLinkCoverOverrides((prev) => ({ ...prev, [id]: cover }));
+          }
+        } catch (e) {
+          console.log("Link cover enrichment failed", e?.message || e);
+        } finally {
+          if (!cancelled) {
+            setLinkCoverLoading((prev) => {
+              const next = { ...prev };
+              delete next[id];
+              return next;
+            });
+          }
         }
       }
-    }
+    };
+    await Promise.all(Array.from({ length: Math.min(batchSize, queue.length) }, worker));
   })();
 
   return () => {
     cancelled = true;
   };
-}, [filtered, refresh]);
+}, [filtered]);
+
+const refreshVisibleCovers = useCallback(async () => {
+  const links = (filtered || []).filter((row) => row?.kind === "link").slice(0, 8);
+  const queue = [...links];
+  const worker = async () => {
+    while (queue.length) {
+      const row = queue.shift();
+      const id = row.attachment_id || row.id;
+      if (!id) continue;
+      setLinkCoverLoading((prev) => ({ ...prev, [id]: true }));
+      try {
+        const cover = await enrichLinkAttachment(row, { force: true });
+        if (cover) {
+          setLinkCoverOverrides((prev) => ({ ...prev, [id]: cover }));
+        }
+      } catch (e) {
+        console.log("Link cover enrichment failed", e?.message || e);
+      } finally {
+        setLinkCoverLoading((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(2, queue.length) }, worker));
+}, [filtered]);
 
 const buildPlacements = useCallback(() => {
   const placements = [];
@@ -736,8 +787,10 @@ useEffect(() => {
     if (!id) return;
     setLinkCoverLoading((prev) => ({ ...prev, [id]: true }));
     try {
-      await enrichLinkAttachment(row, { force: true });
-      await refresh();
+      const cover = await enrichLinkAttachment(row, { force: true });
+      if (cover) {
+        setLinkCoverOverrides((prev) => ({ ...prev, [id]: cover }));
+      }
     } catch (e) {
       Alert.alert("Preview unavailable", e?.message || "Could not refresh this link preview.");
     } finally {
@@ -747,7 +800,7 @@ useEffect(() => {
         return next;
       });
     }
-  }, [refresh]);
+  }, []);
 
   const openOriginalLink = useCallback(async (row) => {
     const url = normalizeUrl(row?.url || "");
@@ -833,6 +886,18 @@ useEffect(() => {
           </TouchableOpacity>
         ))}
       </View>
+
+      {tab === "link" ? (
+        <TouchableOpacity
+          style={styles.refreshCoversBtn}
+          onPress={refreshVisibleCovers}
+          disabled={Object.keys(linkCoverLoading).length > 0}
+          accessibilityLabel="Refresh visible link covers"
+        >
+          <Ionicons name="refresh-outline" size={15} color={colors.primary} />
+          <Text style={styles.refreshCoversText}>Refresh Covers</Text>
+        </TouchableOpacity>
+      ) : null}
 
       {error ? (
         <View style={styles.centered}>
@@ -994,6 +1059,28 @@ linkBtnText: {
   marginLeft: 6,
   color: colors.textPrimary,
   fontWeight: "700",
+},
+
+refreshCoversBtn: {
+  alignSelf: "flex-start",
+  flexDirection: "row",
+  alignItems: "center",
+  marginHorizontal: spacing.lg,
+  marginTop: -2,
+  marginBottom: spacing.sm,
+  paddingHorizontal: 12,
+  paddingVertical: 8,
+  borderRadius: radius.pill,
+  backgroundColor: "#EFF6FF",
+  borderWidth: 1,
+  borderColor: "#BFDBFE",
+},
+
+refreshCoversText: {
+  marginLeft: 6,
+  color: colors.primary,
+  fontWeight: "800",
+  fontSize: 12,
 },
 
 rowSaving: {

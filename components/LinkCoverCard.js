@@ -170,18 +170,18 @@ const shadow = Platform.select({
 const styles = StyleSheet.create({
   card: {
     flexDirection: "row",
-    alignItems: "stretch",
+    alignItems: "center",
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.borderSubtle || colors.border,
     padding: spacing.sm,
     marginBottom: spacing.sm,
-    minHeight: 116,
+    minHeight: 96,
     ...shadow,
   },
   cardCompact: {
-    minHeight: 76,
+    minHeight: 74,
     padding: 10,
   },
   cardSelected: {
@@ -190,7 +190,7 @@ const styles = StyleSheet.create({
   },
   media: {
     width: 112,
-    minHeight: 92,
+    height: 78,
     borderRadius: radius.md,
     overflow: "hidden",
     backgroundColor: "#EEF5FF",
@@ -198,15 +198,17 @@ const styles = StyleSheet.create({
   },
   mediaCompact: {
     width: 58,
-    minHeight: 58,
+    height: 58,
     marginRight: 10,
   },
   image: {
     width: "100%",
     height: "100%",
+    backgroundColor: "#EAF2FF",
   },
   fallback: {
-    flex: 1,
+    width: "100%",
+    height: "100%",
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#F4F8FF",
@@ -226,6 +228,7 @@ const styles = StyleSheet.create({
   body: {
     flex: 1,
     minWidth: 0,
+    alignSelf: "center",
   },
   labelRow: {
     flexDirection: "row",
@@ -297,6 +300,7 @@ const styles = StyleSheet.create({
   actions: {
     justifyContent: "center",
     marginLeft: 8,
+    alignSelf: "center",
   },
   openBtn: {
     width: 34,

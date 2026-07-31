@@ -960,6 +960,7 @@ const isWide = IS_WEB && width >= 980;
   const [heroIsPdf, setHeroIsPdf] = useState(false);
   const [heroLoading, setHeroLoading] = useState(false);
   const [linkCoverLoading, setLinkCoverLoading] = useState({});
+  const [linkCoverOverrides, setLinkCoverOverrides] = useState({});
   // Web: default to preview OFF to prioritize list + editor; user can toggle on.
   const [showPreview, setShowPreview] = useState(!IS_WEB);
 
@@ -1361,8 +1362,19 @@ const isWide = IS_WEB && width >= 980;
       };
     });
 
-    return rows;
-  }, [hookItems, assetId]);
+    return rows.map((row) => {
+      const id = row?.attachment_id || row?.id;
+      const cover = id ? linkCoverOverrides[id] : null;
+      if (!cover) return row;
+      return {
+        ...row,
+        ai_metadata: {
+          ...(row.ai_metadata && typeof row.ai_metadata === "object" ? row.ai_metadata : {}),
+          link_cover: cover,
+        },
+      };
+    });
+  }, [hookItems, assetId, linkCoverOverrides]);
 
   // ✅ Keep selected attachment in sync when we refresh (so new associations show immediately)
   // IMPORTANT: always sync from `normalized` (it contains the derived asset placement role/showcase)
@@ -1488,32 +1500,39 @@ const isWide = IS_WEB && width >= 980;
     };
 
     (async () => {
-      for (const row of visibleLinks) {
-        if (cancelled) break;
-        const id = row.attachment_id || row.id;
-        if (!id) continue;
-        setLinkCoverLoading((prev) => ({ ...prev, [id]: true }));
-        try {
-          await enrichLinkAttachment(row);
-          if (!cancelled) await refresh();
-        } catch (e) {
-          console.log("Link cover enrichment failed", e?.message || e);
-        } finally {
-          if (!cancelled) {
-            setLinkCoverLoading((prev) => {
-              const next = { ...prev };
-              delete next[id];
-              return next;
-            });
+      const batchSize = 2;
+      const queue = [...visibleLinks];
+      const worker = async () => {
+        while (queue.length && !cancelled) {
+          const row = queue.shift();
+          const id = row.attachment_id || row.id;
+          if (!id) continue;
+          setLinkCoverLoading((prev) => ({ ...prev, [id]: true }));
+          try {
+            const cover = await enrichLinkAttachment(row);
+            if (!cancelled && cover) {
+              setLinkCoverOverrides((prev) => ({ ...prev, [id]: cover }));
+            }
+          } catch (e) {
+            console.log("Link cover enrichment failed", e?.message || e);
+          } finally {
+            if (!cancelled) {
+              setLinkCoverLoading((prev) => {
+                const next = { ...prev };
+                delete next[id];
+                return next;
+              });
+            }
           }
         }
-      }
+      };
+      await Promise.all(Array.from({ length: Math.min(batchSize, queue.length) }, worker));
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [filtered, refresh]);
+  }, [filtered]);
 
   const active = selected || filtered?.[0] || null;
 
@@ -1705,8 +1724,10 @@ const isWide = IS_WEB && width >= 980;
     if (!id) return;
     setLinkCoverLoading((prev) => ({ ...prev, [id]: true }));
     try {
-      await enrichLinkAttachment(row, { force: true });
-      await refresh();
+      const cover = await enrichLinkAttachment(row, { force: true });
+      if (cover) {
+        setLinkCoverOverrides((prev) => ({ ...prev, [id]: cover }));
+      }
     } catch (e) {
       Alert.alert("Preview unavailable", e?.message || "Could not refresh this link preview.");
     } finally {
@@ -1716,7 +1737,35 @@ const isWide = IS_WEB && width >= 980;
         return next;
       });
     }
-  }, [refresh]);
+  }, []);
+
+  const refreshVisibleCovers = useCallback(async () => {
+    const links = (filtered || []).filter((row) => row?.kind === "link").slice(0, 10);
+    const queue = [...links];
+    const worker = async () => {
+      while (queue.length) {
+        const row = queue.shift();
+        const id = row.attachment_id || row.id;
+        if (!id) continue;
+        setLinkCoverLoading((prev) => ({ ...prev, [id]: true }));
+        try {
+          const cover = await enrichLinkAttachment(row, { force: true });
+          if (cover) {
+            setLinkCoverOverrides((prev) => ({ ...prev, [id]: cover }));
+          }
+        } catch (e) {
+          console.log("Link cover refresh failed", e?.message || e);
+        } finally {
+          setLinkCoverLoading((prev) => {
+            const next = { ...prev };
+            delete next[id];
+            return next;
+          });
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(2, queue.length) }, worker));
+  }, [filtered]);
 
   const ensureMediaPermission = useCallback(async () => {
     if (IS_WEB) return true;
@@ -2727,6 +2776,17 @@ return (
                 {/* Right-side header actions (wide screens only) */}
                 {isWide ? (
                   <View style={styles.cardHeaderActions}>
+                    {tab === "link" ? (
+                      <TouchableOpacity
+                        onPress={refreshVisibleCovers}
+                        style={styles.refreshCoversBtn}
+                        disabled={Object.keys(linkCoverLoading).length > 0}
+                        accessibilityLabel="Refresh visible link covers"
+                      >
+                        <Ionicons name="refresh-outline" size={14} color={colors.primary} />
+                        <Text style={styles.refreshCoversText}>Refresh Covers</Text>
+                      </TouchableOpacity>
+                    ) : null}
                     
                   <TouchableOpacity
                     onPress={(e) => {
@@ -2760,14 +2820,26 @@ return (
                     </TouchableOpacity>
                   </View>
                 ) : (
-                  <TouchableOpacity
-                    onPress={refresh}
-                    style={styles.smallIconBtn}
-                    disabled={loading || uploading}
-                    accessibilityLabel="Refresh attachments"
-                  >
-                    <Ionicons name="refresh" size={16} color={colors.textSecondary} />
-                  </TouchableOpacity>
+                  <View style={styles.cardHeaderActions}>
+                    {tab === "link" ? (
+                      <TouchableOpacity
+                        onPress={refreshVisibleCovers}
+                        style={styles.smallIconBtn}
+                        disabled={Object.keys(linkCoverLoading).length > 0}
+                        accessibilityLabel="Refresh visible link covers"
+                      >
+                        <Ionicons name="sparkles-outline" size={16} color={colors.primary} />
+                      </TouchableOpacity>
+                    ) : null}
+                    <TouchableOpacity
+                      onPress={refresh}
+                      style={styles.smallIconBtn}
+                      disabled={loading || uploading}
+                      accessibilityLabel="Refresh attachments"
+                    >
+                      <Ionicons name="refresh" size={16} color={colors.textSecondary} />
+                    </TouchableOpacity>
+                  </View>
                 )}
               </View>
 
@@ -3356,17 +3428,29 @@ return (
               <View style={[styles.card, { flex: 1 }]}>
                 <View style={styles.cardHeaderRow}>
                   <Text style={styles.cardTitle}>Attachments</Text>
-                  <TouchableOpacity
-                    onPress={refresh}
-                    style={styles.smallIconBtn}
-                    disabled={loading}
-                  >
-                    <Ionicons
-                      name="refresh"
-                      size={16}
-                      color={colors.textSecondary}
-                    />
-                  </TouchableOpacity>
+                  <View style={styles.cardHeaderActions}>
+                    {tab === "link" ? (
+                      <TouchableOpacity
+                        onPress={refreshVisibleCovers}
+                        style={styles.smallIconBtn}
+                        disabled={Object.keys(linkCoverLoading).length > 0}
+                        accessibilityLabel="Refresh visible link covers"
+                      >
+                        <Ionicons name="sparkles-outline" size={16} color={colors.primary} />
+                      </TouchableOpacity>
+                    ) : null}
+                    <TouchableOpacity
+                      onPress={refresh}
+                      style={styles.smallIconBtn}
+                      disabled={loading}
+                    >
+                      <Ionicons
+                        name="refresh"
+                        size={16}
+                        color={colors.textSecondary}
+                      />
+                    </TouchableOpacity>
+                  </View>
                 </View>
 
                 {!assetId ? (
@@ -3789,6 +3873,23 @@ cardHeaderActions: {
   justifyContent: "flex-end",
   gap: 10,
   flexShrink: 0,
+},
+refreshCoversBtn: {
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "center",
+  paddingHorizontal: 12,
+  paddingVertical: 8,
+  borderRadius: radius.pill,
+  backgroundColor: "#EFF6FF",
+  borderWidth: 1,
+  borderColor: "#BFDBFE",
+},
+refreshCoversText: {
+  marginLeft: 6,
+  color: colors.primary,
+  fontWeight: "800",
+  fontSize: 12,
 },
 primaryActionBtn: {
   marginTop: 18,
