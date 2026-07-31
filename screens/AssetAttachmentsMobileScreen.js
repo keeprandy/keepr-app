@@ -68,6 +68,16 @@ export default function AssetAttachmentsMobileScreen({ route, navigation }) {
   const fromTargetType = route?.params?.targetType || null;
   const fromTargetId = route?.params?.targetId || null;
   const fromTargetRole = route?.params?.targetRole || null;
+  const returnToAttachmentsParams = useMemo(
+    () => ({
+      assetId,
+      assetName,
+      targetType: fromTargetType,
+      targetId: fromTargetId,
+      targetRole: fromTargetRole,
+    }),
+    [assetId, assetName, fromTargetId, fromTargetRole, fromTargetType]
+  );
 
   const { items: hookItems = [], loading, error, refresh } = useAssetAttachments(assetId);
 
@@ -638,8 +648,10 @@ useEffect(() => {
     assetId,
     assetName,
     attachmentId: openAttachmentId,
+    returnRoute: "AssetAttachmentsMobile",
+    returnParams: returnToAttachmentsParams,
   });
-}, [route?.params?.openAttachmentId, navigation, assetId, assetName]);
+}, [route?.params?.openAttachmentId, navigation, assetId, assetName, returnToAttachmentsParams]);
 
 useEffect(() => {
   if (route?.params?.autoOpen === "library" && !IS_WEB) {
@@ -669,9 +681,11 @@ useEffect(() => {
         assetId,
         assetName,
         attachmentId: row.attachment_id || row.id,
+        returnRoute: "AssetAttachmentsMobile",
+        returnParams: returnToAttachmentsParams,
       });
     },
-    [assetId, assetName, navigation]
+    [assetId, assetName, navigation, returnToAttachmentsParams]
   );
 
   return (

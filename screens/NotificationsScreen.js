@@ -13,6 +13,7 @@ import {
   View,
   Image,
   Platform,
+  useWindowDimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -36,6 +37,8 @@ import {
   getReminderVisibilityScope,
 } from "../lib/teamActions";
 import { buildMessagesNavigationParams } from "../lib/messagesService";
+import InboxModeSwitch from "../components/navigation/InboxModeSwitch";
+import { INBOX_MODES, navigateToInbox, setLastInboxMode } from "../lib/inboxNavigation";
 
 
 /* --------------------------- helpers --------------------------- */
@@ -460,6 +463,8 @@ function resolveAttachmentUrl(att) {
 export default function NotificationsScreen({ navigation, route }) {
   const { user } = useAuth();
   const ownerId = user?.id || null;
+  const { width } = useWindowDimensions();
+  const compact = width < 900;
 
   // Context if Notifications is opened from an asset/system/record
   const contextAssetId = route?.params?.assetId || null;
@@ -560,6 +565,15 @@ const showAttachments =
         (ev) => String(ev?.status || "").toLowerCase() === "submitted"
       ),
     [events]
+  );
+
+  const actionModeCount = useMemo(
+    () =>
+      (events?.length || 0) +
+      (reminders?.length || 0) +
+      (transferItems?.length || 0) +
+      (hubInviteItems?.length || 0),
+    [events, reminders, transferItems, hubInviteItems]
   );
 
   const visibleEvents = useMemo(() => {
@@ -814,6 +828,7 @@ const remindersByDate = useMemo(() => {
 
   useFocusEffect(
     useCallback(() => {
+      setLastInboxMode(INBOX_MODES.ACTIONS);
       (async () => {
         await loadEverything({ silent: false });
 
@@ -1973,6 +1988,15 @@ return (
         </View>
       </View>
 
+      {compact ? (
+        <InboxModeSwitch
+          activeMode={INBOX_MODES.ACTIONS}
+          actionsCount={actionModeCount}
+          onChange={(mode) => navigateToInbox(navigation.getParent?.() || navigation, mode)}
+          style={styles.modeSwitch}
+        />
+      ) : null}
+
       <ScrollView
         contentContainerStyle={styles.wrap}
         refreshControl={
@@ -3085,6 +3109,10 @@ const styles = StyleSheet.create({
   },
   headerTextWrap: {
     flex: 1,
+  },
+  modeSwitch: {
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
   },
   title: {
     fontSize: 18,

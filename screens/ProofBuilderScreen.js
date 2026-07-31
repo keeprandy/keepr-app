@@ -217,6 +217,8 @@ export default function ProofBuilderScreen({ route, navigation }) {
 
   const assetId = route?.params?.assetId || null;
   const attachmentId = route?.params?.attachmentId || null;
+  const returnRoute = route?.params?.returnRoute || null;
+  const returnParams = route?.params?.returnParams || null;
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -257,6 +259,28 @@ export default function ProofBuilderScreen({ route, navigation }) {
   // Quick add system
   const [addSystemOpen, setAddSystemOpen] = useState(false);
   const [newSystemName, setNewSystemName] = useState("");
+
+  const exitToAttachmentContext = useCallback(() => {
+    if (returnRoute) {
+      navigation.navigate(returnRoute, returnParams || {});
+      return;
+    }
+
+    if (assetId) {
+      navigation.navigate("AssetAttachmentsMobile", {
+        assetId,
+        assetName: route?.params?.assetName || assetName || "Asset",
+      });
+      return;
+    }
+
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+
+    navigation.navigate("Dashboard");
+  }, [assetId, assetName, navigation, returnParams, returnRoute, route?.params?.assetName]);
 
   const [roleModalOpen, setRoleModalOpen] = useState(false);
 
@@ -830,7 +854,12 @@ setWExpires(isoToMDY(safeStr(d.end_date || d.expiration_date)));
     try {
       const { data, error } = await supabase
         .from("systems")
-        .insert({ asset_id: assetId, name })
+        .insert({
+          asset_id: assetId,
+          name,
+          ksc_code: "custom",
+          system_type: "custom",
+        })
         .select("id,name")
         .single();
 
@@ -930,7 +959,7 @@ const removeFromAsset = useCallback(async () => {
           try {
             setAssocBusy(true);
             await apiDeletePlacementById(assetPlacement.id);
-            navigation.goBack();
+            exitToAttachmentContext();
           } catch (e) {
             Alert.alert("Remove failed", e?.message || "Could not remove from asset.");
           } finally {
@@ -940,7 +969,7 @@ const removeFromAsset = useCallback(async () => {
       },
     ]
   );
-}, [assetPlacement?.id, navigation]);
+}, [assetPlacement?.id, exitToAttachmentContext]);
 
 const removeAssociation = useCallback(
   async (placementId) => {
@@ -1073,7 +1102,7 @@ const goToCreateRecord = useCallback(() => {
       showToast("Saved", isWarranty ? "Warranty enabled." : "Attachment saved.");
       
       setTimeout(() => {
-      navigation.goBack();
+      exitToAttachmentContext();
     }, 700);
     } catch (e) {
       Alert.alert("Save failed", e?.message || "Could not save.");
@@ -1084,6 +1113,7 @@ const goToCreateRecord = useCallback(() => {
     attachment,
     orgId,
     hydrateFromDb,
+    exitToAttachmentContext,
     isWarranty,
     selectedSystemIds.length,
     showToast,
@@ -1176,7 +1206,7 @@ const androidPdfViewerUrl =
           keyboardVerticalOffset={50}
         >
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <TouchableOpacity style={styles.backBtn} onPress={exitToAttachmentContext}>
           <Ionicons name="chevron-back" size={20} color={colors.textPrimary} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>

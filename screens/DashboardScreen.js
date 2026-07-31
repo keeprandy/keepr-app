@@ -31,6 +31,8 @@ import KeeprProgressCard, { buildKeeprProgressModel } from "../components/KeeprP
 import { useFocusEffect } from "@react-navigation/native";
 import { track } from "../lib/analytics";
 import AddAssetTypeModal from "../components/AddAssetTypeModal";
+import MobileNavDrawer from "../components/navigation/MobileNavDrawer";
+import { getLastInboxMode, navigateToInbox } from "../lib/inboxNavigation";
 
 /**
  * Sort helper: prefers explicit sort_rank, then "primary", then created_at, then name.
@@ -281,6 +283,8 @@ export default function DashboardScreen({ navigation }) {
   const [meId, setMeId] = useState(null);
   const [ach, setAch] = useState(null);
   const [achLoading, setAchLoading] = useState(true);
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [actionInboxCount, setActionInboxCount] = useState(0);
 
   // Dashboard Mode
 const dashboardMode = useMemo(() => {
@@ -495,7 +499,7 @@ const shouldShowKeeprProgress =
 
   const goNotifications = () => {
     const parent = navigation.getParent?.();
-    (parent || navigation).navigate(ROUTES.NOTIFICATIONS);
+    navigateToInbox(parent || navigation, getLastInboxMode());
   };
 
   const goCreateEvent = () => {
@@ -540,6 +544,30 @@ const shouldShowKeeprProgress =
       }
     },
     [setAvatarUrl]
+  );
+
+  const refreshActionInboxCount = useCallback(async () => {
+    if (!meId) {
+      setActionInboxCount(0);
+      return;
+    }
+    try {
+      const { count, error } = await supabase
+        .from("inbox_items")
+        .select("id", { count: "exact", head: true })
+        .eq("to_user_id", meId)
+        .eq("status", "pending");
+      if (error) throw error;
+      setActionInboxCount(count || 0);
+    } catch {
+      setActionInboxCount(0);
+    }
+  }, [meId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshActionInboxCount();
+    }, [refreshActionInboxCount])
   );
 
   const renderAvatarImage = useCallback(
@@ -989,6 +1017,13 @@ if (Platform.OS !== "ios") {
 
   return (
     <SafeAreaView style={layoutStyles.screen}>
+      <MobileNavDrawer
+        visible={mobileDrawerOpen}
+        onClose={() => setMobileDrawerOpen(false)}
+        navigation={navigation}
+        actionsCount={actionInboxCount}
+        messagesCount={0}
+      />
       <View style={styles.root}>
         <BackgroundWash />
 
@@ -1083,6 +1118,15 @@ if (Platform.OS !== "ios") {
                 <View>
                   <View style={styles.headerMobileTop}>
                     <TouchableOpacity
+                      style={styles.mobileMenuButton}
+                      onPress={() => setMobileDrawerOpen(true)}
+                      activeOpacity={0.86}
+                      accessibilityRole="button"
+                      accessibilityLabel="Open navigation"
+                    >
+                      <Ionicons name="menu-outline" size={24} color={colors.textPrimary} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
                       style={isWide ? styles.avatarBtnWide : styles.avatarBtn}
                       onPress={goProfile}
                       activeOpacity={0.85}
@@ -1141,9 +1185,9 @@ if (Platform.OS !== "ios") {
 
                   <ModeWidget
                     icon="chatbubbles-outline"
-                    title="Messages"
-                    subtitle="Review conversations across your assets and systems."
-                    onPress={() => navigation.navigate("RootTabs", { screen: "Messages", params: { scope: "global" } })}
+                    title="Inbox"
+                    subtitle="Review actions and conversations across your assets and systems."
+                    onPress={goNotifications}
                   />
 
                   {/* System modes (subtle) */}
@@ -1785,7 +1829,23 @@ headerWebRow: {
   headerRightCol: { width: 420, maxWidth: "100%", gap: spacing.sm },
   headerTopRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.xs, marginBottom: spacing.sm },
   headerTextBlock: { flex: 1, minWidth: 0 },
-  headerMobileTop: { flexDirection: "row", alignItems: "center", marginBottom: spacing.sm },
+  headerMobileTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  mobileMenuButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    alignItems: "center",
+    justifyContent: "center",
+    ...cardStyles.shadowSoft,
+  },
   header: {
     flexDirection: "row",
     marginBottom: 0,

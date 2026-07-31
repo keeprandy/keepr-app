@@ -7,6 +7,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { getLastInboxMode, navigateToInbox } from "../../lib/inboxNavigation";
 
 export default function GlassFooter({
   state,
@@ -18,11 +19,12 @@ export default function GlassFooter({
 
   const visibleTabs = [
     "Dashboard",
-    "Messages",
+    "Notifications",
     "Create",
     "KeeprPros",
     "More",
   ];
+  const activeRouteName = state.routes[state.index]?.name;
 
   return (
     <View style={[styles.wrapper, { paddingBottom: insets.bottom || 10 }]}>
@@ -32,7 +34,9 @@ export default function GlassFooter({
           .map((route) => {
             const index = state.routes.findIndex((r) => r.key === route.key);
             const { options } = descriptors[route.key];
-            const isFocused = state.index === index;
+            const isFocused =
+              state.index === index ||
+              (route.name === "Notifications" && activeRouteName === "Messages");
 
             if (route.name === "Create") {
               return (
@@ -54,7 +58,13 @@ export default function GlassFooter({
             return (
               <TouchableOpacity
                 key={route.key}
-                onPress={() => navigation.navigate(route.name)}
+                onPress={() => {
+                  if (route.name === "Notifications") {
+                    navigateToInbox(navigation, getLastInboxMode());
+                    return;
+                  }
+                  navigation.navigate(route.name);
+                }}
                 style={styles.tab}
                 activeOpacity={0.7}
               >

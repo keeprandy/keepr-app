@@ -1696,7 +1696,7 @@ React.useEffect(() => {
     return;
   }
 
-  navigationRef.current?.navigate("SendToKeeprAssetPicker", {
+  navigationRef.navigate("SendToKeeprAssetPicker", {
     incomingShare: payload,
   });
 
@@ -1723,7 +1723,7 @@ React.useEffect(() => {
       ]);
 
       if (cancelled) return;
-      navigationRef.current?.navigate("SendToKeeprAssetPicker", {
+      navigationRef.navigate("SendToKeeprAssetPicker", {
         incomingShare: payload,
       });
     } catch (e) {

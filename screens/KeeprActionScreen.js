@@ -41,6 +41,8 @@ import {
   buildKeeprAttentionEvent,
   shouldShowMessageAttention,
 } from "../lib/inAppAttention";
+import InboxModeSwitch from "../components/navigation/InboxModeSwitch";
+import { INBOX_MODES, navigateToInbox, setLastInboxMode } from "../lib/inboxNavigation";
 
 function contextLabel(thread) {
   const systemName = thread?.system?.name || null;
@@ -218,6 +220,8 @@ export default function KeeprActionScreen({ route, navigation }) {
   const isGlobal = scope === MESSAGE_SCOPES.GLOBAL && !assetId && !systemId;
   const isSystem = !!assetId && !!systemId;
   const title = isGlobal ? "All Messages" : isSystem ? `${params.systemName || workspace.system?.name || "System"} Messages` : `${params.assetName || workspace.asset?.name || "Asset"} Messages`;
+  const compactTitle = isGlobal ? "Messages" : title;
+  const showInboxModeSwitch = compact && isGlobal;
   const emptyText = isGlobal
     ? "No conversations yet."
     : isSystem
@@ -350,6 +354,10 @@ export default function KeeprActionScreen({ route, navigation }) {
       setThreadLoading(false);
     }
   }, [selectedThread?.id]);
+
+  useEffect(() => {
+    if (isGlobal) setLastInboxMode(INBOX_MODES.MESSAGES);
+  }, [isGlobal]);
 
   useEffect(() => {
     loadSelectedThreadMessages();
@@ -568,9 +576,7 @@ export default function KeeprActionScreen({ route, navigation }) {
     setToQuery("");
     setAboutQuery("");
     setSystemQuery("");
-    if (params.launchComposer && params.backRoute) {
-      navigation.navigate(params.backRoute, params.backParams || {});
-    }
+    if (params.launchComposer && params.backRoute) returnToOrigin();
   };
 
   const openTeamManagement = () => {
@@ -776,6 +782,24 @@ export default function KeeprActionScreen({ route, navigation }) {
     }
   };
 
+  const returnToOrigin = () => {
+    const parent = navigation.getParent?.();
+    if (navigation.canGoBack?.()) {
+      navigation.goBack();
+      return;
+    }
+    if (parent?.canGoBack?.()) {
+      parent.goBack();
+      return;
+    }
+    if (params.backRoute) {
+      const target = parent?.navigate ? parent : navigation;
+      target.navigate(params.backRoute, params.backParams || {});
+      return;
+    }
+    navigation.navigate("RootTabs", { screen: "Dashboard" });
+  };
+
   const goBack = () => {
     if (composerOpen) {
       closeLauncher();
@@ -785,45 +809,78 @@ export default function KeeprActionScreen({ route, navigation }) {
       setCompactConversationOpen(false);
       return;
     }
-    if (params.backRoute) {
-      navigation.navigate(params.backRoute, params.backParams || {});
-      return;
-    }
-    if (navigation.canGoBack?.()) {
-      navigation.goBack();
-      return;
-    }
-    navigation.navigate("RootTabs", { screen: "Dashboard" });
+    returnToOrigin();
   };
 
   return (
     <SafeAreaView style={styles.safe} edges={["top", "left", "right", "bottom"]}>
       <View style={[styles.shell, compact && styles.shellCompact]}>
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={goBack}>
-            <Ionicons name="chevron-back-outline" size={18} color={colors.textPrimary} />
-            <Text style={styles.backText}>{compact && compactConversationOpen ? "Messages" : "Back"}</Text>
-          </TouchableOpacity>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.kicker}>MESSAGES</Text>
-            <Text style={styles.title}>{title}</Text>
-            <Text style={styles.subtitle}>
-              Conversations stay attached to the asset and system context that created them.
-            </Text>
+        {compact ? (
+          <View style={styles.headerMobile}>
+            <View style={styles.headerMobileControls}>
+              <TouchableOpacity style={styles.backButton} onPress={goBack}>
+                <Ionicons name="chevron-back-outline" size={18} color={colors.textPrimary} />
+                <Text style={styles.backText}>{compactConversationOpen ? "Messages" : "Back"}</Text>
+              </TouchableOpacity>
+              <View style={styles.headerMobileActions}>
+                <TouchableOpacity
+                  style={[styles.newButton, styles.newButtonCompact, !canOpenComposer && styles.newButtonQuiet]}
+                  onPress={openLauncher}
+                  disabled={!canOpenComposer}
+                >
+                  <Ionicons name="create-outline" size={16} color={canOpenComposer ? "white" : colors.textMuted} />
+                  <Text style={[styles.newButtonText, !canOpenComposer && styles.newButtonTextQuiet]}>New</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.refreshButton, styles.refreshButtonCompact]} onPress={handleManualRefresh}>
+                  <Ionicons name="refresh-outline" size={17} color={colors.textPrimary} />
+                </TouchableOpacity>
+              </View>
+            </View>
+            <View style={styles.headerMobileTitleBlock}>
+              <Text style={styles.kicker}>MESSAGES</Text>
+              <Text style={styles.titleCompact} numberOfLines={2}>{compactTitle}</Text>
+              {!compactConversationOpen ? (
+                <Text style={styles.subtitleCompact}>
+                  Conversations stay attached to the asset and system context that created them.
+                </Text>
+              ) : null}
+            </View>
           </View>
-          <TouchableOpacity
-            style={[styles.newButton, !canOpenComposer && styles.newButtonQuiet]}
-            onPress={openLauncher}
-            disabled={!canOpenComposer}
-          >
-            <Ionicons name="create-outline" size={16} color={canOpenComposer ? "white" : colors.textMuted} />
-            <Text style={[styles.newButtonText, !canOpenComposer && styles.newButtonTextQuiet]}>New conversation</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.refreshButton} onPress={handleManualRefresh}>
-            <Ionicons name="refresh-outline" size={17} color={colors.textPrimary} />
-            <Text style={styles.refreshText}>{refreshing ? "Refreshing" : "Refresh"}</Text>
-          </TouchableOpacity>
-        </View>
+        ) : (
+          <View style={styles.header}>
+            <TouchableOpacity style={styles.backButton} onPress={goBack}>
+              <Ionicons name="chevron-back-outline" size={18} color={colors.textPrimary} />
+              <Text style={styles.backText}>Back</Text>
+            </TouchableOpacity>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.kicker}>MESSAGES</Text>
+              <Text style={styles.title}>{title}</Text>
+              <Text style={styles.subtitle}>
+                Conversations stay attached to the asset and system context that created them.
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.newButton, !canOpenComposer && styles.newButtonQuiet]}
+              onPress={openLauncher}
+              disabled={!canOpenComposer}
+            >
+              <Ionicons name="create-outline" size={16} color={canOpenComposer ? "white" : colors.textMuted} />
+              <Text style={[styles.newButtonText, !canOpenComposer && styles.newButtonTextQuiet]}>New conversation</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.refreshButton} onPress={handleManualRefresh}>
+              <Ionicons name="refresh-outline" size={17} color={colors.textPrimary} />
+              <Text style={styles.refreshText}>{refreshing ? "Refreshing" : "Refresh"}</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {showInboxModeSwitch ? (
+          <InboxModeSwitch
+            activeMode={INBOX_MODES.MESSAGES}
+            onChange={(mode) => navigateToInbox(navigation, mode)}
+            style={styles.modeSwitch}
+          />
+        ) : null}
 
         {attentionEvent ? (
           <View style={styles.attentionCard}>
@@ -1389,6 +1446,24 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     marginBottom: spacing.md,
   },
+  headerMobile: {
+    marginBottom: spacing.md,
+    gap: spacing.sm,
+  },
+  headerMobileControls: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+  },
+  headerMobileActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  headerMobileTitleBlock: {
+    minWidth: 0,
+  },
   backButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -1403,7 +1478,20 @@ const styles = StyleSheet.create({
   backText: { fontSize: 13, fontWeight: "900", color: colors.textPrimary },
   kicker: { fontSize: 11, fontWeight: "900", color: colors.textMuted },
   title: { fontSize: 28, fontWeight: "900", color: colors.textPrimary },
+  titleCompact: {
+    fontSize: 28,
+    lineHeight: 32,
+    fontWeight: "900",
+    color: colors.textPrimary,
+  },
   subtitle: { marginTop: 4, fontSize: 13, lineHeight: 18, color: colors.textSecondary },
+  subtitleCompact: {
+    marginTop: 4,
+    maxWidth: 360,
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.textSecondary,
+  },
   newButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -1416,6 +1504,10 @@ const styles = StyleSheet.create({
   newButtonQuiet: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.borderSubtle },
   newButtonText: { color: "white", fontSize: 13, fontWeight: "900" },
   newButtonTextQuiet: { color: colors.textMuted },
+  newButtonCompact: {
+    paddingHorizontal: 13,
+    paddingVertical: 10,
+  },
   refreshButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -1427,7 +1519,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 13,
     paddingVertical: 10,
   },
+  refreshButtonCompact: {
+    width: 42,
+    height: 42,
+    justifyContent: "center",
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+  },
   refreshText: { color: colors.textPrimary, fontSize: 12, fontWeight: "900" },
+  modeSwitch: {
+    marginBottom: spacing.md,
+  },
   attentionCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -1925,6 +2027,7 @@ const styles = StyleSheet.create({
   },
   workspaceCompact: {
     flexDirection: "column",
+    minHeight: 0,
   },
   threadPane: {
     width: 390,
@@ -1935,7 +2038,7 @@ const styles = StyleSheet.create({
   },
   threadPaneCompact: {
     width: "100%",
-    maxHeight: 340,
+    maxHeight: "100%",
   },
   threadPaneContent: { padding: spacing.md, gap: spacing.md },
   groupBlock: { gap: spacing.sm },
@@ -1966,7 +2069,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   conversationPaneCompact: {
-    minHeight: 420,
+    minHeight: 0,
+    flex: 1,
   },
   conversationContent: { padding: spacing.lg },
   conversationContentCompact: { paddingBottom: 118 },

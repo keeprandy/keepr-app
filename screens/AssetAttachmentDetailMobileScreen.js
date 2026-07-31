@@ -41,6 +41,7 @@ async function apiUpdateAttachment(attachmentId, patch) {
 export default function AssetAttachmentDetailMobileScreen({ route, navigation }) {
   const assetId = route?.params?.assetId || null;
   const attachmentId = route?.params?.attachmentId || null;
+  const assetName = route?.params?.assetName || route?.params?.asset_name || route?.params?.asset?.name || "Asset";
 
   const { items = [], loading, refresh } = useAssetAttachments(assetId);
 
@@ -216,8 +217,11 @@ export default function AssetAttachmentDetailMobileScreen({ route, navigation })
           onPress={() =>
             navigation.navigate("ProofBuilder", {
               assetId,
+              assetName,
               attachmentId: selected.attachment_id || selected.id,
               role: selected.role,
+              returnRoute: "AssetAttachmentsMobile",
+              returnParams: { assetId, assetName },
             })
           }
         >
