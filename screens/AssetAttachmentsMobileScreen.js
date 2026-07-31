@@ -915,6 +915,7 @@ useEffect(() => {
           openDetail(row);
         } : null}
         assetId={assetId}
+        assetName={assetName}
       />
 <View style={styles.header}>
   <TouchableOpacity onPress={() => {

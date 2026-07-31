@@ -2401,6 +2401,7 @@ return (
       onToggleShowcase={viewerRow ? () => toggleShowcaseForRow(viewerRow) : null}
       showcaseBusy={showcaseBusy}
       assetId={assetId}
+      assetName={assetName}
     />
 
     {IS_WEB ? (

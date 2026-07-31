@@ -1,5 +1,5 @@
 // components/AttachmentViewerModal.js
-import React, { useMemo, useEffect } from "react";
+import React, { useMemo, useEffect, useState } from "react";
 import {
   Modal,
   PanResponder,
@@ -125,6 +125,7 @@ export default function AttachmentViewerModal({
   onEditContext,
   onToggleShowcase,
   showcaseBusy = false,
+  assetName,
   // Optional context for launching Keepr Intelligence
   assetId,
   systemId,
@@ -134,6 +135,7 @@ export default function AttachmentViewerModal({
   onIntelligence,
 }) {
   const url = attachment?.urls?.signed || attachment?.urls?.public || attachment?.url || null;
+  const [profileOpen, setProfileOpen] = useState(IS_WEB);
 
   const fileName =
     attachment?.fileName ||
@@ -182,6 +184,26 @@ export default function AttachmentViewerModal({
   const isPdfDoc = isPdf(ext, attachment?.contentType);
   const isLink = attachment?.kind === "link" || typeLabel === "Link";
   const isShowcase = !!(attachment?.is_showcase || attachment?.isShowcase);
+  const linkCover = attachment?.ai_metadata?.link_cover;
+  const aiMetadata = attachment?.ai_metadata && typeof attachment.ai_metadata === "object"
+    ? attachment.ai_metadata
+    : {};
+  const placements = Array.isArray(attachment?.placements) ? attachment.placements : [];
+  const relatedSystems = placements
+    .filter((p) => p?.target_type === "system")
+    .map((p) => p?.label || p?.name || p?.target_label || p?.target_id)
+    .filter(Boolean);
+  const relatedRecords = placements
+    .filter((p) => p?.target_type === "service_record")
+    .map((p) => p?.label || p?.title || p?.target_label || p?.target_id)
+    .filter(Boolean);
+  const sourceLabel = linkCover?.source_name || linkCover?.source_domain || (isLink ? typeLabel : "");
+  const metadataSummary =
+    aiMetadata.summary ||
+    aiMetadata.extracted_summary ||
+    aiMetadata.description ||
+    linkCover?.display_description ||
+    "";
 
   const badge = useMemo(
     () => ({ label: (ext || (isLink ? "LINK" : "FILE")).toUpperCase(), tone: badgeTone }),
@@ -190,6 +212,10 @@ export default function AttachmentViewerModal({
 
   const canNav = Array.isArray(collection) && collection.length > 1;
   const safeIndex = Math.max(0, Math.min(index || 0, (collection?.length || 1) - 1));
+
+  useEffect(() => {
+    setProfileOpen(IS_WEB);
+  }, [attachment?.id, attachment?.attachment_id]);
 
   const goPrev = () => {
     if (!canNav) return;
@@ -226,11 +252,17 @@ export default function AttachmentViewerModal({
   const swipeResponder = useMemo(
     () => PanResponder.create({
       onMoveShouldSetPanResponder: (_, gestureState) =>
-        Math.abs(gestureState.dx) > 28 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.4,
+        (Math.abs(gestureState.dx) > 28 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.4) ||
+        (Math.abs(gestureState.dy) > 32 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.3),
       onPanResponderRelease: (_, gestureState) => {
-        if (Math.abs(gestureState.dx) < 48) return;
-        if (gestureState.dx > 0) goPrev();
-        else goNext();
+        if (Math.abs(gestureState.dx) > Math.abs(gestureState.dy)) {
+          if (Math.abs(gestureState.dx) < 48) return;
+          if (gestureState.dx > 0) goPrev();
+          else goNext();
+          return;
+        }
+        if (gestureState.dy < -48) setProfileOpen(true);
+        if (gestureState.dy > 48) setProfileOpen(false);
       },
     }),
     [canNav, safeIndex, collection?.length]
@@ -268,6 +300,100 @@ export default function AttachmentViewerModal({
     );
   };
 
+  const ProfileDetailRow = ({ label, value, multiline = false }) => (
+    <View style={styles.profileRow}>
+      <Text style={styles.label}>{label}</Text>
+      <Text style={styles.value} numberOfLines={multiline ? 5 : 2}>
+        {value || "—"}
+      </Text>
+    </View>
+  );
+
+  const profilePanel = (
+    <View style={[styles.profilePanel, IS_MOBILE && styles.profileSheet]}>
+      {IS_MOBILE ? (
+        <View style={styles.sheetHandleRow}>
+          <View style={styles.sheetHandle} />
+          <TouchableOpacity onPress={() => setProfileOpen(false)} style={styles.sheetClose}>
+            <Ionicons name="chevron-down" size={22} color={colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
+      ) : null}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.profileContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.profileHeader}>
+          <View style={styles.headerIcon}>
+            <Ionicons name={isLink ? "link-outline" : iconName} size={18} color={colors.primary} />
+          </View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={styles.profileEyebrow}>Attachment Profile</Text>
+            <Text style={styles.profileTitle} numberOfLines={2}>{title || "Attachment"}</Text>
+          </View>
+        </View>
+
+        <Text style={styles.section}>Identity</Text>
+        <ProfileDetailRow label="Type" value={sourceLabel ? `${typeLabel} · ${sourceLabel}` : typeLabel} />
+        <ProfileDetailRow label="Original file" value={isLink ? url : fileName} />
+        <ProfileDetailRow label="Added" value={formatDate(uploadedAt)} />
+        <ProfileDetailRow label="Size" value={formatSize(size)} />
+
+        <Text style={[styles.section, styles.sectionSpaced]}>Ownership Context</Text>
+        <ProfileDetailRow label="Asset" value={assetName || attachment?.asset_name || "This asset"} />
+        <ProfileDetailRow label="Systems" value={relatedSystems.join(", ") || attachment?.system_name || "Not linked"} />
+        <ProfileDetailRow label="Service records" value={relatedRecords.join(", ") || "Not linked"} />
+        <ProfileDetailRow label="Role" value={attachment?.role || "Other"} />
+        <ProfileDetailRow label="Showcase" value={isShowcase ? "Shown in Showcase" : "Not showcased"} />
+        <ProfileDetailRow label="Visibility" value={attachment?.visibility || aiMetadata.visibility || "Private"} />
+
+        <Text style={[styles.section, styles.sectionSpaced]}>What We Know</Text>
+        <ProfileDetailRow label="Notes" value={notes || "No notes yet"} multiline />
+        <ProfileDetailRow label="Summary" value={metadataSummary || "No summary yet"} multiline />
+        {isLink ? <ProfileDetailRow label="Canonical link" value={linkCover?.canonical_url || url} multiline /> : null}
+        {aiMetadata.document_type ? <ProfileDetailRow label="Document type" value={aiMetadata.document_type} /> : null}
+        {aiMetadata.source_context ? <ProfileDetailRow label="Source context" value={aiMetadata.source_context} multiline /> : null}
+
+        <View style={styles.footerActions}>
+          <TouchableOpacity
+            style={[styles.btn, styles.primary]}
+            onPress={handleOpen}
+            disabled={!url}
+          >
+            <Ionicons name="open-outline" size={18} color={colors.surface} />
+            <Text style={styles.btnTextPrimary}>Open</Text>
+          </TouchableOpacity>
+
+          {onEditContext ? (
+            <TouchableOpacity style={[styles.btn, styles.secondary]} onPress={onEditContext}>
+              <Ionicons name="document-text-outline" size={18} color={colors.textPrimary} />
+              <Text style={styles.btnTextSecondary}>Edit Context</Text>
+            </TouchableOpacity>
+          ) : null}
+
+          {onToggleShowcase ? (
+            <TouchableOpacity
+              style={[styles.btn, styles.secondary, showcaseBusy && { opacity: 0.6 }]}
+              onPress={onToggleShowcase}
+              disabled={showcaseBusy}
+            >
+              <Ionicons name={isShowcase ? "star" : "star-outline"} size={18} color={colors.textPrimary} />
+              <Text style={styles.btnTextSecondary}>{isShowcase ? "Showcased" : "Showcase"}</Text>
+            </TouchableOpacity>
+          ) : null}
+
+          {onDelete ? (
+            <TouchableOpacity style={[styles.btn, styles.danger]} onPress={confirmDelete}>
+              <Ionicons name="trash-outline" size={18} color={colors.danger} />
+              <Text style={styles.btnTextDanger}>Remove</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      </ScrollView>
+    </View>
+  );
+
   // ----- Shared content (header + body) -----
   const content = (
     <>
@@ -283,9 +409,17 @@ export default function AttachmentViewerModal({
         ) : null}
       </View>
 
-      <TouchableOpacity onPress={onClose}>
-        <Ionicons name="close-outline" size={26} color={colors.textSecondary} />
-      </TouchableOpacity>
+      <View style={styles.headerActions}>
+        {IS_MOBILE ? (
+          <TouchableOpacity onPress={() => setProfileOpen(true)} style={styles.infoButton}>
+            <Ionicons name="information-circle-outline" size={21} color={colors.primary} />
+            <Text style={styles.infoButtonText}>Info</Text>
+          </TouchableOpacity>
+        ) : null}
+        <TouchableOpacity onPress={onClose}>
+          <Ionicons name="close-outline" size={26} color={colors.textSecondary} />
+        </TouchableOpacity>
+      </View>
       </View>
 
       <View style={styles.body}>
@@ -371,76 +505,15 @@ export default function AttachmentViewerModal({
           )}
         </View>
 
-        <View style={styles.sidebar}>
-          <ScrollView
-            style={{ flex: 1 }}
-            contentContainerStyle={{ paddingBottom: spacing.md }}
-            showsVerticalScrollIndicator={false}
-          >
-            <Text style={styles.section}>What we know</Text>
-
-            <Text style={styles.label}>Title</Text>
-            <Text style={styles.value} numberOfLines={3}>
-              {title || "—"}
-            </Text>
-
-            {notes ? (
-              <>
-                <Text style={[styles.label, { marginTop: spacing.sm }]}>Notes</Text>
-                <Text style={styles.value}>{notes}</Text>
-              </>
-            ) : null}
-
-            <Text style={[styles.label, { marginTop: spacing.md }]}>Evidence type</Text>
-            <Text style={styles.value}>{typeLabel}</Text>
-
-            <Text style={[styles.label, { marginTop: spacing.sm }]}>Added</Text>
-            <Text style={styles.value}>{formatDate(uploadedAt)}</Text>
-
-            <Text style={[styles.label, { marginTop: spacing.sm }]}>Showcase</Text>
-            <Text style={styles.value}>{isShowcase ? "Shown in Showcase" : "Not showcased"}</Text>
-
-            <Text style={[styles.label, { marginTop: spacing.sm }]}>Size</Text>
-            <Text style={styles.value}>{formatSize(size)}</Text>
-
-            <View style={styles.footerActions}>
-              <TouchableOpacity
-                style={[styles.btn, styles.primary]}
-                onPress={handleOpen}
-                disabled={!url}
-              >
-                <Ionicons name="open-outline" size={18} color={colors.surface} />
-                <Text style={styles.btnTextPrimary}>Open</Text>
-              </TouchableOpacity>
-
-              {onEditContext ? (
-                <TouchableOpacity style={[styles.btn, styles.secondary]} onPress={onEditContext}>
-                  <Ionicons name="document-text-outline" size={18} color={colors.textPrimary} />
-                  <Text style={styles.btnTextSecondary}>Edit Context</Text>
-                </TouchableOpacity>
-              ) : null}
-
-              {onToggleShowcase ? (
-                <TouchableOpacity
-                  style={[styles.btn, styles.secondary, showcaseBusy && { opacity: 0.6 }]}
-                  onPress={onToggleShowcase}
-                  disabled={showcaseBusy}
-                >
-                  <Ionicons name={isShowcase ? "star" : "star-outline"} size={18} color={colors.textPrimary} />
-                  <Text style={styles.btnTextSecondary}>{isShowcase ? "Showcased" : "Showcase"}</Text>
-                </TouchableOpacity>
-              ) : null}
-
-              {onDelete ? (
-                <TouchableOpacity style={[styles.btn, styles.danger]} onPress={confirmDelete}>
-                  <Ionicons name="trash-outline" size={18} color={colors.danger} />
-                  <Text style={styles.btnTextDanger}>Remove</Text>
-                </TouchableOpacity>
-              ) : null}
-            </View>
-          </ScrollView>
-        </View>
+        {IS_WEB ? profilePanel : null}
       </View>
+      {IS_MOBILE && !profileOpen ? (
+        <TouchableOpacity style={styles.infoHint} onPress={() => setProfileOpen(true)}>
+          <Ionicons name="information-circle-outline" size={18} color={colors.primary} />
+          <Text style={styles.infoHintText}>Info</Text>
+        </TouchableOpacity>
+      ) : null}
+      {IS_MOBILE && profileOpen ? profilePanel : null}
     </>
   );
 
@@ -517,6 +590,27 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   headerLeft: { flexDirection: "row", alignItems: "center", flex: 1, marginRight: spacing.md },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  infoButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#DBEAFE",
+  },
+  infoButtonText: {
+    marginLeft: 4,
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: "900",
+  },
   headerIcon: {
     width: 32,
     height: 32,
@@ -619,11 +713,94 @@ navBtn: {
   evidenceHintRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: spacing.md },
   evidenceHint: { flex: 1, fontSize: 13, color: colors.textSecondary },
 
-  sidebar: {
+  profilePanel: {
     flex: IS_WEB ? 0 : 1,
     width: IS_WEB ? 300 : "100%",
     maxWidth: IS_WEB ? 320 : undefined,
     minHeight: IS_WEB ? 0 : 160,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    backgroundColor: colors.surface,
+    overflow: "hidden",
+  },
+  profileSheet: {
+    position: "absolute",
+    left: spacing.md,
+    right: spacing.md,
+    bottom: spacing.md,
+    maxHeight: "76%",
+    minHeight: 260,
+    zIndex: 20,
+    ...shadowSm,
+  },
+  sheetHandleRow: {
+    minHeight: 38,
+    alignItems: "center",
+    justifyContent: "center",
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderSubtle,
+  },
+  sheetHandle: {
+    width: 42,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: colors.border,
+  },
+  sheetClose: {
+    position: "absolute",
+    right: 10,
+    top: 8,
+  },
+  profileContent: {
+    padding: spacing.md,
+    paddingBottom: spacing.lg,
+  },
+  profileHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  profileEyebrow: {
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  profileTitle: {
+    color: colors.textPrimary,
+    fontSize: 17,
+    lineHeight: 21,
+    fontWeight: "900",
+    marginTop: 2,
+  },
+  profileRow: {
+    marginBottom: spacing.sm,
+  },
+  sectionSpaced: {
+    marginTop: spacing.md,
+  },
+  infoHint: {
+    position: "absolute",
+    left: "50%",
+    bottom: spacing.lg,
+    transform: [{ translateX: -46 }],
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 999,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    ...shadowSm,
+  },
+  infoHintText: {
+    marginLeft: 6,
+    color: colors.primary,
+    fontWeight: "900",
+    fontSize: 13,
   },
 
   section: { fontSize: 14, fontWeight: "900", color: colors.textPrimary, marginBottom: spacing.sm },
