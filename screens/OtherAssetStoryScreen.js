@@ -41,6 +41,7 @@ import { getSignedUrl, listAttachmentsForTarget } from "../lib/attachmentsApi";
 // Context-aware Add Event pill
 import EventPill from "../components/EventPill";
 import ReportsModal from "../components/ReportsModal";
+import AssetWhatNextSection from "../components/AssetWhatNextSection";
 import { getAssetDefinition, formatAssetMetaValue } from "../lib/assetDefinitions";
 import { buildMessagesNavigationParams } from "../lib/messagesService";
 
@@ -1477,6 +1478,13 @@ const filteredTimelineItems = useMemo(() => {
           </View>
 
         </View>
+
+        <AssetWhatNextSection
+          assetId={asset?.id}
+          assetName={assetName}
+          assetType="other"
+          navigation={navigation}
+        />
 
         {/* Timeline */}
         <View

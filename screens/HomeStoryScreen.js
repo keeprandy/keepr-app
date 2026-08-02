@@ -47,6 +47,7 @@ import { getSignedUrl, listAttachmentsForTarget } from "../lib/attachmentsApi";
 // Context-aware Add Event pill
 import EventPill from "../components/EventPill";
 import ReportsModal from "../components/ReportsModal";
+import AssetWhatNextSection from "../components/AssetWhatNextSection";
 
 const HERO_ASPECT = 4 / 3;
 const IS_WEB = Platform.OS === "web";
@@ -1622,6 +1623,13 @@ try {
           </View>
 
         </View>
+
+        <AssetWhatNextSection
+          assetId={home?.id}
+          assetName={homeName}
+          assetType="home"
+          navigation={navigation}
+        />
 
         {/* Timeline */}
         <View

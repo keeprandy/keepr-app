@@ -46,6 +46,7 @@ import { getSignedUrl, listAttachmentsForTarget } from "../lib/attachmentsApi";
 // Context-aware Add Event pill
 import EventPill from "../components/EventPill";
 import ReportsModal from "../components/ReportsModal";
+import AssetWhatNextSection from "../components/AssetWhatNextSection";
 import { buildVehicleStory } from "../lib/storyBuilders";
 
 const HERO_ASPECT = 4 / 3;
@@ -1492,6 +1493,13 @@ const meta = {
           </View>
 
         </View>
+
+        <AssetWhatNextSection
+          assetId={vehicle?.id}
+          assetName={vehicleName}
+          assetType="vehicle"
+          navigation={navigation}
+        />
 
         {/* Timeline */}
         <View
