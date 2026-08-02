@@ -1066,15 +1066,6 @@ if (Platform.OS !== "ios") {
                       <WorldChip icon="boat-outline" label="Water" count={boatsSorted.length} onPress={goBoats} />
                     </ScrollView>
 
-                    <View style={{ marginTop: spacing.md, maxWidth: 640 }}>
-                      <AchievementsCard
-                        ach={ach}
-                        loading={achLoading}
-                        dashboardMode={dashboardMode}
-                        onPress={goProfile}
-                      />
-                    </View>
-
                     <ModeWidget
                         icon="share-social-outline"
                         title="Your Keepr Effect"
@@ -1163,14 +1154,6 @@ if (Platform.OS !== "ios") {
                   </View>
                 ) : null}
 
-                  <View style={{ marginTop: spacing.md }}>
-                    <AchievementsCard
-                      ach={ach}
-                      loading={achLoading}
-                      dashboardMode={dashboardMode}
-                      onPress={goProfile}
-                    />
-                  </View>
                   <ModeWidget
                     icon="share-social-outline"
                     title="Your Keepr Effect"
@@ -1602,70 +1585,6 @@ function ModeWidget({ icon, title, subtitle, onPress }) {
     </TouchableOpacity>
   );
 }
-function AchievementsCard({ ach, loading, dashboardMode, onPress }) {
-  return (
-    <TouchableOpacity
-      style={styles.achCard}
-      activeOpacity={0.9}
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel="View achievements"
-    >
-      <View style={styles.achTopRow}>
-        <Text style={styles.achTitle}>Ownership Status:</Text>
-        <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
-      </View>
-
-      {loading ? (
-        <Text style={styles.achMuted}>Loading…</Text>
-      ) : ach ? (
-        <>
-          <Text style={styles.achStats}>
-            <Text style={styles.achStrong}>{ach.asset_count}</Text> assets ·{" "}
-            <Text style={styles.achStrong}>{ach.system_count}</Text> systems ·{" "}
-            <Text style={styles.achStrong}>{ach.service_record_count}</Text> records ·{" "}
-            <Text style={styles.achStrong}>{ach.attachment_count}</Text> attachments ·{" "}
-            <Text style={styles.achStrong}>
-              {typeof ach.attachment_mb === "number" ? ach.attachment_mb.toFixed(2) : ach.attachment_mb}
-            </Text>{" "}
-            MB
-          </Text>
-          {dashboardMode === "no_assets" && (
-            <Text style={styles.achMuted}>
-              Start by adding your first asset to begin documenting your ownership.
-            </Text>
-          )}
-
-          {dashboardMode === "no_records" && (
-            <Text style={styles.achMuted}>
-              Great start. Add your first record to build your ownership story.
-            </Text>
-          )}
-
-          {dashboardMode === "stalled" && (
-            <Text style={styles.achMuted}>
-              Your documentation exists. Add a new record to stay protected.
-            </Text>
-          )}
-
-          {dashboardMode === "active" && (
-            <Text style={styles.achMomentum}>
-              Protection Level: Active — your documentation is current.
-            </Text>
-          )}
-        {dashboardMode === "active" && ach.service_records_30d > 0 && (
-          <Text style={styles.achMomentum}>
-            Momentum — {ach.service_records_30d} records added in the last 30 days.
-          </Text>
-        )}
-        </>
-      ) : (
-        <Text style={styles.achMuted}>Add assets and proof to build your story.</Text>
-      )}
-    </TouchableOpacity>
-  );
-}
-
 function BackgroundWash() {
   return (
     <View pointerEvents="none" style={styles.bgWrap}>
@@ -2322,50 +2241,6 @@ headerWebRow: {
     marginLeft: 8,
   },
 
-  // Achievements card (clickable)
-  achCard: {
-    width: "100%",
-    maxWidth: 640,
-    borderRadius: 18,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    ...cardStyles.shadowSoft,
-  },
-  achTopRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 6,
-  },
-  achTitle: {
-    fontSize: 13,
-    fontWeight: "900",
-    color: colors.textPrimary,
-    letterSpacing: 0.2,
-  },
-  achStats: {
-    fontSize: 13,
-    color: colors.textPrimary,
-    lineHeight: 18,
-  },
-  achStrong: {
-    fontWeight: "900",
-    color: colors.textPrimary,
-  },
-  achMomentum: {
-    marginTop: 6,
-    fontSize: 12,
-    color: colors.textPrimary,
-    fontWeight: "700",
-  },
-  achMuted: {
-    marginTop: 4,
-    fontSize: 12,
-    color: colors.textMuted,
-  },
   modeWidget: {
   marginTop: spacing.md,
   padding: spacing.md,
