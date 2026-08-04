@@ -50,6 +50,7 @@ import {
   getLastReminderNotificationResponse,
   setReminderNotificationHandler,
 } from "./lib/remindersNotifications";
+import { markNotificationRead } from "./lib/notificationsService";
 
 import ManageTeamScreen from "./screens/ManageTeamScreen";
 import PrivacyTrustScreen from "./screens/PrivacyTrustScreen";
@@ -155,8 +156,12 @@ import OtherAssetShowcaseScreen from "./screens/OtherAssetShowcaseScreen";
 
 // Keepr Pros
 import KeeprProAddServiceScreen from "./screens/KeeprProAddServiceScreen";
+import KeeprProActionDetailScreen from "./screens/KeeprProActionDetailScreen";
 import KeeprProDetailScreen from "./screens/KeeprProDetailScreen";
+import KeeprProHomeScreen from "./screens/KeeprProHomeScreen";
+import KeeprProStewardshipViewScreen from "./screens/KeeprProStewardshipViewScreen";
 import KeeprProsScreen from "./screens/KeeprProsScreen";
+import PublicKeeprProProfileScreen from "./screens/PublicKeeprProProfileScreen";
 
 // Upload Lab
 import AssetAttachmentsScreen from "./screens/AssetAttachmentsScreen";
@@ -245,6 +250,7 @@ import { useShareIntent } from "expo-share-intent";
 const Tab = createBottomTabNavigator();
 const RootStack = createNativeStackNavigator();
 const SuperKeeprStackNav = createNativeStackNavigator();
+const KeeprProStackNav = createNativeStackNavigator();
 const HomeStackNav = createNativeStackNavigator();
 
 
@@ -272,6 +278,7 @@ const linking = {
     ShareKeepr: "share-keepr",
     KeeprEffect: "keepr-effect",
     ShareAction: "s/:token",
+    PublicKeeprProProfile: "pro/:slug",
     
     PublicSystemStory: "k/:kac/n/:nodeId",
     PublicKeeprStory: "k/:kac",
@@ -301,6 +308,14 @@ const linking = {
       path: "super",
       screens: {
         SuperKeeprDashboard: "",
+      },
+    },
+    KeeprProStack: {
+      path: "pro-mode",
+      screens: {
+        KeeprProHome: "",
+        KeeprProStewardshipView: "asset/:assetId",
+        KeeprProActionDetail: "asset/:assetId/action/:actionId",
       },
     },
     TimelineRecord: "TimelineRecord",
@@ -1062,6 +1077,28 @@ function SuperKeeprStack() {
   );
 }
 
+/* ----------------- KEEPRPRO STACK ----------------- */
+
+function KeeprProStack() {
+  return (
+    <KeeprProStackNav.Navigator screenOptions={{ headerShown: false }}>
+      <KeeprProStackNav.Screen
+        name="KeeprProHome"
+        component={KeeprProHomeScreen}
+      />
+      <KeeprProStackNav.Screen
+        name="KeeprProStewardshipView"
+        component={KeeprProStewardshipViewScreen}
+      />
+      <KeeprProStackNav.Screen
+        name="KeeprProActionDetail"
+        component={KeeprProActionDetailScreen}
+      />
+      <KeeprProStackNav.Screen name="Settings" component={SettingsScreen} />
+    </KeeprProStackNav.Navigator>
+  );
+}
+
 /* ----------------- NAV THEME ----------------- */
 
 const navTheme = {
@@ -1106,8 +1143,9 @@ function GlobalEventFab({ currentRouteName, role }) {
     "OwnerSystemsPackagePrint",
   "Reports",
   "PrintView",
-  "PublicAction",
-  "PublicKeeprStory",
+    "PublicAction",
+    "PublicKeeprProProfile",
+    "PublicKeeprStory",
   "KeeprStory",
   "PublicConfig",
   ];
@@ -1421,6 +1459,8 @@ async function captureInviteSourceFromUrl(url) {
 
 const PENDING_REMINDER_NOTIFICATION_KEY =
   "keepr.pendingReminderNotification.v1";
+const PENDING_KEEPR_NOTIFICATION_KEY =
+  "keepr.pendingKeeprNotification.v1";
 
 function extractReminderNotificationData(responseOrData) {
   const data =
@@ -1458,6 +1498,29 @@ function extractReminderNotificationData(responseOrData) {
   };
 }
 
+function extractKeeprNotificationData(responseOrData) {
+  const data =
+    responseOrData?.notification?.request?.content?.data ||
+    responseOrData?.request?.content?.data ||
+    responseOrData ||
+    {};
+
+  const eventId = data?.eventId || data?.event_id || null;
+  const threadId = data?.threadId || data?.thread_id || null;
+  const actionId = data?.actionId || data?.action_id || null;
+  const assetId = data?.assetId || data?.asset_id || null;
+  const kac = data?.kac || null;
+  if (!eventId && !threadId && !actionId) return null;
+
+  return {
+    eventId: eventId ? String(eventId) : null,
+    threadId: threadId ? String(threadId) : null,
+    actionId: actionId ? String(actionId) : null,
+    assetId: assetId ? String(assetId) : null,
+    kac: kac ? String(kac) : null,
+  };
+}
+
 async function storePendingReminderNotification(target) {
   if (!target?.reminderId) return;
   try {
@@ -1481,6 +1544,33 @@ async function takePendingReminderNotification() {
     return JSON.parse(raw);
   } catch (error) {
     console.log("Pending reminder notification read skipped:", error);
+    return null;
+  }
+}
+
+async function storePendingKeeprNotification(target) {
+  if (!target?.eventId && !target?.threadId && !target?.actionId) return;
+  try {
+    await AsyncStorage.setItem(
+      PENDING_KEEPR_NOTIFICATION_KEY,
+      JSON.stringify({
+        ...target,
+        storedAt: new Date().toISOString(),
+      })
+    );
+  } catch (error) {
+    console.log("Pending Keepr notification store skipped:", error);
+  }
+}
+
+async function takePendingKeeprNotification() {
+  try {
+    const raw = await AsyncStorage.getItem(PENDING_KEEPR_NOTIFICATION_KEY);
+    if (!raw) return null;
+    await AsyncStorage.removeItem(PENDING_KEEPR_NOTIFICATION_KEY);
+    return JSON.parse(raw);
+  } catch (error) {
+    console.log("Pending Keepr notification read skipped:", error);
     return null;
   }
 }
@@ -1568,6 +1658,43 @@ async function openReminderFromNotification(target, ownerId) {
   return true;
 }
 
+async function openKeeprNotification(target) {
+  if (!target?.eventId && !target?.threadId && !target?.actionId) return false;
+  if (!navigationRef?.isReady?.()) {
+    await storePendingKeeprNotification(target);
+    return false;
+  }
+
+  try {
+    if (target.eventId) await markNotificationRead(target.eventId);
+  } catch (error) {
+    console.log("Keepr notification read mark skipped:", error?.message || error);
+  }
+
+  if (target.threadId) {
+    navigationRef.current?.navigate("RootTabs", {
+      screen: "Messages",
+      params: {
+        scope: "asset",
+        assetId: target.assetId || null,
+        threadId: target.threadId,
+      },
+    });
+    return true;
+  }
+
+  if (target.actionId) {
+    navigationRef.current?.navigate("CreateReminder", {
+      reminderId: target.actionId,
+      afterSave: "Notifications",
+    });
+    return true;
+  }
+
+  navigationRef.current?.navigate("Notifications");
+  return true;
+}
+
 function isPasswordRecoveryUrl(url) {
   if (!url || typeof url !== "string") return false;
 
@@ -1576,10 +1703,11 @@ function isPasswordRecoveryUrl(url) {
     const path = parsed?.path || "";
     const query = parsed?.queryParams || {};
 
-    if (path === "reset" || path.startsWith("reset/")) return true;
+    const isResetPath = path === "reset" || path.startsWith("reset/");
+    if (isResetPath) return true;
     if (query.type === "recovery") return true;
-    if (query.code) return true;
-    if (query.access_token && query.refresh_token) return true;
+    if (isResetPath && query.code) return true;
+    if (isResetPath && query.access_token && query.refresh_token) return true;
     if (query.error || query.error_code || query.error_description) return true;
   } catch (_) {}
 
@@ -1590,18 +1718,18 @@ function isPasswordRecoveryUrl(url) {
     const get = (key) => hash.get(key) || query.get(key) || "";
     const target = `${u.hostname || ""}${u.pathname || ""}`;
 
-    if (target === "reset" || target.startsWith("reset/")) return true;
-    if (url.includes("/reset")) return true;
+    const isResetTarget = target === "reset" || target.startsWith("reset/") || url.includes("/reset");
+    if (isResetTarget) return true;
     if (get("type") === "recovery") return true;
-    if (get("code")) return true;
-    if (get("access_token") && get("refresh_token")) return true;
+    if (isResetTarget && get("code")) return true;
+    if (isResetTarget && get("access_token") && get("refresh_token")) return true;
     if (get("error") || get("error_code") || get("error_description")) return true;
   } catch (_) {
     if (url.startsWith("keepr://reset")) return true;
     if (url.includes("/reset")) return true;
     if (url.includes("type=recovery")) return true;
-    if (url.includes("access_token=") && url.includes("refresh_token=")) return true;
-    if (url.includes("code=")) return true;
+    if (url.includes("/reset") && url.includes("access_token=") && url.includes("refresh_token=")) return true;
+    if (url.includes("/reset") && url.includes("code=")) return true;
   }
 
   return false;
@@ -1626,6 +1754,20 @@ function normalizeInitialActionWebPath() {
       window.history.replaceState(window.history.state, "", next);
     }
   } catch (_) {}
+}
+
+function sanitizeAuthUrlForLog(url) {
+  if (!url || typeof url !== "string") return url || "";
+  try {
+    const parsed = new URL(url);
+    if (parsed.searchParams.has("code")) parsed.searchParams.set("code", "[redacted]");
+    if (parsed.hash) parsed.hash = "#[redacted-oauth-fragment]";
+    return parsed.toString();
+  } catch (_) {
+    return url
+      .replace(/([?&]code=)[^&#]+/i, "$1[redacted]")
+      .replace(/#.*$/, "#[redacted-oauth-fragment]");
+  }
 }
 
 function Root({ onRouteChange, setCurrentRouteName, currentRouteName }) {
@@ -1669,7 +1811,7 @@ React.useEffect(() => {
   captureInitialInvite();
 
   const subscription = ExpoLinking.addEventListener("url", ({ url }) => {
-    console.log("🔥 URL RECEIVED:", url);
+    console.log("🔥 URL RECEIVED:", sanitizeAuthUrlForLog(url));
     if (user?.id) return;
     captureInviteSourceFromUrl(url);
   });
@@ -1745,6 +1887,17 @@ React.useEffect(() => {
   let mounted = true;
 
   const handleResponse = async (response) => {
+    const keeprTarget = extractKeeprNotificationData(response);
+    if (keeprTarget) {
+      if (!mounted) return;
+      if (!user?.id || !navigationRef?.isReady?.()) {
+        await storePendingKeeprNotification(keeprTarget);
+        return;
+      }
+      await openKeeprNotification(keeprTarget);
+      return;
+    }
+
     const target = extractReminderNotificationData(response);
     if (!target) return;
     if (!mounted) return;
@@ -1779,6 +1932,11 @@ React.useEffect(() => {
   let mounted = true;
 
   const drainPending = async () => {
+    const keeprTarget = await takePendingKeeprNotification();
+    if (mounted && keeprTarget) {
+      await openKeeprNotification(keeprTarget);
+    }
+
     const target = await takePendingReminderNotification();
     if (!mounted || !target?.reminderId) return;
     await openReminderFromNotification(target, user.id);
@@ -1939,6 +2097,8 @@ identifyCurrentUser();
       ? "OnboardingStack"
       : role === "superkeepr"
       ? "SuperKeeprStack"
+      : role === "keeprpro"
+      ? "KeeprProStack"
       : "RootTabs";
   }, [role, onboardingState, assetCount, shouldShowOnboarding]);
 
@@ -1953,11 +2113,12 @@ identifyCurrentUser();
     const path = window.location.pathname || "";
     const hash = window.location.hash || "";
     const search = window.location.search || "";
+    const resetPath = path.startsWith("/reset") || href.includes("/reset");
     if (path.startsWith("/reset")) return true;
     if (href.includes("/reset")) return true;
     if (hash.includes("type=recovery")) return true;
-    if (hash.includes("access_token=") && hash.includes("refresh_token=")) return true;
-    if (search.includes("code=")) return true;
+    if (resetPath && hash.includes("access_token=") && hash.includes("refresh_token=")) return true;
+    if (resetPath && search.includes("code=")) return true;
     if (hash.includes("error=")) return true;
     return false;
   } catch (_) {
@@ -2008,8 +2169,6 @@ if (
   didInitialNavResolve.current = true;
   lastResetRouteRef.current = targetRoute;
 }, [targetRoute, isResetLink]);
-
-
 
   React.useEffect(() => {
     let mounted = true;
@@ -2199,6 +2358,7 @@ if (!user) {
           <RootStack.Screen name="KacResolve" component={KacResolveScreen} />
           <RootStack.Screen name="PublicSystemStory" component={PublicSystemStoryScreen}/>
           <RootStack.Screen name="PublicKeeprStory" component={PublicKeeprStoryScreen}/>
+          <RootStack.Screen name="PublicKeeprProProfile" component={PublicKeeprProProfileScreen}/>
           <RootStack.Screen name="MessageLink" component={MessageLinkScreen} />
           <RootStack.Screen name="KeeprHub" component={KeeprHubScreen}/>
           <RootStack.Screen name="HubDetail" component={HubDetailScreen} />
@@ -2235,6 +2395,8 @@ const initialRouteName = isResetLink
   ? "OnboardingStack"
   : role === "superkeepr"
   ? "SuperKeeprStack"
+  : role === "keeprpro"
+  ? "KeeprProStack"
   : "RootTabs";
 
 
@@ -2251,7 +2413,10 @@ const initialRouteName = isResetLink
           !window.location.pathname.startsWith("/hub/") &&
           !window.location.pathname.startsWith("/story/") &&
           !window.location.pathname.startsWith("/invite/") &&
+          !window.location.pathname.startsWith("/auth") &&
           !window.location.pathname.startsWith("/m/") &&
+          !window.location.pathname.startsWith("/pro/") &&
+          !window.location.pathname.startsWith("/pro-mode") &&
           !window.location.pathname.startsWith("/inbox") &&
           !window.location.pathname.startsWith("/messages") &&
           !window.location.pathname.startsWith("/CreateReminder") &&
@@ -2284,6 +2449,10 @@ const initialRouteName = isResetLink
             name="SuperKeeprStack"
             component={SuperKeeprStack}
           />
+          <RootStack.Screen
+            name="KeeprProStack"
+            component={KeeprProStack}
+          />
 
           <RootStack.Screen name="OnboardingStack" component={OnboardingStack} />
           <RootStack.Screen name="Profile" component={ProfileScreen} />
@@ -2300,6 +2469,7 @@ const initialRouteName = isResetLink
           <RootStack.Screen name="PublicConfigAssetPicker" component={PublicConfigAssetPickerScreen} />
           <RootStack.Screen name="PublicSystemStory" component={PublicSystemStoryScreen} />
           <RootStack.Screen name="PublicKeeprStory" component={PublicKeeprStoryScreen} />
+          <RootStack.Screen name="PublicKeeprProProfile" component={PublicKeeprProProfileScreen} />
           <RootStack.Screen name="MessageLink" component={MessageLinkScreen} />
           <RootStack.Screen name="KeeprHub" component={KeeprHubScreen}/>
           <RootStack.Screen name="HubDetail" component={HubDetailScreen} />

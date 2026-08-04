@@ -256,6 +256,11 @@ function SafeShareQrCode({ value, size }) {
   );
 }
 
+function formatProofCountLabel(count, singular) {
+  const value = Number(count || 0);
+  return `${value} ${singular}${value === 1 ? "" : "s"}`;
+}
+
 /* -------------------------------------------------------------------------- */
 /*                              TIMELINE COMPONENT                            */
 /* -------------------------------------------------------------------------- */
@@ -311,7 +316,7 @@ function TimelineRow({
                 color={colors.textSecondary}
               />
               <Text style={styles.metaPillText}>
-                {item.documentCount} documents
+                {formatProofCountLabel(item.documentCount, "document")}
               </Text>
             </View>
           )}
@@ -324,7 +329,7 @@ function TimelineRow({
                 color={colors.textSecondary}
               />
               <Text style={styles.metaPillText}>
-                {item.photoCount} photos
+                {formatProofCountLabel(item.photoCount, "photo")}
               </Text>
             </View>
           )}

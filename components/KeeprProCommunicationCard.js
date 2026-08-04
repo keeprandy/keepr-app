@@ -20,10 +20,13 @@ export function normalizeKeeprProContact(pro) {
   return {
     id: pro.id || pro.keepr_pro_id || pro.keeprProId || null,
     name,
+    slug: firstPresent(pro.slug, pro.keepr_pro_slug, pro.profile_slug),
     category: firstPresent(pro.category, pro.specialty, pro.type),
     phone: firstPresent(pro.phone, pro.mobile, pro.phone_number),
     email: firstPresent(pro.email, pro.email_address),
     website: firstPresent(pro.website, pro.url),
+    claimedState: firstPresent(pro.claimed_state, pro.claimedState),
+    publishStatus: firstPresent(pro.publish_status, pro.publishStatus),
     raw: pro,
   };
 }
@@ -114,6 +117,7 @@ export default function KeeprProCommunicationCard({
   systemName = "",
   relationshipLabel = "Your KeeprPro",
   onRequestService,
+  onMessage,
   onViewKeeprPro,
   compact = false,
 }) {
@@ -182,12 +186,16 @@ export default function KeeprProCommunicationCard({
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.action, !pro.email && styles.disabledAction]}
-          onPress={openEmail}
-          disabled={!pro.email}
+          style={[styles.action, !onMessage && !pro.email && styles.disabledAction]}
+          onPress={onMessage || openEmail}
+          disabled={!onMessage && !pro.email}
         >
-          <Ionicons name="mail-outline" size={15} color={colors.textPrimary} />
-          <Text style={styles.actionText}>Email</Text>
+          <Ionicons
+            name={onMessage ? "chatbubble-ellipses-outline" : "mail-outline"}
+            size={15}
+            color={colors.textPrimary}
+          />
+          <Text style={styles.actionText}>{onMessage ? "Message" : "Email"}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={[styles.action, styles.primaryAction]} onPress={onRequestService}>

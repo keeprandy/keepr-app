@@ -35,7 +35,7 @@ import KeeprProCommunicationCard, {
   getAssetKeeprProsFromMetadata,
 } from "../components/KeeprProCommunicationCard";
 import { buildPrivateKeeprProActionPrefill } from "../lib/keeprProEngagement";
-import { buildMessagesNavigationParams } from "../lib/messagesService";
+import { buildMessagesNavigationParams, startOwnerKeeprProRelationshipThread } from "../lib/messagesService";
 
 // ✅ low-level upload helper (NOT a hook)
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
@@ -1054,10 +1054,61 @@ const meta = {
 
   const boatDisplayName =
   `${boat?.year || ""} ${boat?.make || ""} ${boat?.model || ""}`.trim() || "Boat";
+  const boatKac =
+    boat?.kac ||
+    boat?.kac_code ||
+    boat?.kac_id ||
+    boat?.kacId ||
+    route?.params?.kac ||
+    route?.params?.kacId ||
+    route?.params?.kac_id ||
+    null;
+  const buildOwnerKeeprProAssetContext = useCallback(
+    () => ({
+      assetId: boat?.id || null,
+      assetName: boatName,
+      assetType: "boat",
+      kac: boatKac || null,
+      ownerId: boat?.owner_id || null,
+      ownerName: boat?.owner_display_name || boat?.owner_name || boat?.owner?.display_name || null,
+    }),
+    [boat?.id, boat?.owner_id, boatKac, boatName]
+  );
   const assetKeeprPros = useMemo(() => getAssetKeeprProsFromMetadata(boat), [boat]);
+  const resolveClaimedKeeprProSlug = useCallback(async (keeprPro) => {
+    const directSlug = keeprPro?.slug || keeprPro?.keepr_pro_slug || keeprPro?.profile_slug || null;
+    if (directSlug) return directSlug;
+    if (!keeprPro?.id) return null;
+    try {
+      const { data, error } = await supabase
+        .from("keepr_pros")
+        .select("slug,claimed_state,publish_status")
+        .eq("id", keeprPro.id)
+        .maybeSingle();
+      if (error) throw error;
+      if (
+        data?.slug &&
+        data?.claimed_state === "claimed" &&
+        ["published", "demo"].includes(data?.publish_status)
+      ) {
+        return data.slug;
+      }
+    } catch (err) {
+      console.log("KeeprPro claimed profile lookup skipped:", err);
+    }
+    return null;
+  }, []);
   const openKeeprPro = useCallback(
-    (keeprPro) => {
+    async (keeprPro) => {
       if (!navigation?.navigate || !keeprPro?.id) return;
+      const slug = await resolveClaimedKeeprProSlug(keeprPro);
+      if (slug) {
+        navigation.navigate("PublicKeeprProProfile", {
+          slug,
+          assetContext: buildOwnerKeeprProAssetContext(),
+        });
+        return;
+      }
       navigation.navigate("KeeprProDetail", {
         pro: keeprPro,
         assetId: boat?.id || null,
@@ -1066,10 +1117,113 @@ const meta = {
         assignmentScope: "asset",
       });
     },
-    [navigation, boat?.id, boatName]
+    [navigation, boat?.id, boatName, buildOwnerKeeprProAssetContext, resolveClaimedKeeprProSlug]
+  );
+  const messageKeeprPro = useCallback(
+    async (keeprPro) => {
+      if (!navigation?.navigate || !boat?.id) return;
+      let threadId = null;
+      let relationship = null;
+      let providerMemberId = null;
+      let providerOrgId = keeprPro?.organization_id || keeprPro?.provider_org_id || null;
+      try {
+        if (keeprPro?.id) {
+          const { data, error } = await supabase
+            .from("asset_threads")
+            .select("id")
+            .eq("asset_id", boat.id)
+            .eq("keepr_pro_id", keeprPro.id)
+            .order("updated_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (error) throw error;
+          threadId = data?.id || null;
+        }
+      } catch (err) {
+        console.log("KeeprPro thread lookup skipped:", err);
+      }
+
+      try {
+        if (keeprPro?.id && !providerOrgId) {
+          const { data: proRow, error: proError } = await supabase
+            .from("keepr_pros")
+            .select("organization_id")
+            .eq("id", keeprPro.id)
+            .maybeSingle();
+          if (proError) throw proError;
+          providerOrgId = proRow?.organization_id || null;
+        }
+        if (keeprPro?.id && providerOrgId) {
+          const { data: stewardship, error: stewardshipError } = await supabase
+            .from("asset_provider_stewardships")
+            .select("id,organization_id,keepr_pro_id")
+            .eq("asset_id", boat.id)
+            .eq("organization_id", providerOrgId)
+            .eq("status", "active")
+            .eq("access_scope", "service_stewardship")
+            .maybeSingle();
+          if (stewardshipError) throw stewardshipError;
+          relationship = stewardship || null;
+
+          const { data: members, error: membersError } = await supabase
+            .from("org_members")
+            .select("user_id")
+            .eq("org_id", providerOrgId)
+            .limit(1);
+          if (membersError) throw membersError;
+          providerMemberId = (members || [])[0]?.user_id || null;
+        }
+      } catch (err) {
+        console.log("KeeprPro relationship lookup skipped:", err);
+      }
+
+      if (!threadId && relationship?.id && keeprPro?.id) {
+        try {
+          const started = await startOwnerKeeprProRelationshipThread({
+            assetId: boat.id,
+            assetName: boatName || boat.name || "Boat",
+            kac: boatKac || null,
+            keeprProId: keeprPro.id,
+            keeprProName: keeprPro?.name || keeprPro?.label || "KeeprPro",
+            organizationId: providerOrgId,
+            stewardshipId: relationship.id,
+            providerMemberId,
+            ownerId: boat.owner_id || null,
+          });
+          threadId = started?.thread?.id || null;
+        } catch (err) {
+          Alert.alert("Could not start conversation", err?.message || "Please try again.");
+          return;
+        }
+      }
+
+      navigation.navigate("RootTabs", {
+        screen: "Messages",
+        params: buildMessagesNavigationParams({
+          scope: "asset",
+          assetId: boat.id,
+          assetName: boatName || boat.name || "Boat",
+          parentAssetKac: boatKac || null,
+          keeprProId: keeprPro?.id || null,
+          keeprProName: keeprPro?.name || keeprPro?.label || "KeeprPro",
+          threadId,
+          backRoute: "BoatStory",
+          backParams: { boatId: boat.id, assetId: boat.id },
+        }),
+      });
+    },
+    [navigation, boat?.id, boat?.name, boatName, boatKac]
   );
   const requestAssetServiceFromKeeprPro = useCallback(
-    (pro) => {
+    async (pro) => {
+      const slug = await resolveClaimedKeeprProSlug(pro);
+      if (slug) {
+        navigation.navigate("PublicKeeprProProfile", {
+          slug,
+          assetContext: buildOwnerKeeprProAssetContext(),
+        });
+        return;
+      }
       const prefill = buildPrivateKeeprProActionPrefill({
         assetId: boat?.id || null,
         assetName: boatName,
@@ -1084,7 +1238,7 @@ const meta = {
         afterSave: "Notifications",
       });
     },
-    [navigation, boat?.id, boatName]
+    [navigation, boat?.id, boatName, buildOwnerKeeprProAssetContext, resolveClaimedKeeprProSlug]
   );
 
   const goToKeeprStory = () => {
@@ -1491,6 +1645,7 @@ const meta = {
                   assetName={boatName}
                   relationshipLabel="Linked Service Partner"
                   onRequestService={() => requestAssetServiceFromKeeprPro(assetKeeprPro)}
+                  onMessage={() => messageKeeprPro(assetKeeprPro)}
                   onViewKeeprPro={() => openKeeprPro(assetKeeprPro)}
                 />
               ))

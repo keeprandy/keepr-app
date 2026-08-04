@@ -1068,6 +1068,11 @@ const meta = {
   const openKeeprPro = useCallback(
     (keeprPro) => {
       if (!navigation?.navigate || !keeprPro?.id) return;
+      const slug = keeprPro.slug || keeprPro.keepr_pro_slug || keeprPro.profile_slug || null;
+      if (slug) {
+        navigation.navigate("PublicKeeprProProfile", { slug });
+        return;
+      }
       navigation.navigate("KeeprProDetail", {
         pro: keeprPro,
         assetId: vehicle?.id || null,

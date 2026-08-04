@@ -61,6 +61,7 @@
         }
       ],
       "./plugins/withShareExtensionFix",
+      "expo-notifications",
       "expo-localization"
     ],
     "extra": {

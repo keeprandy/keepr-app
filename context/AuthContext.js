@@ -20,13 +20,11 @@ export function AuthProvider({ children }) {
         if (!mounted) return;
 
         if (error) {
-          console.log("AUTH getSession error:", error?.message || error);
           setUser(null);
         } else {
           setUser(data?.session?.user || null);
         }
       } catch (e) {
-        console.log("AUTH init exception:", e?.message || e);
         if (!mounted) return;
         setUser(null);
       } finally {
@@ -37,7 +35,7 @@ export function AuthProvider({ children }) {
 
     init();
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       if (!mounted) return;
       setUser(session?.user || null);
       // If the app was “stuck” showing Splash forever on web, this also unblocks it

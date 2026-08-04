@@ -31,9 +31,21 @@ import {
 } from "../lib/acquisitionContext";
 import { DEFAULT_MEMBER_AVATAR } from "../lib/memberAvatar";
 import { useAuth } from "../context/AuthContext";
+import { profileIdentityValues } from "../lib/profileIdentityInitialization";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PENDING_MESSAGE_TOKEN_KEY = "keepr_pending_message_token";
+const LOGIN_OAUTH_FRESH_USER_GRACE_MS = 5 * 60 * 1000;
+const WEB_OAUTH_PROVIDERS = Object.freeze({
+  apple: {
+    label: "Continue with Apple",
+    icon: "logo-apple",
+  },
+  google: {
+    label: "Continue with Google",
+    icon: "logo-google",
+  },
+});
 
 function validateEmail(email) {
   const v = (email || "").trim();
@@ -78,6 +90,113 @@ function getResetRedirectTo() {
   return "keepr://reset";
 }
 
+function getWebAuthRedirectTo() {
+  if (Platform.OS !== "web") return undefined;
+  try {
+    const url = new URL("/auth", window.location.origin);
+    url.searchParams.set("oauth", "1");
+    return url.toString();
+  } catch (_) {
+    return "http://localhost:8081/auth?oauth=1";
+  }
+}
+
+function getWebAuthRedirectToForIntent(oauthIntent = "signin") {
+  const redirectTo = getWebAuthRedirectTo();
+  if (!redirectTo || Platform.OS !== "web") return redirectTo;
+  try {
+    const url = new URL(redirectTo);
+    url.searchParams.set("oauth_intent", oauthIntent === "signup" ? "signup" : "signin");
+    return url.toString();
+  } catch (_) {
+    return redirectTo;
+  }
+}
+
+function getOAuthErrorFromUrl() {
+  if (Platform.OS !== "web" || typeof window === "undefined") return null;
+  try {
+    const url = new URL(window.location.href);
+    const hash = new URLSearchParams((url.hash || "").replace(/^#/, ""));
+    const error =
+      url.searchParams.get("error_description") ||
+      hash.get("error_description") ||
+      url.searchParams.get("error") ||
+      hash.get("error");
+    return error ? decodeURIComponent(String(error).replace(/\+/g, " ")) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function getOAuthIntentFromUrl() {
+  if (Platform.OS !== "web" || typeof window === "undefined") return "signin";
+  try {
+    const url = new URL(window.location.href);
+    return url.searchParams.get("oauth_intent") === "signup" ? "signup" : "signin";
+  } catch (_) {
+    return "signin";
+  }
+}
+
+function hasOAuthCodeInUrl() {
+  if (Platform.OS !== "web" || typeof window === "undefined") return false;
+  try {
+    const url = new URL(window.location.href);
+    return Boolean(url.searchParams.get("code"));
+  } catch (_) {
+    return false;
+  }
+}
+
+function hasOAuthFragmentInUrl() {
+  if (Platform.OS !== "web" || typeof window === "undefined") return false;
+  try {
+    const hash = new URLSearchParams((window.location.hash || "").replace(/^#/, ""));
+    return Boolean(hash.get("access_token") || hash.get("refresh_token"));
+  } catch (_) {
+    return false;
+  }
+}
+
+function hasOAuthCallbackInUrl() {
+  return hasOAuthCodeInUrl() || hasOAuthFragmentInUrl();
+}
+
+function cleanAuthUrl() {
+  if (Platform.OS !== "web" || typeof window === "undefined") return;
+  try {
+    window.history.replaceState(window.history.state, "", "/auth");
+  } catch (_) {}
+}
+
+async function getExistingProfileForUser(userId) {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("id", userId)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+function isFreshOAuthUser(authUser) {
+  const createdAt = Date.parse(authUser?.created_at || "");
+  if (!Number.isFinite(createdAt)) return false;
+  return Date.now() - createdAt < LOGIN_OAUTH_FRESH_USER_GRACE_MS;
+}
+
+function profileNameFromUser(authUser, fallbackName = null) {
+  const meta = authUser?.user_metadata || {};
+  return (
+    fallbackName ||
+    meta.full_name ||
+    meta.name ||
+    [meta.given_name, meta.family_name].filter(Boolean).join(" ") ||
+    null
+  );
+}
+
 function isUsableInviteName(value) {
   const name = String(value || "").trim();
   return !!name && name.toLowerCase() !== "keepr member";
@@ -94,13 +213,16 @@ function isValidImageUrl(value) {
 }
 
 export default function AuthScreen({ navigation, route }) {
-  const { user } = useAuth();
+  const { initializing, user } = useAuth();
   const [mode, setMode] = useState(route?.params?.mode === "signup" ? "signup" : "signin"); // "signin" | "signup" | "forgot"
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [oauthResolving, setOauthResolving] = useState(
+    Platform.OS === "web" && hasOAuthCallbackInUrl()
+  );
   const [inviteContext, setInviteContext] = useState(route?.params?.invitation || null);
   const [inviteLoading, setInviteLoading] = useState(!!route?.params?.invitationLoading);
   const [inviteImageBroken, setInviteImageBroken] = useState(false);
@@ -108,6 +230,7 @@ export default function AuthScreen({ navigation, route }) {
   const scrollRef = useRef(null);
   const formAnchorRef = useRef(null);
   const passwordInputRef = useRef(null);
+  const oauthHandledRef = useRef(false);
 
   const [touched, setTouched] = useState({
     email: false,
@@ -169,6 +292,125 @@ export default function AuthScreen({ navigation, route }) {
       setInviteImageBroken(false);
     }
   }, [route?.params?.invitation, route?.params?.invitationLoading]);
+
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    if (oauthHandledRef.current) return;
+
+    const isOAuthCallback = hasOAuthCallbackInUrl();
+
+    const oauthError = getOAuthErrorFromUrl();
+    if (oauthError) {
+      oauthHandledRef.current = true;
+      setOauthResolving(false);
+      setFormError(oauthError.includes("access_denied") ? "Sign-in was canceled." : oauthError);
+      cleanAuthUrl();
+      return;
+    }
+
+    if (!isOAuthCallback) return;
+
+    oauthHandledRef.current = true;
+    let mounted = true;
+    let settled = false;
+    let subscription = null;
+
+    const finishWithSession = async (session, source) => {
+      const authUser = session?.user || null;
+      const oauthIntent = getOAuthIntentFromUrl();
+      if (!authUser?.id) return false;
+      settled = true;
+
+      const existingProfile = await getExistingProfileForUser(authUser.id);
+      if (
+        oauthIntent !== "signup" &&
+        (!existingProfile?.id || isFreshOAuthUser(authUser))
+      ) {
+        await supabase.auth.signOut();
+        cleanAuthUrl();
+        setMode("signin");
+        setFormError(
+          "No Keepr account is connected to that Google or Apple sign-in yet. Sign in with your Keepr email first, then connect Google or Apple in Settings. To create a new account, choose Become a Keepr."
+        );
+        return true;
+      }
+
+      await ensureProfile(authUser.id, {
+        authUser,
+        email: authUser.email,
+        policyAccepted: true,
+      });
+      if (authUser.email) {
+        await claimPendingActionsForEmail({
+          userId: authUser.id,
+          email: authUser.email,
+        });
+      }
+      cleanAuthUrl();
+      await continueActivationJourney();
+      return true;
+    };
+
+    const finishOAuth = async () => {
+      try {
+        setSubmitting(true);
+        setOauthResolving(true);
+        setFormError("");
+
+        if (hasOAuthCodeInUrl()) {
+          const { data, error } = await supabase.auth.exchangeCodeForSession(window.location.href);
+          if (error) throw error;
+          if (await finishWithSession(data?.session, "exchangeCodeForSession")) return;
+          throw new Error("We could not finish sign-in. Please try again.");
+        } else {
+          const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
+            if (!mounted || settled) return;
+            if (event === "SIGNED_IN" || event === "INITIAL_SESSION") {
+              try {
+                const finished = await finishWithSession(session, `onAuthStateChange:${event}`);
+                if (finished && mounted) {
+                  setSubmitting(false);
+                  setOauthResolving(false);
+                }
+              } catch (e) {
+                if (!mounted) return;
+                setFormError(friendlyAuthError(e));
+                setSubmitting(false);
+                setOauthResolving(false);
+              }
+            }
+          });
+          subscription = listener?.subscription || null;
+
+          const { data, error } = await supabase.auth.getSession();
+          if (error) throw error;
+          if (await finishWithSession(data?.session, "getSession")) return;
+
+          setTimeout(() => {
+            if (!mounted || settled) return;
+            setFormError("We could not finish sign-in. Please try again.");
+            setSubmitting(false);
+            setOauthResolving(false);
+          }, 8000);
+        }
+      } catch (e) {
+        if (!mounted) return;
+        setFormError(friendlyAuthError(e));
+        setOauthResolving(false);
+      } finally {
+        if (mounted && settled) {
+          setSubmitting(false);
+          setOauthResolving(false);
+        }
+      }
+    };
+
+    finishOAuth();
+    return () => {
+      mounted = false;
+      subscription?.unsubscribe?.();
+    };
+  }, [route?.params]);
 
   useEffect(() => {
     let mounted = true;
@@ -242,18 +484,82 @@ export default function AuthScreen({ navigation, route }) {
     }
   };
 
-  const ensureProfile = async (userId) => {
-    const { error } = await supabase.from("profiles").upsert(
-      {
-        id: userId,
-        email: normalizedEmail || null,
-        display_name: displayName?.trim() || null,
-        onboarding_state: "in_progress",
-      },
-      { onConflict: "id" }
-    );
+  const ensureProfile = async (userId, options = {}) => {
+    const authUser = options.authUser || null;
+    const profileEmail = String(
+      options.email ||
+        normalizedEmail ||
+        authUser?.email ||
+        ""
+    ).trim().toLowerCase();
+    const profileName = profileNameFromUser(authUser, displayName?.trim() || null);
+    const { data: existingProfile, error: readError } = await supabase
+      .from("profiles")
+      .select("id,email,preferred_contact_email,display_name,full_name,onboarding_state,profile_photo_url,provisional_slug,profile_initialized_at,policy_accepted_at,policy_version,acquisition_source_slug")
+      .eq("id", userId)
+      .maybeSingle();
+    if (readError) throw readError;
 
-    if (error) throw error;
+    const identityValues = profileIdentityValues({
+      authUser: { ...authUser, id: userId },
+      email: profileEmail,
+      displayName: profileName,
+      policyAccepted: !!options.policyAccepted,
+    });
+
+    if (!existingProfile?.id) {
+      const profilePayload = {
+        id: userId,
+        email: identityValues.email,
+        preferred_contact_email: identityValues.preferred_contact_email,
+        onboarding_state: identityValues.onboarding_state,
+        provisional_slug: identityValues.provisional_slug,
+        profile_initialized_at: identityValues.profile_initialized_at,
+        policy_accepted_at: identityValues.policy_accepted_at,
+        policy_version: identityValues.policy_version,
+      };
+      if (identityValues.acquisition_source_slug) {
+        profilePayload.acquisition_source_slug = identityValues.acquisition_source_slug;
+      }
+      if (identityValues.display_name) profilePayload.display_name = identityValues.display_name;
+      if (identityValues.full_name) profilePayload.full_name = identityValues.full_name;
+      if (identityValues.profile_photo_url) profilePayload.profile_photo_url = identityValues.profile_photo_url;
+      const { error } = await supabase.from("profiles").insert(profilePayload);
+      if (error) throw error;
+      return;
+    }
+
+    const updates = {};
+    if (profileEmail && !existingProfile.email) updates.email = profileEmail;
+    if (identityValues.preferred_contact_email && !existingProfile.preferred_contact_email) {
+      updates.preferred_contact_email = identityValues.preferred_contact_email;
+    }
+    if (profileName && !isUsableInviteName(existingProfile.display_name)) {
+      updates.display_name = profileName;
+    }
+    if (profileName && !isUsableInviteName(existingProfile.full_name)) {
+      updates.full_name = profileName;
+    }
+    if (identityValues.profile_photo_url && !existingProfile.profile_photo_url) {
+      updates.profile_photo_url = identityValues.profile_photo_url;
+    }
+    if (identityValues.provisional_slug && !existingProfile.provisional_slug) {
+      updates.provisional_slug = identityValues.provisional_slug;
+    }
+    if (identityValues.acquisition_source_slug && !existingProfile.acquisition_source_slug) {
+      updates.acquisition_source_slug = identityValues.acquisition_source_slug;
+    }
+    if (!existingProfile.profile_initialized_at) {
+      updates.profile_initialized_at = identityValues.profile_initialized_at;
+    }
+    if (identityValues.policy_accepted_at && !existingProfile.policy_accepted_at) {
+      updates.policy_accepted_at = identityValues.policy_accepted_at;
+      updates.policy_version = identityValues.policy_version;
+    }
+    if (Object.keys(updates).length) {
+      const { error } = await supabase.from("profiles").update(updates).eq("id", userId);
+      if (error) throw error;
+    }
   };
 
   const markAllTouched = () => {
@@ -388,6 +694,40 @@ const continueActivationJourney = async () => {
   return true;
 };
 
+  const handleOAuthSignIn = async (provider) => {
+    if (Platform.OS !== "web") {
+      setFormError("Google and Apple sign-in are available on Keepr Web in this pass.");
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      setFormError("");
+      const oauthIntent = isSignUp ? "signup" : "signin";
+
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo: getWebAuthRedirectToForIntent(oauthIntent),
+          queryParams:
+            provider === "google"
+              ? {
+                  prompt: "select_account",
+                }
+              : undefined,
+        },
+      });
+
+      if (error) throw error;
+      if (data?.url && typeof window !== "undefined") {
+        window.location.assign(data.url);
+      }
+    } catch (e) {
+      setFormError(friendlyAuthError(e));
+      setSubmitting(false);
+    }
+  };
+
   const handleSignIn = async () => {
     setFormError("");
     markAllTouched();
@@ -412,7 +752,10 @@ const continueActivationJourney = async () => {
       const userId = data?.user?.id;
       if (userId) {
         try {
-          await ensureProfile(userId);
+          await ensureProfile(userId, {
+            authUser: data?.user,
+            email: normalizedEmail,
+          });
 
           // NEW
           await claimPendingActionsForEmail({
@@ -505,7 +848,11 @@ const continueActivationJourney = async () => {
     }
 
 if (sessionUserId) {
-  await ensureProfile(sessionUserId);
+  await ensureProfile(sessionUserId, {
+    authUser: user,
+    email: normalizedEmail,
+    policyAccepted: true,
+  });
 
   await claimPendingActionsForEmail({
     userId: sessionUserId,
@@ -600,6 +947,14 @@ if (continued) return;
 
   const renderAuthCardContent = () => (
     <>
+      {oauthResolving || initializing ? (
+        <View style={styles.oauthResolvingCard}>
+          <ActivityIndicator color={colors.primary} />
+          <Text style={styles.oauthResolvingTitle}>Finishing sign-in...</Text>
+          <Text style={styles.oauthResolvingText}>Keepr is securely completing your session.</Text>
+        </View>
+      ) : (
+        <>
       {hasInviteIntent ? (
         <View style={styles.inviteCard}>
           <View style={styles.inviteImageFrame}>
@@ -826,6 +1181,44 @@ if (continued) return;
       )}
 
       <View style={styles.form}>
+        {!isForgot && Platform.OS === "web" ? (
+          <View style={styles.socialAuthGroup}>
+            {Object.entries(WEB_OAUTH_PROVIDERS).map(([provider, config]) => (
+              <TouchableOpacity
+                key={provider}
+                style={[styles.socialButton, submitting && styles.buttonDisabled]}
+                onPress={() => handleOAuthSignIn(provider)}
+                disabled={submitting}
+                activeOpacity={0.86}
+              >
+                <Ionicons
+                  name={config.icon}
+                  size={20}
+                  color={provider === "apple" ? "#111827" : colors.primary}
+                />
+                <Text style={styles.socialButtonText}>{config.label}</Text>
+              </TouchableOpacity>
+            ))}
+            <View style={styles.emailDivider}>
+              <View style={styles.emailDividerLine} />
+              <Text style={styles.emailDividerText}>Continue with email</Text>
+              <View style={styles.emailDividerLine} />
+            </View>
+            {isSignUp ? (
+              <Text style={styles.identityLinkHint}>
+                Already have Keepr? Sign in first, then connect Google or Apple in Settings.
+              </Text>
+            ) : (
+              <Text style={styles.identityLinkHint}>
+                Google or Apple sign-in works after it has been connected to your Keepr account in Settings.
+              </Text>
+            )}
+            <Text style={styles.identityLinkHint}>
+              By continuing, you agree to Keepr’s Terms and Privacy Policy.
+            </Text>
+          </View>
+        ) : null}
+
         {isSignUp && (
           <>
             <Text style={styles.label}>Name (optional)</Text>
@@ -998,6 +1391,8 @@ if (continued) return;
       </View>
         </>
       ) : null}
+        </>
+      )}
     </>
   );
 
@@ -1624,6 +2019,76 @@ const styles = StyleSheet.create({
 
   form: {
     marginTop: 2,
+  },
+
+  socialAuthGroup: {
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+
+  oauthResolvingCard: {
+    minHeight: 240,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm,
+    paddingVertical: spacing.xl,
+  },
+
+  oauthResolvingTitle: {
+    fontSize: 18,
+    color: colors.textPrimary,
+    fontWeight: "900",
+  },
+
+  oauthResolvingText: {
+    fontSize: 14,
+    color: colors.textMuted,
+    textAlign: "center",
+  },
+
+  socialButton: {
+    minHeight: 44,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.lg,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm,
+  },
+
+  socialButtonText: {
+    fontSize: 14,
+    color: colors.textPrimary,
+    fontWeight: "800",
+  },
+
+  emailDivider: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginTop: 2,
+  },
+
+  emailDividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: colors.borderSubtle,
+  },
+
+  emailDividerText: {
+    fontSize: 12,
+    color: colors.textMuted,
+    fontWeight: "800",
+  },
+
+  identityLinkHint: {
+    fontSize: 12,
+    color: colors.textMuted,
+    lineHeight: 17,
+    textAlign: "center",
   },
 
   label: {

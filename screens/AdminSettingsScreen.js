@@ -116,7 +116,18 @@ export default function SettingsScreen() {
 
       if (userErr || !user?.id) throw new Error("No signed-in user");
 
-      const nextRole = role === "superkeepr" ? "consumer" : "superkeepr";
+      let hasKeeprProContext = false;
+      if (role === "consumer") {
+        const { data: contexts } = await supabase.rpc("get_my_keeprpro_contexts");
+        hasKeeprProContext = Array.isArray(contexts) && contexts.length > 0;
+      }
+
+      const nextRole =
+        role === "superkeepr" || role === "keeprpro"
+          ? "consumer"
+          : hasKeeprProContext
+          ? "keeprpro"
+          : "superkeepr";
 
       const { error } = await supabase
         .from("profiles")
@@ -131,6 +142,10 @@ export default function SettingsScreen() {
         if (nextRole === "superkeepr") {
           navigationRef.navigate("SuperKeeprStack", {
             screen: ROUTES.SUPERKEEPR_DASHBOARD,
+          });
+        } else if (nextRole === "keeprpro") {
+          navigationRef.navigate("KeeprProStack", {
+            screen: "KeeprProHome",
           });
         } else {
           navigationRef.navigate("RootTabs", {
@@ -148,7 +163,9 @@ export default function SettingsScreen() {
 
   const modeLabel = useMemo(() => {
     if (roleLoading) return "Loading…";
-    return role === "superkeepr" ? "SuperKeepr" : "Consumer";
+    if (role === "superkeepr") return "SuperKeepr";
+    if (role === "keeprpro") return "KeeprPro";
+    return "Consumer";
   }, [role, roleLoading]);
 
   return (
@@ -181,7 +198,7 @@ export default function SettingsScreen() {
                 <Ionicons name="swap-horizontal" size={18} color="#111827" />
               )}
               <Text style={styles.actionText}>
-                Switch to {role === "superkeepr" ? "Consumer" : "SuperKeepr"}
+                Switch to {role === "superkeepr" || role === "keeprpro" ? "Consumer" : "KeeprPro or SuperKeepr"}
               </Text>
             </TouchableOpacity>
 

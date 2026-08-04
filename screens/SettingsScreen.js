@@ -16,6 +16,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, radius, typography, shadows } from "../styles/theme";
 import { navigationRef } from "../navigationRoot";
 import { supabase } from "../lib/supabaseClient";
+import NotificationSettingsCard from "../components/NotificationSettingsCard";
+import SignInMethodsCard from "../components/SignInMethodsCard";
 
 const Row = ({
   icon,
@@ -347,8 +349,6 @@ const handleAccountActions = () => {
   };
 
   const handleModeSwitch = async () => {
-    // If you want to keep this as a true backdoor, leave it hidden.
-    // This toggles consumer <-> superkeepr.
     setBusy(true);
     try {
       const { data: userRes } = await supabase.auth.getUser();
@@ -356,7 +356,18 @@ const handleAccountActions = () => {
       if (!uid) throw new Error("No signed-in user.");
 
       const currentRole = profile?.role || "consumer";
-      const nextRole = currentRole === "superkeepr" ? "consumer" : "superkeepr";
+      let hasKeeprProContext = false;
+      if (currentRole === "consumer") {
+        const { data: contexts } = await supabase.rpc("get_my_keeprpro_contexts");
+        hasKeeprProContext = Array.isArray(contexts) && contexts.length > 0;
+      }
+
+      const nextRole =
+        currentRole === "superkeepr" || currentRole === "keeprpro"
+          ? "consumer"
+          : hasKeeprProContext
+          ? "keeprpro"
+          : "superkeepr";
 
       const { error } = await supabase.from("profiles").update({ role: nextRole }).eq("id", uid);
 
@@ -473,6 +484,16 @@ const handleOpenTerms = () => {
               onPress={handleOpenTeam}
             />
           </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Security</Text>
+          <SignInMethodsCard />
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Notifications</Text>
+          <NotificationSettingsCard />
         </View>
 
         {/* PUBLIC VIEW */}

@@ -547,13 +547,30 @@ export default function EditAssetScreen({ route, navigation }) {
     }
 
     const { data, error } = result;
-    setSaving(false);
 
     if (error) {
+      setSaving(false);
       console.error("Error saving asset", error);
       setError(error.message);
       return;
     }
+
+    const syncAssetId = data?.id || assetId;
+    if (syncAssetId) {
+      const { error: syncError } = await supabase.rpc("sync_asset_provider_stewardships", {
+        p_asset_id: syncAssetId,
+        p_keepr_pro_ids: selectedIds,
+      });
+
+      if (syncError) {
+        setSaving(false);
+        console.error("Error syncing asset provider stewardships", syncError);
+        setError(syncError.message || "Could not sync KeeprPro stewardship.");
+        return;
+      }
+    }
+
+    setSaving(false);
 
     console.log("Saved asset", data);
    

@@ -13,9 +13,11 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect } from "@react-navigation/native";
 import * as Clipboard from "expo-clipboard";
 
 import { colors, radius, shadows, spacing } from "../styles/theme";
+import MessageThreadPanel from "../components/MessageThreadPanel";
 import {
   MESSAGE_SCOPES,
   buildMessageResourceRef,
@@ -24,17 +26,18 @@ import {
   createMemberThread,
   formatMessageTime,
   getMatchingOpenThreads,
-  getMessageSenderLabel,
   getThreadMessageLink,
   groupThreadsByAsset,
   loadAuthorizedAssets,
   loadEligibleRecipientsForAsset,
+  loadKeeprProStewardshipThread,
   loadMessageWorkspace,
   loadThreadMessages,
   loadSystemsForAsset,
   normalizeMessageScope,
   resolveMessageIdentities,
   rotateThreadMessageLink,
+  sendKeeprProStewardshipThreadReply,
   sendThreadReply,
 } from "../lib/messagesService";
 import {
@@ -55,6 +58,17 @@ function contextLabel(thread) {
 }
 
 function sourceLabel(thread) {
+  if (
+    thread?.perspective === "keepr_pro" ||
+    thread?.source_type === "keeprpro_stewardship" ||
+    thread?.keepr_pro_id ||
+    thread?.keeprPro?.id ||
+    thread?.resource_ref?.stewardship_id ||
+    thread?.resource_ref?.provider_org_id ||
+    thread?.resource_ref?.relationship_scope === "service_stewardship"
+  ) {
+    return "KeeprPro stewardship";
+  }
   if (thread?.source_type === "public_system_story") return "Public System Story";
   if (thread?.source_type === "public_asset_story") return "Public Asset Story";
   if (thread?.hub_id) return "KeeprHub";
@@ -173,6 +187,8 @@ export default function KeeprActionScreen({ route, navigation }) {
   const systemId = params.systemId || params.system_id || null;
   const kac = params.kac || null;
   const initialThreadId = params.threadId || params.assetThreadId || params.asset_thread_id || null;
+  const isKeeprProPerspective = params.perspective === "keepr_pro";
+  const organizationId = params.organizationId || params.organization_id || null;
   const { width } = useWindowDimensions();
   const compact = width < 900;
 
@@ -222,6 +238,7 @@ export default function KeeprActionScreen({ route, navigation }) {
   const title = isGlobal ? "All Messages" : isSystem ? `${params.systemName || workspace.system?.name || "System"} Messages` : `${params.assetName || workspace.asset?.name || "Asset"} Messages`;
   const compactTitle = isGlobal ? "Messages" : title;
   const showInboxModeSwitch = compact && isGlobal;
+  const directThreadMode = !!params.threadId && !isGlobal;
   const emptyText = isGlobal
     ? "No conversations yet."
     : isSystem
@@ -246,23 +263,35 @@ export default function KeeprActionScreen({ route, navigation }) {
         systemId,
         force,
       });
-      setWorkspace(next);
+      let hydratedWorkspace = next;
+      if (isKeeprProPerspective && initialThreadId && !next.threads?.some((t) => t.id === initialThreadId)) {
+        hydratedWorkspace = await loadKeeprProStewardshipThread({
+          assetId,
+          kac,
+          organizationId,
+          threadId: initialThreadId,
+          assetName: params.assetName,
+          providerName: params.providerName,
+          ownerName: params.ownerName,
+        });
+      }
+      setWorkspace(hydratedWorkspace);
       setSelectedThreadId((prev) => {
-        if (initialThreadId && next.threads?.some((t) => t.id === initialThreadId)) {
+        if (initialThreadId && hydratedWorkspace.threads?.some((t) => t.id === initialThreadId)) {
           return initialThreadId;
         }
-        if (prev && next.threads?.some((t) => t.id === prev)) return prev;
-        return next.threads?.[0]?.id || null;
+        if (prev && hydratedWorkspace.threads?.some((t) => t.id === prev)) return prev;
+        return hydratedWorkspace.threads?.[0]?.id || null;
       });
-      if (initialThreadId && next.threads?.some((t) => t.id === initialThreadId)) {
+      if (initialThreadId && hydratedWorkspace.threads?.some((t) => t.id === initialThreadId)) {
         setCompactConversationOpen(true);
       }
 
-      const visibleAssets = mergeVisibleAssets(await loadAuthorizedAssets(), next.assets || [], next.threads.map((t) => t.asset));
+      const visibleAssets = mergeVisibleAssets(await loadAuthorizedAssets(), hydratedWorkspace.assets || [], hydratedWorkspace.threads.map((t) => t.asset));
       setAssets(visibleAssets);
 
-      const effectiveAssetId = assetId || draft.assetId || next.asset?.id || "";
-      const effectiveAsset = visibleAssets.find((a) => a.id === effectiveAssetId) || next.asset || null;
+      const effectiveAssetId = assetId || draft.assetId || hydratedWorkspace.asset?.id || "";
+      const effectiveAsset = visibleAssets.find((a) => a.id === effectiveAssetId) || hydratedWorkspace.asset || null;
       if (effectiveAssetId) {
         const [systemRows, recipientRows] = await Promise.all([
           loadSystemsForAsset(effectiveAssetId, { userId: next.currentUserId, force }),
@@ -283,11 +312,17 @@ export default function KeeprActionScreen({ route, navigation }) {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [assetId, draft.assetId, initialThreadId, kac, scope, systemId]);
+  }, [assetId, draft.assetId, initialThreadId, isKeeprProPerspective, kac, organizationId, params.assetName, params.ownerName, params.providerName, scope, systemId]);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useFocusEffect(
+    useCallback(() => {
+      refresh({ quiet: true, force: true });
+    }, [refresh])
+  );
 
   useEffect(() => {
     if (!params.launchComposer) return;
@@ -329,13 +364,47 @@ export default function KeeprActionScreen({ route, navigation }) {
     () => getPendingMessageLink(selectedThreadWithMessages, workspace.currentUserId),
     [selectedThreadWithMessages, workspace.currentUserId]
   );
-  const showThreadList = !compact || !compactConversationOpen;
-  const showConversation = !!selectedThreadWithMessages && (!compact || compactConversationOpen);
+  const providerParticipationWarning = useMemo(() => {
+    if (!params.keeprProName) return null;
+    const routeKeeprProId = params.keeprProId || params.keepr_pro_id || null;
+    const matchedRecipient = (recipients || []).find((identity) => {
+      if (routeKeeprProId && identity.keepr_pro_id === routeKeeprProId) return true;
+      return identity.display_name === params.keeprProName;
+    });
+    if (matchedRecipient?.availability_state !== "not_message_enabled") return null;
+    return `${params.keeprProName} is connected to this system but is not yet participating in Keepr Messages.`;
+  }, [params.keeprProId, params.keeprProName, params.keepr_pro_id, recipients]);
+  const showThreadList = !directThreadMode && (!compact || !compactConversationOpen);
+  const showConversation = !!selectedThreadWithMessages && (directThreadMode || !compact || compactConversationOpen);
 
   const loadSelectedThreadMessages = useCallback(async ({ force = false } = {}) => {
     if (!selectedThread?.id) return;
     setThreadLoading(true);
     try {
+      if (isKeeprProPerspective) {
+        const result = await loadKeeprProStewardshipThread({
+          assetId,
+          kac,
+          organizationId,
+          threadId: selectedThread.id,
+          assetName: params.assetName,
+          providerName: params.providerName,
+          ownerName: params.ownerName,
+        });
+        const thread = result.threads?.[0] || null;
+        setThreadMessagesById((prev) => ({
+          ...prev,
+          [selectedThread.id]: thread?.messages || [],
+        }));
+        setThreadPageById((prev) => ({
+          ...prev,
+          [selectedThread.id]: {
+            hasMore: false,
+            nextCursor: null,
+          },
+        }));
+        return;
+      }
       const result = await loadThreadMessages(selectedThread.id, { force });
       setThreadMessagesById((prev) => ({
         ...prev,
@@ -353,7 +422,7 @@ export default function KeeprActionScreen({ route, navigation }) {
     } finally {
       setThreadLoading(false);
     }
-  }, [selectedThread?.id]);
+  }, [assetId, isKeeprProPerspective, kac, organizationId, params.assetName, params.ownerName, params.providerName, selectedThread?.id]);
 
   useEffect(() => {
     if (isGlobal) setLastInboxMode(INBOX_MODES.MESSAGES);
@@ -469,8 +538,9 @@ export default function KeeprActionScreen({ route, navigation }) {
         assetId: chosenAssetId,
         systemId: chosenSystemId || null,
         recipientId: draft.recipientId || selectedIdentity?.user_id || null,
+        keeprProId: selectedIdentity?.keepr_pro_id || params.keeprProId || null,
       }),
-    [chosenAssetId, chosenSystemId, draft.recipientId, selectedIdentity?.user_id, workspace.threads]
+    [chosenAssetId, chosenSystemId, draft.recipientId, params.keeprProId, selectedIdentity?.keepr_pro_id, selectedIdentity?.user_id, workspace.threads]
   );
 
   useEffect(() => {
@@ -771,12 +841,53 @@ export default function KeeprActionScreen({ route, navigation }) {
     }
   };
 
-  const handleReply = async (threadId) => {
+  const handleReply = async (threadId, payload = {}) => {
     try {
-      await sendThreadReply(threadId, replyByThreadId[threadId]);
+      const body = payload.body ?? replyByThreadId[threadId];
+      const pendingAttachments = payload.attachments || [];
+      const thread = workspace.threads.find((item) => item.id === threadId) || selectedThreadWithMessages;
+      let sentMessage = null;
+      if (isKeeprProPerspective) {
+        sentMessage = await sendKeeprProStewardshipThreadReply({
+          threadId,
+          organizationId,
+          body,
+          assetId: thread?.asset_id || assetId || null,
+          stewardshipId: params.stewardshipId || params.stewardship_id || null,
+          actionId: params.actionId || params.reminderId || null,
+          pendingAttachments,
+        });
+      } else {
+        sentMessage = await sendThreadReply(threadId, body, {
+          assetId: thread?.asset_id || assetId || null,
+          stewardshipId: params.stewardshipId || params.stewardship_id || null,
+          actionId: params.actionId || params.reminderId || null,
+          pendingAttachments,
+        });
+      }
+      if (sentMessage?.id) {
+        setThreadMessagesById((prev) => ({
+          ...prev,
+          [threadId]: [...(prev[threadId] || selectedThreadWithMessages?.messages || []), sentMessage],
+        }));
+        setWorkspace((prev) => ({
+          ...prev,
+          threads: prev.threads.map((item) =>
+            item.id === threadId
+              ? {
+                  ...item,
+                  messages: [...(item.messages || []), sentMessage],
+                  latestMessage: sentMessage,
+                  latestMessagePreview: sentMessage.body || "Shared attachment",
+                  updated_at: sentMessage.created_at || item.updated_at,
+                }
+              : item
+          ),
+        }));
+      }
       setReplyByThreadId((prev) => ({ ...prev, [threadId]: "" }));
-      await refresh({ quiet: true, force: true });
-      await loadSelectedThreadMessages({ force: true });
+      refresh({ quiet: true, force: true });
+      loadSelectedThreadMessages({ force: true });
     } catch (e) {
       Alert.alert("Could not reply", e?.message || "Try again.");
     }
@@ -903,12 +1014,10 @@ export default function KeeprActionScreen({ route, navigation }) {
           </View>
         ) : null}
 
-        {params.keeprProName ? (
+        {providerParticipationWarning ? (
           <View style={styles.truthCard}>
             <Ionicons name="information-circle-outline" size={18} color={colors.primary} />
-            <Text style={styles.truthText}>
-              {params.keeprProName} is connected to this system but is not yet participating in Keepr Messages.
-            </Text>
+            <Text style={styles.truthText}>{providerParticipationWarning}</Text>
           </View>
         ) : null}
 
@@ -1387,35 +1496,29 @@ export default function KeeprActionScreen({ route, navigation }) {
                     </TouchableOpacity>
                   ) : null}
 
-                  {(selectedThreadWithMessages.messages || []).map((m) => {
-                    const mine = m.from_user_id && String(m.from_user_id) === String(workspace.currentUserId);
-                    const label = mine ? "You" : getMessageSenderLabel(m, workspace.profilesById);
-                    return (
-                      <View key={m.id} style={[styles.messageBubble, mine ? styles.messageMine : styles.messageOther]}>
-                        <Text style={[styles.messageMeta, mine && styles.messageMetaMine]}>
-                          {label}
-                          {m.created_at ? ` · ${formatMessageTime(m.created_at)}` : ""}
-                        </Text>
-                        <Text style={[styles.messageBody, mine && styles.messageBodyMine]}>{m.body}</Text>
-                      </View>
-                    );
-                  })}
-
-                  <View style={styles.replyDock}>
-                    <TextInput
-                      value={replyByThreadId[selectedThreadWithMessages.id] || ""}
-                      onChangeText={(txt) => setReplyByThreadId((prev) => ({ ...prev, [selectedThreadWithMessages.id]: txt }))}
-                      placeholder="Write a reply..."
-                      placeholderTextColor={colors.textMuted}
-                      multiline
-                      textAlignVertical="top"
-                      style={styles.replyBox}
-                    />
-                    <TouchableOpacity style={styles.replyButton} onPress={() => handleReply(selectedThreadWithMessages.id)}>
-                      <Ionicons name="send-outline" size={16} color="white" />
-                      <Text style={styles.replyButtonText}>Reply</Text>
-                    </TouchableOpacity>
-                  </View>
+                  <MessageThreadPanel
+                    messages={selectedThreadWithMessages.messages || []}
+                    currentUserId={workspace.currentUserId}
+                    profilesById={workspace.profilesById}
+                    perspective={isKeeprProPerspective ? "keepr_pro" : "member"}
+                    ownerDisplayName={selectedThreadWithMessages.ownerDisplayName || params.ownerName}
+                    providerDisplayName={selectedThreadWithMessages.keeprPro?.name}
+                    replyValue={replyByThreadId[selectedThreadWithMessages.id] || ""}
+                    onReplyChange={(txt) =>
+                      setReplyByThreadId((prev) => ({ ...prev, [selectedThreadWithMessages.id]: txt }))
+                    }
+                    onSend={(payload) => handleReply(selectedThreadWithMessages.id, payload)}
+                    activeNotificationContext={{
+                      thread_id: selectedThreadWithMessages.id,
+                      action_id: params.reminderId || params.actionId || null,
+                      asset_id: assetId || selectedThreadWithMessages.asset_id || null,
+                    }}
+                    replyPlaceholder={
+                      isKeeprProPerspective
+                        ? `Reply as ${selectedThreadWithMessages.keeprPro?.name || params.providerName || "KeeprPro"}...`
+                        : "Write a reply..."
+                    }
+                  />
                 </>
               ) : null}
             </ScrollView>
@@ -1564,6 +1667,8 @@ const styles = StyleSheet.create({
   },
   truthText: { flex: 1, fontSize: 13, lineHeight: 18, color: colors.textSecondary, fontWeight: "700" },
   composerCard: {
+    flex: 1,
+    minHeight: 0,
     borderRadius: radius.xl,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
@@ -1574,13 +1679,14 @@ const styles = StyleSheet.create({
   },
   cardTitle: { fontSize: 16, fontWeight: "900", color: colors.textPrimary },
   composerScroll: {
-    maxHeight: 640,
+    flex: 1,
+    minHeight: 0,
   },
   composerScrollCompact: {
-    maxHeight: 560,
+    flex: 1,
   },
   composerScrollContent: {
-    paddingBottom: spacing.md,
+    paddingBottom: 160,
   },
   launcherHeader: {
     flexDirection: "row",

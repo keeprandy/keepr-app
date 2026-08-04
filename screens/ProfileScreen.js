@@ -171,11 +171,14 @@ const hydrateAvatarFromAttachmentId = async (attachmentId) => {
       setProfileRow(profile || {});
       if (profile?.profile_photo_attachment_id) {
   await hydrateAvatarFromAttachmentId(profile.profile_photo_attachment_id);
+} else if (profile?.profile_photo_url) {
+  setAvatarUrl(profile.profile_photo_url);
 }
 
 setInboxDraft(
   firstNonEmpty(
     profile?.inbox_name,
+    profile?.provisional_slug,
     user.email?.split("@")[0]
   )
 );
@@ -188,7 +191,7 @@ setInboxDraft(
         profile?.name,
         user.email?.split("@")[0]
       ),
-      email: firstNonEmpty(user.email, profile?.email),
+      email: firstNonEmpty(profile?.preferred_contact_email, profile?.email, user.email),
       phone: firstNonEmpty(profile?.phone),
       birthday: formatBirthdayForInput(profile?.birthday),
       language: firstNonEmpty(profile?.language, "English"),
@@ -226,6 +229,7 @@ setInboxDraft(
   const workAddress = firstNonEmpty(placesDraft.workAddress);
 
   const suggestedInboxHandle = firstNonEmpty(
+    profileRow?.provisional_slug,
     userEmail.split("@")[0]
   );
 
@@ -263,19 +267,10 @@ const handleSaveContact = useCallback(async () => {
   try {
     setSaving(true);
 
-    const nextEmail = firstNonEmpty(contactDraft.email).toLowerCase();
-    const currentEmail = firstNonEmpty(userEmail).toLowerCase();
-
-    if (contactDraft.email && nextEmail !== currentEmail) {
-      const { error: emailError } = await supabase.auth.updateUser({
-        email: nextEmail,
-      });
-      if (emailError) throw emailError;
-    }
-
     const payload = {
       full_name: contactDraft.fullName || null,
       display_name: contactDraft.displayName || null,
+      preferred_contact_email: firstNonEmpty(contactDraft.email).toLowerCase() || null,
       phone: contactDraft.phone || null,
       birthday: normalizeBirthdayForSave(contactDraft.birthday),
       language: contactDraft.language || null,
@@ -290,29 +285,13 @@ const handleSaveContact = useCallback(async () => {
 
     setProfileRow((prev) => ({ ...(prev || {}), ...payload }));
 
-    // do NOT update UI email until verified
-
     setShowContactModal(false);
-
-    if (contactDraft.email && nextEmail !== currentEmail) {
-      setContactDraft((prev) => ({
-        ...prev,
-        email: currentEmail,
-      }));
-
-      Platform.OS === "web"
-        ? window.alert("Email update requested. Please verify the new email address.")
-        : Alert.alert(
-            "Verify your new email",
-            "We sent a confirmation link to your new email address."
-          );
-    }
   } catch (e) {
     Alert.alert("Save failed", e?.message || "Could not save contact info.");
   } finally {
     setSaving(false);
   }
-}, [contactDraft, profileId, userEmail]);
+}, [contactDraft, profileId]);
 
 const handleSaveInbox = useCallback(async () => {
   if (!profileId) return;
@@ -750,10 +729,10 @@ useEffect(() => {
         />
 
         <Field
-          label="Email"
+          label="Preferred contact email"
           value={contactDraft.email}
           onChangeText={(v) => setContactDraft((p) => ({ ...p, email: v }))}
-          placeholder="Email"
+          placeholder="Contact email"
           keyboardType="email-address"
         />
         <Field

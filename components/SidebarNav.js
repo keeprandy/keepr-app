@@ -1,10 +1,12 @@
 import React, { useMemo, useEffect, useState, useCallback } from "react";
 import { View, Text, TouchableOpacity, StyleSheet, Image, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { CommonActions } from "@react-navigation/native";
 
 import { colors, spacing, radius } from "../styles/theme";
 import { navigationRef } from "../navigationRoot";
 import { supabase } from "../lib/supabaseClient";
+import { subscribeToNotificationEvents } from "../lib/notificationsService";
 import { useAuth } from "../context/AuthContext";
 import appLogo from "../assets/app_logo_icon.png"; // ✅ Keepr™ logo
 
@@ -12,6 +14,7 @@ import appLogo from "../assets/app_logo_icon.png"; // ✅ Keepr™ logo
 const CONSUMER_ITEMS = [
   { key: "Dashboard", label: "Dashboard", icon: "grid-outline" },
   { key: "SuperKeeprStack", label: "SuperKeepr", icon: "business-outline" },
+  { key: "KeeprProStack", label: "KeeprPro", icon: "briefcase-outline" },
   { key: "MyHome", label: "Homes", icon: "home-outline" },
   { key: "Garage", label: "Garage", icon: "car-outline" },
   { key: "Boats", label: "Boats", icon: "boat-outline" },
@@ -31,6 +34,35 @@ const SUPER_ITEMS = [
   { key: "Settings", label: "Settings", icon: "settings-outline" },
   { key: "__exit__", label: "Exit SuperKeepr", icon: "log-out-outline" },
 ];
+
+const KEEPRPRO_ITEMS = [
+  { key: "KeeprProHome", label: "Wilson Marine", icon: "briefcase-outline" },
+  { key: "Settings", label: "Settings", icon: "settings-outline" },
+  { key: "__exit__", label: "Exit KeeprPro", icon: "log-out-outline" },
+];
+
+const NAV_PERSIST_KEY = "keepr.nav.state.v1";
+const KEEPRPRO_HOME_PATH = "/pro-mode";
+
+function returnToKeeprProHomeOnWeb() {
+  if (Platform.OS !== "web") return false;
+
+  try {
+    window?.sessionStorage?.removeItem(NAV_PERSIST_KEY);
+  } catch {}
+
+  try {
+    const path = window?.location?.pathname || "";
+    if (path === KEEPRPRO_HOME_PATH) {
+      window.location.reload();
+    } else {
+      window.location.assign(KEEPRPRO_HOME_PATH);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function formatBadgeCount(n) {
   if (!n || n <= 0) return null;
@@ -64,6 +96,17 @@ function normalizeToSection(routeName) {
 if (routeName === "SuperKeeprDashboard" || routeName === "SuperKeeprStack") {
   return "SuperKeeprStack";
 }  
+
+if (
+  routeName === "KeeprProHome" ||
+  routeName === "KeeprProStack"
+) {
+  return "KeeprProHome";
+}
+
+if (routeName === "KeeprProStewardshipView" || routeName === "KeeprProActionDetail") {
+  return routeName;
+}
 
   if (
     routeName === "MyHome" ||
@@ -278,13 +321,26 @@ useEffect(() => {
     return rn === "SuperKeeprDashboard" || rn.startsWith("SuperKeepr");
   }, [leafRouteName, currentRouteName]);
 
+  const inKeeprPro = useMemo(() => {
+    const rn = String(leafRouteName || currentRouteName || "");
+    return (
+      rn === "KeeprProHome" ||
+      rn === "KeeprProStewardshipView" ||
+      rn === "KeeprProActionDetail" ||
+      rn === "KeeprProStack"
+    );
+  }, [leafRouteName, currentRouteName]);
+
 const navItems = useMemo(() => {
   if (inSuperKeepr) return SUPER_ITEMS;
+  if (inKeeprPro) return KEEPRPRO_ITEMS;
 
-  if (userRole === "superkeepr") return CONSUMER_ITEMS;
+  if (userRole === "superkeepr" || userRole === "keeprpro") return CONSUMER_ITEMS;
 
-  return CONSUMER_ITEMS.filter((item) => item.key !== "SuperKeeprStack");
-}, [inSuperKeepr, userRole]);
+  return CONSUMER_ITEMS.filter(
+    (item) => item.key !== "SuperKeeprStack" && item.key !== "KeeprProStack"
+  );
+}, [inSuperKeepr, inKeeprPro, userRole]);
 
     // Public View SideBar Collapse
   const isPublicFlow = useMemo(() => {
@@ -313,12 +369,24 @@ const navItems = useMemo(() => {
     return () => clearInterval(t);
   }, [fetchInboxCount]);
 
+  useEffect(() => {
+    if (!userId) return undefined;
+    return subscribeToNotificationEvents({
+      userId,
+      onEvent: () => fetchInboxCount(),
+    });
+  }, [fetchInboxCount, userId]);
+
   const badgeText = useMemo(() => formatBadgeCount(inboxCount), [inboxCount]);
 
   /**
    * SAFE navigation wrapper
    */
   const go = (key) => {
+  if (key === "KeeprProStack" || key === "KeeprProHome") {
+    if (returnToKeeprProHomeOnWeb()) return;
+  }
+
   if (!navigationRef?.isReady?.() || !navigationRef.isReady()) return;
 
   try {
@@ -339,8 +407,38 @@ const navItems = useMemo(() => {
       return;
     }
 
+    if (key === "KeeprProStack") {
+      navigationRef.navigate("KeeprProStack", {
+        screen: "KeeprProHome",
+      });
+      return;
+    }
+
+    if (key === "KeeprProHome") {
+      navigationRef.dispatch(
+        CommonActions.reset({
+          index: 0,
+          routes: [
+            {
+              name: "KeeprProStack",
+              state: {
+                index: 0,
+                routes: [{ name: "KeeprProHome" }],
+              },
+            },
+          ],
+        })
+      );
+      return;
+    }
+
     if (inSuperKeepr) {
       navigationRef.navigate("SuperKeeprStack", { screen: key });
+      return;
+    }
+
+    if (inKeeprPro) {
+      navigationRef.navigate("KeeprProStack", { screen: key });
       return;
     }
 
@@ -382,7 +480,11 @@ if (isPublicFlow) return null;
           <View style={{ flex: 1 }}>
             <Text style={styles.brandTitle}>Keepr™</Text>
             <Text style={styles.brandSub}>
-              {inSuperKeepr ? "SuperKeepr portfolio" : "Asset Lifecycle Intelligence"}
+              {inSuperKeepr
+                ? "SuperKeepr portfolio"
+                : inKeeprPro
+                ? "KeeprPro portfolio"
+                : "Asset Lifecycle Intelligence"}
             </Text>
           </View>
         ) : null}
