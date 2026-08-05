@@ -1704,11 +1704,9 @@ function isPasswordRecoveryUrl(url) {
     const query = parsed?.queryParams || {};
 
     const isResetPath = path === "reset" || path.startsWith("reset/");
-    if (isResetPath) return true;
     if (query.type === "recovery") return true;
-    if (isResetPath && query.code) return true;
-    if (isResetPath && query.access_token && query.refresh_token) return true;
-    if (query.error || query.error_code || query.error_description) return true;
+    if (isResetPath && query.recoveryUrl && isPasswordRecoveryUrl(String(query.recoveryUrl))) return true;
+    if (isResetPath && query.error && query.type === "recovery") return true;
   } catch (_) {}
 
   try {
@@ -1719,17 +1717,13 @@ function isPasswordRecoveryUrl(url) {
     const target = `${u.hostname || ""}${u.pathname || ""}`;
 
     const isResetTarget = target === "reset" || target.startsWith("reset/") || url.includes("/reset");
-    if (isResetTarget) return true;
     if (get("type") === "recovery") return true;
-    if (isResetTarget && get("code")) return true;
-    if (isResetTarget && get("access_token") && get("refresh_token")) return true;
-    if (get("error") || get("error_code") || get("error_description")) return true;
+    const recoveryUrl = query.get("recoveryUrl");
+    if (isResetTarget && recoveryUrl && isPasswordRecoveryUrl(recoveryUrl)) return true;
+    if (isResetTarget && get("error") && get("type") === "recovery") return true;
   } catch (_) {
-    if (url.startsWith("keepr://reset")) return true;
-    if (url.includes("/reset")) return true;
+    if (url.startsWith("keepr://reset") && url.includes("type=recovery")) return true;
     if (url.includes("type=recovery")) return true;
-    if (url.includes("/reset") && url.includes("access_token=") && url.includes("refresh_token=")) return true;
-    if (url.includes("/reset") && url.includes("code=")) return true;
   }
 
   return false;
@@ -1743,6 +1737,30 @@ function getInitialWebPasswordRecoveryUrl() {
   } catch (_) {
     return null;
   }
+}
+
+function normalizeNonRecoveryAuthCallbackWebPath() {
+  if (Platform.OS !== "web") return;
+  try {
+    const path = window.location.pathname || "";
+    if (!path.startsWith("/reset")) return;
+
+    const href = window.location.href || "";
+    if (isPasswordRecoveryUrl(href)) return;
+
+    const hash = window.location.hash || "";
+    const search = window.location.search || "";
+    const params = new URLSearchParams(hash.replace(/^#/, ""));
+    const hasOAuthSession = params.has("access_token") || params.has("refresh_token");
+    const hasOAuthCode = new URLSearchParams(search).has("code");
+    if (!hasOAuthSession && !hasOAuthCode) return;
+
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `/auth?oauth=1${hash || ""}`
+    );
+  } catch (_) {}
 }
 
 function normalizeInitialActionWebPath() {
@@ -1774,6 +1792,7 @@ function Root({ onRouteChange, setCurrentRouteName, currentRouteName }) {
   const { initializing, user } = useAuth();
   const [isNavReady, setIsNavReady] = React.useState(Platform.OS !== "web");
 
+  normalizeNonRecoveryAuthCallbackWebPath();
   normalizeInitialActionWebPath();
 
     React.useEffect(() => {
@@ -2114,12 +2133,13 @@ identifyCurrentUser();
     const hash = window.location.hash || "";
     const search = window.location.search || "";
     const resetPath = path.startsWith("/reset") || href.includes("/reset");
-    if (path.startsWith("/reset")) return true;
-    if (href.includes("/reset")) return true;
     if (hash.includes("type=recovery")) return true;
-    if (resetPath && hash.includes("access_token=") && hash.includes("refresh_token=")) return true;
-    if (resetPath && search.includes("code=")) return true;
-    if (hash.includes("error=")) return true;
+    if (resetPath && search.includes("recoveryUrl=")) {
+      const recoveryUrl = new URLSearchParams(search).get("recoveryUrl");
+      return isPasswordRecoveryUrl(recoveryUrl);
+    }
+    if (resetPath && search.includes("type=recovery")) return true;
+    if (resetPath && hash.includes("error=") && hash.includes("type=recovery")) return true;
     return false;
   } catch (_) {
     return false;

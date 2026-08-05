@@ -94,6 +94,7 @@ export default function ResetPasswordScreen({ navigation, route }) {
             ? window.location.href
             : "");
         const p = parseParams(href);
+        const isRecoveryLink = p.type === "recovery";
 
         if (p.error || p.error_code || p.error_description) {
           const msg =
@@ -103,6 +104,14 @@ export default function ResetPasswordScreen({ navigation, route }) {
               : "Reset link is invalid or expired.");
           if (alive) {
             setBootError(msg);
+            setRecoveryReady(false);
+          }
+          return;
+        }
+
+        if (!isRecoveryLink) {
+          if (alive) {
+            setBootError("This reset link is invalid or expired. Please request a new one.");
             setRecoveryReady(false);
           }
           return;
