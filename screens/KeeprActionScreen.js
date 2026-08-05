@@ -870,7 +870,21 @@ export default function KeeprActionScreen({ route, navigation }) {
       } else {
         sentMessage = await sendThreadReply(threadId, body, {
           assetId: thread?.asset_id || assetId || null,
-          stewardshipId: params.stewardshipId || params.stewardship_id || null,
+          organizationId:
+            params.organizationId ||
+            params.organization_id ||
+            thread?.resource_ref?.provider_org_id ||
+            null,
+          providerOrgId:
+            params.organizationId ||
+            params.organization_id ||
+            thread?.resource_ref?.provider_org_id ||
+            null,
+          stewardshipId:
+            params.stewardshipId ||
+            params.stewardship_id ||
+            thread?.resource_ref?.stewardship_id ||
+            null,
           actionId: params.actionId || params.reminderId || null,
           pendingAttachments,
         });

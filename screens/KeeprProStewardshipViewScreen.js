@@ -135,6 +135,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
+  const relationshipThreadId = portal?.projection_thread?.id || messages?.[0]?.id || null;
 
   const load = useCallback(async ({ quiet = false } = {}) => {
     if (!assetId && !kac) {
@@ -217,6 +218,58 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
   }, [load]);
 
   useEffect(() => {
+    const threadId = relationshipThreadId;
+    if (!threadId) return undefined;
+
+    let active = true;
+    let notificationChannel = null;
+    const reload = () => {
+      if (!active) return;
+      load({ quiet: true });
+    };
+
+    const messageChannel = supabase
+      .channel(`keeprpro-space-thread:${threadId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "asset_thread_messages",
+          filter: `thread_id=eq.${threadId}`,
+        },
+        reload
+      )
+      .subscribe();
+
+    supabase.auth.getUser().then(({ data }) => {
+      const userId = data?.user?.id || null;
+      if (!active || !userId) return;
+      notificationChannel = supabase
+        .channel(`keeprpro-space-notifications:${userId}:${threadId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "notification_events",
+            filter: `recipient_user_id=eq.${userId}`,
+          },
+          (payload) => {
+            if (String(payload?.new?.thread_id || "") === String(threadId)) reload();
+          }
+        )
+        .subscribe();
+    });
+
+    return () => {
+      active = false;
+      supabase.removeChannel(messageChannel);
+      if (notificationChannel) supabase.removeChannel(notificationChannel);
+    };
+  }, [load, relationshipThreadId]);
+
+  useEffect(() => {
     setActionNote(portal?.current_action?.provider_response?.note || "");
     setActionNextStep(portal?.current_action?.provider_response?.next_step || "");
     setActionStatus(portal?.current_action?.status || "open");
@@ -277,7 +330,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
   const playbook = portal?.playbook || null;
   const appointment = portal?.appointment || null;
   const sharedFiles = portal?.shared_files || [];
-  const hasRelationshipThread = Boolean(portal?.projection_thread?.id || messages?.[0]?.id);
+  const hasRelationshipThread = Boolean(relationshipThreadId);
   const canEditCurrentAction = Boolean(
     currentActionOpen &&
       (portal?.permitted_operations?.update_action_status ||
