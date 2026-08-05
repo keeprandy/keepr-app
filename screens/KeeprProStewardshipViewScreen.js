@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -36,6 +37,10 @@ function formatDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function shouldSkipBackgroundRefresh() {
+  return Platform.OS === "web" && typeof document !== "undefined" && document.visibilityState === "hidden";
 }
 
 function actionProviderName(action, projection) {
@@ -268,6 +273,15 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
       if (notificationChannel) supabase.removeChannel(notificationChannel);
     };
   }, [load, relationshipThreadId]);
+
+  useEffect(() => {
+    if (!projection?.relationship?.id && !projection?.asset?.id) return undefined;
+    const interval = setInterval(() => {
+      if (shouldSkipBackgroundRefresh()) return;
+      load({ quiet: true });
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [load, projection?.asset?.id, projection?.relationship?.id]);
 
   useEffect(() => {
     setActionNote(portal?.current_action?.provider_response?.note || "");

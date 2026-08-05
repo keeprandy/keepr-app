@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -79,6 +80,10 @@ function statusStyle(label) {
   if (label === "New inbound") return styles.statusNew;
   if (label === "Resolved") return styles.statusResolved;
   return styles.statusOpen;
+}
+
+function shouldSkipBackgroundRefresh() {
+  return Platform.OS === "web" && typeof document !== "undefined" && document.visibilityState === "hidden";
 }
 
 function mergeVisibleAssets(...collections) {
@@ -466,6 +471,20 @@ export default function KeeprActionScreen({ route, navigation }) {
       },
     });
   }, [assets, loadSelectedThreadMessages, refresh, selectedThreadId, workspace.currentUserId, workspace.threads]);
+
+  useEffect(() => {
+    if (!isKeeprProPerspective || !selectedThreadId) return undefined;
+    let active = true;
+    const interval = setInterval(async () => {
+      if (!active || shouldSkipBackgroundRefresh()) return;
+      await refresh({ quiet: true, force: true });
+      if (active) await loadSelectedThreadMessages({ force: true });
+    }, 5000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [isKeeprProPerspective, loadSelectedThreadMessages, refresh, selectedThreadId]);
 
   const handleLoadEarlier = async () => {
     if (!selectedThread?.id) return;

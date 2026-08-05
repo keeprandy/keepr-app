@@ -49,6 +49,10 @@ function listFromValue(value) {
     .filter(Boolean);
 }
 
+function shouldSkipBackgroundRefresh() {
+  return Platform.OS === "web" && typeof document !== "undefined" && document.visibilityState === "hidden";
+}
+
 function profileDraftFromContext(context) {
   return {
     display_name: context?.display_name || "",
@@ -310,6 +314,15 @@ export default function KeeprProHomeScreen({ navigation }) {
     recentMessageThreadIds,
     recentMessageThreadKey,
   ]);
+
+  useEffect(() => {
+    if (!context?.organization_id) return undefined;
+    const interval = setInterval(() => {
+      if (shouldSkipBackgroundRefresh()) return;
+      load({ quiet: true });
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [context?.organization_id, load]);
 
   const openAsset = (asset) => {
     navigation.navigate("KeeprProStewardshipView", {
@@ -867,6 +880,19 @@ export default function KeeprProHomeScreen({ navigation }) {
             <Text style={styles.title}>{context?.display_name || "Wilson Marine"}</Text>
             <Text style={styles.subtitle}>{statusText}</Text>
           </View>
+          <TouchableOpacity
+            style={[styles.headerRefreshButton, refreshing && styles.disabled]}
+            onPress={refresh}
+            activeOpacity={0.86}
+            disabled={refreshing}
+          >
+            {refreshing ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <Ionicons name="refresh-outline" size={17} color={colors.primary} />
+            )}
+            <Text style={styles.headerRefreshText}>Refresh</Text>
+          </TouchableOpacity>
         </View>
 
         {loading ? (
@@ -963,6 +989,23 @@ const styles = StyleSheet.create({
   headerCopy: {
     flex: 1,
     minWidth: 0,
+  },
+  headerRefreshButton: {
+    minHeight: 38,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: spacing.md,
+    paddingVertical: 8,
+  },
+  headerRefreshText: {
+    ...typography.caption,
+    color: colors.primary,
+    fontWeight: "800",
   },
   eyebrow: {
     ...typography.caption,
