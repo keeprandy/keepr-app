@@ -37,7 +37,8 @@ function clean(value) {
 }
 
 export default function HubQuickAddCarScreen({ navigation, route }) {
-  const { hubId, hubSlug, hubName } = route?.params || {};
+  const { hubId, hubName } = route?.params || {};
+  const hubSlug = route?.params?.hubSlug || route?.params?.slug || null;
   const [resolvedHubId, setResolvedHubId] = useState(hubId || null);
   const [hub, setHub] = useState(route?.params?.hub || null);
   const [year, setYear] = useState("");
