@@ -326,9 +326,19 @@ export default function KeeprActionScreen({ route, navigation }) {
 
   useEffect(() => {
     if (!params.launchComposer) return;
+    if (!loading && !isGlobal && workspace.threads.length) {
+      const relationshipThread =
+        workspace.threads.find((thread) => thread.keepr_pro_id || thread.resource_ref?.relationship_scope === "service_stewardship") ||
+        workspace.threads[0];
+      setSelectedThreadId(relationshipThread.id);
+      setCompactConversationOpen(true);
+      setComposerOpen(false);
+      return;
+    }
+    if (loading && !isGlobal) return;
     setComposerOpen(true);
     setComposerStep(isGlobal ? "context" : "recipient");
-  }, [params.launchComposer, assetId, systemId]);
+  }, [isGlobal, loading, params.launchComposer, workspace.threads]);
 
   useEffect(() => {
     if (!composerOpen) return undefined;
@@ -2146,7 +2156,7 @@ const styles = StyleSheet.create({
     width: "100%",
     maxHeight: "100%",
   },
-  threadPaneContent: { padding: spacing.md, gap: spacing.md },
+  threadPaneContent: { padding: spacing.md, paddingBottom: 132, gap: spacing.md },
   groupBlock: { gap: spacing.sm },
   groupTitle: { fontSize: 13, fontWeight: "900", color: colors.textPrimary },
   threadRow: {
@@ -2178,8 +2188,8 @@ const styles = StyleSheet.create({
     minHeight: 0,
     flex: 1,
   },
-  conversationContent: { padding: spacing.lg },
-  conversationContentCompact: { paddingBottom: 118 },
+  conversationContent: { padding: spacing.lg, paddingBottom: 150 },
+  conversationContentCompact: { paddingBottom: 150 },
   conversationHeader: {
     borderBottomWidth: 1,
     borderBottomColor: colors.borderSubtle,
