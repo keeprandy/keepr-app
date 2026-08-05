@@ -113,6 +113,7 @@ import InviteHubMembersScreen from "./screens/InviteHubMembersScreen";
 import MyHubsScreen from "./screens/MyHubsScreen";
 import CreateHubScreen from "./screens/CreateHubScreen";
 import AddHubStoryScreen from "./screens/AddHubStoryScreen";
+import HubQuickAddCarScreen from "./screens/HubQuickAddCarScreen";
 
 // Screens
 import AssetGroupDashboardScreen from "./screens/AssetGroupDashboardScreen";
@@ -286,6 +287,7 @@ const linking = {
     KeeprHubInternal: "KeeprHubInternal",
     KeeprStoryInternal: "KeeprStoryInternal",
     KeeprHub: "h/:slug",
+    HubQuickAddCar: "h/:slug/add-car",
     KacResolve: "resolve/:kac",
     RootTabs: {
       screens: {
@@ -2389,6 +2391,7 @@ if (!user) {
           <RootStack.Screen name="CreateHub" component={CreateHubScreen} options={{ headerShown: false }}/>
           <RootStack.Screen name="KeeprHubInternal" component={KeeprHubScreen}/>
           <RootStack.Screen name="AddHubStory" component={AddHubStoryScreen} />
+          <RootStack.Screen name="HubQuickAddCar" component={HubQuickAddCarScreen} />
           <RootStack.Screen name="KeeprStoryInternal" component={PublicKeeprStoryScreen}/>
           
           <RootStack.Screen name="ShareAction" component={ShareActionRedirectScreen} />
@@ -2500,6 +2503,7 @@ const initialRouteName = isResetLink
           <RootStack.Screen name="CreateHub" component={CreateHubScreen} options={{ headerShown: false }}/>
           <RootStack.Screen name="KeeprHubInternal" component={KeeprHubScreen}/>
           <RootStack.Screen name="AddHubStory" component={AddHubStoryScreen}/>
+          <RootStack.Screen name="HubQuickAddCar" component={HubQuickAddCarScreen}/>
           <RootStack.Screen name="KeeprStoryInternal" component={PublicKeeprStoryScreen}/>
           
           <RootStack.Screen name="UploadLab" component={UploadLabScreen} />

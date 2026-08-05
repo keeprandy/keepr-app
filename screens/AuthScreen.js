@@ -32,6 +32,11 @@ import {
 import { DEFAULT_MEMBER_AVATAR } from "../lib/memberAvatar";
 import { useAuth } from "../context/AuthContext";
 import { profileIdentityValues } from "../lib/profileIdentityInitialization";
+import {
+  getActiveAuthActivationIntent,
+  getStoredAuthActivationIntent,
+  storeAuthActivationIntent,
+} from "../lib/authActivationIntent";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PENDING_MESSAGE_TOKEN_KEY = "keepr_pending_message_token";
@@ -107,6 +112,9 @@ function getWebAuthRedirectToForIntent(oauthIntent = "signin") {
   try {
     const url = new URL(redirectTo);
     url.searchParams.set("oauth_intent", oauthIntent === "signup" ? "signup" : "signin");
+    const returnTo = window.sessionStorage?.getItem("keepr.auth.activationIntent.v1") ||
+      window.localStorage?.getItem("keepr.auth.activationIntent.v1");
+    if (returnTo) url.searchParams.set("returnTo", "hub_activation");
     return url.toString();
   } catch (_) {
     return redirectTo;
@@ -214,7 +222,7 @@ function isValidImageUrl(value) {
 
 export default function AuthScreen({ navigation, route }) {
   const { initializing, user } = useAuth();
-  const [mode, setMode] = useState(route?.params?.mode === "signup" ? "signup" : "signin"); // "signin" | "signup" | "forgot"
+  const [mode, setMode] = useState(route?.params?.mode === "signup" || route?.params?.source === "hub_activation" ? "signup" : "signin"); // "signin" | "signup" | "forgot"
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -283,6 +291,7 @@ export default function AuthScreen({ navigation, route }) {
   useEffect(() => {
     if (route?.params?.mode === "signup") setMode("signup");
     if (route?.params?.mode === "signin") setMode("signin");
+    if (route?.params?.source === "hub_activation") setMode("signup");
   }, [route?.params?.mode]);
 
   useEffect(() => {
@@ -321,8 +330,11 @@ export default function AuthScreen({ navigation, route }) {
       if (!authUser?.id) return false;
       settled = true;
 
+      const activationIntent = await getStoredAuthActivationIntent();
+      const isHubActivation = activationIntent?.type === "hub_quick_add";
       const existingProfile = await getExistingProfileForUser(authUser.id);
       if (
+        !isHubActivation &&
         oauthIntent !== "signup" &&
         (!existingProfile?.id || isFreshOAuthUser(authUser))
       ) {
@@ -339,6 +351,7 @@ export default function AuthScreen({ navigation, route }) {
         authUser,
         email: authUser.email,
         policyAccepted: true,
+        onboardingState: isHubActivation ? "partial" : undefined,
       });
       if (authUser.email) {
         await claimPendingActionsForEmail({
@@ -506,6 +519,9 @@ export default function AuthScreen({ navigation, route }) {
       displayName: profileName,
       policyAccepted: !!options.policyAccepted,
     });
+    if (options.onboardingState) {
+      identityValues.onboarding_state = options.onboardingState;
+    }
 
     if (!existingProfile?.id) {
       const profilePayload = {
@@ -662,6 +678,19 @@ export default function AuthScreen({ navigation, route }) {
   };
 
 const continueActivationJourney = async () => {
+  const activationIntent = await getActiveAuthActivationIntent(route?.params || {});
+  if (activationIntent?.type === "hub_quick_add") {
+    if (route?.params?.activationIntent?.type) {
+      await storeAuthActivationIntent(route.params.activationIntent);
+    }
+    navigation.replace("HubQuickAddCar", {
+      hubId: activationIntent.hubId,
+      hubSlug: activationIntent.hubSlug,
+      hubName: activationIntent.hubName,
+    });
+    return true;
+  }
+
   const messageToken =
     route?.params?.messageToken ||
     (await AsyncStorage.getItem(PENDING_MESSAGE_TOKEN_KEY).catch(() => null));
@@ -703,7 +732,9 @@ const continueActivationJourney = async () => {
     try {
       setSubmitting(true);
       setFormError("");
-      const oauthIntent = isSignUp ? "signup" : "signin";
+      const activationIntent = await getActiveAuthActivationIntent(route?.params || {});
+      if (activationIntent?.type) await storeAuthActivationIntent(activationIntent);
+      const oauthIntent = isSignUp || activationIntent?.type === "hub_quick_add" ? "signup" : "signin";
 
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider,
@@ -848,10 +879,13 @@ const continueActivationJourney = async () => {
     }
 
 if (sessionUserId) {
+  const activationIntent = await getActiveAuthActivationIntent(route?.params || {});
+  if (activationIntent?.type) await storeAuthActivationIntent(activationIntent);
   await ensureProfile(sessionUserId, {
     authUser: user,
     email: normalizedEmail,
     policyAccepted: true,
+    onboardingState: activationIntent?.type === "hub_quick_add" ? "partial" : undefined,
   });
 
   await claimPendingActionsForEmail({

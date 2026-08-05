@@ -41,6 +41,10 @@ import { getHubUserCapabilities } from "../lib/hubCapabilities";
 import { buildHubShareUrl } from "../lib/inviteLinks";
 import { getKaiTriggerContext } from "../lib/kaiEngine";
 import HubAuthModal from "../components/hubs/HubAuthModal";
+import {
+  buildHubQuickAddIntent,
+  storeAuthActivationIntent,
+} from "../lib/authActivationIntent";
 
 import * as Clipboard from "expo-clipboard";
 import QRCode from "react-native-qrcode-svg";
@@ -1084,9 +1088,25 @@ const addAssetLabel =
     ? "Enter My Vehicle"
     : "Add My Asset";
 
-const handleAddToHubPress = () => {
+const handleAddToHubPress = async () => {
+  const activationIntent = buildHubQuickAddIntent({
+    hubId: hub?.id,
+    hubSlug: hub?.slug || slug,
+    hubName: hub?.name,
+    returnRoute: "HubQuickAddCar",
+  });
+
   if (!currentUserId) {
-    navigation.navigate("Auth");
+    await storeAuthActivationIntent(activationIntent);
+    navigation.navigate("Auth", {
+      mode: "signup",
+      source: "hub_activation",
+      hubId: hub?.id,
+      hubSlug: hub?.slug || slug,
+      hubName: hub?.name,
+      activationIntent,
+      returnTo: "HubQuickAddCar",
+    });
     return;
   }
 
@@ -1098,9 +1118,11 @@ const handleAddToHubPress = () => {
     return;
   }
 
-  navigation.navigate("ManageHubStories", {
+  navigation.navigate("HubQuickAddCar", {
     hubId: hub?.id,
-    activationMode: true,
+    hubSlug: hub?.slug || slug,
+    hubName: hub?.name,
+    hub,
   });
 };
 
