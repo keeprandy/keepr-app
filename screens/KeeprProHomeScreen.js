@@ -140,6 +140,16 @@ export default function KeeprProHomeScreen({ navigation }) {
   const recentMessages = workspace?.recent_messages || [];
   const upcomingWork = workspace?.upcoming_work || [];
   const recentServiceActivity = workspace?.recent_service_activity || [];
+  const recentMessageThreadIds = useMemo(
+    () => Array.from(new Set(recentMessages.map((item) => item.id).filter(Boolean))),
+    [recentMessages]
+  );
+  const portfolioAssetIds = useMemo(
+    () => Array.from(new Set(assets.map((asset) => asset.asset_id).filter(Boolean))),
+    [assets]
+  );
+  const recentMessageThreadKey = recentMessageThreadIds.join(",");
+  const portfolioAssetKey = portfolioAssetIds.join(",");
 
   useEffect(() => {
     if (context) setProfileDraft(profileDraftFromContext(context));
@@ -215,6 +225,91 @@ export default function KeeprProHomeScreen({ navigation }) {
     setRefreshing(true);
     load({ quiet: true });
   };
+
+  useEffect(() => {
+    if (!context?.organization_id) return undefined;
+    let active = true;
+    let notificationChannel = null;
+    const channels = [];
+    const refreshQuietly = () => {
+      if (!active) return;
+      load({ quiet: true });
+    };
+
+    portfolioAssetIds.forEach((assetId) => {
+      const channel = supabase
+        .channel(`keeprpro-home-asset-threads:${context.organization_id}:${assetId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "asset_threads",
+            filter: `asset_id=eq.${assetId}`,
+          },
+          refreshQuietly
+        )
+        .subscribe();
+      channels.push(channel);
+    });
+
+    recentMessageThreadIds.forEach((threadId) => {
+      const channel = supabase
+        .channel(`keeprpro-home-thread:${context.organization_id}:${threadId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "asset_thread_messages",
+            filter: `thread_id=eq.${threadId}`,
+          },
+          refreshQuietly
+        )
+        .subscribe();
+      channels.push(channel);
+    });
+
+    supabase.auth.getUser().then(({ data }) => {
+      const userId = data?.user?.id || null;
+      if (!active || !userId) return;
+      notificationChannel = supabase
+        .channel(`keeprpro-home-notifications:${context.organization_id}:${userId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "notification_events",
+            filter: `recipient_user_id=eq.${userId}`,
+          },
+          (payload) => {
+            const event = payload?.new || {};
+            if (
+              String(event.recipient_organization_id || "") === String(context.organization_id) ||
+              (event.thread_id && recentMessageThreadIds.includes(event.thread_id)) ||
+              (event.asset_id && portfolioAssetIds.includes(event.asset_id))
+            ) {
+              refreshQuietly();
+            }
+          }
+        )
+        .subscribe();
+    });
+
+    return () => {
+      active = false;
+      channels.forEach((channel) => supabase.removeChannel(channel));
+      if (notificationChannel) supabase.removeChannel(notificationChannel);
+    };
+  }, [
+    context?.organization_id,
+    load,
+    portfolioAssetIds,
+    portfolioAssetKey,
+    recentMessageThreadIds,
+    recentMessageThreadKey,
+  ]);
 
   const openAsset = (asset) => {
     navigation.navigate("KeeprProStewardshipView", {
