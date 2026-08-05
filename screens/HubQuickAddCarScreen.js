@@ -21,6 +21,7 @@ import { createAssetWithDefaults } from "../lib/assetsService";
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import { addStoryToHub, fetchHub, fetchPublicHubBySlug } from "../lib/hubsApi";
 import { clearStoredAuthActivationIntent } from "../lib/authActivationIntent";
+import { getHubUserCapabilities } from "../lib/hubCapabilities";
 import { colors, radius, shadows, spacing, typography } from "../styles/theme";
 
 function hubUrl(slug) {
@@ -48,6 +49,17 @@ export default function HubQuickAddCarScreen({ navigation, route }) {
   const [photo, setPhoto] = useState(null);
   const [saving, setSaving] = useState(false);
   const [created, setCreated] = useState(null);
+  const [currentUserId, setCurrentUserId] = useState(null);
+
+  useEffect(() => {
+    let mounted = true;
+    supabase.auth.getUser().then(({ data }) => {
+      if (mounted) setCurrentUserId(data?.user?.id || null);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -71,7 +83,14 @@ export default function HubQuickAddCarScreen({ navigation, route }) {
 
   const effectiveHubName = hub?.name || hubName || "this Hub";
   const effectiveHubSlug = hub?.slug || hubSlug;
-  const canSubmit = resolvedHubId && clean(year) && clean(make) && clean(model) && photo?.uri && !saving;
+  const capabilities = getHubUserCapabilities({
+    hub,
+    user: currentUserId ? { id: currentUserId } : null,
+    currentMember: null,
+    isInternal: false,
+  });
+  const routeAllowed = Boolean(hub && capabilities.canOpenQuickActivation);
+  const canSubmit = routeAllowed && resolvedHubId && clean(year) && clean(make) && clean(model) && photo?.uri && !saving;
   const assetName = useMemo(
     () => [clean(year), clean(make), clean(model)].filter(Boolean).join(" "),
     [year, make, model]
@@ -202,6 +221,27 @@ export default function HubQuickAddCarScreen({ navigation, route }) {
           </TouchableOpacity>
           <TouchableOpacity style={styles.textButton} onPress={() => navigation.replace("Dashboard")}>
             <Text style={styles.textButtonText}>Complete my Keepr later</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (hub && !routeAllowed) {
+    return (
+      <SafeAreaView style={styles.screen}>
+        <View style={styles.successWrap}>
+          <Ionicons name="lock-closed-outline" size={42} color={colors.textSecondary} />
+          <Text style={styles.title}>This Hub is not open for public car activation.</Text>
+          <Text style={styles.subtitle}>
+            {capabilities.addAssetAction === "request"
+              ? "Request to join before adding an asset."
+              : capabilities.addAssetAction === "invite_required"
+              ? "Join with an invite before adding an asset."
+              : "The Hub owner controls which assets appear here."}
+          </Text>
+          <TouchableOpacity style={styles.secondaryButton} onPress={() => navigation.replace("KeeprHub", { slug: effectiveHubSlug })}>
+            <Text style={styles.secondaryButtonText}>Back to Hub</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>

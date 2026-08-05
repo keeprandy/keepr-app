@@ -1004,9 +1004,7 @@ const participationModel = capabilities.participation;
 const hubType = capabilities.hubType;
 const isAuthenticated = !!currentUserId;
 
-const canPublicAddToHub =
-  isAuthenticated &&
-  capabilities.canShowAddAssetCTA;
+const canPublicAddToHub = capabilities.canShowAddAssetCTA;
 
 const hubActions = isInternal ? (
   <View style={styles.hubActions}>
@@ -1075,18 +1073,7 @@ const hubActions = isInternal ? (
   </View>
 ) : null;
 
-const hubName = String(hub?.name || "").toLowerCase();
-
-const addAssetLabel =
-  !isAuthenticated
-    ? "Join Keepr"
-    : hubType === "community" && hubName.includes("porsche")
-    ? "Add My Porsche"
-    : hubType === "community" && hubName.includes("corvette")
-    ? "Add My Corvette"
-    : hubType === "event"
-    ? "Enter My Vehicle"
-    : "Add My Asset";
+const addAssetLabel = capabilities.addAssetLabel || "Add your asset";
 
 const handleAddToHubPress = async () => {
   const activationIntent = buildHubQuickAddIntent({
@@ -1095,6 +1082,30 @@ const handleAddToHubPress = async () => {
     hubName: hub?.name,
     returnRoute: "HubQuickAddCar",
   });
+
+  if (capabilities.addAssetAction === "invite_required") {
+    Alert.alert(
+      "Invitation required",
+      "This Hub is invite only. Please contact the Hub owner or administrator."
+    );
+    return;
+  }
+
+  if (capabilities.addAssetAction === "request") {
+    Alert.alert(
+      "Request to join",
+      "This Hub requires approval before members can add assets."
+    );
+    return;
+  }
+
+  if (!capabilities.canOpenQuickActivation) {
+    Alert.alert(
+      "Not available",
+      "This Hub is not configured for public QR activation."
+    );
+    return;
+  }
 
   if (!currentUserId) {
     await storeAuthActivationIntent(activationIntent);
@@ -1107,14 +1118,6 @@ const handleAddToHubPress = async () => {
       activationIntent,
       returnTo: "HubQuickAddCar",
     });
-    return;
-  }
-
-  if (participationModel === "invite_only") {
-    Alert.alert(
-      "Invitation required",
-      "This Hub is invite only. Please contact the Hub owner or administrator."
-    );
     return;
   }
 
@@ -1148,7 +1151,7 @@ const handleAddToHubPress = async () => {
 {canPublicAddToHub ? (
   <TouchableOpacity
     style={
-      participationModel === "invite_only"
+      capabilities.addAssetAction === "invite_required"
         ? styles.disabledHubAction
         : styles.primaryHubAction
     }
@@ -1157,23 +1160,21 @@ const handleAddToHubPress = async () => {
   >
     <Ionicons
       name={
-        participationModel === "invite_only"
+        capabilities.addAssetAction === "invite_required"
           ? "lock-closed-outline"
           : "add-circle-outline"
       }
       size={16}
-      color={participationModel === "invite_only" ? colors.textMuted : "#fff"}
+      color={capabilities.addAssetAction === "invite_required" ? colors.textMuted : "#fff"}
     />
     <Text
       style={
-        participationModel === "invite_only"
+        capabilities.addAssetAction === "invite_required"
           ? styles.disabledHubActionText
           : styles.primaryHubActionText
       }
     >
-      {participationModel === "invite_only"
-        ? "Invitation Required"
-        : addAssetLabel}
+      {addAssetLabel}
     </Text>
   </TouchableOpacity>
 ) : null}
