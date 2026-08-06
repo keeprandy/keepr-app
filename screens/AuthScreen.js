@@ -254,9 +254,10 @@ export default function AuthScreen({ navigation, route }) {
   const mobileUserAgent =
     typeof navigator !== "undefined" &&
     /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-  const isMobileWeb = isWeb && (mobileUserAgent || width < 760);
+  const isMobileWeb = isWeb && width < 760;
+  const isMobileDeviceWeb = isWeb && mobileUserAgent;
   const isIOSMobileWeb =
-    isMobileWeb &&
+    isWeb &&
     typeof navigator !== "undefined" &&
     /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
@@ -594,8 +595,8 @@ export default function AuthScreen({ navigation, route }) {
 
   const openKeeprApp = () => {
     const slug = route?.params?.inviteSlug || inviteContext?.slug || inviteContext?.normalized_slug || null;
-    const invitePath = slug ? `/invite/${encodeURIComponent(slug)}` : "";
-    const appUrl = `keepr://${invitePath}`;
+    const cleanSlug = String(slug || "").trim().replace(/^\/+|\/+$/g, "");
+    const appUrl = cleanSlug ? `keepr://invite/${encodeURIComponent(cleanSlug)}` : "keepr://";
 
     if (Platform.OS === "web" && typeof window !== "undefined") {
       window.location.href = appUrl;
@@ -618,9 +619,12 @@ export default function AuthScreen({ navigation, route }) {
   };
 
   const continueToKeepr = () => {
-    navigation.reset?.({
-      index: 0,
-      routes: [{ name: "RootTabs" }],
+    continueActivationJourney().then((continued) => {
+      if (continued) return;
+      navigation.reset?.({
+        index: 0,
+        routes: [{ name: "RootTabs" }],
+      });
     });
   };
 
@@ -687,6 +691,31 @@ const continueActivationJourney = async () => {
       hubId: activationIntent.hubId,
       hubSlug: activationIntent.hubSlug,
       hubName: activationIntent.hubName,
+    });
+    return true;
+  }
+
+  if (hasInviteIntent) {
+    try {
+      const sourceSlug =
+        route?.params?.inviteSlug ||
+        inviteContext?.slug ||
+        inviteContext?.normalized_slug ||
+        (await getStoredLegacySourceSlug({ storage: AsyncStorage }));
+
+      await completeSignupAttribution({
+        supabase,
+        storage: AsyncStorage,
+        sourceSlug,
+        intendedAction: "signup",
+      });
+    } catch (e) {
+      console.log("[AuthScreen] invite attribution completion failed:", e?.message || e);
+    }
+
+    navigation.reset?.({
+      index: 0,
+      routes: [{ name: "RootTabs" }],
     });
     return true;
   }
@@ -1049,7 +1078,7 @@ if (continued) return;
                 <TouchableOpacity
                   style={styles.invitePrimary}
                   onPress={() => {
-                    if (isMobileWeb) {
+                    if (isMobileDeviceWeb) {
                       openKeeprApp();
                       return;
                     }
@@ -1061,20 +1090,22 @@ if (continued) return;
                   disabled={submitting}
                 >
                   <Text style={styles.invitePrimaryText}>
-                    {isMobileWeb ? "Open in Keepr" : "Become a Keepr"}
+                    {isMobileDeviceWeb ? "Open in Keepr" : "Become a Keepr"}
                   </Text>
                 </TouchableOpacity>
                 {isMobileWeb ? (
                   <>
-                    <TouchableOpacity
-                      style={styles.inviteStoreButton}
-                      onPress={openAppStore}
-                      activeOpacity={0.9}
-                    >
-                      <Text style={styles.inviteStoreButtonText}>
-                        {isIOSMobileWeb ? "Get Keepr for iPhone" : "Get Keepr for Android"}
-                      </Text>
-                    </TouchableOpacity>
+                    {isMobileDeviceWeb ? (
+                      <TouchableOpacity
+                        style={styles.inviteStoreButton}
+                        onPress={openAppStore}
+                        activeOpacity={0.9}
+                      >
+                        <Text style={styles.inviteStoreButtonText}>
+                          {isIOSMobileWeb ? "Get Keepr for iPhone" : "Get Keepr for Android"}
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null}
                     <TouchableOpacity
                       style={styles.inviteSecondary}
                       onPress={continueOnWeb}
