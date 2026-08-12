@@ -687,10 +687,15 @@ const continueActivationJourney = async () => {
     if (route?.params?.activationIntent?.type) {
       await storeAuthActivationIntent(route.params.activationIntent);
     }
-    navigation.replace("HubQuickAddCar", {
+    const returnRoute =
+      activationIntent.returnRoute === "AddHubStory"
+        ? "AddHubStory"
+        : "HubQuickAddCar";
+    navigation.replace(returnRoute, {
       hubId: activationIntent.hubId,
       hubSlug: activationIntent.hubSlug,
       hubName: activationIntent.hubName,
+      activationMode: returnRoute === "AddHubStory",
     });
     return true;
   }
@@ -895,6 +900,9 @@ const continueActivationJourney = async () => {
         return;
       }
 
+      const activationIntent = await getActiveAuthActivationIntent(route?.params || {});
+      if (activationIntent?.type) await storeAuthActivationIntent(activationIntent);
+
       const user = data?.session?.user || null;    
       const sessionUserId = user?.id || null;
 
@@ -907,10 +915,8 @@ const continueActivationJourney = async () => {
       return;
     }
 
-if (sessionUserId) {
-  const activationIntent = await getActiveAuthActivationIntent(route?.params || {});
-  if (activationIntent?.type) await storeAuthActivationIntent(activationIntent);
-  await ensureProfile(sessionUserId, {
+	if (sessionUserId) {
+	  await ensureProfile(sessionUserId, {
     authUser: user,
     email: normalizedEmail,
     policyAccepted: true,

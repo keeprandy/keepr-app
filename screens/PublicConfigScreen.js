@@ -24,8 +24,10 @@ import {
   fetchMyHubs,
   addStoryToHub,
   createHub,
+  fetchHub,
   removeStoryFromHub,
 } from "../lib/hubsApi";
+import { assetMatchesHubParticipation, getHubParticipationConfig } from "../lib/hubConfig";
 
 
 
@@ -120,10 +122,17 @@ function getDefaultPublicConfig() {
 export default function PublicConfigScreen({ navigation, route }) {
   const assetId = route?.params?.assetId || null;
   const assetNameFromRoute = route?.params?.assetName || "";
+  const returnTo = route?.params?.returnTo || null;
+  const returnParams = route?.params?.returnParams || {};
+  const suggestedHubId =
+    route?.params?.suggestedHubId || returnParams?.hubId || null;
+  const isHubReturn = returnTo === "AddHubStory" && !!suggestedHubId;
 
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
   const [assetName, setAssetName] = React.useState(assetNameFromRoute);
+  const [assetType, setAssetType] = React.useState(null);
+  const [assetRecord, setAssetRecord] = React.useState(null);
   const [saveError, setSaveError] = React.useState(null);
   const [lastSavedAt, setLastSavedAt] = React.useState(null);
   const [publicNarrative, setPublicNarrative] = React.useState("");
@@ -219,10 +228,20 @@ const openHubPicker = async () => {
   }
 };
 
+    const assertAssetCanBeAddedToHub = (hub) => {
+      const config = getHubParticipationConfig(hub);
+      if (assetRecord && !assetMatchesHubParticipation(assetRecord, hub)) {
+        throw new Error(
+          `This Hub is accepting ${config.assetLabel || config.primaryAssetType || "matching asset"} stories only.`
+        );
+      }
+    };
+
     const handleAddStoryToHub = async (hub) => {
       try {
         const user = (await supabase.auth.getUser()).data?.user;
         if (!user?.id) return;
+        assertAssetCanBeAddedToHub(hub);
 
         console.log("ADDING STORY TO NEW HUB", {
           hubId: hub?.id,
@@ -240,6 +259,8 @@ const openHubPicker = async () => {
           hubId: hub.id,
           assetId,
           userId: user.id,
+          hub,
+          status: getHubParticipationConfig(hub).submissionStatus,
         });
 
         const links = await fetchAssetHubLinks(assetId);
@@ -313,6 +334,7 @@ const openHubPicker = async () => {
         });
 
         console.log("CREATE HUB RESULT", hub);
+        assertAssetCanBeAddedToHub(hub);
 
         try {
           console.log("ADDING STORY TO CREATED HUB", {
@@ -325,6 +347,8 @@ const openHubPicker = async () => {
             hubId: hub.id,
             assetId,
             userId: user.id,
+            hub,
+            status: getHubParticipationConfig(hub).submissionStatus,
           });
 
           console.log("STORY ADDED TO CREATED HUB");
@@ -338,12 +362,6 @@ const openHubPicker = async () => {
               throw linkErr;
             }
           }
-
-        await addStoryToHub({
-          hubId: hub.id,
-          assetId,
-          userId: user.id,
-        });
 
         const links = await fetchAssetHubLinks(assetId);
         setHubLinks(links || []);
@@ -370,7 +388,7 @@ const openHubPicker = async () => {
 
       const { data, error } = await supabase
         .from("assets")
-        .select("id, name, kac_id, extra_metadata")
+        .select("id, name, type, make, model, year, kac_id, extra_metadata")
         .eq("id", assetId)
         .maybeSingle();
 
@@ -378,6 +396,8 @@ const openHubPicker = async () => {
       if (!data) throw new Error("Asset not found.");
 
       setAssetName(data?.name || assetNameFromRoute || "Asset");
+      setAssetType(data?.type || null);
+      setAssetRecord(data || null);
       setAssetKac(data?.kac_id || null);
 
       const existing = data?.extra_metadata?.publicConfig || getDefaultPublicConfig();
@@ -397,7 +417,7 @@ const sharingConfig = existing.sharing || getDefaultPublicConfig().sharing;
 
 setPublicNarrative(data?.extra_metadata?.publicStoryNarrative || "");
 setShowNarrative(storyConfig.showNarrative !== false);
-setEnabled(storyConfig.enabled === true);
+setEnabled(storyConfig.enabled === true || isHubReturn);
 setMode(actionConfig.mode || "inquiry");
 setActionsEnabled(
   Array.isArray(actionConfig.actionsEnabled) && actionConfig.actionsEnabled.length
@@ -436,7 +456,7 @@ try {
     } finally {
       setLoading(false);
     }
-  }, [assetId, assetNameFromRoute]);
+}, [assetId, assetNameFromRoute, isHubReturn]);
 
   React.useEffect(() => {
     loadAssetConfig();
@@ -456,11 +476,12 @@ try {
     );
   };
 
-const saveConfig = React.useCallback(async () => {
+const saveConfig = React.useCallback(async (options = {}) => {
+  const forceEnabled = options?.forceEnabled === true;
   if (!assetId) {
   setSaving(false);
   Alert.alert("Missing asset", "No asset was passed into Public Config.");
-  return;
+  return false;
 }
 
   try {
@@ -485,13 +506,13 @@ const saveConfig = React.useCallback(async () => {
       ...existingPublicConfig,
       
       actions: {
-        enabled,
+        enabled: forceEnabled || enabled,
         mode,
         actionsEnabled,
       },
       story: {
         ...(existingPublicConfig.story || getDefaultPublicConfig().story),
-        enabled,
+        enabled: forceEnabled || enabled,
         showLocation,
         showFinancials,
         showSystems,
@@ -533,10 +554,12 @@ const saveConfig = React.useCallback(async () => {
 
     console.log("SAVED CONFIG:", publicConfig);
     setLastSavedAt(Date.now());
+    return true;
 
   } catch (e) {
     console.log("SAVE ERROR:", e);
     Alert.alert("Could not save", e?.message || "Try again.");
+    return false;
   } finally {
     setSaving(false);
   }
@@ -561,6 +584,57 @@ const saveConfig = React.useCallback(async () => {
   allowShareLink,
   publicNarrative,
 showNarrative,
+]);
+
+const completeHubSubmission = React.useCallback(async () => {
+  if (!suggestedHubId) return;
+
+  try {
+    const saved = await saveConfig({ forceEnabled: true });
+    if (!saved) return;
+
+    const user = (await supabase.auth.getUser()).data?.user;
+    if (!user?.id) {
+      Alert.alert("Sign in required", "Please sign in to submit this story to the Hub.");
+      return;
+    }
+
+    if (hubLinks.some((hub) => hub.id === suggestedHubId)) {
+      navigation.replace("KeeprHub", { hubId: suggestedHubId });
+      return;
+    }
+
+    const hub = await fetchHub(suggestedHubId);
+    assertAssetCanBeAddedToHub(hub);
+
+    await addStoryToHub({
+      hubId: suggestedHubId,
+      assetId,
+      userId: user.id,
+      hub,
+      status: getHubParticipationConfig(hub).submissionStatus,
+    });
+
+    Alert.alert(
+      getHubParticipationConfig(hub).submissionStatus === "pending" ? "Submitted" : "Story added",
+      getHubParticipationConfig(hub).submissionStatus === "pending"
+        ? "Your vehicle is pending Hub admin approval."
+        : "Your vehicle was added to this Hub."
+    );
+    navigation.replace("KeeprHub", {
+      hubId: suggestedHubId,
+      slug: hub?.slug,
+    });
+  } catch (e) {
+    Alert.alert("Could not submit to Hub", e?.message || "Try again.");
+  }
+}, [
+  assetId,
+  assertAssetCanBeAddedToHub,
+  hubLinks,
+  navigation,
+  saveConfig,
+  suggestedHubId,
 ]);
 
 const initialLoadComplete = React.useRef(false);
@@ -971,7 +1045,7 @@ React.useEffect(() => {
           <View style={styles.card}>
             <TouchableOpacity
             style={[styles.primaryBtn, saving && { opacity: 0.6 }]}
-            onPress={saveConfig}
+            onPress={isHubReturn ? completeHubSubmission : saveConfig}
             activeOpacity={0.9}
             disabled={saving}
             >
@@ -983,12 +1057,16 @@ React.useEffect(() => {
                   ? "Saving..."
                   : saveError
                   ? "Save Failed"
+                  : isHubReturn
+                  ? "Submit to Hub"
                   : "Saved"}
               </Text>
             )}
             </TouchableOpacity>
             <Text style={styles.footerHint}>
-              These settings control how your asset appears and behaves publicly.
+              {isHubReturn
+                ? "This will make your public story available for Hub review."
+                : "These settings control how your asset appears and behaves publicly."}
             </Text>
           </View>
         </View>

@@ -20,6 +20,12 @@ import { layoutStyles } from "../styles/layout";
 import { colors, spacing, radius, typography, shadows } from "../styles/theme";
 import { supabase } from "../lib/supabaseClient";
 import { KEEPR_PROS } from "../data/keeprPros";
+import {
+  getMyKpcRelationships,
+  mapKpcToKeeprPro,
+  resolveOrCreateOwnerKpc,
+  searchKpcDirectory,
+} from "../lib/kpcApi";
 
 const FILTERS = [
   { id: "all", label: "All" },
@@ -62,8 +68,17 @@ const categoryLabel = (category) => {
 // DB row -> UI shape
 const mapRowToPro = (row) => ({
   id: row.id,
+  kpcId: row.kpc_id || null,
+  organizationId: row.organization_id || null,
+  keeprProId: row.keepr_pro_id || row.id,
+  ownerKpcRelationshipId: row.owner_kpc_relationship_id || null,
+  relationshipType: row.relationship_type || null,
   name: row.name,
   category: row.category || "other",
+  kpcCategory: row.kpc_category || null,
+  capabilities: row.capabilities || [],
+  claimState: row.claimed_state || row.claim_state || null,
+  profileStatus: row.profile_status || null,
   phone: row.phone || "",
   email: row.email || "",
   website: row.website || "",
@@ -95,6 +110,47 @@ const mapProToInsertPayload = (userId, pro) => ({
   contact_id: pro.contactId || null,
 });
 
+const loadLegacyKeeprPros = async (userId) => {
+  const { data, error } = await supabase
+    .from("keepr_pros")
+    .select("*")
+    .eq("user_id", userId)
+    .order("name", { ascending: true });
+
+  if (error) throw error;
+  return (data || []).map(mapRowToPro);
+};
+
+const kpcIdentityKey = (pro) =>
+  pro?.organizationId || pro?.keeprProId || pro?.kpcId || pro?.id;
+
+const mergeKpcResults = (...groups) => {
+  const byIdentity = new Map();
+
+  groups.flat().filter(Boolean).forEach((pro) => {
+    const key = kpcIdentityKey(pro);
+    if (!key) return;
+
+    const existing = byIdentity.get(key);
+    if (!existing) {
+      byIdentity.set(key, pro);
+      return;
+    }
+
+    byIdentity.set(key, {
+      ...pro,
+      ...existing,
+      isFavorite: existing.isFavorite || pro.isFavorite,
+      ownerKpcRelationshipId:
+        existing.ownerKpcRelationshipId || pro.ownerKpcRelationshipId,
+      relationshipType: existing.relationshipType || pro.relationshipType,
+      source: existing.ownerKpcRelationshipId ? existing.source : pro.source,
+    });
+  });
+
+  return Array.from(byIdentity.values());
+};
+
 // Normalizes both:
 // - { data: { user: null }, error: AuthSessionMissingError }
 // - thrown AuthSessionMissingError
@@ -120,6 +176,9 @@ const safeGetUser = async () => {
 export default function KeeprProsScreen({ navigation }) {
   // Start with local demo pros so the screen always has something to show
   const [pros, setPros] = useState(KEEPR_PROS);
+  const [directoryPros, setDirectoryPros] = useState([]);
+  const [directoryLoading, setDirectoryLoading] = useState(false);
+  const [savingDirectoryKpcId, setSavingDirectoryKpcId] = useState(null);
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState("all");
   const [loading, setLoading] = useState(true);
@@ -140,15 +199,17 @@ export default function KeeprProsScreen({ navigation }) {
         return;
       }
 
-      const { data, error } = await supabase
-        .from("keepr_pros")
-        .select("*")
-        .eq("user_id", user.id)
-        .order("name", { ascending: true });
-
-      if (error) throw error;
-
-      const mapped = (data || []).map(mapRowToPro);
+      let mapped = [];
+      try {
+        const directory = await getMyKpcRelationships();
+        mapped = (directory.results || []).map(mapKpcToKeeprPro).filter(Boolean);
+      } catch (resolverError) {
+        console.warn(
+          "KPC relationship resolver unavailable, using legacy Keepr Pros:",
+          resolverError?.message || resolverError
+        );
+        mapped = await loadLegacyKeeprPros(user.id);
+      }
       setPros(mapped);
       setLoading(false);
     } catch (err) {
@@ -170,6 +231,48 @@ export default function KeeprProsScreen({ navigation }) {
       isMounted = false;
     };
   }, [fetchFromCloudOrSeed]);
+
+  useEffect(() => {
+    const term = search.trim();
+    let cancelled = false;
+
+    if (term.length < 2) {
+      setDirectoryPros([]);
+      setDirectoryLoading(false);
+      return undefined;
+    }
+
+    setDirectoryLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const directory = await searchKpcDirectory({
+          query: term,
+          filters: {},
+          limit: 12,
+        });
+
+        if (cancelled) return;
+        setDirectoryPros(
+          (directory.results || []).map(mapKpcToKeeprPro).filter(Boolean)
+        );
+      } catch (resolverError) {
+        if (!cancelled) {
+          console.warn(
+            "KPC directory search unavailable:",
+            resolverError?.message || resolverError
+          );
+          setDirectoryPros([]);
+        }
+      } finally {
+        if (!cancelled) setDirectoryLoading(false);
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [search]);
 
   // Refresh list when returning from Add/Edit screens
   useEffect(() => {
@@ -194,15 +297,17 @@ export default function KeeprProsScreen({ navigation }) {
         return;
       }
 
-      const { data, error } = await supabase
-        .from("keepr_pros")
-        .select("*")
-        .eq("user_id", user.id)
-        .order("name", { ascending: true });
-
-      if (error) throw error;
-
-      const mapped = (data || []).map(mapRowToPro);
+      let mapped = [];
+      try {
+        const directory = await getMyKpcRelationships();
+        mapped = (directory.results || []).map(mapKpcToKeeprPro).filter(Boolean);
+      } catch (resolverError) {
+        console.warn(
+          "KPC relationship resolver unavailable, using legacy Keepr Pros:",
+          resolverError?.message || resolverError
+        );
+        mapped = await loadLegacyKeeprPros(user.id);
+      }
       setPros(mapped);
     } catch (err) {
       console.error("Error refreshing Keepr Pros:", err);
@@ -232,6 +337,13 @@ export default function KeeprProsScreen({ navigation }) {
       })
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [pros, search, activeFilter]);
+
+  const directoryMatches = useMemo(() => {
+    const savedKeys = new Set(pros.map(kpcIdentityKey).filter(Boolean));
+    return directoryPros
+      .filter((pro) => !savedKeys.has(kpcIdentityKey(pro)))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [directoryPros, pros]);
 
   const handleAddManually = () => {
     navigation.navigate("KeeprProDetail", {
@@ -325,17 +437,30 @@ export default function KeeprProsScreen({ navigation }) {
         return;
       }
 
-      // Signed-in path: save to Supabase
-      const payload = mapProToInsertPayload(user.id, basePro);
-      const { data: inserted, error } = await supabase
-        .from("keepr_pros")
-        .insert([payload])
-        .select("*")
-        .single();
+      // Signed-in path: resolve against the canonical KPC directory first.
+      let savedPro;
+      try {
+        const resolved = await resolveOrCreateOwnerKpc(
+          mapProToInsertPayload(user.id, basePro)
+        );
+        savedPro = mapKpcToKeeprPro(resolved?.kpc);
+      } catch (resolverError) {
+        console.warn(
+          "KPC resolve-first unavailable, using legacy Keepr Pro insert:",
+          resolverError?.message || resolverError
+        );
+        const payload = mapProToInsertPayload(user.id, basePro);
+        const { data: inserted, error } = await supabase
+          .from("keepr_pros")
+          .insert([payload])
+          .select("*")
+          .single();
 
-      if (error) throw error;
+        if (error) throw error;
+        savedPro = mapRowToPro(inserted);
+      }
 
-      const savedPro = mapRowToPro(inserted);
+      if (!savedPro) throw new Error("KPC resolve did not return a provider.");
 
       setPros((prev) => {
         if (prev.some((p) => p.id === savedPro.id)) return prev;
@@ -352,6 +477,70 @@ export default function KeeprProsScreen({ navigation }) {
         "Import error",
         "Something went wrong while importing from contacts."
       );
+    }
+  };
+
+  const handleAddDirectoryPro = async (item) => {
+    const identity = kpcIdentityKey(item);
+    try {
+      setSavingDirectoryKpcId(identity);
+
+      const { data: userData, error: userError } = await safeGetUser();
+      if (userError) throw userError;
+
+      if (!userData?.user) {
+        Alert.alert(
+          "Sign in required",
+          "Sign in to add this Keepr Pro to your Blackbook."
+        );
+        return;
+      }
+
+      const resolved = await resolveOrCreateOwnerKpc({
+        name: item.name,
+        display_name: item.name,
+        category: item.category,
+        phone: item.phone || null,
+        email: item.email || null,
+        website: item.website || null,
+        location: item.location || null,
+        notes: item.notes || null,
+        source: "kpc_directory",
+      });
+      const savedPro = mapKpcToKeeprPro(resolved?.kpc);
+      if (!savedPro) throw new Error("KPC resolve did not return a provider.");
+
+      setPros((prev) => mergeKpcResults(prev, [savedPro]));
+      setDirectoryPros((prev) =>
+        prev.map((pro) =>
+          kpcIdentityKey(pro) === identity
+            ? {
+                ...pro,
+                ...savedPro,
+                ownerKpcRelationshipId: savedPro.ownerKpcRelationshipId,
+                relationshipType: savedPro.relationshipType,
+                source: savedPro.source,
+              }
+            : pro
+        )
+      );
+      await onRefresh(true);
+      setDirectoryPros((prev) =>
+        prev.filter((pro) => kpcIdentityKey(pro) !== identity)
+      );
+
+      Alert.alert(
+        "Keepr Pro added",
+        `${savedPro.name} is now in your KeeprPro Blackbook.`
+      );
+    } catch (err) {
+      console.error("Error adding KPC from directory:", err);
+      Alert.alert(
+        "Could not add Keepr Pro",
+        "Keepr could not add this directory result to your Blackbook."
+      );
+    } finally {
+      setSavingDirectoryKpcId(null);
     }
   };
 
@@ -420,6 +609,87 @@ export default function KeeprProsScreen({ navigation }) {
     );
   };
 
+  const renderDirectoryPro = ({ item }) => {
+    const { name, tint } = categoryIcon(item.category);
+    const catLabel = categoryLabel(item.category);
+    const identity = kpcIdentityKey(item);
+    const isSavingDirectoryPro = savingDirectoryKpcId === identity;
+
+    return (
+      <View style={styles.proCard}>
+        <View style={styles.proIconWrap}>
+          <Ionicons name={name} size={30} color={tint} />
+        </View>
+        <View style={styles.proContent}>
+          <View style={styles.proHeaderRow}>
+            <Text style={styles.proName} numberOfLines={1}>
+              {item.name}
+            </Text>
+          </View>
+          <Text style={styles.proCategory}>{catLabel}</Text>
+          {item.location ? (
+            <Text style={styles.proLocation} numberOfLines={1}>
+              {item.location}
+            </Text>
+          ) : null}
+          <View style={styles.directoryResultMeta}>
+            <Ionicons
+              name="search-outline"
+              size={12}
+              color={colors.brandBlue}
+            />
+            <Text style={styles.directoryResultText}>
+              KeeprPro directory result
+            </Text>
+          </View>
+        </View>
+        <TouchableOpacity
+          style={styles.addDirectoryButton}
+          onPress={() => handleAddDirectoryPro(item)}
+          activeOpacity={0.85}
+          disabled={isSavingDirectoryPro}
+        >
+          {isSavingDirectoryPro ? (
+            <ActivityIndicator size="small" color={colors.brandWhite} />
+          ) : (
+            <>
+              <Ionicons
+                name="add-circle-outline"
+                size={14}
+                color={colors.brandWhite}
+              />
+              <Text style={styles.addDirectoryButtonText}>
+                Add to KeeprPros
+              </Text>
+            </>
+          )}
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
+  const renderListHeader = () => {
+    if (!search.trim() || directoryMatches.length === 0) return null;
+
+    return (
+      <View style={styles.directorySection}>
+        <Text style={styles.directorySectionEyebrow}>
+          Add from KeeprPro directory
+        </Text>
+        <Text style={styles.directorySectionHint}>
+          These are global KeeprPro results. Add one to save it into your
+          Blackbook.
+        </Text>
+        {directoryMatches.map((item) => (
+          <View key={kpcIdentityKey(item)} style={styles.directorySectionItem}>
+            {renderDirectoryPro({ item })}
+          </View>
+        ))}
+        <Text style={styles.myKeeprProsLabel}>My KeeprPros</Text>
+      </View>
+    );
+  };
+
   return (
     <SafeAreaView style={layoutStyles.screen}>
       <View style={styles.container}>
@@ -485,7 +755,7 @@ export default function KeeprProsScreen({ navigation }) {
             />
             <TextInput
               style={styles.searchInput}
-              placeholder="Search by name, asset, or specialty…"
+              placeholder="Search my KeeprPros or the KeeprPro directory…"
               placeholderTextColor={colors.textMuted}
               value={search}
               onChangeText={setSearch}
@@ -515,9 +785,15 @@ export default function KeeprProsScreen({ navigation }) {
               size={16}
               color={colors.brandWhite}
             />
-            <Text style={styles.importButtonText}>Import Contacts</Text>
+            <Text style={styles.importButtonText}>Add from Contacts</Text>
           </TouchableOpacity>
         </View>
+
+        {directoryLoading ? (
+          <Text style={styles.directorySearchText}>
+            Searching the Keepr Pro directory…
+          </Text>
+        ) : null}
 
         {/* Filters */}
         <View style={styles.filtersRow}>
@@ -543,6 +819,7 @@ export default function KeeprProsScreen({ navigation }) {
             data={filtered}
             keyExtractor={(item) => item.id}
             renderItem={renderPro}
+            ListHeaderComponent={renderListHeader}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.listContent}
             ItemSeparatorComponent={() => (
@@ -550,8 +827,8 @@ export default function KeeprProsScreen({ navigation }) {
             )}
             ListEmptyComponent={
               <Text style={styles.emptyText}>
-                No Keepr Pros yet. Import one from your contacts or add them
-                manually.
+                No Keepr Pros yet. Search the KeeprPro directory, add one from
+                contacts, or add one manually.
               </Text>
             }
             refreshing={refreshing}
@@ -699,6 +976,40 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     marginBottom: spacing.sm,
   },
+  directorySearchText: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: spacing.xs,
+    marginLeft: spacing.sm,
+  },
+  directorySection: {
+    marginBottom: spacing.md,
+  },
+  directorySectionEyebrow: {
+    fontSize: 11,
+    color: colors.brandBlue,
+    fontWeight: "800",
+    letterSpacing: 0,
+    textTransform: "uppercase",
+    marginBottom: 2,
+  },
+  directorySectionHint: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginBottom: spacing.sm,
+  },
+  directorySectionItem: {
+    marginBottom: spacing.sm,
+  },
+  myKeeprProsLabel: {
+    fontSize: 11,
+    color: colors.textMuted,
+    fontWeight: "800",
+    letterSpacing: 0,
+    textTransform: "uppercase",
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+  },
   filterChip: {
     borderRadius: radius.pill,
     borderWidth: 1,
@@ -771,6 +1082,35 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.textMuted,
     marginTop: 1,
+  },
+  directoryResultMeta: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 6,
+  },
+  directoryResultText: {
+    fontSize: 11,
+    color: colors.brandBlue,
+    fontWeight: "600",
+    marginLeft: 4,
+  },
+  addDirectoryButton: {
+    minWidth: 128,
+    minHeight: 36,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.brandBlue,
+    borderRadius: radius.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginLeft: spacing.sm,
+  },
+  addDirectoryButtonText: {
+    fontSize: 11,
+    color: colors.brandWhite,
+    fontWeight: "700",
+    marginLeft: 4,
   },
 
   emptyText: {

@@ -18,12 +18,14 @@ import * as DocumentPicker from "expo-document-picker";
 
 import { supabase } from "../lib/supabaseClient";
 import { getSignedUrl } from "../lib/attachmentsApi";
+import { resolveAssetHeroUri } from "../lib/assetHeroResolver";
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import {
   loadAttachmentsForMessages,
   sendKeeprProStewardshipThreadReply,
   startKeeprProStewardshipThread,
 } from "../lib/messagesService";
+import ActivatorBreadcrumb from "../components/ActivatorBreadcrumb";
 import AttachmentViewerModal from "../components/AttachmentViewerModal";
 import MessageThreadPanel from "../components/MessageThreadPanel";
 import { colors, radius, shadows, spacing, typography } from "../styles/theme";
@@ -54,6 +56,136 @@ function actionProviderName(action, projection) {
 
 function actionResponsibleName(action) {
   return action?.responsible_party?.label || action?.assigned_to || "Not assigned";
+}
+
+function normalizeCanonicalThread(thread) {
+  if (!thread?.thread_id) return null;
+  return {
+    id: thread.thread_id,
+    subject: thread.subject,
+    status: thread.status,
+    updated_at: thread.updated_at,
+    messages: thread.messages || [],
+  };
+}
+
+function normalizeCanonicalProjection(canonical, fallback = null) {
+  if (!canonical?.asset?.id) return fallback;
+  const relationship = canonical.relationship || {};
+  const canonicalSystems = Array.isArray(canonical.systems) ? canonical.systems : [];
+  const fallbackSystems = Array.isArray(fallback?.systems) ? fallback.systems : [];
+  const canonicalHistory = Array.isArray(canonical.shared_history) ? canonical.shared_history : [];
+  const fallbackHistory = Array.isArray(fallback?.service_records) ? fallback.service_records : [];
+  return {
+    ...(fallback || {}),
+    asset: {
+      ...(fallback?.asset || {}),
+      ...(canonical.asset || {}),
+      owner_display_name: canonical.owner?.display_name || fallback?.asset?.owner_display_name,
+      owner_email: canonical.owner?.email || fallback?.asset?.owner_email,
+      hero_placement_id:
+        canonical.asset?.hero_placement_id ||
+        fallback?.asset?.hero_placement_id ||
+        null,
+      hero_image_url:
+        canonical.asset?.hero_image_url ||
+        fallback?.asset?.hero_image_url ||
+        null,
+      hero_thumb_url:
+        canonical.asset?.hero_thumb_url ||
+        fallback?.asset?.hero_thumb_url ||
+        null,
+    },
+    organization: relationship.organization_id
+      ? {
+          ...(fallback?.organization || {}),
+          id: relationship.organization_id,
+          name: relationship.organization_name,
+          slug: relationship.organization_slug,
+        }
+      : fallback?.organization,
+    keepr_pro: relationship.keepr_pro_id
+      ? {
+          ...(fallback?.keepr_pro || {}),
+          id: relationship.keepr_pro_id,
+          name: relationship.keepr_pro_name,
+          slug: relationship.keepr_pro_slug,
+        }
+      : fallback?.keepr_pro,
+    relationship: relationship.id
+      ? {
+          ...(fallback?.relationship || {}),
+          id: relationship.id,
+          relationship_type: relationship.relationship_type,
+          relationship_purpose: relationship.relationship_purpose,
+          status: relationship.status,
+          access_scope: relationship.access_scope,
+          claim_state: relationship.claim_state,
+          initiated_at: relationship.initiated_at,
+          effective_from: relationship.effective_from,
+          effective_to: relationship.effective_to,
+        }
+      : fallback?.relationship,
+    stewardship: relationship.compatibility_stewardship_id
+      ? {
+          ...(fallback?.stewardship || {}),
+          id: relationship.compatibility_stewardship_id,
+        }
+      : fallback?.stewardship,
+    systems: canonicalSystems.length ? canonicalSystems : fallbackSystems,
+    service_records: canonicalHistory.length ? canonicalHistory : fallbackHistory,
+    actions: canonical.current_action ? [canonical.current_action] : fallback?.actions || [],
+    hero_media: fallback?.hero_media || null,
+  };
+}
+
+function normalizeCanonicalPortal(canonical, fallback = null) {
+  if (!canonical?.asset?.id) return fallback || null;
+  const thread = normalizeCanonicalThread(canonical.messages);
+  const canonicalFiles = Array.isArray(canonical.files) ? canonical.files : [];
+  const fallbackFiles = Array.isArray(fallback?.shared_files) ? fallback.shared_files : [];
+  const currentAction = canonical.current_action
+    ? {
+        ...(fallback?.current_action || {}),
+        ...canonical.current_action,
+        provider_response: {
+          ...(fallback?.current_action?.provider_response || {}),
+          ...(canonical.current_action.provider_response || {}),
+          next_step:
+            canonical.current_action.provider_response?.next_step ||
+            canonical.operating_state?.next_step ||
+            fallback?.current_action?.provider_response?.next_step,
+        },
+        responsible_party:
+          canonical.current_action.responsible_party ||
+          fallback?.current_action?.responsible_party ||
+          (canonical.operating_state?.waiting_on
+            ? { label: canonical.operating_state.waiting_on }
+            : null),
+      }
+    : fallback?.current_action || null;
+
+  return {
+    ...(fallback || {}),
+    current_action: currentAction,
+    owner_display_name: canonical.owner?.display_name || fallback?.owner_display_name,
+    relationship_title:
+      canonical.owner?.display_name && canonical.relationship?.organization_name
+        ? `${canonical.owner.display_name} ↔ ${canonical.relationship.organization_name}`
+        : fallback?.relationship_title,
+    stewardship_id:
+      canonical.relationship?.compatibility_stewardship_id || fallback?.stewardship_id || null,
+    projection_thread: thread || fallback?.projection_thread || null,
+    shared_files: canonicalFiles.length ? canonicalFiles : fallbackFiles,
+    shared_action_count: canonical.counts?.open_actions ?? fallback?.shared_action_count,
+    permitted_operations: {
+      ...(fallback?.permitted_operations || {}),
+      ...(canonical.permitted_operations || {}),
+    },
+    what_next: canonical.operating_state?.next_step
+      ? { ...(fallback?.what_next || {}), title: canonical.operating_state.next_step }
+      : fallback?.what_next,
+  };
 }
 
 function EmptyBlock({ icon, title, body }) {
@@ -153,50 +285,241 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
     setError(null);
 
     try {
-      const projectionRpc = kac
-        ? supabase.rpc("get_keeprpro_stewardship_asset_by_kac", {
-            p_kac: kac,
-            p_organization_id: organizationId || null,
-          })
-        : supabase.rpc("get_keeprpro_stewardship_asset", {
-            p_asset_id: assetId,
-            p_organization_id: organizationId || null,
-          });
-      const { data, error: rpcError } = await projectionRpc;
-      if (rpcError) throw rpcError;
+      let legacyProjection = null;
+      let legacyPortal = null;
+      let legacyMessages = [];
+      let canonical = null;
+      let directSystems = [];
+      let directRecords = [];
+      let directActions = [];
+      let directAssetHero = null;
+      let legacyError = null;
+      let canonicalError = null;
 
-      if (!data) {
+      try {
+        const projectionRpc = kac
+          ? supabase.rpc("get_keeprpro_stewardship_asset_by_kac", {
+              p_kac: kac,
+              p_organization_id: organizationId || null,
+            })
+          : supabase.rpc("get_keeprpro_stewardship_asset", {
+              p_asset_id: assetId,
+              p_organization_id: organizationId || null,
+            });
+        const { data, error: rpcError } = await projectionRpc;
+        if (rpcError) throw rpcError;
+        legacyProjection = data || null;
+      } catch (err) {
+        legacyError = err;
+      }
+
+      const resolvedAssetId = legacyProjection?.asset?.id || assetId || null;
+      const resolvedKac = legacyProjection?.asset?.kac_id || kac || null;
+      const resolvedOrgId = legacyProjection?.organization?.id || organizationId || null;
+
+      if (resolvedAssetId) {
+        try {
+          const { data: canonicalData, error: resolverError } = await supabase.rpc(
+            "resolve_asset_relationship_workspace",
+            {
+              p_asset_id: resolvedAssetId,
+              p_organization_id: resolvedOrgId,
+              p_relationship_id: null,
+              p_action_id: null,
+            }
+          );
+          if (resolverError) throw resolverError;
+          canonical = canonicalData || null;
+        } catch (err) {
+          canonicalError = err;
+          console.warn("Canonical relationship resolver unavailable, using compatibility RPCs:", err?.message || err);
+        }
+      }
+
+      if (!legacyProjection && !canonical) {
         setProjection(null);
-        setError("This asset is not available in the active KeeprPro context.");
+        setError(
+          canonicalError?.message ||
+            legacyError?.message ||
+            "This asset is not available in the active KeeprPro context."
+        );
         return;
       }
 
-      const { data: messageRows, error: messageError } = await supabase.rpc(
-        "get_keeprpro_stewardship_messages",
-        {
-          p_asset_id: data.asset?.id || assetId || null,
-          p_kac: data.asset?.kac_id || kac || null,
-          p_organization_id: data.organization?.id || organizationId || null,
+      if ((resolvedAssetId || resolvedKac) && resolvedOrgId) {
+        try {
+          const { data: messageRows, error: messageError } = await supabase.rpc(
+            "get_keeprpro_stewardship_messages",
+            {
+              p_asset_id: legacyProjection?.asset?.id || resolvedAssetId,
+              p_kac: legacyProjection?.asset?.kac_id || resolvedKac,
+              p_organization_id: legacyProjection?.organization?.id || resolvedOrgId,
+            }
+          );
+          if (messageError) throw messageError;
+          legacyMessages = messageRows || [];
+        } catch (err) {
+          console.warn("Could not load KeeprPro relationship messages:", err?.message || err);
         }
-      );
-      if (messageError) throw messageError;
 
-      const { data: portalData, error: portalError } = await supabase.rpc(
-        "get_keeprpro_relationship_portal",
-        {
-          p_asset_id: data.asset?.id || assetId || null,
-          p_kac: data.asset?.kac_id || kac || null,
-          p_organization_id: data.organization?.id || organizationId || null,
+        try {
+          const { data: portalData, error: portalError } = await supabase.rpc(
+            "get_keeprpro_relationship_portal",
+            {
+              p_asset_id: legacyProjection?.asset?.id || resolvedAssetId,
+              p_kac: legacyProjection?.asset?.kac_id || resolvedKac,
+              p_organization_id: legacyProjection?.organization?.id || resolvedOrgId,
+            }
+          );
+          if (portalError) throw portalError;
+          legacyPortal = portalData || null;
+        } catch (err) {
+          console.warn("Could not load KeeprPro relationship portal:", err?.message || err);
         }
-      );
-      if (portalError) throw portalError;
+      }
 
-      const messageIds = (messageRows || []).flatMap((thread) =>
+      if (resolvedAssetId) {
+        const [assetResult, systemsResult, recordsResult, actionsResult] = await Promise.all([
+          supabase
+            .from("assets")
+            .select("id,hero_placement_id,hero_image_url,hero_thumb_url")
+            .eq("id", resolvedAssetId)
+            .maybeSingle(),
+          supabase
+            .from("systems")
+            .select("*")
+            .eq("asset_id", resolvedAssetId)
+            .order("name", { ascending: true }),
+          supabase
+            .from("service_records")
+            .select("*")
+            .eq("asset_id", resolvedAssetId)
+            .order("performed_at", { ascending: false }),
+          supabase
+            .from("reminders")
+            .select("*")
+            .eq("asset_id", resolvedAssetId)
+            .or("status.is.null,status.not.in.(completed,deleted,archived)")
+            .order("due_at", { ascending: true, nullsFirst: false })
+            .order("created_at", { ascending: false }),
+        ]);
+
+        if (assetResult.error) {
+          console.warn("Could not load asset hero continuity:", assetResult.error.message);
+        } else {
+          directAssetHero = assetResult.data || null;
+        }
+
+        if (systemsResult.error) {
+          console.warn("Could not load asset systems continuity:", systemsResult.error.message);
+        } else {
+          directSystems = systemsResult.data || [];
+        }
+
+        if (recordsResult.error) {
+          console.warn("Could not load asset service history continuity:", recordsResult.error.message);
+        } else {
+          directRecords = recordsResult.data || [];
+        }
+
+        if (actionsResult.error) {
+          console.warn("Could not load asset action continuity:", actionsResult.error.message);
+        } else {
+          directActions = actionsResult.data || [];
+        }
+      }
+
+      const fallbackAsset = {
+        ...(legacyProjection?.asset || {}),
+        ...(directAssetHero || {}),
+        ...(canonical?.asset || {}),
+        id: canonical?.asset?.id || legacyProjection?.asset?.id || resolvedAssetId,
+        kac_id: canonical?.asset?.kac_id || legacyProjection?.asset?.kac_id || resolvedKac,
+        name: canonical?.asset?.name || legacyProjection?.asset?.name || directAssetHero?.name || "Boat",
+        owner_display_name:
+          canonical?.owner?.display_name || legacyProjection?.asset?.owner_display_name || legacyPortal?.owner_display_name,
+        owner_email: canonical?.owner?.email || legacyProjection?.asset?.owner_email,
+        hero_placement_id:
+          canonical?.asset?.hero_placement_id ||
+          legacyProjection?.asset?.hero_placement_id ||
+          directAssetHero?.hero_placement_id ||
+          null,
+        hero_image_url:
+          canonical?.asset?.hero_image_url ||
+          legacyProjection?.asset?.hero_image_url ||
+          directAssetHero?.hero_image_url ||
+          directAssetHero?.hero_thumb_url ||
+          null,
+        hero_thumb_url:
+          canonical?.asset?.hero_thumb_url ||
+          legacyProjection?.asset?.hero_thumb_url ||
+          directAssetHero?.hero_thumb_url ||
+          null,
+      };
+      const continuityProjection = {
+        ...(legacyProjection || {}),
+        asset: fallbackAsset,
+        organization: legacyProjection?.organization ||
+          (canonical?.relationship?.organization_id
+            ? {
+                id: canonical.relationship.organization_id,
+                name: canonical.relationship.organization_name,
+                slug: canonical.relationship.organization_slug,
+              }
+            : null),
+        keepr_pro: legacyProjection?.keepr_pro ||
+          (canonical?.relationship?.keepr_pro_id
+            ? {
+                id: canonical.relationship.keepr_pro_id,
+                name: canonical.relationship.keepr_pro_name,
+                slug: canonical.relationship.keepr_pro_slug,
+              }
+            : null),
+        relationship: legacyProjection?.relationship ||
+          (canonical?.relationship?.id
+            ? {
+                id: canonical.relationship.id,
+                relationship_type: canonical.relationship.relationship_type,
+                relationship_purpose: canonical.relationship.relationship_purpose,
+                status: canonical.relationship.status,
+                access_scope: canonical.relationship.access_scope,
+                claim_state: canonical.relationship.claim_state,
+                compatibility_stewardship_id: canonical.relationship.compatibility_stewardship_id,
+              }
+            : null),
+        systems: legacyProjection?.systems?.length ? legacyProjection.systems : directSystems,
+        service_records: legacyProjection?.service_records?.length
+          ? legacyProjection.service_records
+          : directRecords,
+        actions: legacyProjection?.actions?.length ? legacyProjection.actions : directActions,
+      };
+      const continuityPortal = legacyPortal
+        ? {
+            ...legacyPortal,
+            current_action: legacyPortal.current_action || directActions[0] || null,
+            shared_action_count:
+              legacyPortal.shared_action_count ?? (directActions.length ? directActions.length : undefined),
+          }
+        : {
+            current_action: directActions[0] || null,
+            owner_display_name: canonical?.owner?.display_name || fallbackAsset.owner_display_name,
+            relationship_title:
+              canonical?.owner?.display_name && canonical?.relationship?.organization_name
+                ? `${canonical.owner.display_name} ↔ ${canonical.relationship.organization_name}`
+                : null,
+            stewardship_id: canonical?.relationship?.compatibility_stewardship_id || null,
+            shared_action_count: directActions.length,
+          };
+
+      const canonicalThread = normalizeCanonicalThread(canonical?.messages);
+      const messageRows = canonicalThread ? [canonicalThread] : legacyMessages;
+      const attachmentsByMessage = await loadAttachmentsForMessages(
+        (messageRows || []).flatMap((thread) =>
         (thread.messages || []).map((message) => message.id).filter(Boolean)
+        )
       );
-      const attachmentsByMessage = await loadAttachmentsForMessages(messageIds);
-      setProjection(data);
-      setPortal(portalData || null);
+      setProjection(normalizeCanonicalProjection(canonical, continuityProjection));
+      setPortal(normalizeCanonicalPortal(canonical, continuityPortal));
       setMessages(
         (messageRows || []).map((thread) => ({
           ...thread,
@@ -293,9 +616,17 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
     let active = true;
 
     const signHero = async () => {
+      const assetHero = await resolveAssetHeroUri(projection?.asset, {
+        transform: { width: 1400, quality: 82 },
+      });
+      if (assetHero) {
+        if (active) setHeroUrl(assetHero);
+        return;
+      }
+
       const hero = projection?.hero_media;
       if (!hero?.bucket || !hero?.storage_path) {
-        setHeroUrl(null);
+        if (active) setHeroUrl(null);
         return;
       }
 
@@ -319,7 +650,12 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
     return () => {
       active = false;
     };
-  }, [projection?.hero_media]);
+  }, [
+    projection?.asset?.hero_placement_id,
+    projection?.asset?.hero_image_url,
+    projection?.asset?.hero_thumb_url,
+    projection?.hero_media,
+  ]);
 
   const refresh = () => {
     setRefreshing(true);
@@ -331,7 +667,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
   const records = projection?.service_records || [];
   const actions = projection?.actions || [];
   const currentAction = portal?.current_action || null;
-  const activeWorkTitle = currentAction?.title || "No active service request";
+  const activeWorkTitle = currentAction?.title || "";
   const currentActionOpen =
     currentAction?.id && !["completed", "deleted", "archived"].includes(String(currentAction.status || "open"));
   const sharedActions = currentActionOpen
@@ -345,6 +681,8 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
   const appointment = portal?.appointment || null;
   const sharedFiles = portal?.shared_files || [];
   const hasRelationshipThread = Boolean(relationshipThreadId);
+  const hasPersistedPlaybook = Boolean(playbook?.exists);
+  const hasPersistedAppointment = Boolean(appointment?.scheduled);
   const canEditCurrentAction = Boolean(
     currentActionOpen &&
       (portal?.permitted_operations?.update_action_status ||
@@ -360,20 +698,33 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
   };
 
   const conciseActionDescription = (() => {
-    if (!currentAction?.id) return "No active service request is open in this relationship.";
+    if (!currentAction?.id) return "";
     const explicit = currentAction?.provider_response?.note || currentAction?.provider_response?.next_step;
     if (explicit) return explicit;
-    return "No concise description has been set.";
+    return "";
   })();
   const latestActionActivity =
     currentAction?.updated_at || portal?.projection_thread?.updated_at || currentAction?.created_at || null;
-  const currentStage = currentAction?.status ? String(currentAction.status).replace(/_/g, " ") : "No active service request";
+  const currentStage = currentAction?.status ? String(currentAction.status).replace(/_/g, " ") : "";
   const waitingOn = currentAction?.id ? actionResponsibleName(currentAction) : "No one";
   const nextStepLabel = currentAction?.id ? whatNext?.title || "No next step has been set." : "No active work is waiting.";
   const targetDateLabel = currentAction?.due_at ? formatDate(currentAction.due_at) : "No target date set";
   const ownerName = portal?.owner_display_name || asset.owner_display_name || "Owner";
   const providerName = projection?.organization?.name || projection?.keepr_pro?.name || "KeeprPro";
   const relationshipTitle = `${ownerName} ↔ ${providerName}`;
+  const relationshipRole =
+    projection?.relationship?.relationship_purpose ||
+    projection?.relationship?.relationship_type ||
+    "service";
+  const relationshipStatus = projection?.relationship?.status || "active";
+  const boatDescriptor = compact([asset.year, asset.make, asset.model]);
+  const boatFacts = [
+    asset.registration ? { label: "Registration", value: asset.registration } : null,
+    asset.serial ? { label: "Serial", value: asset.serial } : null,
+    asset.length_feet ? { label: "Length", value: `${asset.length_feet} ft` } : null,
+    asset.engine_type ? { label: "Engine", value: asset.engine_type } : null,
+    asset.hull_material ? { label: "Hull", value: asset.hull_material } : null,
+  ].filter(Boolean);
   const wilsonAdvisor =
     currentAction?.provider_response?.advisor ||
     currentAction?.provider_response?.advisor_name ||
@@ -387,11 +738,20 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
     const systemRecords = records.filter((record) =>
       String(record.system_id || record.system?.id || "") === String(system.id)
     );
+    const systemActions = sharedActions.filter((action) =>
+      String(action.system_id || action.system?.id || "") === String(system.id) ||
+      String(action.system_name || action.system?.name || "").toLowerCase() ===
+        String(system.name || "").toLowerCase()
+    );
     return {
       ...system,
       recordCount: systemRecords.length,
+      actionCount: systemActions.length,
     };
   });
+  const visibleRelatedSystems = relatedSystems.filter(
+    (system) => system.recordCount || system.actionCount
+  );
 
   const contactByPhone = (phone) => {
     if (!phone) return;
@@ -406,6 +766,110 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
   const openProviderWebsite = () => {
     if (!providerWebsite || typeof window === "undefined") return;
     window.open(providerWebsite, "_blank", "noopener,noreferrer");
+  };
+
+  const resolveClaimedProviderSlug = async () => {
+    const directSlug =
+      projection?.keepr_pro?.slug ||
+      projection?.keepr_pro?.keepr_pro_slug ||
+      projection?.keepr_pro?.profile_slug ||
+      null;
+    if (directSlug) return directSlug;
+
+    const normalizeUuid = (value) => {
+      const text = String(value || "").trim().replace(/^org:/i, "");
+      return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text)
+        ? text
+        : null;
+    };
+    const uniqueUuids = (values = []) => [...new Set(values.map(normalizeUuid).filter(Boolean))];
+    const providerName = String(
+      projection?.keepr_pro?.name ||
+        projection?.organization?.name ||
+        ""
+    )
+      .split(" · ")[0]
+      .trim();
+    const profileIds = uniqueUuids([
+      projection?.keepr_pro?.id,
+      projection?.relationship?.keepr_pro_id,
+    ]);
+    const orgIds = uniqueUuids([
+      projection?.organization?.id,
+      projection?.relationship?.organization_id,
+      organizationId,
+    ]);
+    const pickClaimedSlug = (rows = []) =>
+      (rows || []).find(
+        (row) =>
+          row?.slug &&
+          row?.claimed_state === "claimed" &&
+          ["published", "demo"].includes(row?.publish_status)
+      )?.slug || null;
+
+    try {
+      if (profileIds.length) {
+        const { data, error } = await supabase
+          .from("keepr_pros")
+          .select("slug,claimed_state,publish_status")
+          .in("id", profileIds);
+        if (error) throw error;
+        const slug = pickClaimedSlug(data);
+        if (slug) return slug;
+      }
+
+      if (orgIds.length) {
+        const { data, error } = await supabase
+          .from("keepr_pros")
+          .select("slug,claimed_state,publish_status")
+          .in("organization_id", orgIds);
+        if (error) throw error;
+        const slug = pickClaimedSlug(data);
+        if (slug) return slug;
+      }
+
+      if (providerName) {
+        const { data, error } = await supabase
+          .from("keepr_pros")
+          .select("slug,claimed_state,publish_status,name")
+          .ilike("name", providerName)
+          .limit(10);
+        if (error) throw error;
+        const slug = pickClaimedSlug(data);
+        if (slug) return slug;
+      }
+    } catch (err) {
+      console.log("Provider claimed profile lookup skipped:", err);
+    }
+
+    return null;
+  };
+
+  const openProviderProfile = async () => {
+    const slug = await resolveClaimedProviderSlug();
+    if (slug) {
+      navigation.navigate("PublicKeeprProProfile", {
+        slug,
+        assetContext: {
+          assetId: asset.id,
+          assetName: asset.name,
+          assetType: "boat",
+          kac: asset.kac_id || kac || null,
+          ownerName,
+        },
+      });
+      return;
+    }
+
+    if (projection?.keepr_pro?.id) {
+      navigation.navigate("KeeprProDetail", {
+        pro: projection.keepr_pro,
+        assetId: asset.id,
+        assetName: asset.name,
+        assetType: "boat",
+        assignmentScope: "asset",
+      });
+    }
   };
 
   const connectPlaybook = () => {
@@ -708,11 +1172,36 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
           </View>
         ) : (
           <>
+            <ActivatorBreadcrumb
+              navigation={navigation}
+              current={asset.name || asset.kac_id || "Service Relationship"}
+              homeParams={{
+                initialMode: "fleet",
+                workspaceId: organizationId ? `org:${organizationId}` : null,
+              }}
+              items={[
+                {
+                  label: "Service",
+                  route: "ActivatorHome",
+                  params: {
+                    initialMode: "fleet",
+                    workspaceId: organizationId ? `org:${organizationId}` : null,
+                  },
+                },
+              ]}
+              right={(
+                <View style={styles.breadcrumbWorkspace}>
+                  <Ionicons name="briefcase-outline" size={14} color={colors.brandNavy} />
+                  <Text style={styles.breadcrumbWorkspaceText} numberOfLines={1}>{providerName}</Text>
+                  <Text style={styles.breadcrumbSwitchText}>Service</Text>
+                </View>
+              )}
+            />
             <View style={styles.header}>
               <Text style={styles.eyebrow}>KeeprSpace</Text>
               <Text style={styles.title}>{relationshipTitle}</Text>
               <Text style={styles.subtitle}>
-                {asset.name} · {ownerName} ↔ {providerName} · KAC: {asset.kac_id}
+                {asset.name} · {providerName} is connected for {String(relationshipRole).replace(/_/g, " ")}
               </Text>
             </View>
 
@@ -762,285 +1251,289 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
 
             {viewMode === "visual" ? (
               <>
-                <View style={styles.visualHero}>
-                  {heroUrl ? (
-                    <Image source={{ uri: heroUrl }} style={styles.heroImage} resizeMode="cover" />
-                  ) : (
-                    <View style={styles.heroFallback}>
-                      <Ionicons name="boat-outline" size={42} color="#2563EB" />
-                    </View>
-                  )}
-                  <View style={styles.heroOverlay}>
-                    <Text style={styles.heroContext}>Shared asset relationship</Text>
-                    <Text style={styles.heroTitle}>{asset.name}</Text>
-                    <Text style={styles.heroMeta}>
-                      {compact([asset.year, asset.make, asset.model, asset.kac_id])}
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.whatNextCard}>
-                  <View style={styles.whatNextHeader}>
-                    <View style={styles.sectionTitleBlock}>
-                      <Text style={styles.cardLabel}>Where we are now</Text>
-                      <Text style={styles.whatNextTitle}>{activeWorkTitle}</Text>
-                      <Text style={styles.whatNextBody}>{conciseActionDescription}</Text>
-                    </View>
-                    <View style={styles.workActions}>
-                      <TouchableOpacity style={styles.secondaryButton} onPress={openMessages} activeOpacity={0.86}>
-                        <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.textPrimary} />
-                        <Text style={styles.secondaryButtonText}>Message</Text>
-                      </TouchableOpacity>
-                      {canEditCurrentAction ? (
-                        <TouchableOpacity
-                          style={styles.primaryButton}
-                          onPress={() => setShowUpdateWork((value) => !value)}
-                          activeOpacity={0.86}
-                        >
-                          <Ionicons name="create-outline" size={16} color="#FFFFFF" />
-                          <Text style={styles.primaryButtonText}>Update work</Text>
-                        </TouchableOpacity>
-                      ) : null}
-                    </View>
-                  </View>
-                  <View style={styles.summaryGrid}>
-                    <View style={styles.summaryItem}>
-                      <Text style={styles.detailLabel}>Current stage</Text>
-                      <Text style={styles.detailValue}>{currentStage}</Text>
-                    </View>
-                    <View style={styles.summaryItem}>
-                      <Text style={styles.detailLabel}>Waiting on</Text>
-                      <Text style={styles.detailValue}>{waitingOn}</Text>
-                    </View>
-                    <View style={styles.summaryItemWide}>
-                      <Text style={styles.detailLabel}>Next step</Text>
-                      <Text style={styles.detailValue}>{nextStepLabel}</Text>
-                    </View>
-                    <View style={styles.summaryItem}>
-                      <Text style={styles.detailLabel}>Target date</Text>
-                      <Text style={styles.detailValue}>{targetDateLabel}</Text>
-                    </View>
-                    <View style={styles.summaryItem}>
-                      <Text style={styles.detailLabel}>Last activity</Text>
-                      <Text style={styles.detailValue}>{formatDate(latestActionActivity)}</Text>
-                    </View>
-                    <View style={styles.summaryItem}>
-                      <Text style={styles.detailLabel}>Wilson advisor</Text>
-                      <Text style={styles.detailValue}>{wilsonAdvisor}</Text>
-                    </View>
-                    <View style={styles.summaryItem}>
-                      <Text style={styles.detailLabel}>Linked system</Text>
-                      <Text style={styles.detailValue}>
-                        {currentAction?.system_name || currentAction?.system?.name || "Asset-level work"}
-                      </Text>
-                    </View>
-                  </View>
-                  {currentAction?.notes ? (
-                    <View style={styles.originalRequestBox}>
-                      <TouchableOpacity
-                        style={styles.originalRequestToggle}
-                        onPress={() => setShowOriginalRequestDetails((value) => !value)}
-                        activeOpacity={0.86}
-                      >
-                        <Text style={styles.originalRequestToggleText}>
-                          View original request details
-                        </Text>
-                        <Ionicons
-                          name={showOriginalRequestDetails ? "chevron-up" : "chevron-down"}
-                          size={18}
-                          color={colors.primary}
-                        />
-                      </TouchableOpacity>
-                      {showOriginalRequestDetails ? (
-                        <Text style={styles.originalRequestText}>{currentAction.notes}</Text>
-                      ) : null}
-                    </View>
-                  ) : null}
-                  {canEditCurrentAction && showUpdateWork ? (
-                    <View style={styles.operationPanel}>
-                      <Text style={styles.cardLabel}>Update work</Text>
-                      <Text style={styles.inputLabel}>Current stage</Text>
-                      <View style={styles.statusChoiceRow}>
-                        {["open", "requested", "in_progress", "waiting"].map((status) => (
-                          <TouchableOpacity
-                            key={status}
-                            style={[
-                              styles.statusChoice,
-                              actionStatus === status && styles.statusChoiceActive,
-                            ]}
-                            onPress={() => setActionStatus(status)}
-                            activeOpacity={0.85}
-                          >
-                            <Text
-                              style={[
-                                styles.statusChoiceText,
-                                actionStatus === status && styles.statusChoiceTextActive,
-                              ]}
-                            >
-                              {status.replace(/_/g, " ")}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
+                <View style={styles.assetRelationshipHeader}>
+                  <View style={styles.visualHero}>
+                    {heroUrl ? (
+                      <Image source={{ uri: heroUrl }} style={styles.heroImage} resizeMode="cover" />
+                    ) : (
+                      <View style={styles.heroFallbackContent}>
+                        <Ionicons name="boat-outline" size={40} color="#2563EB" />
+                        <Text style={styles.heroFallbackTitle}>{asset.name || "Boat"}</Text>
+                        <Text style={styles.heroFallbackMeta}>Asset photo will appear here when shared</Text>
                       </View>
-                      <Text style={styles.inputLabel}>Shared update</Text>
-                      <TextInput
-                        value={actionNote}
-                        onChangeText={setActionNote}
-                        placeholder="Add a timestamped Wilson update..."
-                        multiline
-                        style={[styles.input, styles.textArea]}
-                      />
-                      <Text style={styles.inputLabel}>Next step</Text>
-                      <TextInput
-                        value={actionNextStep}
-                        onChangeText={setActionNextStep}
-                        placeholder="Set the next step..."
-                        style={styles.input}
-                      />
-                      <View style={styles.operationActions}>
-                        <TouchableOpacity
-                          style={[styles.primaryButton, savingAction && styles.disabled]}
-                          onPress={saveAction}
-                          disabled={savingAction}
-                          activeOpacity={0.86}
-                        >
-                          {savingAction ? <ActivityIndicator size="small" color="#FFFFFF" /> : null}
-                          <Text style={styles.primaryButtonText}>Save update</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={[styles.secondaryButton, completingAction && styles.disabled]}
-                          onPress={completeAction}
-                          disabled={completingAction || currentAction.status === "completed"}
-                          activeOpacity={0.86}
-                        >
-                          {completingAction ? <ActivityIndicator size="small" color={colors.primary} /> : null}
-                          <Text style={styles.secondaryButtonText}>Complete</Text>
-                        </TouchableOpacity>
+                    )}
+                    <View style={styles.heroOverlay}>
+                      <Text style={styles.heroContext}>Shared service relationship</Text>
+                      <Text style={styles.heroTitle}>{asset.name}</Text>
+                      <Text style={styles.heroMeta}>{boatDescriptor}</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.relationshipSummaryCard}>
+                    <Text style={styles.cardLabel}>Service continuity</Text>
+                    <Text style={styles.cardTitle}>{relationshipTitle}</Text>
+                    <Text style={styles.sectionHint}>
+                      Same boat, shared work, messages, files, and history from both sides.
+                    </Text>
+                    <View style={styles.relationshipContextGrid}>
+                      <View style={styles.relationshipContextItem}>
+                        <Text style={styles.detailLabel}>Owner</Text>
+                        <Text style={styles.detailValue}>{ownerName}</Text>
+                      </View>
+                      <View style={styles.relationshipContextItem}>
+                        <Text style={styles.detailLabel}>Wilson's role</Text>
+                        <Text style={styles.detailValue}>{String(relationshipRole).replace(/_/g, " ")}</Text>
+                      </View>
+                      <View style={styles.relationshipContextItem}>
+                        <Text style={styles.detailLabel}>Status</Text>
+                        <Text style={styles.detailValue}>{String(relationshipStatus).replace(/_/g, " ")}</Text>
                       </View>
                     </View>
-                  ) : null}
-                </View>
-
-                <View style={styles.visualGrid}>
-                  <View style={styles.visualPanel}>
-                    <Text style={styles.cardLabel}>Andy Drake</Text>
-                    <Text style={styles.visualValue}>Owner</Text>
-                    <Text style={styles.visualMuted}>Current responsibility: {waitingOn === ownerName ? nextStepLabel : "No owner step assigned"}</Text>
-                    <View style={styles.contactRow}>
-                      <TouchableOpacity style={styles.inlineButton} onPress={() => contactByPhone(ownerPhone)} disabled={!ownerPhone}>
-                        <Ionicons name="call-outline" size={15} color={colors.primary} />
-                        <Text style={styles.inlineButtonText}>Call</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity style={styles.inlineButton} onPress={() => contactByEmail(ownerEmail)} disabled={!ownerEmail}>
-                        <Ionicons name="mail-outline" size={15} color={colors.primary} />
-                        <Text style={styles.inlineButtonText}>Email</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity style={styles.inlineButton} onPress={openMessages}>
-                        <Ionicons name="chatbubble-outline" size={15} color={colors.primary} />
-                        <Text style={styles.inlineButtonText}>Message</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                  <View style={styles.visualPanel}>
-                    <Text style={styles.cardLabel}>Wilson Marine</Text>
-                    <Text style={styles.visualValue}>Professional steward</Text>
-                    <Text style={styles.visualMuted}>Assigned staff: {wilsonAdvisor}</Text>
-                    <View style={styles.contactRow}>
-                      <TouchableOpacity style={styles.inlineButton} onPress={() => contactByPhone(providerPhone)} disabled={!providerPhone}>
-                        <Ionicons name="call-outline" size={15} color={colors.primary} />
-                        <Text style={styles.inlineButtonText}>Call</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity style={styles.inlineButton} onPress={openProviderWebsite} disabled={!providerWebsite}>
-                        <Ionicons name="globe-outline" size={15} color={colors.primary} />
-                        <Text style={styles.inlineButtonText}>Website</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity style={styles.inlineButton} onPress={openMessages}>
-                        <Ionicons name="chatbubble-outline" size={15} color={colors.primary} />
-                        <Text style={styles.inlineButtonText}>Message</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                </View>
-
-                <View style={styles.visualGrid}>
-                  <View style={styles.visualPanel}>
-                    <Text style={styles.cardLabel}>Playbook / cycle</Text>
-                    <Text style={styles.visualValue}>{playbook?.exists ? "Connected" : "Annual Winterization"}</Text>
-                    <Text style={styles.visualMuted}>
-                      {playbook?.exists
-                        ? "Using persisted ordered Playbook state."
-                        : "No persisted Playbook steps are connected yet; current work is driven by the shared Action."}
-                    </Text>
-                    {!playbook?.exists ? (
-                      <TouchableOpacity style={[styles.secondaryButton, styles.panelButton]} onPress={connectPlaybook}>
-                        <Ionicons name="git-branch-outline" size={16} color={colors.textPrimary} />
-                        <Text style={styles.secondaryButtonText}>Connect Playbook</Text>
-                      </TouchableOpacity>
-                    ) : null}
-                  </View>
-                  <View style={styles.visualPanel}>
-                    <Text style={styles.cardLabel}>Appointment</Text>
-                    <Text style={styles.visualValue}>
-                      {appointment?.scheduled ? "Scheduled" : "No appointment is scheduled"}
-                    </Text>
-                    <Text style={styles.visualMuted}>Scheduling appears here only when a persisted appointment record exists.</Text>
-                  </View>
-                </View>
-
-                <View style={styles.card}>
-                  <View style={styles.sectionHeader}>
-                    <View style={styles.sectionTitleBlock}>
-                      <Text style={styles.cardTitle}>Related systems</Text>
-                      <Text style={styles.sectionHint}>Systems included in this stewardship projection and related Wilson history.</Text>
-                    </View>
-                    <Text style={styles.count}>{systems.length}</Text>
-                  </View>
-                  {relatedSystems.map((system) => (
-                    <View key={system.id} style={styles.visualSystemPill}>
-                      <Ionicons name="construct-outline" size={16} color="#2563EB" />
-                      <View style={styles.rowBody}>
-                        <Text style={styles.visualSystemText}>{system.name}</Text>
-                        <Text style={styles.rowMeta}>
-                          {system.recordCount ? `${system.recordCount} Wilson record${system.recordCount === 1 ? "" : "s"}` : "No Wilson records yet"}
-                        </Text>
-                      </View>
-                    </View>
-                  ))}
-                </View>
-
-                {sharedActions.length > 1 ? (
-                  <View style={styles.card}>
-                    <View style={styles.sectionHeader}>
-                      <Text style={styles.cardTitle}>Related work</Text>
-                      <Text style={styles.count}>{sharedActionCount}</Text>
-                    </View>
-                    {sharedActions.map((action) => (
-                        <TouchableOpacity
-                          key={action.id}
-                          style={styles.actionRow}
-                          activeOpacity={0.86}
-                          onPress={() => openAction(action)}
-                        >
-                          <Ionicons name="alert-circle-outline" size={18} color="#2563EB" />
-                          <View style={styles.rowBody}>
-                            <Text style={styles.rowTitle}>{action.title}</Text>
-                            <Text style={styles.rowMeta}>
-                              {compact([action.status || "open", action.system_name])}
-                            </Text>
-                          </View>
-                          <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-                        </TouchableOpacity>
+                    <View style={styles.boatSpecGridCompact}>
+                      {boatFacts.map((fact) => (
+                        <View key={fact.label} style={styles.boatSpecChipCompact}>
+                          <Text style={styles.detailLabel}>{fact.label}</Text>
+                          <Text style={styles.detailValue}>{fact.value}</Text>
+                        </View>
                       ))}
+                      <View style={styles.boatSpecChipCompact}>
+                        <Text style={styles.detailLabel}>Systems</Text>
+                        <Text style={styles.detailValue}>{systems.length}</Text>
+                      </View>
+                      <View style={styles.boatSpecChipCompact}>
+                        <Text style={styles.detailLabel}>History</Text>
+                        <Text style={styles.detailValue}>{records.length}</Text>
+                      </View>
+                      <View style={styles.boatSpecChipCompact}>
+                        <Text style={styles.detailLabel}>Open work</Text>
+                        <Text style={styles.detailValue}>{sharedActions.length}</Text>
+                      </View>
+                      <View style={styles.boatSpecChipCompact}>
+                        <Text style={styles.detailLabel}>Messages</Text>
+                        <Text style={styles.detailValue}>{messages.length}</Text>
+                      </View>
+                    </View>
+                  </View>
+                </View>
+
+                {currentActionOpen ? (
+                  <View style={styles.whatNextCard}>
+                    <View style={styles.whatNextHeader}>
+                      <View style={styles.sectionTitleBlock}>
+                        <Text style={styles.cardLabel}>Current work</Text>
+                        <Text style={styles.whatNextTitle}>{activeWorkTitle}</Text>
+                        <Text style={styles.whatNextBody}>{conciseActionDescription}</Text>
+                      </View>
+                      <View style={styles.workActions}>
+                        <TouchableOpacity style={styles.secondaryButton} onPress={openMessages} activeOpacity={0.86}>
+                          <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.textPrimary} />
+                          <Text style={styles.secondaryButtonText}>Message</Text>
+                        </TouchableOpacity>
+                        {canEditCurrentAction ? (
+                          <TouchableOpacity
+                            style={styles.primaryButton}
+                            onPress={() => setShowUpdateWork((value) => !value)}
+                            activeOpacity={0.86}
+                          >
+                            <Ionicons name="create-outline" size={16} color="#FFFFFF" />
+                            <Text style={styles.primaryButtonText}>Update work</Text>
+                          </TouchableOpacity>
+                        ) : null}
+                      </View>
+                    </View>
+                    <View style={styles.summaryGrid}>
+                      <View style={styles.summaryItem}>
+                        <Text style={styles.detailLabel}>Current stage</Text>
+                        <Text style={styles.detailValue}>{currentStage}</Text>
+                      </View>
+                      <View style={styles.summaryItem}>
+                        <Text style={styles.detailLabel}>Waiting on</Text>
+                        <Text style={styles.detailValue}>{waitingOn}</Text>
+                      </View>
+                      <View style={styles.summaryItemWide}>
+                        <Text style={styles.detailLabel}>Next step</Text>
+                        <Text style={styles.detailValue}>{nextStepLabel}</Text>
+                      </View>
+                      {currentAction?.due_at ? (
+                        <View style={styles.summaryItem}>
+                          <Text style={styles.detailLabel}>Target date</Text>
+                          <Text style={styles.detailValue}>{targetDateLabel}</Text>
+                        </View>
+                      ) : null}
+                      {latestActionActivity ? (
+                        <View style={styles.summaryItem}>
+                          <Text style={styles.detailLabel}>Last activity</Text>
+                          <Text style={styles.detailValue}>{formatDate(latestActionActivity)}</Text>
+                        </View>
+                      ) : null}
+                      {wilsonAdvisor ? (
+                        <View style={styles.summaryItem}>
+                          <Text style={styles.detailLabel}>Advisor</Text>
+                          <Text style={styles.detailValue}>{wilsonAdvisor}</Text>
+                        </View>
+                      ) : null}
+                      {currentAction?.system_name || currentAction?.system?.name ? (
+                        <View style={styles.summaryItem}>
+                          <Text style={styles.detailLabel}>Linked system</Text>
+                          <Text style={styles.detailValue}>
+                            {currentAction?.system_name || currentAction?.system?.name}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    {currentAction?.notes ? (
+                      <View style={styles.originalRequestBox}>
+                        <TouchableOpacity
+                          style={styles.originalRequestToggle}
+                          onPress={() => setShowOriginalRequestDetails((value) => !value)}
+                          activeOpacity={0.86}
+                        >
+                          <Text style={styles.originalRequestToggleText}>
+                            View original request details
+                          </Text>
+                          <Ionicons
+                            name={showOriginalRequestDetails ? "chevron-up" : "chevron-down"}
+                            size={18}
+                            color={colors.primary}
+                          />
+                        </TouchableOpacity>
+                        {showOriginalRequestDetails ? (
+                          <Text style={styles.originalRequestText}>{currentAction.notes}</Text>
+                        ) : null}
+                      </View>
+                    ) : null}
+                    {canEditCurrentAction && showUpdateWork ? (
+                      <View style={styles.operationPanel}>
+                        <Text style={styles.cardLabel}>Update work</Text>
+                        <Text style={styles.inputLabel}>Current stage</Text>
+                        <View style={styles.statusChoiceRow}>
+                          {["open", "requested", "in_progress", "waiting"].map((status) => (
+                            <TouchableOpacity
+                              key={status}
+                              style={[
+                                styles.statusChoice,
+                                actionStatus === status && styles.statusChoiceActive,
+                              ]}
+                              onPress={() => setActionStatus(status)}
+                              activeOpacity={0.85}
+                            >
+                              <Text
+                                style={[
+                                  styles.statusChoiceText,
+                                  actionStatus === status && styles.statusChoiceTextActive,
+                                ]}
+                              >
+                                {status.replace(/_/g, " ")}
+                              </Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                        <Text style={styles.inputLabel}>Shared update</Text>
+                        <TextInput
+                          value={actionNote}
+                          onChangeText={setActionNote}
+                          placeholder="Add a timestamped Wilson update..."
+                          multiline
+                          style={[styles.input, styles.textArea]}
+                        />
+                        <Text style={styles.inputLabel}>Next step</Text>
+                        <TextInput
+                          value={actionNextStep}
+                          onChangeText={setActionNextStep}
+                          placeholder="Set the next step..."
+                          style={styles.input}
+                        />
+                        <View style={styles.operationActions}>
+                          <TouchableOpacity
+                            style={[styles.primaryButton, savingAction && styles.disabled]}
+                            onPress={saveAction}
+                            disabled={savingAction}
+                            activeOpacity={0.86}
+                          >
+                            {savingAction ? <ActivityIndicator size="small" color="#FFFFFF" /> : null}
+                            <Text style={styles.primaryButtonText}>Save update</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.secondaryButton, completingAction && styles.disabled]}
+                            onPress={completeAction}
+                            disabled={completingAction || currentAction.status === "completed"}
+                            activeOpacity={0.86}
+                          >
+                            {completingAction ? <ActivityIndicator size="small" color={colors.primary} /> : null}
+                            <Text style={styles.secondaryButtonText}>Complete</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ) : null}
                   </View>
                 ) : null}
 
-                <View style={styles.card}>
-                  <View style={styles.sectionHeader}>
-                    <Text style={styles.cardTitle}>Conversation and files</Text>
-                    <Text style={styles.count}>{messages.length}</Text>
+                <View style={styles.visualGrid}>
+                  <View style={styles.visualPanel}>
+                    <Text style={styles.cardLabel}>{ownerName}</Text>
+                    <Text style={styles.visualValue}>Owner</Text>
+                    {currentActionOpen && waitingOn === ownerName ? (
+                      <Text style={styles.visualMuted}>Current responsibility: {nextStepLabel}</Text>
+                    ) : null}
+                    <View style={styles.contactRow}>
+                      {ownerPhone ? (
+                      <TouchableOpacity style={styles.inlineButton} onPress={() => contactByPhone(ownerPhone)}>
+                        <Ionicons name="call-outline" size={15} color={colors.primary} />
+                        <Text style={styles.inlineButtonText}>Call</Text>
+                      </TouchableOpacity>
+                      ) : null}
+                      {ownerEmail ? (
+                      <TouchableOpacity style={styles.inlineButton} onPress={() => contactByEmail(ownerEmail)}>
+                        <Ionicons name="mail-outline" size={15} color={colors.primary} />
+                        <Text style={styles.inlineButtonText}>Email</Text>
+                      </TouchableOpacity>
+                      ) : null}
+                      <TouchableOpacity style={styles.inlineButton} onPress={openMessages}>
+                        <Ionicons name="chatbubble-outline" size={15} color={colors.primary} />
+                        <Text style={styles.inlineButtonText}>Message</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
-                  {messages.length ? (
-                    messages.map((thread) => (
+                  <View style={styles.visualPanel}>
+                    <TouchableOpacity onPress={openProviderProfile} activeOpacity={0.85}>
+                      <Text style={[styles.cardLabel, styles.linkLabel]}>{providerName}</Text>
+                    </TouchableOpacity>
+                    <Text style={styles.visualValue}>{String(relationshipRole).replace(/_/g, " ")}</Text>
+                    {currentActionOpen && wilsonAdvisor ? (
+                      <Text style={styles.visualMuted}>Assigned staff: {wilsonAdvisor}</Text>
+                    ) : null}
+                    <View style={styles.contactRow}>
+                      <TouchableOpacity style={styles.inlineButton} onPress={openProviderProfile}>
+                        <Ionicons name="business-outline" size={15} color={colors.primary} />
+                        <Text style={styles.inlineButtonText}>Profile</Text>
+                      </TouchableOpacity>
+                      {providerPhone ? (
+                      <TouchableOpacity style={styles.inlineButton} onPress={() => contactByPhone(providerPhone)}>
+                        <Ionicons name="call-outline" size={15} color={colors.primary} />
+                        <Text style={styles.inlineButtonText}>Call</Text>
+                      </TouchableOpacity>
+                      ) : null}
+                      {providerWebsite ? (
+                      <TouchableOpacity style={styles.inlineButton} onPress={openProviderWebsite}>
+                        <Ionicons name="globe-outline" size={15} color={colors.primary} />
+                        <Text style={styles.inlineButtonText}>Website</Text>
+                      </TouchableOpacity>
+                      ) : null}
+                      <TouchableOpacity style={styles.inlineButton} onPress={openMessages}>
+                        <Ionicons name="chatbubble-outline" size={15} color={colors.primary} />
+                        <Text style={styles.inlineButtonText}>Message</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </View>
+
+                {messages.length ? (
+                  <View style={styles.card}>
+                    <View style={styles.sectionHeader}>
+                      <Text style={styles.cardTitle}>Conversation and files</Text>
+                      <Text style={styles.count}>{messages.length}</Text>
+                    </View>
+                    {messages.map((thread) => (
                       <View key={thread.id} style={styles.row}>
                         <Ionicons name="chatbubble-ellipses-outline" size={18} color="#2563EB" />
                         <View style={styles.rowBody}>
@@ -1080,21 +1573,85 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
                           ) : null}
                         </View>
                       </View>
-                    ))
-                  ) : (
-                    <EmptyBlock
-                      icon="chatbubble-outline"
-                      title="No shared message thread"
-                      body="Only provider-scoped Harris/Wilson threads appear here."
-                    />
-                  )}
-                </View>
+                    ))}
+                  </View>
+                ) : null}
 
-                <View style={styles.card}>
+                {hasPersistedPlaybook || hasPersistedAppointment ? (
+                  <View style={styles.visualGrid}>
+                    {hasPersistedPlaybook ? (
+                      <View style={styles.visualPanel}>
+                        <Text style={styles.cardLabel}>Playbook / cycle</Text>
+                        <Text style={styles.visualValue}>Connected</Text>
+                        <Text style={styles.visualMuted}>Using persisted ordered Playbook state.</Text>
+                      </View>
+                    ) : null}
+                    {hasPersistedAppointment ? (
+                      <View style={styles.visualPanel}>
+                        <Text style={styles.cardLabel}>Appointment</Text>
+                        <Text style={styles.visualValue}>Scheduled</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                ) : null}
+
+                {visibleRelatedSystems.length ? (
+                  <View style={styles.card}>
+                    <View style={styles.sectionHeader}>
+                      <View style={styles.sectionTitleBlock}>
+                        <Text style={styles.cardTitle}>Related systems</Text>
+                        <Text style={styles.sectionHint}>Systems tied to current work or Wilson-attributed history.</Text>
+                      </View>
+                      <Text style={styles.count}>{visibleRelatedSystems.length}</Text>
+                    </View>
+                    {visibleRelatedSystems.map((system) => (
+                      <View key={system.id} style={styles.visualSystemPill}>
+                        <Ionicons name="construct-outline" size={16} color="#2563EB" />
+                        <View style={styles.rowBody}>
+                          <Text style={styles.visualSystemText}>{system.name}</Text>
+                          <Text style={styles.rowMeta}>
+                            {system.recordCount
+                              ? `${system.recordCount} Wilson record${system.recordCount === 1 ? "" : "s"}`
+                              : `${system.actionCount} open action${system.actionCount === 1 ? "" : "s"}`}
+                          </Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+
+                {sharedActions.length > 1 ? (
+                  <View style={styles.card}>
+                    <View style={styles.sectionHeader}>
+                      <Text style={styles.cardTitle}>Related work</Text>
+                      <Text style={styles.count}>{sharedActionCount}</Text>
+                    </View>
+                    {sharedActions.map((action) => (
+                        <TouchableOpacity
+                          key={action.id}
+                          style={styles.actionRow}
+                          activeOpacity={0.86}
+                          onPress={() => openAction(action)}
+                        >
+                          <Ionicons name="alert-circle-outline" size={18} color="#2563EB" />
+                          <View style={styles.rowBody}>
+                            <Text style={styles.rowTitle}>{action.title}</Text>
+                            <Text style={styles.rowMeta}>
+                              {compact([action.status || "open", action.system_name])}
+                            </Text>
+                          </View>
+                          <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                        </TouchableOpacity>
+                      ))}
+                  </View>
+                ) : null}
+
+                {sharedFiles.length ? (
+                  <View style={styles.card}>
                   <View style={styles.sectionHeader}>
                     <View style={styles.sectionTitleBlock}>
                       <Text style={styles.cardTitle}>Relationship files</Text>
-                      <Text style={styles.sectionHint}>Files shared across the Harris/Wilson relationship; one attachment can also be placed on work, records, and history.</Text>
+                      <Text style={styles.sectionHint}>Files shared across this relationship.</Text>
                     </View>
                     <TouchableOpacity
                       style={[styles.inlineButton, uploadingFile && styles.disabled]}
@@ -1110,8 +1667,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
                       <Text style={styles.inlineButtonText}>Add file</Text>
                     </TouchableOpacity>
                   </View>
-                  {sharedFiles.length ? (
-                    sharedFiles.map((file) => (
+                  {sharedFiles.map((file) => (
                       <TouchableOpacity
                         key={file.attachment_id || file.placement_id}
                         style={styles.row}
@@ -1124,19 +1680,14 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
                           <Text style={styles.rowMeta}>{file.created_at ? formatDate(file.created_at) : "Shared file"}</Text>
                         </View>
                       </TouchableOpacity>
-                    ))
-                  ) : (
-                    <EmptyBlock
-                      icon="attach-outline"
-                      title="No files yet"
-                      body="Photos, invoices, receipts, and quotes appear here after they are shared in the relationship."
-                    />
-                  )}
-                </View>
+                    ))}
+                  </View>
+                ) : null}
 
-                <View style={styles.card}>
+                {records.length ? (
+                  <View style={styles.card}>
                   <View style={styles.sectionHeader}>
-                    <Text style={styles.cardTitle}>Previous work with Wilson Marine</Text>
+                    <Text style={styles.cardTitle}>Previous work with {providerName}</Text>
                     <Text style={styles.count}>{records.length}</Text>
                   </View>
                   {records.map((record) => (
@@ -1154,17 +1705,19 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
                       <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
                     </TouchableOpacity>
                   ))}
-                </View>
+                  </View>
+                ) : null}
               </>
             ) : (
               <>
                 <View style={styles.listViewLabel}>
                   <Text style={styles.cardLabel}>KeeprSpace · List View</Text>
                   <Text style={styles.listViewText}>
-                    {portal?.relationship_title || "Andy Drake ↔ Wilson Marine"} · {asset.kac_id}
+                    {portal?.relationship_title || relationshipTitle}
                   </Text>
                 </View>
 
+            {currentActionOpen ? (
             <View style={styles.whatNextCard}>
               <View style={styles.whatNextHeader}>
                 <View>
@@ -1183,6 +1736,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
                 {conciseActionDescription}
               </Text>
             </View>
+            ) : null}
 
             <View style={styles.card}>
               <Text style={styles.cardLabel}>Safe asset summary</Text>
@@ -1214,36 +1768,38 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
               </View>
             </View>
 
+            {hasPersistedPlaybook || hasPersistedAppointment ? (
             <View style={styles.card}>
               <View style={styles.sectionHeader}>
                 <Text style={styles.cardTitle}>Playbook and Scheduling</Text>
               </View>
               <View style={styles.detailGrid}>
+                {hasPersistedPlaybook ? (
                 <View style={styles.detailItem}>
                   <Text style={styles.detailLabel}>Playbook</Text>
-                  <Text style={styles.detailValue}>
-                    {playbook?.exists ? "Connected" : "No Playbook is connected"}
-                  </Text>
+                  <Text style={styles.detailValue}>Connected</Text>
                 </View>
+                ) : null}
+                {hasPersistedAppointment ? (
                 <View style={styles.detailItem}>
                   <Text style={styles.detailLabel}>Appointment</Text>
-                  <Text style={styles.detailValue}>
-                    {appointment?.scheduled ? "Scheduled" : "No appointment is scheduled"}
-                  </Text>
+                  <Text style={styles.detailValue}>Scheduled</Text>
                 </View>
+                ) : null}
               </View>
             </View>
+            ) : null}
 
+            {visibleRelatedSystems.length ? (
             <View style={styles.card}>
               <View style={styles.sectionHeader}>
                 <View style={styles.sectionTitleBlock}>
                   <Text style={styles.cardTitle}>Related systems</Text>
-                  <Text style={styles.sectionHint}>Included by the Harris/Wilson stewardship relationship and related Wilson history.</Text>
+                  <Text style={styles.sectionHint}>Systems with provider-attributed work or current service context.</Text>
                 </View>
-                <Text style={styles.count}>{systems.length}</Text>
+                <Text style={styles.count}>{visibleRelatedSystems.length}</Text>
               </View>
-              {systems.length ? (
-                systems.map((system) => (
+              {visibleRelatedSystems.map((system) => (
                   <View key={system.id} style={styles.row}>
                     <Ionicons name="construct-outline" size={18} color="#2563EB" />
                     <View style={styles.rowBody}>
@@ -1257,23 +1813,17 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
                       </Text>
                     </View>
                   </View>
-                ))
-              ) : (
-                <EmptyBlock
-                  icon="albums-outline"
-                  title="No systems included"
-                  body="The current projection does not include system details."
-                />
-              )}
+                ))}
             </View>
+            ) : null}
 
+            {records.length ? (
             <View style={styles.card}>
               <View style={styles.sectionHeader}>
-                <Text style={styles.cardTitle}>Previous work with Wilson Marine</Text>
+                <Text style={styles.cardTitle}>Previous work with {providerName}</Text>
                 <Text style={styles.count}>{records.length}</Text>
               </View>
-              {records.length ? (
-                records.map((record) => (
+              {records.map((record) => (
                   <TouchableOpacity
                     key={record.id}
                     style={styles.row}
@@ -1293,23 +1843,17 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
                     </View>
                     <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
                   </TouchableOpacity>
-                ))
-              ) : (
-                <EmptyBlock
-                  icon="document-outline"
-                  title="No Wilson-attributed records"
-                  body="Only service records attributed to Wilson Marine are shown here."
-                />
-              )}
+                ))}
             </View>
+            ) : null}
 
+            {sharedActions.length ? (
             <View style={styles.card}>
               <View style={styles.sectionHeader}>
                 <Text style={styles.cardTitle}>Current and upcoming work</Text>
                 <Text style={styles.count}>{sharedActionCount}</Text>
               </View>
-              {sharedActions.length ? (
-                sharedActions.map((action) => (
+              {sharedActions.map((action) => (
                   <TouchableOpacity
                     key={action.id}
                     style={styles.actionRow}
@@ -1329,23 +1873,17 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
                     </View>
                     <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
                   </TouchableOpacity>
-                ))
-              ) : (
-                <EmptyBlock
-                  icon="notifications-off-outline"
-                  title="No shared open Actions"
-                  body="Provider attribution alone is not enough; Actions must be assigned or shared with Wilson."
-                />
-              )}
+                ))}
             </View>
+            ) : null}
 
+            {messages.length ? (
             <View style={styles.card}>
               <View style={styles.sectionHeader}>
                 <Text style={styles.cardTitle}>Conversation</Text>
                 <Text style={styles.count}>{messages.length}</Text>
               </View>
-              {messages.length ? (
-                messages.map((thread) => (
+              {messages.map((thread) => (
                   <View key={thread.id} style={styles.row}>
                     <Ionicons name="chatbubble-ellipses-outline" size={18} color="#2563EB" />
                       <View style={styles.rowBody}>
@@ -1385,16 +1923,11 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
                       ) : null}
                     </View>
                   </View>
-                ))
-              ) : (
-                <EmptyBlock
-                  icon="chatbubble-outline"
-                  title="No shared message thread"
-                  body="Only provider-scoped Harris/Wilson threads appear here."
-                />
-              )}
+                ))}
             </View>
+            ) : null}
 
+            {sharedFiles.length ? (
             <View style={styles.card}>
               <View style={styles.sectionHeader}>
                 <Text style={styles.cardTitle}>Relationship files</Text>
@@ -1412,8 +1945,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
                   <Text style={styles.inlineButtonText}>Add file</Text>
                 </TouchableOpacity>
               </View>
-              {sharedFiles.length ? (
-                sharedFiles.map((file) => (
+              {sharedFiles.map((file) => (
                   <TouchableOpacity
                     key={file.attachment_id || file.placement_id}
                     style={styles.row}
@@ -1426,15 +1958,9 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
                       <Text style={styles.rowMeta}>{file.created_at ? formatDate(file.created_at) : "Shared file"}</Text>
                     </View>
                   </TouchableOpacity>
-                ))
-              ) : (
-                <EmptyBlock
-                  icon="attach-outline"
-                  title="No files yet"
-                  body="Photos, invoices, receipts, and quotes appear here after they are shared in the relationship."
-                />
-              )}
+                ))}
             </View>
+            ) : null}
               </>
             )}
           </>
@@ -1462,6 +1988,30 @@ const styles = StyleSheet.create({
   content: {
     padding: spacing.lg,
     gap: spacing.md,
+  },
+  breadcrumbWorkspace: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.xs,
+    maxWidth: 280,
+    minHeight: 30,
+    paddingHorizontal: spacing.sm,
+  },
+  breadcrumbWorkspaceText: {
+    color: colors.brandNavy,
+    flexShrink: 1,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  breadcrumbSwitchText: {
+    color: colors.brandBlue,
+    fontSize: 10,
+    fontWeight: "900",
+    textTransform: "uppercase",
   },
   header: {
     paddingVertical: spacing.md,
@@ -1533,8 +2083,15 @@ const styles = StyleSheet.create({
   viewModeChipTextActive: {
     color: "#FFFFFF",
   },
+  assetRelationshipHeader: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.md,
+  },
   visualHero: {
-    minHeight: 340,
+    flex: 1.05,
+    minWidth: 320,
+    minHeight: 300,
     borderRadius: radius.md,
     overflow: "hidden",
     backgroundColor: "#DBEAFE",
@@ -1550,6 +2107,22 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
     justifyContent: "center",
+  },
+  heroFallbackContent: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#DBEAFE",
+    gap: spacing.xs,
+  },
+  heroFallbackTitle: {
+    ...typography.h2,
+    color: colors.brandNavy,
+    fontWeight: "900",
+  },
+  heroFallbackMeta: {
+    ...typography.body,
+    color: colors.textSecondary,
   },
   heroOverlay: {
     padding: spacing.lg,
@@ -1575,6 +2148,70 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: spacing.md,
+  },
+  relationshipContextCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.lg,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.md,
+    ...shadows.card,
+  },
+  relationshipContextItem: {
+    flex: 1,
+    minWidth: 160,
+    borderRadius: radius.sm,
+    backgroundColor: "#F8FAFC",
+    padding: spacing.md,
+  },
+  relationshipSummaryCard: {
+    flex: 0.95,
+    minWidth: 320,
+    backgroundColor: "#FFFFFF",
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.lg,
+    justifyContent: "space-between",
+    ...shadows.card,
+  },
+  relationshipContextGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  boatSpecGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  boatSpecChip: {
+    backgroundColor: "#F8FAFC",
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    minWidth: 150,
+    padding: spacing.md,
+  },
+  boatSpecGridCompact: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  boatSpecChipCompact: {
+    backgroundColor: "#F8FAFC",
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexBasis: 120,
+    flexGrow: 1,
+    padding: spacing.sm,
   },
   fileStrip: {
     marginTop: spacing.sm,
@@ -1936,6 +2573,9 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     textTransform: "uppercase",
     marginBottom: spacing.sm,
+  },
+  linkLabel: {
+    color: colors.primary,
   },
   cardTitle: {
     ...typography.h2,

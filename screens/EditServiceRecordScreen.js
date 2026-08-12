@@ -28,6 +28,7 @@ import { colors, spacing, radius, shadows } from "../styles/theme";
 import { supabase } from "../lib/supabaseClient";
 import { uploadLocalImageToSupabase } from "../lib/imageUpload";
 import { deleteServiceRecordAttachment } from "../lib/attachmentsEngine";
+import { isKeeprProPickerMatch, loadMyKeeprProsForPicker } from "../lib/kpcApi";
 import { formatMoneyInput, parseMoneyInput } from "../lib/money";
 
 import AttachmentsStrip from "../components/AttachmentsStrip";
@@ -299,24 +300,25 @@ export default function EditServiceRecordScreen({ navigation, route }) {
         // pros
         setProLoading(true);
         try {
-          const { data: proRows, error: proErr } = await supabase
-            .from("keepr_pros")
-            .select("id, name, location")
-            .order("name", { ascending: true });
-
-          if (!proErr && proRows) {
-            setKeeprPros(proRows);
+          const proRows = await loadMyKeeprProsForPicker();
+          if (proRows) {
+            setKeeprPros(proRows || []);
             if (record.keepr_pro_id) {
-              const match = proRows.find((p) => p.id === record.keepr_pro_id);
+              const match = proRows.find((p) =>
+                isKeeprProPickerMatch(p, record.keepr_pro_id)
+              );
               if (match) {
                 setSelectedKeeprProLabel(
-                  match.location
-                    ? `${match.name} · ${match.location}`
-                    : match.name
+                  match.label ||
+                    (match.location
+                      ? `${match.name} · ${match.location}`
+                      : match.name)
                 );
               }
             }
           }
+        } catch (proErr) {
+          console.log("EditServiceRecordScreen KeeprPro lookup skipped:", proErr);
         } finally {
           if (isActive) setProLoading(false);
         }
@@ -514,7 +516,7 @@ export default function EditServiceRecordScreen({ navigation, route }) {
     }
     setSelectedKeeprProId(pro.id);
     setSelectedKeeprProLabel(
-      pro.location ? `${pro.name} · ${pro.location}` : pro.name
+      pro.label || (pro.location ? `${pro.name} · ${pro.location}` : pro.name)
     );
   };
 
@@ -1224,7 +1226,7 @@ export default function EditServiceRecordScreen({ navigation, route }) {
                     key={pro.id}
                     style={[
                       styles.modalOption,
-                      selectedKeeprProId === pro.id &&
+                      isKeeprProPickerMatch(pro, selectedKeeprProId) &&
                         styles.modalOptionSelected,
                     ]}
                     onPress={() => handleSelectKeeprPro(pro)}
@@ -1235,7 +1237,7 @@ export default function EditServiceRecordScreen({ navigation, route }) {
                         <Text style={styles.modalOptionMeta}>{pro.location}</Text>
                       ) : null}
                     </View>
-                    {selectedKeeprProId === pro.id && (
+                    {isKeeprProPickerMatch(pro, selectedKeeprProId) && (
                       <Ionicons
                         name="checkmark-circle"
                         size={20}

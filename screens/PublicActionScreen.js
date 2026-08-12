@@ -22,10 +22,7 @@ import { buildPrivateKeeprProActionPrefill } from "../lib/keeprProEngagement";
 import { useFocusEffect } from "@react-navigation/native";
 import PublicShell from "../components/public/PublicShell";
 import { SafeAreaView } from "react-native-safe-area-context";
-
-const PROJECT_REF = "jjzjuqxysucqutgjnrkk";
-const FUNCTIONS_BASE = `https://${PROJECT_REF}.supabase.co/functions/v1`;
-const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+import { postSupabaseFunction } from "../lib/supabaseRuntimeConfig";
 
 const IS_WEB = Platform.OS === "web";
 
@@ -88,34 +85,7 @@ function getSourceUrl() {
 }
 
 async function postFunction(path, payload, accessToken) {
-  if (!ANON_KEY) throw new Error("Missing EXPO_PUBLIC_SUPABASE_ANON_KEY");
-
-  const bearer = accessToken ? accessToken : ANON_KEY;
-
-  const res = await fetch(`${FUNCTIONS_BASE}/${path}`, {
-    method: "POST",
-    credentials: "omit",
-    headers: {
-      "Content-Type": "application/json",
-      apikey: ANON_KEY,
-      Authorization: `Bearer ${bearer}`,
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const text = await res.text();
-  let json = null;
-  try {
-    json = JSON.parse(text);
-  } catch {}
-
-  if (!res.ok) {
-    throw new Error(
-      (json && (json.error || json.message)) || text || `HTTP ${res.status}`
-    );
-  }
-
-  return json ?? {};
+  return postSupabaseFunction(path, payload, { accessToken });
 }
 
 function normalizeResolved(input, { kac, token }) {

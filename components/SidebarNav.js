@@ -8,6 +8,7 @@ import { navigationRef } from "../navigationRoot";
 import { supabase } from "../lib/supabaseClient";
 import { subscribeToNotificationEvents } from "../lib/notificationsService";
 import { useAuth } from "../context/AuthContext";
+import { useWorkspace } from "../context/WorkspaceContext";
 import appLogo from "../assets/app_logo_icon.png"; // ✅ Keepr™ logo
 
 /** Consumer menu (RootTabs) */
@@ -35,11 +36,93 @@ const SUPER_ITEMS = [
   { key: "__exit__", label: "Exit SuperKeepr", icon: "log-out-outline" },
 ];
 
-const KEEPRPRO_ITEMS = [
-  { key: "KeeprProHome", label: "Wilson Marine", icon: "briefcase-outline" },
-  { key: "Settings", label: "Settings", icon: "settings-outline" },
-  { key: "__exit__", label: "Exit KeeprPro", icon: "log-out-outline" },
-];
+function workspaceLabel(workspace) {
+  return workspace?.display_name || workspace?.name || workspace?.label || "Workspace";
+}
+
+function workspaceModeLabel(workspace) {
+  switch (workspace?.workspace_type) {
+    case "keeproem":
+      return "KeeprOEM workspace";
+    case "keeprdealer":
+      return "KeeprDealer workspace";
+    case "keeprpro":
+      return "KeeprPro workspace";
+    default:
+      return "Asset Lifecycle Intelligence";
+  }
+}
+
+function navItemsForWorkspace(workspace) {
+  const type = workspace?.workspace_type;
+  const name = workspaceLabel(workspace);
+
+  if (type === "keeproem") {
+    return [
+      { key: "ActivatorHome", label: name, icon: "business-outline" },
+      { key: "Messages", label: "Messages", icon: "chatbubbles-outline" },
+      { key: "KeeprSpaceAdmin", label: "KeeprSpace Admin", icon: "image-outline" },
+      { key: "Settings", label: "Settings", icon: "settings-outline" },
+    ];
+  }
+
+  if (type === "keeprdealer") {
+    return [
+      { key: "ActivatorHome", label: name, icon: "storefront-outline" },
+      { key: "Messages", label: "Messages", icon: "chatbubbles-outline" },
+      { key: "KeeprSpaceAdmin", label: "KeeprSpace Admin", icon: "image-outline" },
+      { key: "Settings", label: "Settings", icon: "settings-outline" },
+    ];
+  }
+
+  if (type === "keeprpro") {
+    return [
+      { key: "ActivatorHome", label: name, icon: "briefcase-outline" },
+      { key: "Messages", label: "Messages", icon: "chatbubbles-outline" },
+      { key: "KeeprSpaceAdmin", label: "KeeprSpace Admin", icon: "image-outline" },
+      { key: "Settings", label: "Settings", icon: "settings-outline" },
+    ];
+  }
+
+  return null;
+}
+
+function firstActivatorWorkspace(workspaces = [], currentWorkspace) {
+  if (currentWorkspace?.workspace_type && currentWorkspace.workspace_type !== "keepr") {
+    return currentWorkspace;
+  }
+
+  return workspaces.find((workspace) =>
+    ["keeproem", "keeprdealer", "keeprpro"].includes(workspace?.workspace_type)
+  ) || currentWorkspace;
+}
+
+function orgWorkspaces(workspaces = []) {
+  return workspaces.filter((workspace) =>
+    ["keeproem", "keeprdealer", "keeprpro"].includes(workspace?.workspace_type)
+  );
+}
+
+function iconForWorkspace(workspace) {
+  if (workspace?.workspace_type === "keeproem") return "business-outline";
+  if (workspace?.workspace_type === "keeprdealer") return "storefront-outline";
+  return "briefcase-outline";
+}
+
+function destinationForWorkspace(workspace) {
+  if (["keeproem", "keeprdealer", "keeprpro"].includes(workspace?.workspace_type)) {
+    return "ActivatorHome";
+  }
+  return "ActivatorHome";
+}
+
+function activatorModeForSidebarKey(key, workspace) {
+  if (key === "KeeprSpaceAdmin") return "profile";
+  if (key === "Messages") {
+    return workspace?.workspace_type === "keeprpro" ? "messages" : "fleet";
+  }
+  return "fleet";
+}
 
 const NAV_PERSIST_KEY = "keepr.nav.state.v1";
 const KEEPRPRO_HOME_PATH = "/pro-mode";
@@ -106,6 +189,16 @@ if (
 
 if (routeName === "KeeprProStewardshipView" || routeName === "KeeprProActionDetail") {
   return routeName;
+}
+
+if (
+  routeName === "ActivatorHome" ||
+  routeName === "ActivatorBoatWorkspace" ||
+  routeName === "ActivatorCatalogTemplate" ||
+  routeName === "ActivatorExactBuild" ||
+  routeName === "ActivatorTemplateCustomize"
+) {
+  return "ActivatorHome";
 }
 
   if (
@@ -186,6 +279,7 @@ if (
 
 export default function SidebarNav({ currentRouteName }) {
   const { user } = useAuth();
+  const { currentWorkspace, setCurrentWorkspaceId, workspaces } = useWorkspace();
   const userId = user?.id || null;
 
   const [userRole, setUserRole] = useState(null);
@@ -331,16 +425,51 @@ useEffect(() => {
     );
   }, [leafRouteName, currentRouteName]);
 
+  const inActivator = useMemo(() => {
+    const rn = String(leafRouteName || currentRouteName || "");
+    return rn === "ActivatorHome" || rn.startsWith("Activator");
+  }, [leafRouteName, currentRouteName]);
+
+  const sidebarWorkspace = useMemo(() => {
+    return inActivator ? firstActivatorWorkspace(workspaces, currentWorkspace) : currentWorkspace;
+  }, [currentWorkspace, inActivator, workspaces]);
+
+  const workspaceNavItems = useMemo(() => orgWorkspaces(workspaces).map((workspace) => ({
+    key: `workspace:${workspace.workspace_id}`,
+    label: workspaceLabel(workspace),
+    icon: iconForWorkspace(workspace),
+    workspace,
+  })), [workspaces]);
+
 const navItems = useMemo(() => {
+  const workspaceItems = navItemsForWorkspace(sidebarWorkspace);
+  if (workspaceItems) return workspaceItems;
+
   if (inSuperKeepr) return SUPER_ITEMS;
-  if (inKeeprPro) return KEEPRPRO_ITEMS;
+  if (inKeeprPro) {
+    return navItemsForWorkspace({
+      workspace_type: "keeprpro",
+      display_name: "KeeprPro",
+    });
+  }
 
-  if (userRole === "superkeepr" || userRole === "keeprpro") return CONSUMER_ITEMS;
+  if (userRole === "superkeepr" || userRole === "keeprpro") {
+    return [
+      ...CONSUMER_ITEMS.slice(0, 1),
+      ...workspaceNavItems,
+      ...CONSUMER_ITEMS.slice(1),
+    ];
+  }
 
-  return CONSUMER_ITEMS.filter(
+  const consumerItems = CONSUMER_ITEMS.filter(
     (item) => item.key !== "SuperKeeprStack" && item.key !== "KeeprProStack"
   );
-}, [inSuperKeepr, inKeeprPro, userRole]);
+  return [
+    ...consumerItems.slice(0, 1),
+    ...workspaceNavItems,
+    ...consumerItems.slice(1),
+  ];
+}, [sidebarWorkspace, inSuperKeepr, inKeeprPro, userRole, workspaceNavItems]);
 
     // Public View SideBar Collapse
   const isPublicFlow = useMemo(() => {
@@ -390,7 +519,41 @@ const navItems = useMemo(() => {
   if (!navigationRef?.isReady?.() || !navigationRef.isReady()) return;
 
   try {
+    const isOrgWorkspace =
+      sidebarWorkspace?.workspace_type && sidebarWorkspace.workspace_type !== "keepr";
+    const navigateActivatorMode = (initialMode = "fleet", targetWorkspace = sidebarWorkspace) => {
+      if (
+        targetWorkspace?.workspace_id &&
+        targetWorkspace.workspace_id !== currentWorkspace?.workspace_id
+      ) {
+        setCurrentWorkspaceId(targetWorkspace.workspace_id);
+      }
+      navigationRef.navigate("ActivatorHome", {
+        initialMode,
+        workspaceId: targetWorkspace?.workspace_id || null,
+      });
+    };
+
+    if (String(key).startsWith("workspace:")) {
+      const workspaceId = String(key).slice("workspace:".length);
+      const targetWorkspace = workspaces.find((workspace) => workspace.workspace_id === workspaceId);
+      if (!targetWorkspace) return;
+      setCurrentWorkspaceId(workspaceId);
+
+      const destination = destinationForWorkspace(targetWorkspace);
+      if (destination === "KeeprProStack") {
+        navigationRef.navigate("KeeprProStack", { screen: "KeeprProHome" });
+      } else {
+        navigateActivatorMode("fleet", targetWorkspace);
+      }
+      return;
+    }
+
     if (key === "__exit__") {
+      const personal = workspaces.find((workspace) => workspace.workspace_type === "keepr");
+      if (personal?.workspace_id) {
+        setCurrentWorkspaceId(personal.workspace_id);
+      }
       navigationRef.navigate("RootTabs", { screen: "Dashboard" });
       return;
     }
@@ -411,6 +574,39 @@ const navItems = useMemo(() => {
       navigationRef.navigate("KeeprProStack", {
         screen: "KeeprProHome",
       });
+      return;
+    }
+
+    if (key === "ActivatorHome") {
+      if (isOrgWorkspace) {
+        navigateActivatorMode(activatorModeForSidebarKey(key, sidebarWorkspace));
+        return;
+      }
+      navigationRef.navigate("ActivatorHome", { initialMode: "fleet" });
+      return;
+    }
+
+    if (key === "Messages") {
+      if (isOrgWorkspace) {
+        navigateActivatorMode(activatorModeForSidebarKey(key, sidebarWorkspace));
+        return;
+      }
+      navigationRef.navigate("RootTabs", { screen: "Messages", params: { scope: "global" } });
+      return;
+    }
+
+    if (key === "Settings") {
+      navigationRef.navigate("RootTabs", { screen: "Settings" });
+      return;
+    }
+
+    if (isOrgWorkspace && key === "Messages") {
+      navigateActivatorMode(activatorModeForSidebarKey(key, sidebarWorkspace));
+      return;
+    }
+
+    if (isOrgWorkspace && key === "KeeprSpaceAdmin") {
+      navigateActivatorMode(activatorModeForSidebarKey(key, sidebarWorkspace));
       return;
     }
 
@@ -452,11 +648,6 @@ if (key === "MyHubs") {
   return;
 }
 
-if (key === "Messages") {
-  navigationRef.navigate("RootTabs", { screen: "Messages", params: { scope: "global" } });
-  return;
-}
-
     navigationRef.navigate("RootTabs", { screen: key });
   } catch {
     // no-op
@@ -482,8 +673,10 @@ if (isPublicFlow) return null;
             <Text style={styles.brandSub}>
               {inSuperKeepr
                 ? "SuperKeepr portfolio"
+                : sidebarWorkspace?.workspace_type !== "keepr"
+                ? workspaceModeLabel(sidebarWorkspace)
                 : inKeeprPro
-                ? "KeeprPro portfolio"
+                ? "KeeprPro workspace"
                 : "Asset Lifecycle Intelligence"}
             </Text>
           </View>

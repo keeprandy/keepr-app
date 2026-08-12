@@ -43,6 +43,7 @@ import {
   normalizeReminderProvider,
   scheduleReminderPushNotification,
 } from "../lib/teamActions";
+import { loadMyKeeprProsForPicker } from "../lib/kpcApi";
 
 /* ------------------------------------------------------------- */
 /* Date helpers                                                  */
@@ -667,10 +668,9 @@ export default function CreateReminderScreen({ navigation, route }) {
               .maybeSingle()
           : Promise.resolve({ data: null, error: null });
 
-        const prosPromise = supabase
-          .from("keepr_pros")
-          .select("id,name,category,phone,email,website,is_favorite")
-          .order("name", { ascending: true });
+        const prosPromise = loadMyKeeprProsForPicker()
+          .then((data) => ({ data, error: null }))
+          .catch((error) => ({ data: [], error }));
 
         const [
           { data: systemRow, error: systemErr },

@@ -74,14 +74,17 @@ function KeeprAlertModal({ open, title, message, onClose }) {
   );
 }
 
-export default function AddVehicleAssetScreen({ navigation }) {
+export default function AddVehicleAssetScreen({ navigation, route }) {
+  const routeParams = route?.params || {};
   const [photoLocal, setPhotoLocal] = useState(null); // { uri, fileName, mimeType, fileSize }
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   const [name, setName] = useState("");
-  const [make, setMake] = useState("");
-  const [model, setModel] = useState("");
-  const [year, setYear] = useState("");
+  const [make, setMake] = useState(routeParams.suggestedMake || "");
+  const [model, setModel] = useState(routeParams.suggestedModel || "");
+  const [year, setYear] = useState(
+    routeParams.suggestedYear ? String(routeParams.suggestedYear) : ""
+  );
   const [vin, setVin] = useState("");
   const [mileage, setMileage] = useState("");
   const [location, setLocation] = useState("");
@@ -370,6 +373,18 @@ if (photoLocal?.uri) {
         asset_id: assetId,
         asset_type: "vehicle",
       }, { userId });
+
+      if (routeParams.returnTo && routeParams.suggestedHubId) {
+        navigation.replace("PublicConfig", {
+          assetId,
+          assetName: displayName,
+          returnTo: routeParams.returnTo,
+          returnParams: routeParams.returnParams || {},
+          suggestedHubId: routeParams.suggestedHubId,
+          suggestedHubName: routeParams.suggestedHubName,
+        });
+        return;
+      }
 
      navigation.replace("VehicleStory", { assetId });
     } catch (e) {

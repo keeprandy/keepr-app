@@ -21,6 +21,7 @@ import { useOperationFeedback } from "../context/OperationFeedbackContext";
 import { layoutStyles } from "../styles/layout";
 import { colors, radius, spacing } from "../styles/theme";
 import KeeprDateField from "../components/KeeprDateField";
+import { loadMyKeeprProsForPicker } from "../lib/kpcApi";
 import { formatMoneyInput, parseMoneyInput } from "../lib/money";
 
 const IS_WEB = Platform.OS === "web";
@@ -397,14 +398,7 @@ export default function EditSystemEnrichmentScreen({ route, navigation }) {
           return;
         }
 
-        const { data, error } = await supabase
-          .from("keepr_pros")
-          .select("id,name,category,phone,email,website,location,is_favorite")
-          .eq("user_id", user.id)
-          .order("is_favorite", { ascending: false })
-          .order("name", { ascending: true });
-
-        if (error) throw error;
+        const data = await loadMyKeeprProsForPicker();
 
         if (!cancelled) {
           setPros(data || []);

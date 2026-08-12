@@ -20,6 +20,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, radius, shadows } from "../styles/theme";
 import { fetchHub, updateHub } from "../lib/hubsApi";
 import HubActionRow from "../components/hubs/HubActionRow";
+import { HUB_PARTICIPATION_PRESETS, getHubPresetKey } from "../lib/hubConfig";
 
 const HUB_TYPES = [
   "community",
@@ -38,6 +39,34 @@ const PARTICIPATION_MODELS = [
    "owner_controlled",
 ];
 
+const PARTICIPATION_PRESETS = ["membership_club", "open_event"];
+
+function ConfigTextInput({ value, onChangeText, style, ...props }) {
+  const handleChange = React.useCallback(
+    (event) => {
+      const next =
+        event?.nativeEvent?.text ??
+        event?.target?.value ??
+        "";
+      onChangeText?.(next);
+    },
+    [onChangeText]
+  );
+
+  return (
+    <TextInput
+      {...props}
+      value={String(value || "")}
+      onChangeText={onChangeText}
+      onChange={handleChange}
+      editable
+      autoCorrect={false}
+      spellCheck={false}
+      style={style}
+    />
+  );
+}
+
 export default function EditHubScreen({ navigation, route }) {
   const hubId = route?.params?.hubId;
 
@@ -50,6 +79,13 @@ export default function EditHubScreen({ navigation, route }) {
   const [visibility, setVisibility] = React.useState("public");
   const [participationModel, setParticipationModel] =
   React.useState("moderated");
+  const [participationPreset, setParticipationPreset] =
+  React.useState("membership_club");
+  const [assetLabel, setAssetLabel] = React.useState("");
+  const [eligibleMake, setEligibleMake] = React.useState("");
+  const [eligibleModel, setEligibleModel] = React.useState("");
+  const [eligibleYear, setEligibleYear] = React.useState("");
+  const [ctaLabel, setCtaLabel] = React.useState("");
   const [logoUrl, setLogoUrl] = React.useState("");
   const [editingLogo, setEditingLogo] = React.useState(false);
   const [hub, setHub] = React.useState(null);
@@ -128,7 +164,18 @@ async function handlePickLogo() {
         setDescription(hub?.description || "");
         setHubType(hub?.hub_type || "community");
         setVisibility(hub?.settings?.visibility || hub?.visibility || "public");
-        setParticipationModel(hub?.settings?.participation_model || "moderated");
+        const preset = getHubPresetKey(hub) || "membership_club";
+        setParticipationPreset(preset);
+        setParticipationModel(
+          hub?.settings?.participation_model ||
+            HUB_PARTICIPATION_PRESETS[preset]?.participation_model ||
+            "moderated"
+        );
+        setAssetLabel(hub?.settings?.asset_label || "");
+        setEligibleMake(hub?.settings?.eligible_make || "");
+        setEligibleModel(hub?.settings?.eligible_model || "");
+        setEligibleYear(hub?.settings?.eligible_year ? String(hub.settings.eligible_year) : "");
+        setCtaLabel(hub?.settings?.cta_label || "");
       } catch (e) {
         Alert.alert("Could not load Hub", e?.message || "Try again.");
       } finally {
@@ -147,15 +194,40 @@ async function handlePickLogo() {
 
     try {
       setSaving(true);
+      const model = participationModel || "moderated";
+      const presetFromModel =
+        model === "public" ? "open_event" : "membership_club";
+      const selectedPreset = HUB_PARTICIPATION_PRESETS[participationPreset]
+        ? participationPreset
+        : presetFromModel;
+      const selectedPresetConfig = HUB_PARTICIPATION_PRESETS[selectedPreset] || {};
+      const preset =
+        selectedPresetConfig.participation_model === model
+          ? selectedPreset
+          : presetFromModel;
+      const presetConfig = HUB_PARTICIPATION_PRESETS[preset] || {};
+      const canonicalModel = presetConfig.participation_model || model;
 
     await updateHub(hubId, {
       name: name.trim(),
       description: description.trim() || null,
       hub_type: hubType,
+      visibility,
       settings: {
         ...(hub?.settings || {}),
         visibility,
-        participation_model: participationModel,
+        participation_preset: preset,
+        participation_model: canonicalModel,
+        submission_status:
+          presetConfig.submission_status ||
+          (canonicalModel === "public" ? "approved" : "pending"),
+        primary_asset_type: presetConfig.primary_asset_type || "vehicle",
+        can_quick_activate: presetConfig.can_quick_activate === true,
+        asset_label: assetLabel.trim() || null,
+        eligible_make: eligibleMake.trim() || null,
+        eligible_model: eligibleModel.trim() || null,
+        eligible_year: eligibleYear.trim() || null,
+        cta_label: ctaLabel.trim() || null,
       },
     });
 
@@ -236,10 +308,10 @@ async function handlePickLogo() {
 
         <View style={styles.card}>
           <Text style={styles.label}>Hub Name</Text>
-          <TextInput value={name} onChangeText={setName} style={styles.input} />
+          <ConfigTextInput value={name} onChangeText={setName} style={styles.input} />
 
           <Text style={styles.label}>Description</Text>
-          <TextInput
+          <ConfigTextInput
             value={description}
             onChangeText={setDescription}
             style={[styles.input, styles.textArea]}
@@ -278,6 +350,26 @@ async function handlePickLogo() {
             ))}
           </View>
 
+          <Text style={styles.label}>Participation Preset</Text>
+          <View style={styles.pillWrap}>
+            {PARTICIPATION_PRESETS.map((value) => (
+              <TouchableOpacity
+                key={value}
+                onPress={() => {
+                  setParticipationPreset(value);
+                  setParticipationModel(
+                    HUB_PARTICIPATION_PRESETS[value]?.participation_model || participationModel
+                  );
+                }}
+                style={[styles.pill, participationPreset === value && styles.pillActive]}
+              >
+                <Text style={[styles.pillText, participationPreset === value && styles.pillTextActive]}>
+                  {value.replace("_", " ")}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
           <Text style={styles.label}>Participation</Text>
 
           <View style={styles.pillWrap}>
@@ -310,6 +402,55 @@ async function handlePickLogo() {
             {PARTICIPATION_DESCRIPTIONS[participationModel]?.body}
           </Text>
         </View>
+
+          <Text style={styles.label}>Eligible Asset</Text>
+          <ConfigTextInput
+            value={assetLabel}
+            onChangeText={setAssetLabel}
+            style={styles.input}
+            placeholder="Optional display label"
+            placeholderTextColor={colors.textMuted}
+          />
+
+          <Text style={styles.label}>Eligible Make</Text>
+          <ConfigTextInput
+            value={eligibleMake}
+            onChangeText={setEligibleMake}
+            style={styles.input}
+            placeholder="Optional make"
+            placeholderTextColor={colors.textMuted}
+            autoCapitalize="words"
+          />
+
+          <Text style={styles.label}>Eligible Model</Text>
+          <ConfigTextInput
+            value={eligibleModel}
+            onChangeText={setEligibleModel}
+            style={styles.input}
+            placeholder="Optional model"
+            placeholderTextColor={colors.textMuted}
+            autoCapitalize="words"
+          />
+
+          <Text style={styles.label}>Eligible Year</Text>
+          <ConfigTextInput
+            value={eligibleYear}
+            onChangeText={setEligibleYear}
+            style={styles.input}
+            placeholder="Optional year"
+            placeholderTextColor={colors.textMuted}
+            keyboardType="number-pad"
+            inputMode="numeric"
+          />
+
+          <Text style={styles.label}>CTA Copy</Text>
+          <ConfigTextInput
+            value={ctaLabel}
+            onChangeText={setCtaLabel}
+            style={styles.input}
+            placeholder="Optional CTA override"
+            placeholderTextColor={colors.textMuted}
+          />
 
           <TouchableOpacity
             style={[styles.saveButton, saving && { opacity: 0.6 }]}

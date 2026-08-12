@@ -14,10 +14,7 @@ import {
 } from "react-native";
 
 import { colors, spacing, radius } from "../styles/theme";
-
-const PROJECT_REF = "jjzjuqxysucqutgjnrkk";
-const FUNCTIONS_BASE = `https://${PROJECT_REF}.supabase.co/functions/v1`;
-const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+import { postSupabaseFunction } from "../lib/supabaseRuntimeConfig";
 
 const IS_WEB = Platform.OS === "web";
 
@@ -48,24 +45,7 @@ function getKacFromUrlFallback() {
 }
 
 async function postFunction(path, body) {
-  const res = await fetch(`${FUNCTIONS_BASE}/${path}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(ANON_KEY ? { apikey: ANON_KEY } : {}),
-    },
-    body: JSON.stringify(body || {}),
-  });
-
-  let json = null;
-  try {
-    json = await res.json();
-  } catch {
-    // ignore
-  }
-
-  if (!res.ok) throw new Error(json?.error || json?.message || `HTTP ${res.status}`);
-  return json;
+  return postSupabaseFunction(path, body);
 }
 
 export default function KacResolveScreen({ route, navigation }) {

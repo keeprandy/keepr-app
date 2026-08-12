@@ -45,34 +45,36 @@ export function useAssets(type, options = {}) {
         setAssets([]);
         return;
       }
-      let query = supabase.from("assets").select("*");
-
-      // Do not filter by owner_id here. RLS determines the assets visible to
-      // the caller, including Team-shared assets through asset_stewardships.
-      // includeAllOwners remains for admin usage only.
       if (includeAllOwners) {
-        // no owner filter
+        let query = supabase.from("assets").select("*");
+
+        if (!includeDeleted) {
+          query = query.is("deleted_at", null);
+        }
+
+        if (typeFilter) {
+          query = query.eq("type", typeFilter);
+        }
+
+        query = query
+          .order("sort_rank", { ascending: true, nullsLast: true })
+          .order("created_at", { ascending: true });
+
+        const { data, error: fetchError } = await query;
+        if (fetchError) throw fetchError;
+
+        setAssets(data || []);
+        return;
       }
 
-      // ✅ default: exclude deleted
-      if (!includeDeleted) {
-        query = query.is("deleted_at", null);
-      }
+      const { data, error: fetchError } = await supabase.rpc("get_authorized_assets", {
+        p_asset_type: typeFilter,
+        p_include_deleted: includeDeleted,
+      });
 
-      // ✅ optional type filter
-      if (typeFilter) {
-        query = query.eq("type", typeFilter);
-      }
-
-      // ✅ ordering: explicit sort_rank first, then created_at
-      query = query
-        .order("sort_rank", { ascending: true, nullsLast: true })
-        .order("created_at", { ascending: true });
-
-      const { data, error: fetchError } = await query;
       if (fetchError) throw fetchError;
 
-      setAssets(data || []);
+      setAssets((data || []).map((row) => row?.asset).filter(Boolean));
     } catch (err) {
       console.error("useAssets fetchAssets error", err);
       setError(err?.message || "Failed to load assets.");

@@ -1078,20 +1078,69 @@ const meta = {
   const resolveClaimedKeeprProSlug = useCallback(async (keeprPro) => {
     const directSlug = keeprPro?.slug || keeprPro?.keepr_pro_slug || keeprPro?.profile_slug || null;
     if (directSlug) return directSlug;
-    if (!keeprPro?.id) return null;
+    const normalizeUuid = (value) => {
+      const text = String(value || "").trim().replace(/^org:/i, "");
+      return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text)
+        ? text
+        : null;
+    };
+    const uniqueUuids = (values = []) => [...new Set(values.map(normalizeUuid).filter(Boolean))];
+    const providerName = String(
+      keeprPro?.name || keeprPro?.displayName || keeprPro?.display_name || keeprPro?.label || ""
+    )
+      .split(" · ")[0]
+      .trim();
+    const profileIds = uniqueUuids([
+      keeprPro?.id,
+      keeprPro?.keeprProId,
+      keeprPro?.keepr_pro_id,
+      keeprPro?.keepr_pro_profile_id,
+    ]);
+    const orgIds = uniqueUuids([
+      keeprPro?.organization_id,
+      keeprPro?.organizationId,
+      keeprPro?.org_id,
+      keeprPro?.orgId,
+      keeprPro?.kpcId,
+      keeprPro?.kpc_id,
+    ]);
+    const claimedProfileSlug = (rows = []) =>
+      (rows || []).find(
+        (row) =>
+          row?.slug &&
+          row?.claimed_state === "claimed" &&
+          ["published", "demo"].includes(row?.publish_status)
+      )?.slug || null;
+
+    if (!profileIds.length && !orgIds.length && !providerName) return null;
     try {
-      const { data, error } = await supabase
-        .from("keepr_pros")
-        .select("slug,claimed_state,publish_status")
-        .eq("id", keeprPro.id)
-        .maybeSingle();
-      if (error) throw error;
-      if (
-        data?.slug &&
-        data?.claimed_state === "claimed" &&
-        ["published", "demo"].includes(data?.publish_status)
-      ) {
-        return data.slug;
+      if (profileIds.length) {
+        const { data, error } = await supabase
+          .from("keepr_pros")
+          .select("slug,claimed_state,publish_status")
+          .in("id", profileIds);
+        if (error) throw error;
+        const slug = claimedProfileSlug(data);
+        if (slug) return slug;
+      }
+      if (orgIds.length) {
+        const { data, error } = await supabase
+          .from("keepr_pros")
+          .select("slug,claimed_state,publish_status")
+          .in("organization_id", orgIds);
+        if (error) throw error;
+        const slug = claimedProfileSlug(data);
+        if (slug) return slug;
+      }
+      if (providerName) {
+        const { data, error } = await supabase
+          .from("keepr_pros")
+          .select("slug,claimed_state,publish_status,name")
+          .ilike("name", providerName)
+          .limit(10);
+        if (error) throw error;
+        const slug = claimedProfileSlug(data);
+        if (slug) return slug;
       }
     } catch (err) {
       console.log("KeeprPro claimed profile lookup skipped:", err);

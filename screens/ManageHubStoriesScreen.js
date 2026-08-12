@@ -17,6 +17,7 @@ import { supabase } from "../lib/supabaseClient";
 import { addStoryToHub } from "../lib/hubsApi";
 import AddAssetTypeModal from "../components/AddAssetTypeModal";
 import HubActionRow from "../components/hubs/HubActionRow";
+import { getHubUserCapabilities } from "../lib/hubCapabilities";
 
 import { colors, spacing, radius, shadows } from "../styles/theme";
 import {
@@ -24,6 +25,8 @@ import {
   fetchHubStoryLinks,
   updateHubStoryLink,
   removeStoryFromHub,
+  approveHubStoryLink,
+  declineHubStoryLink,
 } from "../lib/hubsApi";
 
 export default function ManageHubStoriesScreen({ navigation, route }) {
@@ -36,17 +39,39 @@ export default function ManageHubStoriesScreen({ navigation, route }) {
 const [myAssets, setMyAssets] = React.useState([]);
 const [addingAssetId, setAddingAssetId] = React.useState(null);
 const [assetTypePickerOpen, setAssetTypePickerOpen] = React.useState(false);
+const [currentUserId, setCurrentUserId] = React.useState(null);
 
 const activationMode = route?.params?.activationMode === true;
 
   const load = React.useCallback(async () => {
     try {
       setLoading(true);
-      const [hubRecord, storyRows] = await Promise.all([
+      const { data: auth } = await supabase.auth.getUser();
+      const userId = auth?.user?.id || null;
+      setCurrentUserId(userId);
+
+      const [hubRecord, memberResult] = await Promise.all([
         fetchHub(hubId),
-        fetchHubStoryLinks(hubId),
+        userId
+          ? supabase
+              .from("hub_members")
+              .select("id, role, user_id")
+              .eq("hub_id", hubId)
+              .eq("user_id", userId)
+              .maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
       ]);
-      setHub(hubRecord);
+      if (memberResult.error) throw memberResult.error;
+      const hubWithMember = {
+        ...hubRecord,
+        currentMember: memberResult.data || null,
+      };
+      const role = String(memberResult.data?.role || "").toLowerCase();
+      const canReview = role === "owner" || role === "admin";
+      const storyRows = await fetchHubStoryLinks(hubId, {
+        includeReviewStatuses: canReview,
+      });
+      setHub(hubWithMember);
       setStories(storyRows || []);
     } catch (e) {
       Alert.alert("Could not load stories", e?.message || "Try again.");
@@ -60,11 +85,20 @@ const activationMode = route?.params?.activationMode === true;
   }, [load]);
 
   const toggleFeatured = async (row) => {
+    if (!canManageStories) {
+      Alert.alert("Not allowed", "Only Hub owners and admins can manage Hub stories.");
+      return;
+    }
     await updateHubStoryLink(row.id, { featured: !row.featured });
     load();
   };
 
   const removeStory = async (row) => {
+  if (!canManageStories) {
+    Alert.alert("Not allowed", "Only Hub owners and admins can remove Hub stories.");
+    return;
+  }
+
   console.log("REMOVE FROM HUB BUTTON FIRED", {
     linkId: row.id,
     asset: row.asset?.name,
@@ -88,6 +122,41 @@ const activationMode = route?.params?.activationMode === true;
   }
 };
 
+const approveStory = async (row) => {
+  if (!canManageStories) {
+    Alert.alert("Not allowed", "Only Hub owners and admins can approve submissions.");
+    return;
+  }
+
+  try {
+    await approveHubStoryLink(row.id);
+    await load();
+  } catch (e) {
+    Alert.alert("Could not approve story", e?.message || "Try again.");
+  }
+};
+
+const declineStory = async (row) => {
+  if (!canManageStories) {
+    Alert.alert("Not allowed", "Only Hub owners and admins can decline submissions.");
+    return;
+  }
+
+  const confirmed =
+    Platform.OS === "web" && typeof window !== "undefined"
+      ? window.confirm("Decline this Hub submission?")
+      : true;
+
+  if (!confirmed) return;
+
+  try {
+    await declineHubStoryLink(row.id);
+    await load();
+  } catch (e) {
+    Alert.alert("Could not decline story", e?.message || "Try again.");
+  }
+};
+
 const loadMyAssets = async () => {
   const { data: auth } = await supabase.auth.getUser();
   const userId = auth?.user?.id;
@@ -102,7 +171,9 @@ const loadMyAssets = async () => {
 
   if (error) throw error;
 
-  setMyAssets(data || []);
+  setMyAssets(
+    (data || []).filter((asset) => String(asset?.type || "").toLowerCase() === "vehicle")
+  );
 };
 
 const openStoryPicker = async () => {
@@ -119,7 +190,9 @@ const isPublicStoryEnabled = (asset) => {
 };
 
 const isAlreadyLinked = (assetId) => {
-  return stories.some((row) => row.asset?.id === assetId);
+  return stories.some(
+    (row) => row.asset?.id === assetId && row.status !== "declined"
+  );
 };
 
 const handleAddAssetToHub = async (asset) => {
@@ -134,6 +207,8 @@ const handleAddAssetToHub = async (asset) => {
       hubId,
       assetId: asset.id,
       userId,
+      hub,
+      status: capabilities.submissionStatus,
     });
 
     setStoryPickerOpen(false);
@@ -170,6 +245,18 @@ const createNewAssetStory = () => {
       </SafeAreaView>
     );
   }
+  const currentMember = hub?.currentMember || null;
+  const capabilities = getHubUserCapabilities({
+    hub,
+    user: currentUserId ? { id: currentUserId } : null,
+    currentMember,
+    isInternal: true,
+  });
+  const canManageStories = capabilities.canManageHub;
+  const visibleStories = stories.filter((row) => (row.status || "approved") === "approved");
+  const pendingStories = stories.filter((row) => row.status === "pending");
+  const declinedStories = stories.filter((row) => row.status === "declined");
+
   const goCreateAssetFromHub = (assetType) => {
   setAssetTypePickerOpen(false);
   setStoryPickerOpen(false);
@@ -246,14 +333,17 @@ const createNewAssetStory = () => {
             active="stories"
           />
         ) : null}
+        {canManageStories || activationMode ? (
         <TouchableOpacity
           style={styles.primaryButton}
           onPress={openStoryPicker}
         >
           <Ionicons name="add-circle-outline" size={18} color="#fff" />
-          <Text style={styles.primaryButtonText}>Add Asset Story</Text>
+          <Text style={styles.primaryButtonText}>{capabilities.addAssetLabel}</Text>
         </TouchableOpacity>
+        ) : null}
 
+        {canManageStories || activationMode ? (
         <TouchableOpacity
           style={[styles.primaryButton, { marginHorizontal: 14, marginTop: 12, marginBottom: 12 }]}
           onPress={createNewAssetStory}
@@ -261,12 +351,53 @@ const createNewAssetStory = () => {
           <Ionicons name="add-outline" size={18} color="#fff" />
           <Text style={styles.primaryButtonText}>Create New Asset Story</Text>
         </TouchableOpacity>
+        ) : null}
+
+        {canManageStories && pendingStories.length > 0 ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Pending Review</Text>
+            <View style={styles.card}>
+              {pendingStories.map((row) => {
+                const asset = row.asset;
+                const owner =
+                  row.ownerProfile?.display_name ||
+                  row.ownerProfile?.full_name ||
+                  row.ownerProfile?.email ||
+                  asset?.owner_name ||
+                  "Owner";
+                const storyPath = asset?.kac_id ? `/k/${asset.kac_id}` : null;
+
+                return (
+                  <View key={row.id} style={styles.storyRow}>
+                    <View style={styles.rowIcon}>
+                      <Ionicons name="car-sport-outline" size={17} color={colors.textPrimary} />
+                    </View>
+
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.rowTitle}>{asset?.name || "Untitled Vehicle"}</Text>
+                      <Text style={styles.rowSubtext}>{owner}</Text>
+                      <Text style={styles.rowSubtext}>{storyPath || "Public Story pending"}</Text>
+                    </View>
+
+                    <TouchableOpacity style={styles.actionButton} onPress={() => approveStory(row)}>
+                      <Text style={styles.actionButtonText}>Approve</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity style={styles.removeLinkButton} onPress={() => declineStory(row)}>
+                      <Text style={styles.removeLinkText}>Decline</Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
 
         <View style={styles.card}>
-          {stories.length === 0 ? (
+          {visibleStories.length === 0 ? (
             <Text style={styles.emptyText}>No stories linked yet.</Text>
           ) : (
-            stories.map((row) => {
+            visibleStories.map((row) => {
               const asset = row.asset;
 
               return (
@@ -303,6 +434,11 @@ const createNewAssetStory = () => {
             })
           )}
         </View>
+        {canManageStories && declinedStories.length > 0 ? (
+          <Text style={styles.reviewFootnote}>
+            {declinedStories.length} declined {declinedStories.length === 1 ? "submission" : "submissions"} hidden from the public Hub.
+          </Text>
+        ) : null}
       </ScrollView>
       <Modal
           visible={storyPickerOpen}
@@ -373,7 +509,9 @@ const createNewAssetStory = () => {
                         style={styles.actionButton}
                         onPress={() => handleAddAssetToHub(item)}
                       >
-                        <Text style={styles.actionButtonText}>Add to Hub</Text>
+                        <Text style={styles.actionButtonText}>
+                          {capabilities.submissionStatus === "pending" ? "Submit" : "Add"}
+                        </Text>
                       </TouchableOpacity>
                     ) : (
                       <TouchableOpacity
@@ -441,6 +579,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.borderSubtle || "#E5E7EB",
     ...(shadows?.subtle || {}),
+  },
+  section: {
+    marginBottom: 14,
+  },
+  sectionTitle: {
+    marginBottom: 8,
+    fontSize: 13,
+    fontWeight: "900",
+    color: colors.textPrimary,
+    textTransform: "uppercase",
+  },
+  reviewFootnote: {
+    marginTop: 10,
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.textMuted,
   },
   storyRow: {
     flexDirection: "row",

@@ -278,28 +278,51 @@ export default function KeeprHubScreen({ navigation }) {
   const route = useRoute();
   const { width: windowWidth } = useWindowDimensions();
 
-const hubId = route?.params?.hubId || route?.params?.hub?.id || null;
+const webSearchParams =
+  Platform.OS === "web" && typeof window !== "undefined"
+    ? new URLSearchParams(window.location.search)
+    : null;
+
+const hubId =
+  route?.params?.hubId ||
+  route?.params?.hub?.id ||
+  webSearchParams?.get("hubId") ||
+  null;
 
 const [galleryVisible, setGalleryVisible] = useState(false);
 const [galleryIndex, setGalleryIndex] = useState(0);
 const [hubAuthModalVisible, setHubAuthModalVisible] = useState(false);
 
+const webHubSlug =
+  Platform.OS === "web" && typeof window !== "undefined"
+    ? window.location.pathname.split("/").filter(Boolean)[0] === "h"
+      ? window.location.pathname.split("/").filter(Boolean)[1] || null
+      : null
+    : null;
+
 const hubSlug =
   route?.params?.slug ||
   route?.params?.hubSlug ||
   route?.params?.hub?.slug ||
+  webHubSlug ||
   null;
 
 
+const webPath =
+  Platform.OS === "web" && typeof window !== "undefined"
+    ? window.location.pathname || ""
+    : "";
+
 const isInternal =
-  route?.name === "KeeprHubInternal";
+  route?.name === "KeeprHubInternal" ||
+  route?.params?.mode === "internal" ||
+  webSearchParams?.get("mode") === "internal" ||
+  webPath.startsWith("/KeeprHubInternal");
 
   const inviteToken =
   route?.params?.invite ||
   route?.params?.inviteToken ||
-  (Platform.OS === "web" && typeof window !== "undefined"
-    ? new URLSearchParams(window.location.search).get("invite")
-    : null);
+  webSearchParams?.get("invite");
 
   const [hub, setHub] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -313,11 +336,13 @@ const isInternal =
   const [shareHubVisible, setShareHubVisible] = useState(false);
   const [hubLinkCopied, setHubLinkCopied] = useState(false);
   const [inviteModalVisible, setInviteModalVisible] = useState(false);
+  const [hubLoadError, setHubLoadError] = useState(null);
   
   const [inviteRecord, setInviteRecord] = useState(null);
   const [inviteLoading, setInviteLoading] = useState(false);
 
   const effectiveWidth = containerWidth || windowWidth;
+  const isCompactHub = windowWidth < 640;
   const cardGap = 14;
   const listSidePadding = 24;
 
@@ -423,6 +448,7 @@ setStories((prev) =>
 
 const loadHub = useCallback(async () => {
   setLoading(true);
+  setHubLoadError(null);
 
   const { data: authData } = await supabase.auth.getUser();
   setCurrentUserId(authData?.user?.id || null);
@@ -470,7 +496,8 @@ const loadHub = useCallback(async () => {
 
   } catch (e) {
     console.error(e);
-    Alert.alert("Hub unavailable", e?.message || "Failed to load hub.");
+    setHub(null);
+    setHubLoadError(e?.message || "Failed to load hub.");
     setStories([]);
     setLoading(false);
   }
@@ -844,7 +871,7 @@ useEffect(() => {
   const header = (
     <View style={styles.top}>
 
-      <View style={styles.searchRow}>
+      <View style={[styles.searchRow, isCompactHub && styles.searchRowCompact]}>
         <Ionicons name="search-outline" size={18} color={colors.textMuted} />
         <TextInput
           value={query}
@@ -856,7 +883,7 @@ useEffect(() => {
         />
 
         <TouchableOpacity
-          style={styles.sortBtn}
+          style={[styles.sortBtn, isCompactHub && styles.sortBtnCompact]}
           onPress={() => {
             const idx = SORT_OPTIONS.findIndex((s) => s.key === sortKey);
             const next = SORT_OPTIONS[(idx + 1) % SORT_OPTIONS.length].key;
@@ -999,18 +1026,25 @@ const canManageHub = capabilities.canManageHub;
 const canManageStories = capabilities.canManageHub;
 const canInviteMembers =
 capabilities.canManageHub || hub?.settings?.members_can_invite === true;
+const showPrivateHubGate =
+  !loading &&
+  !isInternal &&
+  (
+    (hub?.id && capabilities.isPrivateHub && !capabilities.canViewHub) ||
+    (!hub?.id && !!hubSlug && !!hubLoadError)
+  );
 
 const participationModel = capabilities.participation;
 const hubType = capabilities.hubType;
 const isAuthenticated = !!currentUserId;
 
-const canPublicAddToHub = capabilities.canShowAddAssetCTA;
+const canPublicAddToHub = capabilities.canShowAddAssetCTA && !showPrivateHubGate;
 
 const hubActions = isInternal ? (
-  <View style={styles.hubActions}>
+  <View style={[styles.hubActions, isCompactHub && styles.hubActionsCompact]}>
     {canManageHub ? (
       <TouchableOpacity
-        style={styles.primaryHubAction}
+        style={[styles.primaryHubAction, isCompactHub && styles.hubActionCompact]}
         onPress={() =>
           navigation.navigate("HubDetail", {
             hubId: hub?.id,
@@ -1025,7 +1059,7 @@ const hubActions = isInternal ? (
 
 
     <TouchableOpacity
-      style={styles.secondaryHubAction}
+      style={[styles.secondaryHubAction, isCompactHub && styles.hubActionCompact]}
       onPress={() => {
         if (!hub?.slug) return;
 
@@ -1043,7 +1077,7 @@ const hubActions = isInternal ? (
 
     {canManageStories ? (
       <TouchableOpacity
-        style={styles.secondaryHubAction}
+        style={[styles.secondaryHubAction, isCompactHub && styles.hubActionCompact]}
         onPress={() =>
           navigation.navigate("ManageHubStories", {
             hubId: hub?.id,
@@ -1058,7 +1092,7 @@ const hubActions = isInternal ? (
 
     {canInviteMembers ? (
       <TouchableOpacity
-        style={styles.secondaryHubAction}
+        style={[styles.secondaryHubAction, isCompactHub && styles.hubActionCompact]}
         onPress={() =>
           navigation.navigate("InviteHubMembers", {
             hubId: hub?.id,
@@ -1080,29 +1114,13 @@ const handleAddToHubPress = async () => {
     hubId: hub?.id,
     hubSlug: hub?.slug || slug,
     hubName: hub?.name,
-    returnRoute: "HubQuickAddCar",
+    returnRoute: capabilities.canOpenQuickActivation ? "HubQuickAddCar" : "AddHubStory",
   });
 
-  if (capabilities.addAssetAction === "invite_required") {
-    Alert.alert(
-      "Invitation required",
-      "This Hub is invite only. Please contact the Hub owner or administrator."
-    );
-    return;
-  }
-
-  if (capabilities.addAssetAction === "request") {
-    Alert.alert(
-      "Request to join",
-      "This Hub requires approval before members can add assets."
-    );
-    return;
-  }
-
-  if (!capabilities.canOpenQuickActivation) {
+  if (!capabilities.canShowAddAssetCTA || capabilities.addAssetAction === "hidden") {
     Alert.alert(
       "Not available",
-      "This Hub is not configured for public QR activation."
+      "This Hub is not accepting public vehicle submissions."
     );
     return;
   }
@@ -1116,23 +1134,34 @@ const handleAddToHubPress = async () => {
       hubSlug: hub?.slug || slug,
       hubName: hub?.name,
       activationIntent,
-      returnTo: "HubQuickAddCar",
+      returnTo: activationIntent.returnRoute,
     });
     return;
   }
 
-  navigation.navigate("HubQuickAddCar", {
+  if (capabilities.canOpenQuickActivation) {
+    navigation.navigate("HubQuickAddCar", {
+      hubId: hub?.id,
+      hubSlug: hub?.slug || slug,
+      hubName: hub?.name,
+      hub,
+    });
+    return;
+  }
+
+  navigation.navigate("AddHubStory", {
     hubId: hub?.id,
     hubSlug: hub?.slug || slug,
     hubName: hub?.name,
     hub,
+    activationMode: true,
   });
 };
 
     const activationActions = (
-  <View style={styles.hubActions}>
+  <View style={[styles.hubActions, isCompactHub && styles.hubActionsCompact]}>
     <TouchableOpacity
-      style={styles.secondaryHubAction}
+      style={[styles.secondaryHubAction, isCompactHub && styles.hubActionCompact]}
       onPress={() => {
         setGalleryIndex(0);
         setGalleryVisible(true);
@@ -1142,7 +1171,7 @@ const handleAddToHubPress = async () => {
       <Text style={styles.secondaryHubActionText}>Browse Gallery</Text>
     </TouchableOpacity>
     <TouchableOpacity
-  style={styles.secondaryHubAction}
+  style={[styles.secondaryHubAction, isCompactHub && styles.hubActionCompact]}
   onPress={() => setShareHubVisible(true)}
 >
   <Ionicons name="share-social-outline" size={16} color={colors.textPrimary} />
@@ -1151,25 +1180,25 @@ const handleAddToHubPress = async () => {
 {canPublicAddToHub ? (
   <TouchableOpacity
     style={
-      capabilities.addAssetAction === "invite_required"
-        ? styles.disabledHubAction
-        : styles.primaryHubAction
+      capabilities.addAssetAction === "hidden"
+        ? [styles.disabledHubAction, isCompactHub && styles.hubActionCompact]
+        : [styles.primaryHubAction, isCompactHub && styles.hubActionCompact]
     }
     onPress={handleAddToHubPress}
     activeOpacity={0.9}
   >
     <Ionicons
       name={
-        capabilities.addAssetAction === "invite_required"
+        capabilities.addAssetAction === "hidden"
           ? "lock-closed-outline"
           : "add-circle-outline"
       }
       size={16}
-      color={capabilities.addAssetAction === "invite_required" ? colors.textMuted : "#fff"}
+      color={capabilities.addAssetAction === "hidden" ? colors.textMuted : "#fff"}
     />
     <Text
       style={
-        capabilities.addAssetAction === "invite_required"
+        capabilities.addAssetAction === "hidden"
           ? styles.disabledHubActionText
           : styles.primaryHubActionText
       }
@@ -1201,14 +1230,43 @@ const hubContent = (
       </View>
     ) : null}
 
-    {activationActions}
-    {hubActions}
-    {header}
+    {!showPrivateHubGate ? activationActions : null}
+    {!showPrivateHubGate ? hubActions : null}
+    {!showPrivateHubGate ? header : null}
 
     {loading ? (
       <View style={styles.center}>
         <ActivityIndicator />
         <Text style={styles.loadingText}>Loading hub…</Text>
+      </View>
+    ) : showPrivateHubGate ? (
+      <View style={styles.privateGate}>
+        <View style={styles.privateGateIcon}>
+          <Ionicons name="lock-closed-outline" size={26} color={colors.textPrimary} />
+        </View>
+        <Text style={styles.privateGateTitle}>
+          {hub?.id ? "This Hub is private" : "This Hub is private or unavailable"}
+        </Text>
+        <Text style={styles.privateGateText}>
+          {hub?.id
+            ? "Sign in with an invited member account or ask the Hub owner for access."
+            : "Sign in with an invited member account, or check that you have the correct Hub link."}
+        </Text>
+        <TouchableOpacity
+          style={styles.privateGateButton}
+          onPress={() =>
+            navigation.navigate("Auth", {
+              mode: "signin",
+              source: "hub_private",
+              hubId: hub?.id,
+              hubSlug: hub?.slug || hubSlug,
+              hubName: hub?.name,
+              returnTo: "KeeprHub",
+            })
+          }
+        >
+          <Text style={styles.privateGateButtonText}>Sign in</Text>
+        </TouchableOpacity>
       </View>
     ) : filtered.length === 0 ? (
       <View style={styles.empty}>
@@ -1542,11 +1600,6 @@ const inviteLandingModal = (
               }
 
             if (kaiInvite?.gate === "membership") {
-              await acceptHubInviteByToken({
-                inviteToken,
-                userId: currentUserId,
-              });
-
               const accepted = await acceptHubInviteByToken({
                 inviteToken,
                 userId: currentUserId,
@@ -1710,6 +1763,14 @@ hubActions: {
   gap: 10,
   marginBottom: 18,
 },
+hubActionsCompact: {
+  gap: 8,
+},
+hubActionCompact: {
+  width: "100%",
+  minHeight: 46,
+  justifyContent: "center",
+},
 
 disabledHubAction: {
   flexDirection: "row",
@@ -1824,6 +1885,10 @@ cardHashtagText: {
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
+  searchRowCompact: {
+    alignItems: "stretch",
+    gap: 8,
+  },
   searchInput: { flex: 1, color: colors.textPrimary, fontSize: 14 },
 
 chipRow: {
@@ -1874,6 +1939,10 @@ filterLabel: {
     paddingVertical: 6,
     borderRadius: 10,
   },
+  sortBtnCompact: {
+    alignSelf: "center",
+    paddingHorizontal: 12,
+  },
   sortText: { color: colors.textPrimary, fontSize: 13, fontWeight: "600" },
 
   summaryRow: {
@@ -1912,6 +1981,58 @@ filterLabel: {
     fontSize: 13,
     textAlign: "center",
     lineHeight: 18,
+  },
+  privateGate: {
+    width: "100%",
+    maxWidth: 520,
+    alignSelf: "center",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 34,
+    paddingHorizontal: 22,
+    paddingVertical: 28,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#11182722",
+    backgroundColor: colors.surface,
+    ...(shadows?.subtle || {}),
+  },
+  privateGateIcon: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.surfaceSubtle || "#F3F4F6",
+    marginBottom: 14,
+  },
+  privateGateTitle: {
+    color: colors.textPrimary,
+    fontWeight: "900",
+    fontSize: 20,
+    textAlign: "center",
+  },
+  privateGateText: {
+    marginTop: 8,
+    color: colors.textMuted,
+    fontWeight: "700",
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "center",
+  },
+  privateGateButton: {
+    marginTop: 18,
+    minHeight: 44,
+    borderRadius: 999,
+    backgroundColor: "#111827",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 22,
+  },
+  privateGateButtonText: {
+    color: "#fff",
+    fontWeight: "900",
+    fontSize: 14,
   },
 
   card: {

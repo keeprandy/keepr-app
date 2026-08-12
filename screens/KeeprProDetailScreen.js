@@ -21,6 +21,7 @@ import { supabase } from "../lib/supabaseClient";
 import { useOperationFeedback } from "../context/OperationFeedbackContext";
 import { getAssetKeeprProsFromMetadata } from "../components/KeeprProCommunicationCard";
 import { buildPrivateKeeprProActionPrefill } from "../lib/keeprProEngagement";
+import { mapKpcToKeeprPro, resolveOrCreateOwnerKpc } from "../lib/kpcApi";
 
 const categoryIconName = (category) => {
   switch (category) {
@@ -81,8 +82,17 @@ const safeGetUser = async () => {
 // DB row -> UI shape
 const mapRowToPro = (row) => ({
   id: row.id,
+  kpcId: row.kpc_id || null,
+  organizationId: row.organization_id || null,
+  keeprProId: row.keepr_pro_id || row.id,
+  ownerKpcRelationshipId: row.owner_kpc_relationship_id || null,
+  relationshipType: row.relationship_type || null,
   name: row.name,
   category: row.category || "other",
+  kpcCategory: row.kpc_category || null,
+  capabilities: row.capabilities || [],
+  claimState: row.claimed_state || row.claim_state || null,
+  profileStatus: row.profile_status || null,
   phone: row.phone || "",
   email: row.email || "",
   website: row.website || "",
@@ -773,15 +783,26 @@ export default function KeeprProDetailScreen({ route, navigation }) {
 
       const payload = mapDraftToInsertPayload(user.id, draft);
 
-      const { data: inserted, error } = await supabase
-        .from("keepr_pros")
-        .insert([payload])
-        .select("*")
-        .single();
+      let saved;
+      try {
+        const resolved = await resolveOrCreateOwnerKpc(payload);
+        saved = mapKpcToKeeprPro(resolved?.kpc);
+      } catch (resolverError) {
+        console.warn(
+          "KPC resolve-first unavailable, using legacy Keepr Pro insert:",
+          resolverError?.message || resolverError
+        );
+        const { data: inserted, error } = await supabase
+          .from("keepr_pros")
+          .insert([payload])
+          .select("*")
+          .single();
 
-      if (error) throw error;
+        if (error) throw error;
+        saved = mapRowToPro(inserted);
+      }
 
-      const saved = mapRowToPro(inserted);
+      if (!saved) throw new Error("KPC resolve did not return a provider.");
       setPro(saved);
       setIsEditing(false);
 

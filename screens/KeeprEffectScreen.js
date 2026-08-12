@@ -13,6 +13,7 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
 import QRCode from "react-native-qrcode-svg";
@@ -81,19 +82,20 @@ function getInitials(name) {
   return `${parts[0].slice(0, 1)}${parts[1].slice(0, 1)}`.toUpperCase();
 }
 
-function StatCard({ icon, label, value, tone = colors.primary }) {
+function StatCard({ icon, label, value, tone = colors.primary, compact = false }) {
   return (
-    <View style={styles.statCard}>
-      <View style={[styles.statIcon, { backgroundColor: `${tone}12` }]}>
+    <View style={[styles.statCard, compact && styles.statCardCompact]}>
+      <View style={[styles.statIcon, compact && styles.statIconCompact, { backgroundColor: `${tone}12` }]}>
         <Ionicons name={icon} size={22} color={tone} />
       </View>
-      <Text style={styles.statValue}>{formatCount(value)}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
+      <Text style={[styles.statValue, compact && styles.statValueCompact]}>{formatCount(value)}</Text>
+      <Text style={[styles.statLabel, compact && styles.statLabelCompact]}>{label}</Text>
     </View>
   );
 }
 
 export default function KeeprEffectScreen({ navigation }) {
+  const { width: windowWidth } = useWindowDimensions();
   const [effect, setEffect] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -243,6 +245,7 @@ export default function KeeprEffectScreen({ navigation }) {
   const recentImpact = effect?.recentImpact || [];
   const shareCounts = effect?.sharesByChannel || {};
   const conversionCounts = effect?.conversionsByChannel || {};
+  const compactStats = windowWidth < 560;
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -281,12 +284,12 @@ export default function KeeprEffectScreen({ navigation }) {
           </View>
         ) : (
           <>
-            <View style={styles.panel}>
-              <View style={styles.statsGrid}>
-                <StatCard icon="people-outline" label="Verified Keeprs" value={effect.verifiedKeeprs} />
-                <StatCard icon="cube-outline" label="Assets Created" value={effect.assetsCreated} tone="#4F46E5" />
-                <StatCard icon="shield-checkmark-outline" label="Proof Preserved" value={effect.proofItemsAdded} tone="#059669" />
-                <StatCard icon="git-network-outline" label="Downstream Keeprs" value={effect.downstreamKeeprs} tone="#DB2777" />
+            <View style={[styles.panel, compactStats && styles.panelCompact]}>
+              <View style={[styles.statsGrid, compactStats && styles.statsGridCompact]}>
+                <StatCard compact={compactStats} icon="people-outline" label="Verified Keeprs" value={effect.verifiedKeeprs} />
+                <StatCard compact={compactStats} icon="cube-outline" label="Assets Created" value={effect.assetsCreated} tone="#4F46E5" />
+                <StatCard compact={compactStats} icon="shield-checkmark-outline" label="Proof Preserved" value={effect.proofItemsAdded} tone="#059669" />
+                <StatCard compact={compactStats} icon="git-network-outline" label="Downstream Keeprs" value={effect.downstreamKeeprs} tone="#DB2777" />
               </View>
 
               <View style={styles.secondaryStats}>
@@ -485,10 +488,16 @@ const styles = StyleSheet.create({
     padding: spacing.xl,
     ...shadows.subtle,
   },
+  panelCompact: {
+    padding: spacing.lg,
+  },
   statsGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: spacing.md,
+  },
+  statsGridCompact: {
+    gap: spacing.sm,
   },
   statCard: {
     flexGrow: 1,
@@ -500,6 +509,13 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     backgroundColor: colors.surfaceSubtle,
   },
+  statCardCompact: {
+    width: "48%",
+    flexBasis: "48%",
+    flexGrow: 0,
+    minWidth: 0,
+    padding: spacing.md,
+  },
   statIcon: {
     width: 42,
     height: 42,
@@ -508,15 +524,27 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: spacing.md,
   },
+  statIconCompact: {
+    width: 40,
+    height: 40,
+    marginBottom: spacing.sm,
+  },
   statValue: {
     fontSize: 28,
     fontWeight: "800",
     color: colors.textPrimary,
   },
+  statValueCompact: {
+    fontSize: 25,
+  },
   statLabel: {
     color: colors.textMuted,
     fontWeight: "700",
     marginTop: spacing.xs,
+  },
+  statLabelCompact: {
+    fontSize: 12,
+    lineHeight: 16,
   },
   secondaryStats: {
     flexDirection: "row",

@@ -29,6 +29,11 @@ import { Linking } from "react-native";
 import RenderHTML from "react-native-render-html";
 import { useWindowDimensions } from "react-native";
 import AttachmentViewerModal from "../components/AttachmentViewerModal";
+import {
+  isKeeprProPickerMatch,
+  loadMyKeeprProsForPicker,
+  resolveOrCreateKpcForPicker,
+} from "../lib/kpcApi";
 import { formatMoneyInput, parseMoneyInput } from "../lib/money";
 
 /* ---------------- helpers ---------------- */
@@ -430,7 +435,10 @@ const notesHasUrls = useMemo(() => {
 }, [notes]);
 
   const selectedPro = useMemo(
-    () => (selectedKeeprProId ? pros.find((p) => p.id === selectedKeeprProId) : null),
+    () =>
+      selectedKeeprProId
+        ? pros.find((p) => isKeeprProPickerMatch(p, selectedKeeprProId))
+        : null,
     [selectedKeeprProId, pros]
   );
 
@@ -472,13 +480,10 @@ const notesHasUrls = useMemo(() => {
 
         setAssets(cleanAssets);
 
-        // Keepr Pros (same model as EditTimelineRecordScreen)
-        let rows = await safeSelect("keepr_pros", (q) =>
-          q.select("id, name, location").order("name", { ascending: true })
-        );
-
-        // Fallback for older naming
-        if (!rows || rows.length === 0) {
+        let rows = [];
+        try {
+          rows = await loadMyKeeprProsForPicker();
+        } catch {
           rows = await safeSelect("service_providers", (q) =>
             q.select("id, name, location").order("name", { ascending: true })
           );
@@ -598,23 +603,14 @@ const notesHasUrls = useMemo(() => {
         return;
       }
 
-      const payload = {
+      const newPro = await resolveOrCreateKpcForPicker({
         user_id: user.id,
         name,
+        display_name: name,
         category: "other",
         is_favorite: false,
         source: "manual_quick",
-      };
-
-      const { data, error } = await supabase
-        .from("keepr_pros")
-        .insert([payload])
-        .select("*")
-        .single();
-
-      if (error) throw error;
-
-      const newPro = data || { id: null, name };
+      });
       setPros((prev) => {
         const next = [...(prev || [])];
         // If DB returned, use it; else keep minimal.
@@ -1745,7 +1741,7 @@ const deleteInboxAttachment = async (attachmentId) => {
                   </TouchableOpacity>
 
                   {pros.map((pro) => {
-                    const isSelected = selectedKeeprProId === pro.id;
+                    const isSelected = isKeeprProPickerMatch(pro, selectedKeeprProId);
 
                     return (
                       <TouchableOpacity

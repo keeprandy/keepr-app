@@ -16,6 +16,8 @@ import { supabase } from "../lib/supabaseClient";
 import { addStoryToHub, fetchHub, fetchHubStoryLinks } from "../lib/hubsApi";
 import AddAssetTypeModal from "../components/AddAssetTypeModal";
 import { colors, spacing, radius, shadows } from "../styles/theme";
+import { getHubUserCapabilities } from "../lib/hubCapabilities";
+import { assetMatchesHubParticipation, getHubParticipationConfig } from "../lib/hubConfig";
 
 export default function AddHubStoryScreen({ navigation, route }) {
   const hubId = route?.params?.hubId;
@@ -27,11 +29,23 @@ export default function AddHubStoryScreen({ navigation, route }) {
   const [storyPickerOpen, setStoryPickerOpen] = React.useState(false);
   const [addingAssetId, setAddingAssetId] = React.useState(null);
   const [assetTypePickerOpen, setAssetTypePickerOpen] = React.useState(false);
+  const [currentUserId, setCurrentUserId] = React.useState(null);
 
-  const loadMyAssets = React.useCallback(async () => {
+  const loadMyAssets = React.useCallback(async (hubRecord = hub) => {
     const { data: auth } = await supabase.auth.getUser();
     const userId = auth?.user?.id;
-    if (!userId) return;
+    setCurrentUserId(userId || null);
+    if (!userId) {
+      navigation.navigate("Auth", {
+        mode: "signup",
+        source: "hub_activation",
+        hubId,
+        hubSlug: hub?.slug,
+        hubName: hub?.name,
+        returnTo: "AddHubStory",
+      });
+      return;
+    }
 
     const { data, error } = await supabase
       .from("assets")
@@ -41,8 +55,8 @@ export default function AddHubStoryScreen({ navigation, route }) {
       .order("created_at", { ascending: false });
 
     if (error) throw error;
-    setMyAssets(data || []);
-  }, []);
+    setMyAssets((data || []).filter((asset) => assetMatchesHubParticipation(asset, hubRecord)));
+  }, [hub, hubId, navigation]);
 
   const load = React.useCallback(async () => {
     if (!hubId) {
@@ -54,10 +68,10 @@ export default function AddHubStoryScreen({ navigation, route }) {
     try {
       setLoading(true);
 
-      const [hubRecord, storyRows] = await Promise.all([
-        fetchHub(hubId),
+      const hubRecord = await fetchHub(hubId);
+      const [storyRows] = await Promise.all([
         fetchHubStoryLinks(hubId),
-        loadMyAssets(),
+        loadMyAssets(hubRecord),
       ]);
 
       setHub(hubRecord);
@@ -79,7 +93,9 @@ export default function AddHubStoryScreen({ navigation, route }) {
   };
 
   const isAlreadyLinked = (assetId) => {
-    return stories.some((row) => row.asset?.id === assetId);
+    return stories.some(
+      (row) => row.asset?.id === assetId && row.status !== "declined"
+    );
   };
 
   const handleAddAssetToHub = async (asset) => {
@@ -90,13 +106,25 @@ export default function AddHubStoryScreen({ navigation, route }) {
 
       setAddingAssetId(asset.id);
 
+      if (!capabilities.canShowAddAssetCTA) {
+        Alert.alert("Not available", "This Hub is not accepting public vehicle submissions.");
+        return;
+      }
+
       await addStoryToHub({
         hubId,
         assetId: asset.id,
         userId,
+        hub,
+        status: capabilities.submissionStatus,
       });
 
-      Alert.alert("Story added", "Your Asset Story was added to this Hub.");
+      Alert.alert(
+        capabilities.submissionStatus === "pending" ? "Submitted" : "Story added",
+        capabilities.submissionStatus === "pending"
+          ? "Your vehicle is pending Hub admin approval."
+          : "Your Asset Story was added to this Hub."
+      );
       navigation.goBack();
     } catch (e) {
       Alert.alert("Could not add story", e?.message || "Try again.");
@@ -123,6 +151,7 @@ export default function AddHubStoryScreen({ navigation, route }) {
 
   const goCreateAssetFromHub = (assetType) => {
     setAssetTypePickerOpen(false);
+    const config = getHubParticipationConfig(hub);
 
     const params = {
       source: "hub",
@@ -130,6 +159,10 @@ export default function AddHubStoryScreen({ navigation, route }) {
       returnParams: { hubId },
       suggestedHubId: hubId,
       suggestedHubName: hub?.name,
+      suggestedAssetType: config.primaryAssetType,
+      suggestedMake: config.eligibleMake,
+      suggestedModel: config.eligibleModel,
+      suggestedYear: config.eligibleYear,
     };
 
     if (assetType === "home") {
@@ -169,6 +202,14 @@ export default function AddHubStoryScreen({ navigation, route }) {
     );
   }
 
+  const capabilities = getHubUserCapabilities({
+    hub,
+    user: currentUserId ? { id: currentUserId } : null,
+    currentMember: hub?.currentMember || null,
+    isInternal: false,
+  });
+  const hubConfig = getHubParticipationConfig(hub);
+
   return (
     <SafeAreaView style={styles.screen}>
       <Modal
@@ -185,7 +226,7 @@ export default function AddHubStoryScreen({ navigation, route }) {
               </TouchableOpacity>
 
               <View style={{ flex: 1 }}>
-                <Text style={styles.modalTitle}>Add Asset Story</Text>
+                <Text style={styles.modalTitle}>Add {hubConfig.assetLabel} Story</Text>
                 <Text style={styles.modalSub}>
                   Add one of your public Asset Stories to {hub?.name || "this Hub"}. Your private records stay private.
                 </Text>
@@ -197,7 +238,7 @@ export default function AddHubStoryScreen({ navigation, route }) {
               onPress={createNewAssetStory}
             >
               <Ionicons name="add-outline" size={18} color="#fff" />
-              <Text style={styles.primaryButtonText}>Create New Asset Story</Text>
+              <Text style={styles.primaryButtonText}>Create New {hubConfig.assetLabel} Story</Text>
             </TouchableOpacity>
 
             <FlatList
@@ -256,7 +297,7 @@ export default function AddHubStoryScreen({ navigation, route }) {
               }}
               ListEmptyComponent={
                 <View style={styles.card}>
-                  <Text style={styles.emptyText}>No assets found.</Text>
+                  <Text style={styles.emptyText}>No matching assets found.</Text>
                 </View>
               }
             />

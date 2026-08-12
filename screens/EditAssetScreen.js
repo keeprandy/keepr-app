@@ -26,6 +26,7 @@ import {
   typography,
 } from "../styles/theme";
 import KeeprDateField from "../components/KeeprDateField";
+import { loadMyKeeprProsForPicker } from "../lib/kpcApi";
 import { formatMoneyInput, parseMoneyInput } from "../lib/money";
 
 /** ---------- Keepr input wrapper ---------- **/
@@ -333,15 +334,8 @@ export default function EditAssetScreen({ route, navigation }) {
       setProsLoading(true);
       setProsError(null);
       try {
-        const { data, error } = await supabase
-          .from("keepr_pros")
-          .select("id,name,category,phone,email,website,location,is_favorite")
-          .eq("user_id", user.id)
-          .order("is_favorite", { ascending: false })
-          .order("name", { ascending: true });
-
-        if (error) throw error;
-        if (!cancelled) setKeeprPros(data || []);
+        const rows = await loadMyKeeprProsForPicker();
+        if (!cancelled) setKeeprPros(rows || []);
       } catch (e) {
         if (!cancelled) {
           setProsError(e?.message || "Could not load KeeprPros.");
@@ -514,6 +508,9 @@ export default function EditAssetScreen({ route, navigation }) {
         email: pro.email || null,
         website: pro.website || null,
         location: pro.location || null,
+        kpc_id: pro.kpcId || null,
+        organization_id: pro.organizationId || pro.orgId || null,
+        source: pro.source || null,
         scope: "asset",
         assignment_scope: "asset",
         relationship_label: "Linked Service Partner",

@@ -22,6 +22,7 @@ import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import { addStoryToHub, fetchHub, fetchPublicHubBySlug } from "../lib/hubsApi";
 import { clearStoredAuthActivationIntent } from "../lib/authActivationIntent";
 import { getHubUserCapabilities } from "../lib/hubCapabilities";
+import { getHubParticipationConfig } from "../lib/hubConfig";
 import { colors, radius, shadows, spacing, typography } from "../styles/theme";
 
 function hubUrl(slug) {
@@ -42,9 +43,10 @@ export default function HubQuickAddCarScreen({ navigation, route }) {
   const hubSlug = route?.params?.hubSlug || route?.params?.slug || null;
   const [resolvedHubId, setResolvedHubId] = useState(hubId || null);
   const [hub, setHub] = useState(route?.params?.hub || null);
-  const [year, setYear] = useState("");
-  const [make, setMake] = useState("");
-  const [model, setModel] = useState("");
+  const initialConfig = getHubParticipationConfig(route?.params?.hub || null);
+  const [year, setYear] = useState(initialConfig.eligibleYear || "");
+  const [make, setMake] = useState(initialConfig.eligibleMake || "");
+  const [model, setModel] = useState(initialConfig.eligibleModel || "");
   const [displayName, setDisplayName] = useState("");
   const [photo, setPhoto] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -83,6 +85,7 @@ export default function HubQuickAddCarScreen({ navigation, route }) {
 
   const effectiveHubName = hub?.name || hubName || "this Hub";
   const effectiveHubSlug = hub?.slug || hubSlug;
+  const participationConfig = getHubParticipationConfig(hub);
   const capabilities = getHubUserCapabilities({
     hub,
     user: currentUserId ? { id: currentUserId } : null,
@@ -95,6 +98,14 @@ export default function HubQuickAddCarScreen({ navigation, route }) {
     () => [clean(year), clean(make), clean(model)].filter(Boolean).join(" "),
     [year, make, model]
   );
+
+  useEffect(() => {
+    if (!hub) return;
+    const config = getHubParticipationConfig(hub);
+    if (!year && config.eligibleYear) setYear(config.eligibleYear);
+    if (!make && config.eligibleMake) setMake(config.eligibleMake);
+    if (!model && config.eligibleModel) setModel(config.eligibleModel);
+  }, [hub, make, model, year]);
 
   const pickPhoto = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -160,7 +171,7 @@ export default function HubQuickAddCarScreen({ navigation, route }) {
         },
         publicConfig: {
           story: {
-            enabled: false,
+            enabled: true,
             showOwnerName: false,
             showPhotos: true,
             showYearMakeModel: true,
@@ -185,7 +196,13 @@ export default function HubQuickAddCarScreen({ navigation, route }) {
         })
         .eq("id", asset.id);
 
-      const link = await addStoryToHub({ hubId: resolvedHubId, assetId: asset.id, userId });
+      const link = await addStoryToHub({
+        hubId: resolvedHubId,
+        assetId: asset.id,
+        userId,
+        hub,
+        status: capabilities.submissionStatus,
+      });
       await clearStoredAuthActivationIntent();
       setCreated({ asset, attachment, link });
     } catch (e) {
@@ -251,7 +268,7 @@ export default function HubQuickAddCarScreen({ navigation, route }) {
   return (
     <SafeAreaView style={styles.screen}>
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.eyebrow}>Add Your Car</Text>
+        <Text style={styles.eyebrow}>{participationConfig.ctaLabel || "Add Your Car"}</Text>
         <Text style={styles.title}>{effectiveHubName}</Text>
         <Text style={styles.subtitle}>Add one photo and the basics. Private Keepr setup can wait.</Text>
 
@@ -277,7 +294,7 @@ export default function HubQuickAddCarScreen({ navigation, route }) {
         <View style={styles.privacyCard}>
           <Text style={styles.cardTitle}>Public Hub projection</Text>
           <Text style={styles.privacyLine}>Photo, year, make, and model will appear in {effectiveHubName}.</Text>
-          <Text style={styles.privacyLine}>Owner name is off. Public Story is off.</Text>
+          <Text style={styles.privacyLine}>Owner name is off. Public Story is on for this Hub participation.</Text>
         </View>
 
         <TouchableOpacity style={[styles.primaryButton, !canSubmit && styles.disabled]} onPress={createProjection} disabled={!canSubmit}>

@@ -33,6 +33,11 @@ import { getSignedUrl, listAttachmentsForTarget, removePlacementById } from "../
 import { createLinkAttachment, uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import KeeprDateField from "../components/KeeprDateField";
 import AttachmentViewerModal from "../components/AttachmentViewerModal";
+import {
+  isKeeprProPickerMatch,
+  loadMyKeeprProsForPicker,
+  resolveOrCreateKpcForPicker,
+} from "../lib/kpcApi";
 import { formatMoneyInput, parseMoneyInput } from "../lib/money";
 
 /* ---------------- helpers ---------------- */
@@ -242,7 +247,10 @@ const closeViewer = () => setViewer(null);
   );
 
   const selectedPro = useMemo(
-    () => (selectedKeeprProId ? pros.find((p) => p.id === selectedKeeprProId) : null),
+    () =>
+      selectedKeeprProId
+        ? pros.find((p) => isKeeprProPickerMatch(p, selectedKeeprProId))
+        : null,
     [selectedKeeprProId, pros]
   );
 
@@ -394,14 +402,19 @@ const loadRecordAttachments = useCallback(async () => {
       if (isActive) setSystems(sys);
 
       // pros
-      const pr = await safeSelect("keepr_pros", (q) =>
-        q.select("id, name, location").order("name", { ascending: true })
-      );
+      let pr = [];
+      try {
+        pr = await loadMyKeeprProsForPicker();
+      } catch {
+        pr = await safeSelect("service_providers", (q) =>
+          q.select("id, name, location").order("name", { ascending: true })
+        );
+      }
       if (isActive) {
         setPros(pr);
         if (rec.keepr_pro_id) {
-          const match = pr.find((p) => p.id === rec.keepr_pro_id);
-          if (match) setSelectedKeeprProLabel(buildKeeprProLabel(match));
+          const match = pr.find((p) => isKeeprProPickerMatch(p, rec.keepr_pro_id));
+          if (match) setSelectedKeeprProLabel(match.label || buildKeeprProLabel(match));
         }
       }
 
@@ -565,23 +578,14 @@ const payload = {
         return;
       }
 
-      const payload = {
+      const newPro = await resolveOrCreateKpcForPicker({
         user_id: user.id,
         name,
+        display_name: name,
         category: "other",
         is_favorite: false,
         source: "manual_quick",
-      };
-
-      const { data, error } = await supabase
-        .from("keepr_pros")
-        .insert([payload])
-        .select("*")
-        .single();
-
-      if (error) throw error;
-
-      const newPro = data || { id: null, name };
+      });
       setPros((prev) => {
         const next = [...(prev || [])];
         // If DB returned, use it; else keep minimal.
@@ -1260,11 +1264,14 @@ if (serviceType === "cost") {
 {pros.map((p) => (
                 <TouchableOpacity
                   key={p.id}
-                  style={[styles.modalOption, selectedKeeprProId === p.id && styles.modalOptionSelected]}
+                  style={[
+                    styles.modalOption,
+                    isKeeprProPickerMatch(p, selectedKeeprProId) && styles.modalOptionSelected,
+                  ]}
                   onPress={() => handleSelectPro(p)}
                 >
                   <Text style={styles.modalOptionText}>{buildKeeprProLabel(p)}</Text>
-                  {selectedKeeprProId === p.id ? <Ionicons name="checkmark-circle" size={20} color={colors.brandBlue} /> : null}
+                  {isKeeprProPickerMatch(p, selectedKeeprProId) ? <Ionicons name="checkmark-circle" size={20} color={colors.brandBlue} /> : null}
                 </TouchableOpacity>
               ))}
             </ScrollView>

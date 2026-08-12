@@ -30,15 +30,13 @@ import ShowcaseAttachmentsSection from "../components/showcase/ShowcaseAttachmen
 import { supabase } from "../lib/supabaseClient";
 import { formatKeeprDate } from "../lib/dateFormat";
 import { buildMessagesNavigationParams } from "../lib/messagesService";
+import { postSupabaseFunction } from "../lib/supabaseRuntimeConfig";
 const keeprEnabledMark = require("../assets/public/keepr-enabled-mark-180.png");
 const keeprEnabledWatermark = require("../assets/public/keepr-enabled-mark-120.png");
 const keeprLogo = require("../assets/app_logo_icon.png");
 
 const HERO_ASPECT = 4 / 3;
 const IS_WEB = Platform.OS === "web";
-const PROJECT_REF = "jjzjuqxysucqutgjnrkk";
-const FUNCTIONS_BASE = `https://${PROJECT_REF}.supabase.co/functions/v1`;
-const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 const DEBUG_PUBLIC_STORY_LOAD = false;
 
 function logPublicStoryLoad(...args) {
@@ -358,22 +356,13 @@ function TimelineRow({
 }
 
 async function fetchPublicStoryMedia(kac) {
-  if (!kac || !ANON_KEY) return [];
+  if (!kac) return [];
 
-  const res = await fetch(`${FUNCTIONS_BASE}/public-story-media`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      apikey: ANON_KEY,
-      Authorization: `Bearer ${ANON_KEY}`,
-    },
-    body: JSON.stringify({ kac }),
-  });
-
-  const json = await res.json();
-
-  if (!res.ok) {
-    logPublicStoryLoad("PUBLIC STORY MEDIA ERROR:", json);
+  let json = null;
+  try {
+    json = await postSupabaseFunction("public-story-media", { kac });
+  } catch (error) {
+    logPublicStoryLoad("PUBLIC STORY MEDIA ERROR:", error);
     return [];
   }
 

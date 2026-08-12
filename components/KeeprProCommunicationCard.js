@@ -19,6 +19,10 @@ export function normalizeKeeprProContact(pro) {
   if (!name) return null;
   return {
     id: pro.id || pro.keepr_pro_id || pro.keeprProId || null,
+    keeprProId: pro.keepr_pro_id || pro.keeprProId || pro.keepr_pro_profile_id || null,
+    organization_id: pro.organization_id || pro.organizationId || pro.org_id || pro.orgId || null,
+    orgId: pro.orgId || pro.org_id || pro.organization_id || pro.organizationId || null,
+    kpcId: pro.kpcId || pro.kpc_id || pro.organization_id || pro.organizationId || null,
     name,
     slug: firstPresent(pro.slug, pro.keepr_pro_slug, pro.profile_slug),
     category: firstPresent(pro.category, pro.specialty, pro.type),

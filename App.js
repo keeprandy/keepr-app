@@ -126,6 +126,11 @@ import KacResolveScreen from "./screens/KacResolveScreen";
 import KacRouteScreen from "./screens/KacRouteScreen";
 import ShareKeeprScreen from "./screens/ShareKeeprScreen";
 import KeeprEffectScreen from "./screens/KeeprEffectScreen";
+import ActivatorHomeScreen from "./screens/ActivatorHomeScreen";
+import ActivatorBoatWorkspaceScreen from "./screens/ActivatorBoatWorkspaceScreen";
+import ActivatorCatalogTemplateScreen from "./screens/ActivatorCatalogTemplateScreen";
+import ActivatorExactBuildScreen from "./screens/ActivatorExactBuildScreen";
+import ActivatorTemplateCustomizeScreen from "./screens/ActivatorTemplateCustomizeScreen";
 
 // Home
 import AddHomeAssetScreen from "./screens/AddHomeAssetScreen";
@@ -217,7 +222,7 @@ import ChangePasswordScreen from "./screens/ChangePasswordScreen";
 import { BoatsProvider } from "./context/BoatsContext";
 import { HomeProvider } from "./context/HomeContext";
 import { VehiclesProvider } from "./context/VehiclesContext";
-import { WorkspaceProvider } from "./context/WorkspaceContext";
+import { WorkspaceProvider, useWorkspace } from "./context/WorkspaceContext";
 
 // Enhance Connectors
 import { EnhanceProvider } from "./enhance/EnhanceProvider";
@@ -254,6 +259,15 @@ const SuperKeeprStackNav = createNativeStackNavigator();
 const KeeprProStackNav = createNativeStackNavigator();
 const HomeStackNav = createNativeStackNavigator();
 
+function routeForWorkspace(workspace, legacyRole) {
+  const type = workspace?.workspace_type || workspace?.type;
+
+  if (type === "keeproem" || type === "keeprdealer" || type === "keeprpro" || type === "pro") return "ActivatorHome";
+  if (legacyRole === "superkeepr") return "SuperKeeprStack";
+  if (legacyRole === "keeprpro") return "KeeprProStack";
+  return "RootTabs";
+}
+
 
 
 /* ---------------- DEEP LINKING ----------------- */
@@ -278,6 +292,11 @@ const linking = {
     MessageLink: "m/:token",
     ShareKeepr: "share-keepr",
     KeeprEffect: "keepr-effect",
+    ActivatorHome: "activator",
+    ActivatorCatalogTemplate: "activator/catalog/:templateKey",
+    ActivatorTemplateCustomize: "activator/catalog/:templateKey/customize",
+    ActivatorExactBuild: "activator/build/:templateKey",
+    ActivatorBoatWorkspace: "activator/boats/:assetId",
     ShareAction: "s/:token",
     PublicKeeprProProfile: "pro/:slug",
     
@@ -1792,6 +1811,11 @@ function sanitizeAuthUrlForLog(url) {
 
 function Root({ onRouteChange, setCurrentRouteName, currentRouteName }) {
   const { initializing, user } = useAuth();
+  const {
+    currentWorkspace,
+    loading: loadingWorkspaces,
+    legacyProfileRole,
+  } = useWorkspace();
   const [isNavReady, setIsNavReady] = React.useState(Platform.OS !== "web");
 
   normalizeNonRecoveryAuthCallbackWebPath();
@@ -2109,19 +2133,18 @@ identifyCurrentUser();
   !hasAssets &&
   !isOnboardingComplete &&
   !isOnboardingDismissed;
+  const isOrgWorkspaceActive =
+    currentWorkspace?.workspace_type && currentWorkspace.workspace_type !== "keepr";
+  const shouldRouteToOnboarding = shouldShowOnboarding && !isOrgWorkspaceActive;
 
   // Force correct landing route after profile gate resolves (web/state can be "sticky")
   const targetRoute = React.useMemo(() => {
     if (!role || onboardingState === null || assetCount === null) return null;
 
-    return shouldShowOnboarding
+    return shouldRouteToOnboarding
       ? "OnboardingStack"
-      : role === "superkeepr"
-      ? "SuperKeeprStack"
-      : role === "keeprpro"
-      ? "KeeprProStack"
-      : "RootTabs";
-  }, [role, onboardingState, assetCount, shouldShowOnboarding]);
+      : routeForWorkspace(currentWorkspace, legacyProfileRole || role);
+  }, [role, onboardingState, assetCount, shouldRouteToOnboarding, currentWorkspace, legacyProfileRole]);
 
   const didInitialNavResolve = React.useRef(false);
   const lastResetRouteRef = React.useRef(null);
@@ -2171,6 +2194,7 @@ if (
   path.startsWith("/inbox") ||
   path.startsWith("/CreateReminder") ||
   path.startsWith("/Notifications") ||
+  path.startsWith("/activator") ||
   path.startsWith("/KeeprHubInternal") ||
   path.startsWith("/KeeprStoryInternal")
 ) {
@@ -2410,17 +2434,13 @@ if (!user) {
   );
 }
 
-if (loadingRole && role === null) return <SplashIntroScreen />;
+if ((loadingRole && role === null) || loadingWorkspaces) return <SplashIntroScreen />;
 
 const initialRouteName = isResetLink
   ? "ResetPassword"
-  : shouldShowOnboarding
+  : shouldRouteToOnboarding
   ? "OnboardingStack"
-  : role === "superkeepr"
-  ? "SuperKeeprStack"
-  : role === "keeprpro"
-  ? "KeeprProStack"
-  : "RootTabs";
+  : routeForWorkspace(currentWorkspace, legacyProfileRole || role);
 
 
   return (
@@ -2444,9 +2464,10 @@ const initialRouteName = isResetLink
           !window.location.pathname.startsWith("/messages") &&
           !window.location.pathname.startsWith("/CreateReminder") &&
           !window.location.pathname.startsWith("/Notifications") &&
-          !window.location.pathname.startsWith("/resolve/")
+          !window.location.pathname.startsWith("/resolve/") &&
+          !window.location.pathname.startsWith("/activator")
           
-            ? initialNavState
+            ? isOrgWorkspaceActive ? undefined : initialNavState
             : undefined
         }
         onReady={() => setIsNavReady(true)}
@@ -2481,6 +2502,11 @@ const initialRouteName = isResetLink
           <RootStack.Screen name="Profile" component={ProfileScreen} />
           <RootStack.Screen name="ShareKeepr" component={ShareKeeprScreen} />
           <RootStack.Screen name="KeeprEffect" component={KeeprEffectScreen} />
+          <RootStack.Screen name="ActivatorHome" component={ActivatorHomeScreen} />
+          <RootStack.Screen name="ActivatorCatalogTemplate" component={ActivatorCatalogTemplateScreen} />
+          <RootStack.Screen name="ActivatorTemplateCustomize" component={ActivatorTemplateCustomizeScreen} />
+          <RootStack.Screen name="ActivatorExactBuild" component={ActivatorExactBuildScreen} />
+          <RootStack.Screen name="ActivatorBoatWorkspace" component={ActivatorBoatWorkspaceScreen} />
 
           <RootStack.Screen name="ChangePassword" component={ChangePasswordScreen} />
           <RootStack.Screen name="AdminSettings" component={SettingsScreen} />

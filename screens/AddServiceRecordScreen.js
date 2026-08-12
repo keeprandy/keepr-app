@@ -32,6 +32,7 @@ import {
   uploadInvoicePhotoForServiceRecord,
 } from "../lib/invoicePhotos";
 import { addServiceRecordAttachment } from "../lib/attachmentsEngine";
+import { isKeeprProPickerMatch, loadMyKeeprProsForPicker } from "../lib/kpcApi";
 import { formatMoneyInput, parseMoneyInput } from "../lib/money";
 
 /* =======================================================
@@ -197,24 +198,19 @@ export default function AddServiceRecordScreen({ route, navigation }) {
       setKeeprProsLoading(true);
       setKeeprProsError(null);
 
-      const { data, error } = await supabase
-        .from("keepr_pros")
-        .select(
-          "id, name, location, category, website, since_label, last_service, is_favorite"
-        )
-        .order("name", { ascending: true });
-
-      if (error) {
+      try {
+        const data = await loadMyKeeprProsForPicker();
+        const mapped =
+          data?.map((row) => ({
+            ...row,
+            id: row.id,
+            label: row.label || buildKeeprProLabel(row),
+          })) || [];
+        setKeeprPros(mapped);
+      } catch (error) {
         console.error("Error loading Keepr Pros", error);
         setKeeprProsError("Could not load Keepr Pros.");
         setKeeprPros([]);
-      } else {
-        const mapped =
-          data?.map((row) => ({
-            id: row.id,
-            label: buildKeeprProLabel(row),
-          })) || [];
-        setKeeprPros(mapped);
       }
 
       setKeeprProsLoading(false);
@@ -628,7 +624,7 @@ export default function AddServiceRecordScreen({ route, navigation }) {
                   </TouchableOpacity>
 
                   {keeprPros.map((pro) => {
-                    const isActive = selectedKeeprProId === pro.id;
+                    const isActive = isKeeprProPickerMatch(pro, selectedKeeprProId);
                     return (
                       <TouchableOpacity
                         key={pro.id}

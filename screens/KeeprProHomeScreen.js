@@ -17,6 +17,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 
 import { supabase } from "../lib/supabaseClient";
+import { fetchAssetHeroUris } from "../lib/assetHeroResolver";
 import { getSignedUrl } from "../lib/attachmentsApi";
 import { colors, radius, shadows, spacing, typography } from "../styles/theme";
 
@@ -194,8 +195,16 @@ export default function KeeprProHomeScreen({ navigation }) {
     let active = true;
 
     async function signPortfolioHeroes() {
+      const canonicalHeroUrls = await fetchAssetHeroUris(portfolioAssetIds, {
+        transform: { width: 900, quality: 80 },
+      });
+
       const entries = await Promise.all(
         assets.map(async (asset) => {
+          if (canonicalHeroUrls[asset.asset_id]) {
+            return [asset.asset_id, canonicalHeroUrls[asset.asset_id]];
+          }
+
           const hero = asset.hero_media;
           if (!hero?.bucket || !hero?.storage_path) return [asset.asset_id, null];
 
@@ -223,7 +232,7 @@ export default function KeeprProHomeScreen({ navigation }) {
     return () => {
       active = false;
     };
-  }, [assets]);
+  }, [assets, portfolioAssetKey, portfolioAssetIds]);
 
   const refresh = () => {
     setRefreshing(true);

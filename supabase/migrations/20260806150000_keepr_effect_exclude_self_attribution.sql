@@ -1,0 +1,424 @@
+-- Keepr Effect must never count the source owner's own account, assets, or proof
+-- as invite impact. Clean existing self-attribution rows and harden the RPCs.
+
+update public.attribution_records ar
+set status = 'unattributed',
+    attribution_model = 'direct',
+    activation_source_id = null,
+    source_slug_snapshot = null,
+    source_type_snapshot = null,
+    initiating_actor_id = null,
+    metadata = coalesce(ar.metadata, '{}'::jsonb) || jsonb_build_object(
+      'self_attribution_removed_at', now(),
+      'self_attribution_removed_by', '20260806150000_keepr_effect_exclude_self_attribution',
+      'self_attribution_removed_reason', 'source owner cannot be attributed to their own invite source'
+    ),
+    updated_at = now()
+from public.activation_sources src
+where ar.activation_source_id = src.id
+  and src.source_type = 'user'
+  and src.owner_user_id = ar.user_id
+  and ar.status = 'verified'
+  and ar.attribution_model = 'person';
+
+create or replace function public.get_my_keepr_effect(
+  p_recent_window text default '30d'
+)
+returns table (
+  source_slug text,
+  activation_source_id uuid,
+  invite_visits integer,
+  verified_keeprs integer,
+  activated_keeprs integer,
+  assets_created integer,
+  proof_items_added integer,
+  downstream_keeprs integer,
+  recent_impact jsonb,
+  shares_by_channel jsonb
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  current_user_id uuid;
+  source_row public.activation_sources%rowtype;
+  profile_slug text;
+  recent_since timestamptz;
+begin
+  current_user_id := auth.uid();
+  if current_user_id is null then
+    raise exception 'authentication required';
+  end if;
+
+  recent_since := case lower(coalesce(nullif(trim(p_recent_window), ''), '30d'))
+    when 'today' then date_trunc('day', now())
+    when '7d' then now() - interval '7 days'
+    when '30d' then now() - interval '30 days'
+    else now() - interval '30 days'
+  end;
+
+  select *
+    into source_row
+    from public.activation_sources s
+    where s.source_type = 'user'
+      and s.owner_user_id = current_user_id
+      and s.status = 'active'
+    order by s.created_at asc
+    limit 1;
+
+  if source_row.id is null then
+    source_slug := null;
+    activation_source_id := null;
+    invite_visits := 0;
+    verified_keeprs := 0;
+    activated_keeprs := 0;
+    assets_created := 0;
+    proof_items_added := 0;
+    downstream_keeprs := 0;
+    recent_impact := '[]'::jsonb;
+    shares_by_channel := '{}'::jsonb;
+    return next;
+    return;
+  end if;
+
+  select coalesce(
+      nullif(trim(p.acquisition_source_slug), ''),
+      nullif(trim(p.username), ''),
+      nullif(trim(p.inbox_name), '')
+    )
+    into profile_slug
+    from public.profiles p
+    where p.id = current_user_id;
+
+  select coalesce(
+      (
+        select s.normalized_slug
+        from public.activation_source_slugs s
+        where s.activation_source_id = source_row.id
+          and s.status = 'active'
+          and s.normalized_slug = public.normalize_activation_slug(profile_slug)
+        limit 1
+      ),
+      (
+        select s.normalized_slug
+        from public.activation_source_slugs s
+        where s.activation_source_id = source_row.id
+          and s.status = 'active'
+          and s.slug_kind = 'alias'
+          and s.normalized_slug !~ '^u_[0-9a-f]{8}$'
+        order by
+          case when s.metadata->>'alias_source' = 'profile' then 0 else 1 end,
+          s.created_at asc
+        limit 1
+      ),
+      (
+        select s.normalized_slug
+        from public.activation_source_slugs s
+        where s.activation_source_id = source_row.id
+          and s.status = 'active'
+          and s.slug_kind = 'canonical'
+        order by s.created_at asc
+        limit 1
+      ),
+      (
+        select s.normalized_slug
+        from public.activation_source_slugs s
+        where s.activation_source_id = source_row.id
+          and s.status = 'active'
+        order by s.created_at asc
+        limit 1
+      ),
+      source_row.source_key
+    )
+    into source_slug;
+
+  activation_source_id := source_row.id;
+
+  with attributed as (
+    select ar.id,
+           ar.user_id,
+           ar.created_at
+    from public.attribution_records ar
+    where ar.activation_source_id = source_row.id
+      and ar.status = 'verified'
+      and ar.attribution_model = 'person'
+      and ar.user_id <> current_user_id
+      and ar.user_id <> source_row.owner_user_id
+  ),
+  attributed_identity as (
+    select ar.user_id,
+           coalesce(
+             case
+               when profile_identity.profile_name is null then null
+               when profile_identity.profile_name like '% %' then
+                 split_part(profile_identity.profile_name, ' ', 1)
+                 || ' '
+                 || left(regexp_replace(profile_identity.profile_name, '^.*\s+', ''), 1)
+                 || '.'
+               else profile_identity.profile_name
+             end,
+             profile_identity.username_slug,
+             profile_identity.inbox_slug,
+             member_slug.normalized_slug,
+             profile_identity.email_local_slug,
+             'A Keepr'
+           ) as actor_display_name,
+           case
+             when coalesce(photo.mime_type, '') not ilike 'image/%' then null
+             when nullif(trim(coalesce(photo.url, '')), '') is not null then nullif(trim(photo.url), '')
+             when nullif(trim(coalesce(photo.bucket, '')), '') is not null
+              and nullif(trim(coalesce(photo.storage_path, '')), '') is not null
+             then 'https://jjzjuqxysucqutgjnrkk.supabase.co/storage/v1/object/public/'
+               || trim(photo.bucket)
+               || '/'
+               || trim(photo.storage_path)
+             else null
+           end as actor_photo_url
+    from attributed ar
+    left join public.profiles p on p.id = ar.user_id
+    left join public.attachments photo on photo.id = p.profile_photo_attachment_id
+    left join lateral (
+      select
+        case
+          when nullif(trim(coalesce(p.display_name, '')), '') is not null
+           and trim(p.display_name) !~* '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+           and trim(p.display_name) !~* '^u_[0-9a-f]{8}$'
+          then trim(regexp_replace(p.display_name, '\s+', ' ', 'g'))
+          when nullif(trim(coalesce(p.full_name, '')), '') is not null
+           and trim(p.full_name) !~* '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+           and trim(p.full_name) !~* '^u_[0-9a-f]{8}$'
+          then trim(regexp_replace(p.full_name, '\s+', ' ', 'g'))
+          else null
+        end as profile_name,
+        case
+          when nullif(trim(coalesce(p.username, '')), '') is not null
+           and trim(p.username) !~* '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+           and public.normalize_activation_slug(p.username) !~ '^u_[0-9a-f]{8}$'
+          then public.normalize_activation_slug(p.username)
+          else null
+        end as username_slug,
+        case
+          when nullif(trim(coalesce(p.inbox_name, '')), '') is not null
+           and trim(p.inbox_name) !~* '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+           and public.normalize_activation_slug(p.inbox_name) !~ '^u_[0-9a-f]{8}$'
+          then public.normalize_activation_slug(p.inbox_name)
+          else null
+        end as inbox_slug,
+        case
+          when nullif(trim(coalesce(p.email, '')), '') is not null
+           and split_part(split_part(trim(p.email), '@', 1), '+', 1) !~* '^u_[0-9a-f]{8}$'
+          then nullif(public.normalize_activation_slug(split_part(split_part(trim(p.email), '@', 1), '+', 1)), '')
+          else null
+        end as email_local_slug
+    ) profile_identity on true
+    left join lateral (
+      select s.normalized_slug
+      from public.activation_sources member_source
+      join public.activation_source_slugs s on s.activation_source_id = member_source.id
+      where member_source.source_type = 'user'
+        and member_source.owner_user_id = ar.user_id
+        and member_source.status = 'active'
+        and s.status = 'active'
+        and s.slug_kind = 'alias'
+        and s.normalized_slug !~ '^u_[0-9a-f]{8}$'
+      order by
+        case when s.metadata->>'alias_source' = 'profile' then 0 else 1 end,
+        s.created_at asc
+      limit 1
+    ) member_slug on true
+  ),
+  attributed_assets as (
+    select a.id,
+           a.owner_id,
+           a.created_at
+    from public.assets a
+    join attributed ar on ar.user_id = a.owner_id
+    where a.deleted_at is null
+  ),
+  attributed_proof as (
+    select att.id,
+           att.owner_user_id,
+           att.asset_id,
+           att.created_at
+    from public.attachments att
+    join attributed ar on ar.user_id = att.owner_user_id
+    where att.deleted_at is null
+  ),
+  downstream as (
+    select distinct ar.user_id
+    from attributed ar
+    join public.activation_sources child_source
+      on child_source.source_type = 'user'
+     and child_source.owner_user_id = ar.user_id
+     and child_source.status = 'active'
+    join public.attribution_records child_ar
+      on child_ar.activation_source_id = child_source.id
+     and child_ar.status = 'verified'
+     and child_ar.attribution_model = 'person'
+  ),
+  recent_events as (
+    select ar.created_at as happened_at,
+           'verified_keepr'::text as event_type,
+           ai.actor_display_name,
+           ai.actor_photo_url,
+           ai.actor_display_name || ' became a Keepr.'::text as label
+    from attributed ar
+    left join attributed_identity ai on ai.user_id = ar.user_id
+    union all
+    select aa.created_at,
+           'asset_created',
+           ai.actor_display_name,
+           ai.actor_photo_url,
+           ai.actor_display_name || ' created an asset.'
+    from attributed_assets aa
+    left join attributed_identity ai on ai.user_id = aa.owner_id
+    union all
+    select ap.created_at,
+           'proof_added',
+           ai.actor_display_name,
+           ai.actor_photo_url,
+           ai.actor_display_name || ' preserved an ownership record.'
+    from attributed_proof ap
+    left join attributed_identity ai on ai.user_id = ap.owner_user_id
+  ),
+  recent_limited as (
+    select event_type, actor_display_name, actor_photo_url, label, happened_at
+    from recent_events
+    where happened_at >= recent_since
+    order by happened_at desc
+    limit 8
+  ),
+  share_counts as (
+    select case when sa.channel = 'sms' then 'text' else sa.channel end as channel,
+           count(*)::integer as count
+    from public.share_actions sa
+    where sa.activation_source_id = source_row.id
+      and sa.actor_user_id = current_user_id
+    group by 1
+  )
+  select
+    (
+      select count(*)::integer
+      from public.activation_sessions s
+      where s.activation_source_id = source_row.id
+        and s.status not in ('ignored', 'blocked')
+        and coalesce(s.internal_test_status, 'normal') = 'normal'
+        and (s.converted_user_id is null or s.converted_user_id <> current_user_id)
+    ),
+    (select count(*)::integer from attributed),
+    (
+      select count(distinct ar.user_id)::integer
+      from attributed ar
+      join attributed_assets aa on aa.owner_id = ar.user_id
+    ),
+    (select count(*)::integer from attributed_assets),
+    (select count(*)::integer from attributed_proof),
+    (select count(*)::integer from downstream),
+    coalesce(
+      (
+        select jsonb_agg(
+          jsonb_build_object(
+            'event_type', rl.event_type,
+            'actor_display_name', rl.actor_display_name,
+            'actor_photo_url', rl.actor_photo_url,
+            'label', rl.label,
+            'happened_at', rl.happened_at
+          )
+          order by rl.happened_at desc
+        )
+        from recent_limited rl
+      ),
+      '[]'::jsonb
+    ),
+    coalesce(
+      (
+        select jsonb_object_agg(sc.channel, sc.count)
+        from share_counts sc
+      ),
+      '{}'::jsonb
+    )
+  into
+    invite_visits,
+    verified_keeprs,
+    activated_keeprs,
+    assets_created,
+    proof_items_added,
+    downstream_keeprs,
+    recent_impact,
+    shares_by_channel;
+
+  return next;
+end;
+$$;
+
+revoke all on function public.get_my_keepr_effect() from public;
+revoke all on function public.get_my_keepr_effect(text) from public;
+grant execute on function public.get_my_keepr_effect() to authenticated;
+grant execute on function public.get_my_keepr_effect(text) to authenticated;
+
+create or replace function public.get_my_keepr_effect_channel_conversions()
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with current_source as (
+    select s.id, s.owner_user_id
+    from public.activation_sources s
+    where s.source_type = 'user'
+      and s.owner_user_id = auth.uid()
+      and s.status = 'active'
+    order by s.created_at asc
+    limit 1
+  ),
+  attributed_sessions as (
+    select
+      session.id,
+      session.landing_url,
+      lower(nullif(session.utm->>'channel', '')) as utm_channel,
+      lower(nullif(session.metadata->>'share_channel', '')) as metadata_channel,
+      lower(nullif(substring(coalesce(session.landing_url, '') from '[?&]channel=([^&#]+)'), '')) as url_channel,
+      sa.channel as share_action_channel
+    from current_source src
+    join public.attribution_records ar
+      on ar.activation_source_id = src.id
+     and ar.status = 'verified'
+     and ar.attribution_model = 'person'
+     and ar.user_id <> src.owner_user_id
+     and ar.user_id <> auth.uid()
+    join public.activation_sessions session
+      on session.id = ar.activation_session_id
+    left join public.share_actions sa
+      on sa.id = session.share_action_id
+     and sa.activation_source_id = src.id
+  ),
+  normalized as (
+    select
+      case
+        when coalesce(share_action_channel, utm_channel, metadata_channel, url_channel) in ('sms', 'text') then 'text'
+        when coalesce(share_action_channel, utm_channel, metadata_channel, url_channel) in (
+          'native_share',
+          'copy_link',
+          'qr',
+          'email',
+          'facebook',
+          'linkedin'
+        ) then coalesce(share_action_channel, utm_channel, metadata_channel, url_channel)
+        else null
+      end as channel
+    from attributed_sessions
+  ),
+  conversion_counts as (
+    select channel, count(*)::integer as count
+    from normalized
+    where channel is not null
+    group by 1
+  )
+  select coalesce(jsonb_object_agg(channel, count), '{}'::jsonb)
+  from conversion_counts;
+$$;
+
+revoke all on function public.get_my_keepr_effect_channel_conversions() from public;
+grant execute on function public.get_my_keepr_effect_channel_conversions() to authenticated;
