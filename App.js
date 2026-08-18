@@ -131,6 +131,14 @@ import ActivatorBoatWorkspaceScreen from "./screens/ActivatorBoatWorkspaceScreen
 import ActivatorCatalogTemplateScreen from "./screens/ActivatorCatalogTemplateScreen";
 import ActivatorExactBuildScreen from "./screens/ActivatorExactBuildScreen";
 import ActivatorTemplateCustomizeScreen from "./screens/ActivatorTemplateCustomizeScreen";
+import KeeprAdminHomeScreen from "./screens/KeeprAdminHomeScreen";
+import KeeprAdminOrgDetailScreen from "./screens/KeeprAdminOrgDetailScreen";
+import KeeprSpaceHomeScreen from "./screens/KeeprSpaceHomeScreen";
+import KeeprSpaceFleetScreen from "./screens/KeeprSpaceFleetScreen";
+import KeeprSpaceAdminScreen from "./screens/KeeprSpaceAdminScreen";
+import KeeprSpaceAddBoatScreen from "./screens/KeeprSpaceAddBoatScreen";
+import KeeprSpaceMessagesRouteScreen from "./screens/KeeprSpaceMessagesScreen";
+import KeeprSpacePlaybooksScreen from "./screens/KeeprSpacePlaybooksScreen";
 
 // Home
 import AddHomeAssetScreen from "./screens/AddHomeAssetScreen";
@@ -255,6 +263,8 @@ import { useShareIntent } from "expo-share-intent";
 
 const Tab = createBottomTabNavigator();
 const RootStack = createNativeStackNavigator();
+const PersonalStackNav = createNativeStackNavigator();
+const KeeprSpaceStackNav = createNativeStackNavigator();
 const SuperKeeprStackNav = createNativeStackNavigator();
 const KeeprProStackNav = createNativeStackNavigator();
 const HomeStackNav = createNativeStackNavigator();
@@ -262,10 +272,125 @@ const HomeStackNav = createNativeStackNavigator();
 function routeForWorkspace(workspace, legacyRole) {
   const type = workspace?.workspace_type || workspace?.type;
 
-  if (type === "keeproem" || type === "keeprdealer" || type === "keeprpro" || type === "pro") return "ActivatorHome";
+  if (type === "keeproem" || type === "keeprdealer" || type === "keeprpro" || type === "pro") return "KeeprSpaceModule";
   if (legacyRole === "superkeepr") return "SuperKeeprStack";
-  if (legacyRole === "keeprpro") return "KeeprProStack";
-  return "RootTabs";
+  if (legacyRole === "keeprpro") return "KeeprSpaceModule";
+  return "PersonalModule";
+}
+
+function routeForCurrentWebPath() {
+  if (Platform.OS !== "web") return null;
+  try {
+    const path = window.location.pathname || "";
+    if (path === "/dashboard" || path.startsWith("/dashboard/")) return "PersonalModule";
+    if (path === "/home" || path.startsWith("/home/")) return "PersonalModule";
+    if (path === "/garage" || path.startsWith("/garage/")) return "PersonalModule";
+    if (path === "/boats" || path.startsWith("/boats/")) return "PersonalModule";
+    if (path === "/settings" || path.startsWith("/settings/")) return "PersonalModule";
+    if (path === "/messages" || path.startsWith("/messages/")) return "PersonalModule";
+    if (path === "/super" || path.startsWith("/super/")) return "SuperKeeprStack";
+    if (path === "/wilson" || path.startsWith("/wilson/")) return "KeeprSpaceModule";
+    if (path.startsWith("/keepr-admin/org/")) return "KeeprAdminOrgDetail";
+    if (path === "/keepr-admin" || path.startsWith("/keepr-admin/")) return "KeeprAdminHome";
+  } catch (_) {}
+  return null;
+}
+
+function WilsonHomeScreen(props) {
+  return <ActivatorHomeScreen {...props} fixedMode="needs" />;
+}
+
+function WilsonFleetScreen(props) {
+  return <ActivatorHomeScreen {...props} fixedMode="fleet" />;
+}
+
+function WilsonMessagesScreen(props) {
+  return <ActivatorHomeScreen {...props} fixedMode="messages" />;
+}
+
+function WilsonAdminScreen(props) {
+  return <ActivatorHomeScreen {...props} fixedMode="profile" />;
+}
+
+function WilsonBoatScreen(props) {
+  return <KeeprProStewardshipViewScreen {...props} />;
+}
+
+function WilsonSettingsScreen(props) {
+  return <SettingsScreen {...props} />;
+}
+
+function PersonalNavigator() {
+  return (
+    <PersonalStackNav.Navigator screenOptions={{ headerShown: false }}>
+      <PersonalStackNav.Screen name="PersonalTabs" component={MainTabs} />
+    </PersonalStackNav.Navigator>
+  );
+}
+
+function KeeprSpaceMessagesScreen(props) {
+  return <KeeprSpaceMessagesRouteScreen {...props} />;
+}
+
+function KeeprSpaceBoatScreen(props) {
+  return <WilsonBoatScreen {...props} />;
+}
+
+function KeeprSpaceSettingsScreen(props) {
+  return <WilsonSettingsScreen {...props} />;
+}
+
+function KeeprSpaceNavigator() {
+  return (
+    <KeeprSpaceStackNav.Navigator
+      screenOptions={{ headerShown: false }}
+      initialRouteName="KeeprSpaceHome"
+    >
+      <KeeprSpaceStackNav.Screen name="KeeprSpaceHome" component={KeeprSpaceHomeScreen} />
+      <KeeprSpaceStackNav.Screen name="KeeprSpaceFleet" component={KeeprSpaceFleetScreen} />
+      <KeeprSpaceStackNav.Screen name="KeeprSpaceActivator" component={KeeprSpaceAddBoatScreen} />
+      <KeeprSpaceStackNav.Screen name="KeeprSpaceAddBoat" component={KeeprSpaceAddBoatScreen} />
+      <KeeprSpaceStackNav.Screen name="KeeprSpaceMessages" component={KeeprSpaceMessagesScreen} />
+      <KeeprSpaceStackNav.Screen name="KeeprSpacePlaybooks" component={KeeprSpacePlaybooksScreen} />
+      <KeeprSpaceStackNav.Screen name="KeeprProActionDetail" component={KeeprProActionDetailScreen} />
+      <KeeprSpaceStackNav.Screen name="KeeprSpaceAdmin" component={KeeprSpaceAdminScreen} />
+      <KeeprSpaceStackNav.Screen name="KeeprSpaceSettings" component={KeeprSpaceSettingsScreen} />
+      <KeeprSpaceStackNav.Screen name="KeeprSpaceBoat" component={KeeprSpaceBoatScreen} />
+    </KeeprSpaceStackNav.Navigator>
+  );
+}
+
+function topRouteNameFromRootRef() {
+  try {
+    const root = navigationRef.getRootState?.();
+    if (!root?.routes?.length) return null;
+    const index = typeof root.index === "number" ? root.index : 0;
+    return root.routes[index]?.name || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function topRouteNameFromState(state) {
+  if (!state?.routes?.length) return null;
+  const index = typeof state.index === "number" ? state.index : 0;
+  return state.routes[index]?.name || null;
+}
+
+function isOrgModuleRouteName(routeName) {
+  return (
+    routeName === "KeeprSpaceModule" ||
+    String(routeName || "").startsWith("KeeprSpace") ||
+    String(routeName || "").startsWith("Wilson") ||
+    String(routeName || "").startsWith("Activator") ||
+    routeName === "KeeprProStack"
+  );
+}
+
+function shouldRestoreWebNavStateForWorkspace(state, workspace) {
+  const isOrgWorkspace = workspace?.workspace_type && workspace.workspace_type !== "keepr";
+  if (isOrgWorkspace) return false;
+  return !isOrgModuleRouteName(topRouteNameFromState(state));
 }
 
 
@@ -292,6 +417,49 @@ const linking = {
     MessageLink: "m/:token",
     ShareKeepr: "share-keepr",
     KeeprEffect: "keepr-effect",
+    PersonalModule: {
+      screens: {
+        PersonalTabs: {
+          screens: {
+            Dashboard: "dashboard",
+            MyHome: "home",
+            Garage: "garage",
+            Boats: "boats",
+            Notifications: {
+              path: "inbox",
+              screens: {
+                InboxHome: "",
+              },
+            },
+            Messages: "messages",
+            KeeprPros: "pros",
+            Settings: "settings",
+          },
+        },
+      },
+    },
+    KeeprSpaceModule: {
+      path: "wilson",
+      screens: {
+        KeeprSpaceHome: "",
+        KeeprSpaceFleet: "fleet",
+        KeeprSpaceActivator: "activator",
+        KeeprSpaceAddBoat: "add-boat",
+        KeeprSpaceMessages: "messages",
+        KeeprSpacePlaybooks: "playbooks",
+        KeeprSpaceAdmin: "admin",
+        KeeprSpaceSettings: "settings",
+        KeeprSpaceBoat: "boats/:assetId",
+      },
+    },
+    WilsonHome: "wilson-legacy",
+    WilsonFleet: "wilson-legacy/fleet",
+    WilsonMessages: "wilson-legacy/messages",
+    WilsonAdmin: "wilson-legacy/admin",
+    WilsonSettings: "wilson-legacy/settings",
+    WilsonBoat: "wilson-legacy/boats/:assetId",
+    KeeprAdminHome: "keepr-admin",
+    KeeprAdminOrgDetail: "keepr-admin/org/:organizationId",
     ActivatorHome: "activator",
     ActivatorCatalogTemplate: "activator/catalog/:templateKey",
     ActivatorTemplateCustomize: "activator/catalog/:templateKey/customize",
@@ -309,6 +477,7 @@ const linking = {
     HubQuickAddCar: "h/:slug/add-car",
     KacResolve: "resolve/:kac",
     RootTabs: {
+      path: "legacy-tabs",
       screens: {
         Dashboard: "dashboard",
         MyHome: "home",
@@ -2137,18 +2306,6 @@ identifyCurrentUser();
     currentWorkspace?.workspace_type && currentWorkspace.workspace_type !== "keepr";
   const shouldRouteToOnboarding = shouldShowOnboarding && !isOrgWorkspaceActive;
 
-  // Force correct landing route after profile gate resolves (web/state can be "sticky")
-  const targetRoute = React.useMemo(() => {
-    if (!role || onboardingState === null || assetCount === null) return null;
-
-    return shouldRouteToOnboarding
-      ? "OnboardingStack"
-      : routeForWorkspace(currentWorkspace, legacyProfileRole || role);
-  }, [role, onboardingState, assetCount, shouldRouteToOnboarding, currentWorkspace, legacyProfileRole]);
-
-  const didInitialNavResolve = React.useRef(false);
-  const lastResetRouteRef = React.useRef(null);
-
   const isResetLink = React.useMemo(() => {
   if (passwordRecoveryUrl) return true;
   if (Platform.OS !== "web") return false;
@@ -2171,6 +2328,23 @@ identifyCurrentUser();
   }
 }, [passwordRecoveryUrl]);
 
+  // Force correct landing route after profile gate resolves (web/state can be "sticky")
+  const targetRoute = React.useMemo(() => {
+    if (initializing) return "SplashIntro";
+    if (!user) return isResetLink ? "ResetPassword" : "Auth";
+    if ((loadingRole && role === null) || loadingWorkspaces) return "SplashIntro";
+    if (!role || onboardingState === null || assetCount === null) return null;
+    const webRoute = routeForCurrentWebPath();
+    if (webRoute && isOrgWorkspaceActive) return webRoute;
+
+    return shouldRouteToOnboarding
+      ? "OnboardingStack"
+      : routeForWorkspace(currentWorkspace, legacyProfileRole || role);
+  }, [initializing, user, isResetLink, loadingRole, role, loadingWorkspaces, onboardingState, assetCount, isOrgWorkspaceActive, shouldRouteToOnboarding, currentWorkspace, legacyProfileRole]);
+
+  const didInitialNavResolve = React.useRef(false);
+  const lastResetRouteRef = React.useRef(null);
+
 React.useEffect(() => {
   if (!targetRoute) return;
   if (!navigationRef?.isReady?.()) return;
@@ -2192,8 +2366,10 @@ if (
   path.startsWith("/invite/") ||
   path.startsWith("/resolve/") ||
   path.startsWith("/inbox") ||
+  path.startsWith("/super") ||
   path.startsWith("/CreateReminder") ||
   path.startsWith("/Notifications") ||
+  (isOrgWorkspaceActive && path.startsWith("/wilson")) ||
   path.startsWith("/activator") ||
   path.startsWith("/KeeprHubInternal") ||
   path.startsWith("/KeeprStoryInternal")
@@ -2203,7 +2379,12 @@ if (
     }
   }
 
-  const current = navigationRef.getCurrentRoute()?.name;
+  const current = topRouteNameFromRootRef() || navigationRef.getCurrentRoute()?.name;
+  if (isOrgWorkspaceActive && current === "KeeprSpaceModule") {
+    didInitialNavResolve.current = true;
+    lastResetRouteRef.current = current;
+    return;
+  }
 
   if (current !== targetRoute) {
     navigationRef.reset({
@@ -2214,7 +2395,7 @@ if (
 
   didInitialNavResolve.current = true;
   lastResetRouteRef.current = targetRoute;
-}, [targetRoute, isResetLink]);
+}, [targetRoute, isResetLink, isOrgWorkspaceActive, activeTrigger?.type]);
 
   React.useEffect(() => {
     let mounted = true;
@@ -2374,70 +2555,20 @@ const handleNavStateChange = React.useCallback(
   [onRouteChange, setCurrentRouteName, role]
 );
 
-// Web: wait until persisted navigation state (if any) is restored before rendering.
-if (Platform.OS === "web" && !isNavReady) return <SplashIntroScreen />;
+const isBootLoading =
+  (Platform.OS === "web" && !isNavReady) ||
+  (Platform.OS !== "web" && !checkedInitialRecoveryUrl) ||
+  initializing ||
+  ((loadingRole && role === null) || loadingWorkspaces);
 
-if (Platform.OS !== "web" && !checkedInitialRecoveryUrl) return <SplashIntroScreen />;
-
-if (initializing) return <SplashIntroScreen />;
-
-// Let password-reset links render ResetPassword even if there is no session yet.
-if (!user) {
-  return (
-    <View style={{ flex: 1 }}>
-        <NavigationContainer
-          key="logged-out"
-          theme={navTheme}
-          ref={navigationRef}
-          linking={linking}
-          initialState={undefined}
-          onReady={() => setIsNavReady(true)}
-        >
-        <RootStack.Navigator
-          screenOptions={{ headerShown: false }}
-          initialRouteName={isResetLink ? "ResetPassword" : "Auth"}
-        >
-          {/* Public KAC routes MUST be accessible without auth */}
-          <RootStack.Screen name="KacRoute" component={KacRouteScreen} />
-          <RootStack.Screen name="PublicAction" component={PublicActionScreen} />
-          <RootStack.Screen name="KeeprAction" component={KeeprActionScreen} options={{ headerShown: false }} />
-          <RootStack.Screen name="KacResolve" component={KacResolveScreen} />
-          <RootStack.Screen name="PublicSystemStory" component={PublicSystemStoryScreen}/>
-          <RootStack.Screen name="PublicKeeprStory" component={PublicKeeprStoryScreen}/>
-          <RootStack.Screen name="PublicKeeprProProfile" component={PublicKeeprProProfileScreen}/>
-          <RootStack.Screen name="MessageLink" component={MessageLinkScreen} />
-          <RootStack.Screen name="KeeprHub" component={KeeprHubScreen}/>
-          <RootStack.Screen name="HubDetail" component={HubDetailScreen} />
-          <RootStack.Screen name="EditHub" component={EditHubScreen} />
-          <RootStack.Screen name="ManageHubStories" component={ManageHubStoriesScreen} />
-          <RootStack.Screen name="InviteHubMembers" component={InviteHubMembersScreen} />
-          <RootStack.Screen name="MyHubs" component={MyHubsScreen} />
-          <RootStack.Screen name="CreateHub" component={CreateHubScreen} options={{ headerShown: false }}/>
-          <RootStack.Screen name="KeeprHubInternal" component={KeeprHubScreen}/>
-          <RootStack.Screen name="AddHubStory" component={AddHubStoryScreen} />
-          <RootStack.Screen name="HubQuickAddCar" component={HubQuickAddCarScreen} />
-          <RootStack.Screen name="KeeprStoryInternal" component={PublicKeeprStoryScreen}/>
-          
-          <RootStack.Screen name="ShareAction" component={ShareActionRedirectScreen} />
-          <RootStack.Screen name="Invite" component={InviteRedirectScreen} />
-          <RootStack.Screen name="Auth" component={AuthScreen} />
-          <RootStack.Screen
-            name="ResetPassword"
-            component={ResetPasswordScreen}
-            initialParams={
-              passwordRecoveryUrl ? { recoveryUrl: passwordRecoveryUrl } : undefined
-            }
-          />
-        </RootStack.Navigator>
-      </NavigationContainer>
-    </View>
-  );
-}
-
-if ((loadingRole && role === null) || loadingWorkspaces) return <SplashIntroScreen />;
-
-const initialRouteName = isResetLink
+const initialRouteName = isBootLoading
+  ? "SplashIntro"
+  : isResetLink
   ? "ResetPassword"
+  : !user
+  ? "Auth"
+  : isOrgWorkspaceActive && routeForCurrentWebPath()
+  ? routeForCurrentWebPath()
   : shouldRouteToOnboarding
   ? "OnboardingStack"
   : routeForWorkspace(currentWorkspace, legacyProfileRole || role);
@@ -2460,6 +2591,9 @@ const initialRouteName = isResetLink
           !window.location.pathname.startsWith("/m/") &&
           !window.location.pathname.startsWith("/pro/") &&
           !window.location.pathname.startsWith("/pro-mode") &&
+          !window.location.pathname.startsWith("/super") &&
+          !window.location.pathname.startsWith("/wilson") &&
+          !window.location.pathname.startsWith("/keepr-admin") &&
           !window.location.pathname.startsWith("/inbox") &&
           !window.location.pathname.startsWith("/messages") &&
           !window.location.pathname.startsWith("/CreateReminder") &&
@@ -2467,7 +2601,7 @@ const initialRouteName = isResetLink
           !window.location.pathname.startsWith("/resolve/") &&
           !window.location.pathname.startsWith("/activator")
           
-            ? isOrgWorkspaceActive ? undefined : initialNavState
+            ? shouldRestoreWebNavStateForWorkspace(initialNavState, currentWorkspace) ? initialNavState : undefined
             : undefined
         }
         onReady={() => setIsNavReady(true)}
@@ -2477,6 +2611,7 @@ const initialRouteName = isResetLink
             screenOptions={{ headerShown: false }}
             initialRouteName={initialRouteName}
           >
+          <RootStack.Screen name="SplashIntro" component={SplashIntroScreen} />
           <RootStack.Screen name="ShareAction" component={ShareActionRedirectScreen} />
           <RootStack.Screen name="Invite" component={InviteRedirectScreen} />
           <RootStack.Screen name="Auth" component={AuthScreen} />
@@ -2488,6 +2623,8 @@ const initialRouteName = isResetLink
             }
           />
 
+          <RootStack.Screen name="PersonalModule" component={PersonalNavigator} />
+          <RootStack.Screen name="KeeprSpaceModule" component={KeeprSpaceNavigator} />
           <RootStack.Screen name="RootTabs" component={MainTabs} />
           <RootStack.Screen
             name="SuperKeeprStack"
@@ -2502,6 +2639,14 @@ const initialRouteName = isResetLink
           <RootStack.Screen name="Profile" component={ProfileScreen} />
           <RootStack.Screen name="ShareKeepr" component={ShareKeeprScreen} />
           <RootStack.Screen name="KeeprEffect" component={KeeprEffectScreen} />
+          <RootStack.Screen name="WilsonHome" component={WilsonHomeScreen} />
+          <RootStack.Screen name="WilsonFleet" component={WilsonFleetScreen} />
+          <RootStack.Screen name="WilsonMessages" component={WilsonMessagesScreen} />
+          <RootStack.Screen name="WilsonAdmin" component={WilsonAdminScreen} />
+          <RootStack.Screen name="WilsonSettings" component={WilsonSettingsScreen} />
+          <RootStack.Screen name="WilsonBoat" component={WilsonBoatScreen} />
+          <RootStack.Screen name="KeeprAdminHome" component={KeeprAdminHomeScreen} />
+          <RootStack.Screen name="KeeprAdminOrgDetail" component={KeeprAdminOrgDetailScreen} />
           <RootStack.Screen name="ActivatorHome" component={ActivatorHomeScreen} />
           <RootStack.Screen name="ActivatorCatalogTemplate" component={ActivatorCatalogTemplateScreen} />
           <RootStack.Screen name="ActivatorTemplateCustomize" component={ActivatorTemplateCustomizeScreen} />

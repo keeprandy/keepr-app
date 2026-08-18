@@ -42,10 +42,80 @@ Standard result labels:
 
 Purpose: determine whether production database state is compatible with local code and release assumptions.
 
+Known remote projects:
+
+```text
+staging    nvtotcdsvijssokijnbn
+production jjzjuqxysucqutgjnrkk
+```
+
+Keepr separates application runtime targeting from Supabase CLI targeting:
+
+- Browser/runtime credentials live in ignored local env files and are loaded by explicit npm commands.
+- CLI migration commands must pass an explicit target database URL.
+- The linked Supabase CLI project is never treated as proof of what the app or a migration command targets.
+- Production is never the default write target.
+
+Local browser runtime files:
+
+```text
+.local-env/staging.env
+.local-env/production.env
+```
+
+Both files are ignored by Git through `.env*.local`. Use the committed examples as templates:
+
+```text
+.env.staging.example
+.env.production.example
+```
+
+Required browser runtime values:
+
+```text
+EXPO_PUBLIC_SUPABASE_URL
+EXPO_PUBLIC_SUPABASE_ANON_KEY
+```
+
+These must be browser-safe anon/publishable keys. Do not use `service_role` in the web client.
+
+Standard runtime commands:
+
+```bash
+npm run web:staging
+npm run web:production
+npm run supabase:runtime:staging
+npm run supabase:runtime:production
+```
+
+`web:staging` defaults to port `8096` and verifies the runtime points at `nvtotcdsvijssokijnbn` before Expo starts. `web:production` defaults to port `8097` and verifies the runtime points at `jjzjuqxysucqutgjnrkk`.
+
+Migration credentials are separate:
+
+```text
+SUPABASE_DB_URL
+```
+
+Store database URLs only in ignored local env files. Do not put DB passwords, access tokens, or service-role keys in `package.json`, docs, source files, or committed examples.
+
+Safe migration commands:
+
+```bash
+npm run db:status:staging
+npm run db:dry-run:staging
+npm run db:push:staging
+
+npm run db:status:production
+npm run db:dry-run:production
+CONFIRM_PRODUCTION_DB_PUSH=jjzjuqxysucqutgjnrkk npm run db:push:production
+```
+
+Production push intentionally requires `CONFIRM_PRODUCTION_DB_PUSH=jjzjuqxysucqutgjnrkk` in the shell. This is still not approval by itself; it is only a local guardrail after Andy explicitly approves a production migration.
+
 Available read-only procedure:
 
 1. Inspect linked project metadata from `supabase/.temp/linked-project.json` without printing secrets.
-2. Run `supabase migration list` to compare local and remote migration history.
+2. Run `npm run db:status:staging` or `npm run db:status:production` to compare local and remote migration history against an explicit target.
 3. Inspect repository migrations and Edge Function source as local intent, not production proof.
 
 Current limits:
@@ -64,6 +134,27 @@ Safety boundary:
 - No migrations.
 - No SQL writes.
 - No service-role credentials in prompts, scripts, logs, docs, or commits.
+- No project-ref inference from shell history, pulled Vercel env files, or Supabase CLI link state.
+
+## Vercel Environment Targeting
+
+Desired environment split:
+
+```text
+Vercel Preview    -> staging Supabase nvtotcdsvijssokijnbn
+Vercel Production -> production Supabase jjzjuqxysucqutgjnrkk
+```
+
+Use Vercel environment variables for deployed builds. Local files are only for local development and migration tooling.
+
+Before Monday release, verify Vercel has:
+
+- Preview `EXPO_PUBLIC_SUPABASE_URL=https://nvtotcdsvijssokijnbn.supabase.co`
+- Preview anon/publishable key for `nvtotcdsvijssokijnbn`
+- Production `EXPO_PUBLIC_SUPABASE_URL=https://jjzjuqxysucqutgjnrkk.supabase.co`
+- Production anon/publishable key for `jjzjuqxysucqutgjnrkk`
+
+Do not deploy or change production env vars without explicit approval.
 
 ## Vercel Deployed-Truth Check
 

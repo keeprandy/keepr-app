@@ -23,9 +23,11 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext";
+import { useWorkspace } from "../context/WorkspaceContext";
 import { layoutStyles } from "../styles/layout";
 import { colors, spacing, radius, shadows } from "../styles/theme";
 import KeeprDateField from "../components/KeeprDateField";
+import { getKeeprSpaceOrgConfig } from "../lib/keeprspaceApi";
 import { createServiceRecordWithStoryEvent } from "../lib/serviceRecordsService";
 import {
   buildKeeprProAssignmentOptions,
@@ -59,11 +61,65 @@ const todayISO = () => {
   return `${yyyy}-${mm}-${dd}`;
 };
 
+const listFromValue = (value) => {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+};
+
+const serviceTemplateLabel = (service) =>
+  service?.owner_facing_label || service?.name || "Service";
+
+const buildServiceTemplateSnapshot = (service) => {
+  if (!service) return null;
+  const template = service.metadata?.service_template || service.metadata || {};
+  const serviceItems = Array.isArray(template.service_items)
+    ? template.service_items
+    : Array.isArray(template.checklist_items)
+    ? template.checklist_items
+    : Array.isArray(service.service_items)
+    ? service.service_items
+    : [];
+  return {
+    id: service.id || null,
+    slug: service.slug || null,
+    key: service.service_key || service.key || service.slug || service.id || null,
+    name: service.name || service.owner_facing_label || "Service",
+    label: serviceTemplateLabel(service),
+    service_type: service.service_type || null,
+    asset_system_type: service.asset_system_type || template.asset_system_type || null,
+    brand_applicability: service.brand_applicability || template.brand_applicability || null,
+    interval_trigger: service.interval_trigger || template.interval_trigger || null,
+    owner_facing_description: service.owner_facing_description || service.description || null,
+    service_items: serviceItems
+      .map((item) => {
+        if (typeof item === "string") return { label: item };
+        if (item && typeof item === "object") {
+          return {
+            ...item,
+            label: item.label || item.title || item.name || "",
+          };
+        }
+        return null;
+      })
+      .filter((item) => item?.label),
+    relationship_purposes: listFromValue(service.relationship_purposes),
+    supported_asset_types: listFromValue(service.supported_asset_types),
+    status: service.status || "active",
+  };
+};
+
 
 /* ------------------------------------------------------------- */
 
 export default function CreateReminderScreen({ navigation, route }) {
   const { user } = useAuth();
+  const { currentWorkspace } = useWorkspace();
   const ownerId = user?.id || null;
 
   const reminderIdFromRoute = route?.params?.reminderId ?? null;
@@ -85,6 +141,7 @@ export default function CreateReminderScreen({ navigation, route }) {
     "",
 };
   const afterSave = route?.params?.afterSave || "Notifications";
+  const afterSaveParams = route?.params?.afterSaveParams || null;
 
 
   const contextAssetId = prefill.asset_id ?? route?.params?.assetId ?? null;
@@ -109,6 +166,7 @@ export default function CreateReminderScreen({ navigation, route }) {
 
   const [dueDateISO, setDueDateISO] = useState(initialISO);
   const [timeText, setTimeText] = useState("09:00");
+  const [scheduleTouched, setScheduleTouched] = useState(false);
 
   const [hasTime, setHasTime] = useState(
     typeof prefill.has_time === "boolean" ? prefill.has_time : true
@@ -142,6 +200,25 @@ export default function CreateReminderScreen({ navigation, route }) {
   const [baseExtraMeta, setBaseExtraMeta] = useState(initialExtraMeta);
   const initialAssignment = normalizeReminderAssignment(initialExtraMeta);
   const initialProvider = normalizeReminderProvider(initialExtraMeta);
+  const initialServiceSnapshot =
+    initialExtraMeta.service_template_snapshot ||
+    initialExtraMeta.serviceTemplateSnapshot ||
+    null;
+  const [actionType, setActionType] = useState(
+    initialServiceSnapshot || initialExtraMeta.action_type === "service"
+      ? "service"
+      : "general"
+  );
+  const [serviceTemplates, setServiceTemplates] = useState([]);
+  const [serviceTemplatesLoading, setServiceTemplatesLoading] = useState(false);
+  const [serviceTemplateError, setServiceTemplateError] = useState(null);
+  const [selectedServiceKey, setSelectedServiceKey] = useState(
+    initialServiceSnapshot?.key ||
+      initialServiceSnapshot?.id ||
+      initialExtraMeta.service_template_id ||
+      initialExtraMeta.service_template_key ||
+      ""
+  );
   const [assignedTo, setAssignedTo] = useState(initialAssignment.assignedTo);
   const [assignmentTarget, setAssignmentTarget] = useState(
     initialAssignment.assignmentTarget
@@ -212,6 +289,7 @@ export default function CreateReminderScreen({ navigation, route }) {
           : todayISO();
 
         setDueDateISO(iso);
+        setScheduleTouched(false);
 
                 const existingTime = data.due_at
           ? new Date(data.due_at)
@@ -244,7 +322,21 @@ export default function CreateReminderScreen({ navigation, route }) {
           {};
         const assignment = normalizeReminderAssignment(em);
         const provider = normalizeReminderProvider(em);
+        const existingServiceSnapshot =
+          em.service_template_snapshot || em.serviceTemplateSnapshot || null;
         setBaseExtraMeta(em);
+        setActionType(
+          existingServiceSnapshot || em.action_type === "service"
+            ? "service"
+            : "general"
+        );
+        setSelectedServiceKey(
+          existingServiceSnapshot?.key ||
+            existingServiceSnapshot?.id ||
+            em.service_template_id ||
+            em.service_template_key ||
+            ""
+        );
         setAssignedTo(assignment.assignedTo);
         setAssignmentTarget(assignment.assignmentTarget);
         setProviderTarget(provider.providerTarget);
@@ -437,6 +529,108 @@ export default function CreateReminderScreen({ navigation, route }) {
       coordinationOrg?.id && (assetId || launchedFromInbox) ? "team" : "private"
     );
   }, [afterSave, assetId, coordinationOrg?.id, isEdit, visibilityTouched]);
+
+  const serviceOrgId =
+    route?.params?.organizationId ||
+    route?.params?.organization_id ||
+    currentWorkspace?.organization_id ||
+    currentWorkspace?.org_id ||
+    baseExtraMeta?.visibility_org_id ||
+    baseExtraMeta?.provider_target?.org_id ||
+    null;
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadServiceTemplates() {
+      if (!serviceOrgId) {
+        setServiceTemplates([]);
+        setServiceTemplateError(null);
+        setServiceTemplatesLoading(false);
+        return;
+      }
+
+      setServiceTemplatesLoading(true);
+      setServiceTemplateError(null);
+      try {
+        const config = await getKeeprSpaceOrgConfig({ organizationId: serviceOrgId });
+        const services = Array.isArray(config?.service_offerings)
+          ? config.service_offerings
+          : [];
+        const activeServices = services.filter((service) => {
+          const status = String(service?.status || "active").toLowerCase();
+          return status !== "inactive" && status !== "archived";
+        });
+        if (mounted) setServiceTemplates(activeServices);
+      } catch (error) {
+        if (mounted) {
+          setServiceTemplates([]);
+          setServiceTemplateError(
+            initialServiceSnapshot
+              ? null
+              : error?.message || "Could not load service templates."
+          );
+        }
+      } finally {
+        if (mounted) setServiceTemplatesLoading(false);
+      }
+    }
+
+    loadServiceTemplates();
+    return () => {
+      mounted = false;
+    };
+  }, [serviceOrgId]);
+
+  const selectedServiceTemplate = useMemo(() => {
+    if (!selectedServiceKey) return null;
+    return (
+      serviceTemplates.find((service) => {
+        const keys = [
+          service.id,
+          service.slug,
+          service.service_key,
+          service.key,
+          service.name,
+          service.owner_facing_label,
+        ]
+          .filter(Boolean)
+          .map(String);
+        return keys.includes(String(selectedServiceKey));
+      }) || null
+    );
+  }, [selectedServiceKey, serviceTemplates]);
+
+  const selectedServiceSnapshot = useMemo(
+    () => buildServiceTemplateSnapshot(selectedServiceTemplate),
+    [selectedServiceTemplate]
+  );
+
+  const effectiveServiceSnapshot = useMemo(() => {
+    if (selectedServiceSnapshot) return selectedServiceSnapshot;
+    if (actionType !== "service") return null;
+    return (
+      baseExtraMeta?.service_template_snapshot ||
+      baseExtraMeta?.serviceTemplateSnapshot ||
+      initialServiceSnapshot ||
+      null
+    );
+  }, [actionType, baseExtraMeta, initialServiceSnapshot, selectedServiceSnapshot]);
+
+  const selectServiceTemplate = useCallback(
+    (service) => {
+      const snapshot = buildServiceTemplateSnapshot(service);
+      if (!snapshot) return;
+      setActionType("service");
+      setSelectedServiceKey(snapshot.key || snapshot.id || snapshot.name);
+      setTitle((current) => current || snapshot.label || snapshot.name || "Service");
+      setNotes((current) => current || snapshot.owner_facing_description || "");
+      if (snapshot.interval_trigger && !repeatRule) {
+        setRepeatRule(snapshot.interval_trigger);
+      }
+    },
+    [repeatRule]
+  );
 
   /* ---------------------- asset + system names ------------------------ */
 
@@ -956,6 +1150,22 @@ export default function CreateReminderScreen({ navigation, route }) {
       d.getDate()
     )}`;
     setDueDateISO(iso);
+    setScheduleTouched(true);
+  };
+
+  const updateDueDateISO = (value) => {
+    setDueDateISO(value);
+    setScheduleTouched(true);
+  };
+
+  const updateTimeText = (value) => {
+    setTimeText(value);
+    setScheduleTouched(true);
+  };
+
+  const toggleHasTime = () => {
+    setHasTime((v) => !v);
+    setScheduleTouched(true);
   };
 
   const buildDueAtISO = () => {
@@ -1393,12 +1603,15 @@ const canSave = useMemo(
   const validate = useCallback(() => {
     if (!ownerId) return "Not signed in.";
     if (!dueDateISO) return "Please select a date.";
+    if (actionType === "service" && !effectiveServiceSnapshot) {
+      return "Please select a Service template.";
+    }
     if (!title.trim()) return "Title is required.";
     if (hasTime && !normalizeTimeText(timeText)) {
       return "Please enter time as HH:MM in 24-hour format.";
     }
     return null;
-  }, [ownerId, dueDateISO, title, hasTime, timeText]);
+  }, [ownerId, dueDateISO, actionType, effectiveServiceSnapshot, title, hasTime, timeText]);
 
   const onSave = useCallback(
     async (nextStatus, completionMetadata = null) => {
@@ -1436,6 +1649,26 @@ const canSave = useMemo(
           extraMeta.action_context === "household"
             ? "Team coordination"
             : extraMeta.action_context;
+
+        if (actionType === "service" && effectiveServiceSnapshot) {
+          extraMeta.action_type = "service";
+          extraMeta.service_action = true;
+          extraMeta.service_template_id = effectiveServiceSnapshot.id || null;
+          extraMeta.service_template_key = effectiveServiceSnapshot.key || null;
+          extraMeta.service_template_name = effectiveServiceSnapshot.name || null;
+          extraMeta.service_template_label = effectiveServiceSnapshot.label || null;
+          extraMeta.service_template_snapshot = effectiveServiceSnapshot;
+          extraMeta.service_template_org_id = serviceOrgId || null;
+        } else {
+          if (extraMeta.action_type === "service") delete extraMeta.action_type;
+          delete extraMeta.service_action;
+          delete extraMeta.service_template_id;
+          delete extraMeta.service_template_key;
+          delete extraMeta.service_template_name;
+          delete extraMeta.service_template_label;
+          delete extraMeta.service_template_snapshot;
+          delete extraMeta.service_template_org_id;
+        }
 
         if (assignmentTarget?.type === "team_member") {
           const responsible = {
@@ -1493,6 +1726,39 @@ const canSave = useMemo(
           };
         } else {
           delete extraMeta.provider_target;
+        }
+
+        const pendingPlaceholderDate = extraMeta.playbook_due_date_placeholder
+          ? String(extraMeta.playbook_due_date_placeholder).slice(0, 10)
+          : null;
+        const hasChangedFromPendingPlaceholder =
+          (extraMeta.playbook_due_date_pending === true ||
+            extraMeta.playbook_due_date_pending === "true") &&
+          pendingPlaceholderDate &&
+          dueDateISO &&
+          pendingPlaceholderDate !== dueDateISO;
+        const isPlaybookAction =
+          extraMeta.source === "keeprspace_playbook" ||
+          extraMeta.playbook_id ||
+          extraMeta.playbook_step_id;
+        const normalizedScheduledTime = hasTime
+          ? normalizeTimeText(timeText) || "09:00"
+          : null;
+        const shouldSyncPlaybookSchedule =
+          Boolean(
+            isPlaybookAction &&
+              dueDateISO &&
+              (scheduleTouched || hasChangedFromPendingPlaceholder)
+          );
+
+        if (shouldSyncPlaybookSchedule) {
+          extraMeta.playbook_due_date_pending = false;
+          delete extraMeta.playbook_due_date_placeholder;
+          extraMeta.playbook_scheduled_date = dueDateISO;
+          extraMeta.playbook_scheduled_time = normalizedScheduledTime;
+          extraMeta.playbook_has_time = !!hasTime;
+          extraMeta.schedule_state = "scheduled";
+          extraMeta.due_time = normalizedScheduledTime;
         }
 
         if (effectiveStatus === "completed") {
@@ -1649,6 +1915,37 @@ const canSave = useMemo(
           savedId = data?.id;
         }
 
+        if (shouldSyncPlaybookSchedule && extraMeta.playbook_step_id) {
+          const { data: stepRow, error: stepLookupError } = await supabase
+            .from("playbook_steps")
+            .select("metadata")
+            .eq("id", extraMeta.playbook_step_id)
+            .maybeSingle();
+
+          if (stepLookupError) throw stepLookupError;
+
+          const nextStepMetadata = {
+            ...((stepRow?.metadata && typeof stepRow.metadata === "object"
+              ? stepRow.metadata
+              : {}) || {}),
+            due_time: normalizedScheduledTime,
+            schedule_state: "scheduled",
+            scheduled_from_action_id: savedId || reminderIdFromRoute || null,
+            scheduled_from_action_at: new Date().toISOString(),
+          };
+
+          const { error: stepUpdateError } = await supabase
+            .from("playbook_steps")
+            .update({
+              due_date: dueDateISO,
+              metadata: nextStepMetadata,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", extraMeta.playbook_step_id);
+
+          if (stepUpdateError) throw stepUpdateError;
+        }
+
         if (
           effectiveStatus === "completed" &&
           repeatRule &&
@@ -1772,6 +2069,7 @@ const canSave = useMemo(
         setStatus(effectiveStatus);
 
         navigation.navigate(afterSave, {
+          ...(afterSaveParams || {}),
           reopenReminderId: savedId,
         });
       } catch (e) {
@@ -1800,7 +2098,10 @@ const canSave = useMemo(
       title,
       notes,
       prefill,
+      dueDateISO,
       hasTime,
+      timeText,
+      scheduleTouched,
       isUrgent,
       repeatRule,
       assetId,
@@ -1809,11 +2110,15 @@ const canSave = useMemo(
       eventId,
       reminderIdFromRoute,
       afterSave,
+      afterSaveParams,
       navigation,
       status,
       isEdit,
       assetName,
       systemName,
+      actionType,
+      effectiveServiceSnapshot,
+      serviceOrgId,
     ]
   );
 
@@ -2276,6 +2581,116 @@ const canSave = useMemo(
             it fires, you’ll jump straight back into this context.
           </Text>
 
+          <View style={styles.card}>
+            <Text style={styles.label}>Action type</Text>
+            <View style={styles.actionTypeRow}>
+              {[
+                { key: "general", label: "General Action", icon: "checkbox-outline" },
+                { key: "service", label: "Service", icon: "construct-outline" },
+              ].map((option) => {
+                const selected = actionType === option.key;
+                return (
+                  <TouchableOpacity
+                    key={option.key}
+                    style={[
+                      styles.actionTypeButton,
+                      selected && styles.actionTypeButtonActive,
+                    ]}
+                    onPress={() => setActionType(option.key)}
+                    activeOpacity={0.9}
+                  >
+                    <Ionicons
+                      name={option.icon}
+                      size={16}
+                      color={selected ? "#FFFFFF" : colors.textSecondary}
+                    />
+                    <Text
+                      style={[
+                        styles.actionTypeText,
+                        selected && styles.actionTypeTextActive,
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {actionType === "service" ? (
+              <View style={styles.serviceTemplateBlock}>
+                <View style={styles.contextHeaderRow}>
+                  <Text style={styles.label}>Service template</Text>
+                  {serviceTemplatesLoading ? (
+                    <ActivityIndicator size="small" color={colors.textSecondary} />
+                  ) : null}
+                </View>
+                {serviceTemplateError ? (
+                  <Text style={styles.warningText}>{serviceTemplateError}</Text>
+                ) : null}
+                {serviceTemplates.length ? (
+                  <View style={styles.choiceGrid}>
+                    {serviceTemplates.map((service) => {
+                      const snapshot = buildServiceTemplateSnapshot(service);
+                      const key =
+                        snapshot?.key ||
+                        snapshot?.id ||
+                        service.name ||
+                        service.owner_facing_label;
+                      const selected =
+                        !!effectiveServiceSnapshot &&
+                        (String(effectiveServiceSnapshot.key || "") === String(snapshot?.key || "") ||
+                          String(effectiveServiceSnapshot.id || "") === String(snapshot?.id || "") ||
+                          String(effectiveServiceSnapshot.label || "") === String(snapshot?.label || ""));
+                      return (
+                        <TouchableOpacity
+                          key={key}
+                          style={[
+                            styles.choicePill,
+                            selected && styles.choicePillActive,
+                          ]}
+                          onPress={() => selectServiceTemplate(service)}
+                          activeOpacity={0.9}
+                        >
+                          <Ionicons
+                            name={selected ? "checkmark-circle" : "construct-outline"}
+                            size={17}
+                            color={selected ? colors.brandBlue : colors.textMuted}
+                          />
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.choiceText}>
+                              {snapshot?.label || snapshot?.name || "Service"}
+                            </Text>
+                            <Text style={styles.choiceDetail}>
+                              {[
+                                snapshot?.asset_system_type,
+                                snapshot?.brand_applicability,
+                                snapshot?.interval_trigger,
+                              ].filter(Boolean).join(" · ") ||
+                                snapshot?.owner_facing_description ||
+                                "Service template"}
+                            </Text>
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                ) : serviceTemplatesLoading ? (
+                  <Text style={styles.help}>Loading Services configured by this KeeprSpace...</Text>
+                ) : (
+                  <Text style={styles.help}>
+                    No active Services are configured for this KeeprSpace yet.
+                  </Text>
+                )}
+                {effectiveServiceSnapshot?.owner_facing_description ? (
+                  <Text style={styles.serviceDescription}>
+                    {effectiveServiceSnapshot.owner_facing_description}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
+          </View>
+
           {/* Title */}
           <View style={styles.card}>
             <Text style={styles.label}>Title</Text>
@@ -2306,7 +2721,7 @@ const canSave = useMemo(
             <Text style={styles.label}>When</Text>
             <KeeprDateField
               value={dueDateISO}
-              onChange={setDueDateISO}
+              onChange={updateDueDateISO}
             />
             <Text style={styles.help}>Stored as {dueDateISO || "—"}</Text>
             {hasTime ? (
@@ -2314,7 +2729,7 @@ const canSave = useMemo(
               <Text style={styles.label}>Time</Text>
               <TextInput
                 value={timeText}
-                onChangeText={setTimeText}
+                onChangeText={updateTimeText}
                 placeholder="08:00"
                 placeholderTextColor={colors.textMuted}
                 style={styles.input}
@@ -2352,7 +2767,7 @@ const canSave = useMemo(
                   styles.toggleBtn,
                   hasTime && styles.toggleBtnActive,
                 ]}
-                onPress={() => setHasTime((v) => !v)}
+                onPress={toggleHasTime}
                 activeOpacity={0.9}
               >
                 <Ionicons
@@ -3397,6 +3812,50 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "900",
     color: colors.textSecondary,
+  },
+
+  actionTypeRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  actionTypeButton: {
+    alignItems: "center",
+    backgroundColor: colors.background,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 42,
+    paddingHorizontal: spacing.md,
+  },
+  actionTypeButtonActive: {
+    backgroundColor: colors.brandNavy,
+    borderColor: colors.brandNavy,
+  },
+  actionTypeText: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  actionTypeTextActive: {
+    color: "#FFFFFF",
+  },
+  serviceTemplateBlock: {
+    marginTop: spacing.md,
+    gap: spacing.sm,
+  },
+  serviceDescription: {
+    backgroundColor: "#EFF6FF",
+    borderColor: "#BFDBFE",
+    borderRadius: radius.md,
+    borderWidth: 1,
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 19,
+    padding: spacing.md,
   },
 
   assignmentGrid: {

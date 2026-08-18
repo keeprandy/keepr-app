@@ -35,6 +35,7 @@ import {
   resolveOrCreateKpcForPicker,
 } from "../lib/kpcApi";
 import { formatMoneyInput, parseMoneyInput } from "../lib/money";
+import { normalizeContributionMetadata } from "../lib/provenance";
 
 /* ---------------- helpers ---------------- */
 async function openContactUrl(url, fallbackMessage) {
@@ -105,6 +106,20 @@ async function safeGetUser() {
       return { data: { user: null }, error: null };
     }
     throw e;
+  }
+}
+
+async function getCurrentUserLabel(userId) {
+  if (!userId) return null;
+  try {
+    const { data } = await supabase
+      .from("profiles")
+      .select("display_name,full_name,email")
+      .eq("id", userId)
+      .maybeSingle();
+    return data?.display_name || data?.full_name || data?.email || null;
+  } catch {
+    return null;
   }
 }
 
@@ -697,6 +712,14 @@ const promoteEventAttachmentsToRecord = async (recordId) => {
             file_name: a?.file_name || "Attachment",
             mime_type: a?.mime_type || null,
             title: a?.file_name || "Attachment",
+            source_context: normalizeContributionMetadata({
+              metadata: {
+                contribution_context: "owner_authored_service_record_proof",
+                contributed_by_user_label: await getCurrentUserLabel(userId),
+              },
+              userId,
+              authorityState: "official",
+            }),
           })
           .select("id")
           .single();
@@ -758,6 +781,15 @@ if (!effectiveAssetId) {
   return;
 }
 
+  const { data: currentUserData, error: currentUserError } = await safeGetUser();
+  if (currentUserError) {
+    setSubmitError(currentUserError.message || "Could not confirm your session.");
+    setSaving(false);
+    return;
+  }
+  const currentUserId = currentUserData?.user?.id || null;
+  const currentUserLabel = await getCurrentUserLabel(currentUserId);
+
   let finalDate = date;
   let finalTitle = title?.trim();
 
@@ -790,16 +822,24 @@ if (!effectiveAssetId) {
     keepr_pro_id: selectedKeeprProId || null,
     source_type: "manual",
     verification_status: "verified",
-    extra_metadata:
-      serviceType === "cost"
-        ? {
-            category: costCategory,
-            mode: costMode,
-            year: costYear,
-            breakdown: costBreakdown || null,
-          }
-        : {},
+    extra_metadata: normalizeContributionMetadata({
+      metadata:
+        serviceType === "cost"
+          ? {
+              category: costCategory,
+              mode: costMode,
+              year: costYear,
+              breakdown: costBreakdown || null,
+            }
+          : {},
+      userId: currentUserId,
+      contributionContext: "owner_authored_service_record",
+      authorityState: "official",
+    }),
   };
+  if (currentUserLabel) {
+    payload.extra_metadata.contributed_by_user_label = currentUserLabel;
+  }
 
 const deleteInboxAttachment = async (attachmentId) => {
   try {
@@ -874,7 +914,6 @@ const deleteInboxAttachment = async (attachmentId) => {
 
     recordId = data?.[0]?.id;
 
-
     if (recordId && pendingAttachmentId) {
       const { error: placementError } = await supabase
         .from("attachment_placements")
@@ -895,6 +934,7 @@ const deleteInboxAttachment = async (attachmentId) => {
         throw placementError;
       }
     }
+
   } catch (e) {
     console.error("Create timeline record error:", e);
     setSubmitError(e?.message || "Could not save this record.");

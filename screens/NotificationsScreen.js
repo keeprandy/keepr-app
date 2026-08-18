@@ -39,6 +39,19 @@ import {
 import { buildMessagesNavigationParams } from "../lib/messagesService";
 import InboxModeSwitch from "../components/navigation/InboxModeSwitch";
 import { INBOX_MODES, navigateToInbox, setLastInboxMode } from "../lib/inboxNavigation";
+import {
+  acceptRelationshipRecordContribution,
+  dismissRelationshipRecordContribution,
+} from "../lib/relationshipContributionsApi";
+import {
+  getActionEstimatedDueAt,
+  getActionScheduledDueAt,
+  isPlaybookDueDatePending,
+} from "../lib/playbookSchedule";
+import {
+  enrichPlaybookActions,
+  getPlaybookStepPosition,
+} from "../lib/playbookActionContext";
 
 
 /* --------------------------- helpers --------------------------- */
@@ -189,8 +202,15 @@ function formatDateLabel(d) {
 }
 
 function getReminderDueLabel(reminder) {
-  if (!reminder?.due_at) return null;
-  const due = new Date(reminder.due_at);
+  if (String(reminder?.status || "").toLowerCase() === "completed") {
+    return "Completed";
+  }
+  if (isPlaybookDueDatePending(reminder)) {
+    return getActionEstimatedDueAt(reminder) ? "Estimated date" : "No estimated date";
+  }
+  const dueAt = getActionScheduledDueAt(reminder);
+  if (!dueAt) return null;
+  const due = new Date(dueAt);
   if (Number.isNaN(due.getTime())) return null;
 
   const now = new Date();
@@ -199,12 +219,57 @@ function getReminderDueLabel(reminder) {
   const today = new Date(now);
   today.setHours(0, 0, 0, 0);
 
-  if (String(reminder?.status || "").toLowerCase() === "completed") {
-    return "Completed";
-  }
   if (due.getTime() < now.getTime()) return "Overdue";
   if (dueDate.getTime() === today.getTime()) return "Due today";
   return "Upcoming";
+}
+
+function getPlaybookContext(action) {
+  return action?.playbook_context && typeof action.playbook_context === "object"
+    ? action.playbook_context
+    : {};
+}
+
+function getPlaybookPlanLine(action) {
+  const context = getPlaybookContext(action);
+  if (!context.is_playbook_action) return null;
+  const name = context.playbook_name || "care plan";
+  return `From your ${name} plan`;
+}
+
+function getPlaybookStepLabel(action) {
+  const context = getPlaybookContext(action);
+  if (!context.is_playbook_action || !context.playbook_step_position) return null;
+  return context.playbook_total_steps
+    ? `Step ${context.playbook_step_position} of ${context.playbook_total_steps}`
+    : `Step ${context.playbook_step_position}`;
+}
+
+function cleanLabel(value) {
+  return String(value || "").trim();
+}
+
+function safeMetadata(value) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
+}
+
+function collectReminderOrgIds(reminders = []) {
+  const ids = new Set();
+  reminders.forEach((reminder) => {
+    const meta = safeMetadata(reminder?.extra_metadata);
+    [
+      meta.visibility_org_id,
+      meta.service_template_org_id,
+      meta.provider_target?.org_id,
+      meta.responsible_party?.org_id,
+      meta.assignment_target?.org_id,
+    ].forEach((id) => {
+      if (id) ids.add(id);
+    });
+  });
+  return Array.from(ids);
 }
 
 function formatMoneyFromCents(cents) {
@@ -494,11 +559,13 @@ const [loading, setLoading] = useState(true);
   const [reminders, setReminders] = useState([]);
   const [reminderFilter, setReminderFilter] = useState("open"); // open | completed
   const [reminderViewMode, setReminderViewMode] = useState("list"); // list | schedule
+  const [collapsedPlaybookIds, setCollapsedPlaybookIds] = useState({});
 
   // Transfer requests (inbox_items)
   const [transferItems, setTransferItems] = useState([]);
   const [transferBusyId, setTransferBusyId] = useState(null);
   const [hubInviteItems, setHubInviteItems] = useState([]);
+  const [relationshipContributionItems, setRelationshipContributionItems] = useState([]);
 
   
 
@@ -506,6 +573,7 @@ const [loading, setLoading] = useState(true);
   const [assetNameById, setAssetNameById] = useState({});
   const [systemNameById, setSystemNameById] = useState({});
   const [homeSystemNameById, setHomeSystemNameById] = useState({});
+  const [orgNameById, setOrgNameById] = useState({});
 
   // Add choice modal (Event vs Reminder)
   const [showAddChoice, setShowAddChoice] = useState(false);
@@ -572,8 +640,9 @@ const showAttachments =
       (events?.length || 0) +
       (reminders?.length || 0) +
       (transferItems?.length || 0) +
-      (hubInviteItems?.length || 0),
-    [events, reminders, transferItems, hubInviteItems]
+      (hubInviteItems?.length || 0) +
+      (relationshipContributionItems?.length || 0),
+    [events, reminders, transferItems, hubInviteItems, relationshipContributionItems]
   );
 
   const visibleEvents = useMemo(() => {
@@ -600,28 +669,51 @@ const showAttachments =
           meta.work_completed_on ||
           meta.actual_completed_date ||
           reminder?.updated_at ||
-          reminder?.due_at
+          getActionScheduledDueAt(reminder)
         );
       }
-      return reminder?.due_at;
+      return getActionScheduledDueAt(reminder);
     },
     [reminderFilter]
   );
 
+  const enrichedReminders = useMemo(
+    () => enrichPlaybookActions(reminders || []),
+    [reminders]
+  );
+
   // Reminders sorted & grouped for schedule view
   const sortedReminders = useMemo(() => {
-    if (!reminders) return [];
-    return [...reminders].sort((a, b) => {
+    if (!enrichedReminders) return [];
+    return [...enrichedReminders].sort((a, b) => {
       if (reminderFilter === "completed") {
         const da = new Date(getReminderPrimaryDate(a) || 0).getTime();
         const db = new Date(getReminderPrimaryDate(b) || 0).getTime();
-        return db - da;
+        if (da !== db) return db - da;
+        const aPosition = getPlaybookStepPosition(a);
+        const bPosition = getPlaybookStepPosition(b);
+        if (aPosition !== bPosition) return aPosition - bPosition;
+        return new Date(b?.created_at || 0).getTime() - new Date(a?.created_at || 0).getTime();
       }
-      const da = a?.due_at ? new Date(a.due_at).getTime() : 0;
-      const db = b?.due_at ? new Date(b.due_at).getTime() : 0;
-      return da - db;
+      const da = getReminderPrimaryDate(a) ? new Date(getReminderPrimaryDate(a)).getTime() : Number.MAX_SAFE_INTEGER;
+      const db = getReminderPrimaryDate(b) ? new Date(getReminderPrimaryDate(b)).getTime() : Number.MAX_SAFE_INTEGER;
+      if (da !== db) return da - db;
+
+      const aNextPlaybook = Boolean(a?.playbook_context?.is_next_playbook_step);
+      const bNextPlaybook = Boolean(b?.playbook_context?.is_next_playbook_step);
+      if (aNextPlaybook !== bNextPlaybook) return aNextPlaybook ? -1 : 1;
+
+      const aPlaybookId = a?.playbook_context?.playbook_id;
+      const bPlaybookId = b?.playbook_context?.playbook_id;
+      if (aPlaybookId && aPlaybookId === bPlaybookId) {
+        const aPosition = getPlaybookStepPosition(a);
+        const bPosition = getPlaybookStepPosition(b);
+        if (aPosition !== bPosition) return aPosition - bPosition;
+      }
+
+      return new Date(a?.created_at || 0).getTime() - new Date(b?.created_at || 0).getTime();
     });
-  }, [reminders, reminderFilter, getReminderPrimaryDate]);
+  }, [enrichedReminders, reminderFilter, getReminderPrimaryDate]);
 
 const remindersByDate = useMemo(() => {
   const map = {};
@@ -638,6 +730,43 @@ const remindersByDate = useMemo(() => {
     () => Object.keys(remindersByDate).sort(),
     [remindersByDate]
   );
+
+  const reminderListGroups = useMemo(() => {
+    const playbookMap = new Map();
+    const individualActions = [];
+
+    sortedReminders.forEach((reminder) => {
+      const context = getPlaybookContext(reminder);
+      const assetName = reminder.asset_id ? assetNameById[reminder.asset_id] : null;
+      const systemName = reminder.system_id ? systemNameById[reminder.system_id] : null;
+      const contextLabel = [assetName, systemName].filter(Boolean).join(" • ");
+      if (!context.is_playbook_action || !context.playbook_id) {
+        individualActions.push(reminder);
+        return;
+      }
+
+      if (!playbookMap.has(context.playbook_id)) {
+        playbookMap.set(context.playbook_id, {
+          id: context.playbook_id,
+          name: context.playbook_name || "Care plan",
+          items: [],
+          hasNextStep: false,
+          contextLabels: [],
+        });
+      }
+      const group = playbookMap.get(context.playbook_id);
+      group.items.push(reminder);
+      group.hasNextStep = group.hasNextStep || Boolean(context.is_next_playbook_step);
+      if (contextLabel && !group.contextLabels.includes(contextLabel)) {
+        group.contextLabels.push(contextLabel);
+      }
+    });
+
+    return {
+      playbookGroups: Array.from(playbookMap.values()),
+      individualActions,
+    };
+  }, [assetNameById, sortedReminders, systemNameById]);
 
   const loadEverything = useCallback(
     async (opts = { silent: false }) => {
@@ -717,6 +846,7 @@ const remindersByDate = useMemo(() => {
         const homeSystemIds = Array.from(
           new Set(evs.map((e) => e.home_system_id).filter(Boolean))
         );
+        const orgIds = collectReminderOrgIds(rems);
 
         const attachmentsPromise = evs.length > 0
           ? supabase
@@ -747,16 +877,25 @@ const remindersByDate = useMemo(() => {
               .in("id", homeSystemIds)
           : Promise.resolve({ data: [], error: null });
 
+        const orgLookupPromise = orgIds.length > 0
+          ? supabase
+              .from("orgs")
+              .select("id, display_name, name")
+              .in("id", orgIds)
+          : Promise.resolve({ data: [], error: null });
+
         const [
           { data: attRows, error: attErr },
           { data: aRows, error: aErr },
           { data: sRows, error: sErr },
           { data: hsRows, error: hsErr },
+          { data: orgRows, error: orgErr },
         ] = await Promise.all([
           attachmentsPromise,
           assetLookupPromise,
           systemLookupPromise,
           homeSystemLookupPromise,
+          orgLookupPromise,
         ]);
 
         if (attErr) throw attErr;
@@ -792,12 +931,21 @@ const remindersByDate = useMemo(() => {
           });
         }
 
+        const orgMap = {};
+        if (!orgErr) {
+          (orgRows || []).forEach((r) => {
+            if (!r?.id) return;
+            orgMap[r.id] = r.display_name || r.name || "Organization";
+          });
+        }
+
         setEvents(evs);
         setAttachmentsByEvent(attachmentsMap);
         setReminders(rems);
         setAssetNameById(assetMap);
         setSystemNameById(systemMap);
         setHomeSystemNameById(homeSystemMap);
+        setOrgNameById(orgMap);
         const inboxItems = inboxRows || [];
 
       setTransferItems(
@@ -806,6 +954,9 @@ const remindersByDate = useMemo(() => {
 
       setHubInviteItems(
         inboxItems.filter((item) => item.type === "hub_invite")
+      );
+      setRelationshipContributionItems(
+        inboxItems.filter((item) => item.type === "relationship_record_contribution")
       );
 
       } catch (e) {
@@ -1416,6 +1567,62 @@ const handleViewHubInvite = (item) => {
   });
 };
 
+const handleAcceptRelationshipContribution = async (item) => {
+  const contributionId = item?.payload?.contribution_id;
+  if (!contributionId) {
+    Alert.alert("Contribution unavailable", "This Inbox item is missing its contribution id.");
+    return;
+  }
+
+  setTransferBusyId(item.id);
+  try {
+    const result = await acceptRelationshipRecordContribution({ contributionId });
+    await supabase
+      .from("inbox_items")
+      .update({
+        status: "accepted",
+        responded_at: new Date().toISOString(),
+      })
+      .eq("id", item.id)
+      .eq("to_user_id", ownerId);
+    await loadEverything({ silent: true });
+    Alert.alert("Added to history", "The Wilson record is now part of this asset history.");
+    if (result?.service_record_id) {
+      navigation.navigate("TimelineRecord", {
+        serviceRecordId: result.service_record_id,
+        recordId: result.service_record_id,
+      });
+    }
+  } catch (e) {
+    Alert.alert("Could not accept contribution", e?.message || "Please try again.");
+  } finally {
+    setTransferBusyId(null);
+  }
+};
+
+const handleDismissRelationshipContribution = async (item) => {
+  const contributionId = item?.payload?.contribution_id;
+  if (!contributionId) return;
+
+  setTransferBusyId(item.id);
+  try {
+    await dismissRelationshipRecordContribution({ contributionId });
+    await supabase
+      .from("inbox_items")
+      .update({
+        status: "declined",
+        responded_at: new Date().toISOString(),
+      })
+      .eq("id", item.id)
+      .eq("to_user_id", ownerId);
+    await loadEverything({ silent: true });
+  } catch (e) {
+    Alert.alert("Could not dismiss contribution", e?.message || "Please try again.");
+  } finally {
+    setTransferBusyId(null);
+  }
+};
+
   /* ------------------------- render helpers ------------------------- */
 
   const badgeForStatus = (statusRaw) => {
@@ -1824,18 +2031,38 @@ return (
     </View>
   );
 
-  const renderReminderRow = (r) => {
+  const renderReminderRow = (r, options = {}) => {
     const assetName = r.asset_id ? assetNameById[r.asset_id] : null;
     const systemName = r.system_id ? systemNameById[r.system_id] : null;
     const ctx = [assetName, systemName].filter(Boolean).join(" • ");
+    const meta = safeMetadata(r?.extra_metadata);
     const responsibleLabel = getReminderResponsibilityLabel(r);
-    const providerLabel = getReminderProviderLabel(r);
+    const explicitProviderLabel = getReminderProviderLabel(r);
     const visibilityScope = getReminderVisibilityScope(r);
     const actionContext = getReminderActionContext(r);
+    const playbookContext = getPlaybookContext(r);
+    const sharedOrgLabel = meta.visibility_org_id
+      ? cleanLabel(orgNameById[meta.visibility_org_id])
+      : null;
+    const providerOrgLabel = cleanLabel(
+      explicitProviderLabel ||
+        meta.provider_target?.label ||
+        (meta.service_template_org_id ? orgNameById[meta.service_template_org_id] : null)
+    );
+    const providerLabel =
+      providerOrgLabel && providerOrgLabel !== sharedOrgLabel
+        ? providerOrgLabel
+        : null;
+    const visibilityLabel =
+      sharedOrgLabel && playbookContext.is_playbook_action
+        ? `Shared with ${sharedOrgLabel}`
+        : visibilityScope === "team"
+        ? actionContext === "household"
+          ? "Shared with Team"
+          : "Team-visible"
+        : "Private";
     const responsibleParty =
-      r?.extra_metadata && typeof r.extra_metadata === "object"
-        ? r.extra_metadata.responsible_party || r.extra_metadata.assignment_target || {}
-        : {};
+      meta.responsible_party || meta.assignment_target || {};
     const assignedToMe =
       responsibleParty?.type === "team_member" &&
       String(responsibleParty?.id || "") === String(ownerId || "");
@@ -1844,12 +2071,12 @@ return (
       (!responsibleLabel || responsibleLabel === "Unassigned");
     const dueLabel = getReminderDueLabel(r);
     const primaryDate = getReminderPrimaryDate(r);
-    const completionMeta =
-      r?.extra_metadata && typeof r.extra_metadata === "object"
-        ? r.extra_metadata
-        : {};
+    const playbookPlanLine = getPlaybookPlanLine(r);
+    const playbookStepLabel = getPlaybookStepLabel(r);
+    const isCompleted = String(r?.status || "").toLowerCase() === "completed";
+    const completionMeta = meta;
     const overdue =
-      r.status === "open" && r.due_at && new Date(r.due_at) < new Date();
+      r.status === "open" && primaryDate && new Date(primaryDate) < new Date();
     const completedAt = completionMeta.completed_at || null;
     const workCompletedOn =
       completionMeta.work_completed_on || completionMeta.actual_completed_date;
@@ -1864,11 +2091,7 @@ return (
       ? "Repeat needs review"
       : null;
     const secondaryBits = [
-      visibilityScope === "team"
-        ? actionContext === "household"
-          ? "Shared with Team"
-          : "Team-visible"
-        : "Private",
+      visibilityLabel,
       assignedToMe ? "Assigned to you" : null,
       unassignedTeam ? "Unassigned Team Action" : null,
       responsibleLabel ? `Responsible: ${responsibleLabel}` : null,
@@ -1887,6 +2110,8 @@ return (
           styles.reminderCard,
           assignedToMe && styles.reminderCardAssignedToMe,
           unassignedTeam && styles.reminderCardUnassignedTeam,
+          playbookContext.is_next_playbook_step && styles.reminderCardNextPlaybook,
+          isCompleted && styles.reminderCardCompleted,
         ]}
         activeOpacity={0.9}
         onPress={() =>
@@ -1897,16 +2122,32 @@ return (
         }
       >
         <View style={{ flex: 1 }}>
+          {playbookContext.is_next_playbook_step ? (
+            <Text style={styles.nextCareCycleText}>Next in your care cycle</Text>
+          ) : null}
           <View
             style={{
               flexDirection: "row",
               alignItems: "center",
               gap: 8,
+              flexWrap: "wrap",
             }}
           >
             <Text style={styles.reminderTitle} numberOfLines={1}>
               {r.title}
             </Text>
+            {playbookStepLabel ? (
+              <View
+                style={[
+                  styles.badge,
+                  playbookContext.is_next_playbook_step
+                    ? styles.badgePlaybookNext
+                    : styles.badgeNeutral,
+                ]}
+              >
+                <Text style={styles.badgeText}>{playbookStepLabel}</Text>
+              </View>
+            ) : null}
             {r.is_urgent ? (
               <View style={[styles.badge, styles.badgeOrange]}>
                 <Text style={styles.badgeText}>Urgent</Text>
@@ -1930,6 +2171,11 @@ return (
               </View>
             ) : null}
           </View>
+          {playbookPlanLine && !options.suppressPlaybookPlanLine ? (
+            <Text style={styles.reminderPlaybookMeta} numberOfLines={1}>
+              {playbookPlanLine}
+            </Text>
+          ) : null}
           <Text style={styles.reminderMeta} numberOfLines={1}>
             {formatDateTimeUS(primaryDate)}
           </Text>
@@ -1950,6 +2196,75 @@ return (
           color={colors.textMuted}
         />
       </TouchableOpacity>
+    );
+  };
+
+  const togglePlaybookGroup = (playbookId) => {
+    setCollapsedPlaybookIds((prev) => ({
+      ...prev,
+      [playbookId]: !prev?.[playbookId],
+    }));
+  };
+
+  const renderPlaybookReminderGroup = (group) => {
+    const items = group?.items || [];
+    const collapsed = Boolean(collapsedPlaybookIds?.[group.id]);
+    const nextItem = items.find((item) => getPlaybookContext(item).is_next_playbook_step);
+    const nextStepLabel = nextItem ? getPlaybookStepLabel(nextItem) : null;
+    const countLabel =
+      reminderFilter === "completed"
+        ? `${items.length} completed step${items.length === 1 ? "" : "s"}`
+        : `${items.length} open step${items.length === 1 ? "" : "s"}`;
+
+    return (
+      <View key={group.id} style={styles.playbookReminderGroup}>
+        <TouchableOpacity
+          style={styles.playbookReminderHeader}
+          activeOpacity={0.85}
+          onPress={() => togglePlaybookGroup(group.id)}
+        >
+          <View style={{ flex: 1 }}>
+            {group.hasNextStep ? (
+              <Text style={styles.nextCareCycleText}>Next in your care cycle</Text>
+            ) : null}
+            <Text style={styles.playbookReminderTitle} numberOfLines={1}>
+              {group.name}
+            </Text>
+            <Text style={styles.playbookReminderMeta} numberOfLines={1}>
+              From your {group.name} plan
+            </Text>
+            {group.contextLabels?.length ? (
+              <Text style={styles.playbookReminderContext} numberOfLines={1}>
+                {group.contextLabels.length === 1
+                  ? `For ${group.contextLabels[0]}`
+                  : `Across ${group.contextLabels.length} assets or systems`}
+              </Text>
+            ) : null}
+          </View>
+          <View style={styles.playbookReminderHeaderPills}>
+            {nextStepLabel ? (
+              <View style={[styles.badge, styles.badgePlaybookNext]}>
+                <Text style={styles.badgeText}>{nextStepLabel}</Text>
+              </View>
+            ) : null}
+            <View style={[styles.badge, styles.badgeNeutral]}>
+              <Text style={styles.badgeText}>{countLabel}</Text>
+            </View>
+            <View style={styles.playbookToggleButton}>
+              <Ionicons
+                name={collapsed ? "chevron-down" : "chevron-up"}
+                size={16}
+                color={colors.textSecondary}
+              />
+            </View>
+          </View>
+        </TouchableOpacity>
+        {!collapsed ? (
+          <View style={styles.playbookReminderItems}>
+            {items.map((item) => renderReminderRow(item, { suppressPlaybookPlanLine: true }))}
+          </View>
+        ) : null}
+      </View>
     );
   };
 
@@ -2136,6 +2451,77 @@ Use this for your own forwarding or with trusted sources.
 
         <View style={{ height: spacing.xl }} />
 
+        {/* ---------------- Relationship record contributions ---------------- */}
+        <Text style={styles.sectionTitle}>Relationship contributions</Text>
+
+        {relationshipContributionItems.length === 0 ? (
+          <View style={styles.emptyRow}>
+            <Ionicons name="document-text-outline" size={18} color={colors.textMuted} />
+            <Text style={styles.emptyText}>No contributed records waiting for review.</Text>
+          </View>
+        ) : (
+          <View style={{ gap: spacing.md }}>
+            {relationshipContributionItems.map((item) => {
+              const payload = item.payload || {};
+              const busy = transferBusyId === item.id;
+              return (
+                <View key={item.id} style={styles.transferCard}>
+                  <View style={styles.transferHeaderRow}>
+                    <View style={styles.transferIcon}>
+                      <Ionicons name="document-attach-outline" size={18} color="#2563EB" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.transferTitle} numberOfLines={2}>
+                        {payload.title || "Contributed record"}
+                      </Text>
+                      <Text style={styles.transferMeta}>
+                        {[
+                          payload.performed_at,
+                          payload.record_type,
+                          payload.amount ? `$${payload.amount}` : null,
+                        ].filter(Boolean).join(" · ") || "Relationship record"}
+                      </Text>
+                    </View>
+                    <View style={[styles.transferStatusPill, styles.transferStatusPending]}>
+                      <Text style={styles.transferStatusText}>REVIEW</Text>
+                    </View>
+                  </View>
+
+                  <Text style={styles.transferBody}>
+                    {payload.note || "Wilson sent a record for you to review and add to this asset history."}
+                  </Text>
+
+                  <View style={styles.transferActionsRow}>
+                    <TouchableOpacity
+                      style={styles.transferSecondaryBtn}
+                      onPress={() => handleDismissRelationshipContribution(item)}
+                      disabled={busy}
+                    >
+                      <Ionicons name="close-circle-outline" size={16} color="#DC2626" />
+                      <Text style={styles.transferSecondaryText}>Dismiss</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.transferPrimaryBtn}
+                      onPress={() => handleAcceptRelationshipContribution(item)}
+                      disabled={busy}
+                    >
+                      {busy ? (
+                        <ActivityIndicator size="small" color="#FFFFFF" />
+                      ) : (
+                        <Ionicons name="checkmark-circle-outline" size={16} color="#FFF" />
+                      )}
+                      <Text style={styles.transferPrimaryText}>Add to history</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
+
+        <View style={{ height: spacing.xl }} />
+
         {/* ---------------- Transfer requests ---------------- */}
         <Text style={styles.sectionTitle}>Transfer requests</Text>
 
@@ -2266,7 +2652,27 @@ Use this for your own forwarding or with trusted sources.
               </Text>
             </View>
           ) : reminderViewMode === "list" ? (
-            sortedReminders.map(renderReminderRow)
+            <>
+              {reminderListGroups.playbookGroups.length > 0 ? (
+                <View style={styles.reminderListSection}>
+                  <Text style={styles.reminderListSectionLabel}>Care plans</Text>
+                  <View style={{ gap: spacing.sm }}>
+                    {reminderListGroups.playbookGroups.map(renderPlaybookReminderGroup)}
+                  </View>
+                </View>
+              ) : null}
+
+              {reminderListGroups.individualActions.length > 0 ? (
+                <View style={styles.reminderListSection}>
+                  <Text style={styles.reminderListSectionLabel}>Individual actions</Text>
+                  <View style={{ gap: spacing.sm }}>
+                    {reminderListGroups.individualActions.map((item) =>
+                      renderReminderRow(item)
+                    )}
+                  </View>
+                </View>
+              ) : null}
+            </>
           ) : (
             reminderDateKeys.map((key) => {
               const items = remindersByDate[key] || [];
@@ -4179,11 +4585,30 @@ statusReadyDraftText: {
     borderColor: "#F59E0B55",
     backgroundColor: "#FFFBEB",
   },
+  reminderCardNextPlaybook: {
+    borderColor: "#93C5FD",
+    backgroundColor: "#EFF6FF",
+  },
+  reminderCardCompleted: {
+    opacity: 0.72,
+  },
   reminderTitle: {
     fontSize: 14,
     fontWeight: "900",
     color: colors.textPrimary,
     flexShrink: 1,
+  },
+  nextCareCycleText: {
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: "900",
+    marginBottom: 3,
+  },
+  reminderPlaybookMeta: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: colors.textSecondary,
+    marginTop: 3,
   },
   reminderMeta: {
     fontSize: 12,
@@ -4202,6 +4627,66 @@ statusReadyDraftText: {
     fontWeight: "700",
     color: colors.textMuted,
     marginTop: 3,
+  },
+  reminderListSection: {
+    gap: spacing.sm,
+  },
+  reminderListSectionLabel: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  playbookReminderGroup: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    borderRadius: radius.lg,
+    padding: spacing.sm,
+    gap: spacing.sm,
+    ...(shadows?.subtle || {}),
+  },
+  playbookReminderHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.sm,
+  },
+  playbookReminderTitle: {
+    fontSize: 15,
+    fontWeight: "900",
+    color: colors.textPrimary,
+  },
+  playbookReminderMeta: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  playbookReminderContext: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  playbookReminderHeaderPills: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+    gap: 6,
+    maxWidth: 260,
+  },
+  playbookToggleButton: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#CBD5E133",
+  },
+  playbookReminderItems: {
+    gap: spacing.sm,
   },
 
   reminderDayBlock: {
@@ -4223,6 +4708,7 @@ statusReadyDraftText: {
   badgeOrange: { backgroundColor: "#FFF7ED", borderColor: "#FDBA7422" },
   badgeRed: { backgroundColor: "#FEF2F2", borderColor: "#FCA5A522" },
   badgeBlue: { backgroundColor: "#EFF6FF", borderColor: "#93C5FD33" },
+  badgePlaybookNext: { backgroundColor: "#DBEAFE", borderColor: "#93C5FD" },
   badgeNeutral: { backgroundColor: "#F8FAFC", borderColor: "#CBD5E133" },
   badgeText: { fontSize: 11, fontWeight: "900", color: colors.textPrimary },
 

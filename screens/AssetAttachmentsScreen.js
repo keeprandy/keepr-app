@@ -41,6 +41,7 @@ import {
   createLinkAttachment,
   uploadAttachmentFromUri,
 } from "../lib/attachmentsUploader";
+import { clearKeeprSpaceAssetHero, setKeeprSpaceAssetHero } from "../lib/keeprspaceApi";
 
 import { getSignedUrl } from "../lib/attachmentsApi";
 import LinkCoverCard from "../components/LinkCoverCard";
@@ -179,6 +180,19 @@ function formatDate(raw) {
   } catch {
     return "—";
   }
+}
+
+function assetPlacementIdForRow(row, assetId) {
+  if (!row) return null;
+  if (row.asset_placement_id) return row.asset_placement_id;
+  if (row.placement_id && (row.target_type === "asset" || !row.target_type)) return row.placement_id;
+  const placements = Array.isArray(row.placements) ? row.placements : [];
+  return (
+    placements.find((placement) => (
+      placement?.target_type === "asset" &&
+      (!assetId || placement?.target_id === assetId)
+    ))?.id || null
+  );
 }
 
 function Badge({ text }) {
@@ -532,6 +546,7 @@ function AttachmentDetailsPanel({
   showcaseBusy,
   canToggleShowcase,
   handleToggleShowcase,
+  handleSetAssetHero,
   draftTitle,
   setDraftTitle,
   draftUrl,
@@ -699,6 +714,20 @@ function AttachmentDetailsPanel({
           </TouchableOpacity>
         </View>
       )}
+
+      {selected?._isPhoto && selected?.asset_placement_id ? (
+        <View style={styles.showcaseRow}>
+          <Text style={styles.label}>Hero</Text>
+          <TouchableOpacity
+            onPress={handleSetAssetHero}
+            disabled={showcaseBusy}
+            style={[styles.showcaseToggle, showcaseBusy && { opacity: 0.6 }]}
+          >
+            <Ionicons name="image-outline" size={16} color={colors.primary} style={{ marginRight: 8 }} />
+            <Text style={styles.showcaseToggleText}>Make asset Hero</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
       <View style={styles.sectionDivider} />
 
@@ -902,6 +931,15 @@ export default function AssetAttachmentsScreen({ route, navigation }) {
   const scopeTargetId = route?.params?.scopeTargetId || null;
   const fromTargetId = route?.params?.targetId || null;
   const fromTargetRole = route?.params?.targetRole || null;
+  const returnParams =
+    route?.params?.returnParams && typeof route.params.returnParams === "object"
+      ? route.params.returnParams
+      : {};
+  const organizationId =
+    route?.params?.organizationId ||
+    route?.params?.orgId ||
+    returnParams?.organizationId ||
+    null;
  
 
   // Scope override: null = use route scope, "none" = show all
@@ -1204,6 +1242,14 @@ const isWide = IS_WEB && width >= 980;
   const [assocBusy, setAssocBusy] = useState(false);
   const assocBusyRef = useRef(false);
   const [showcaseBusy, setShowcaseBusy] = useState(false);
+  const [assetHeroPlacementId, setAssetHeroPlacementId] = useState(null);
+  const [relationshipHeroPlacementId, setRelationshipHeroPlacementId] = useState(null);
+  const [activeAssetRelationshipId, setActiveAssetRelationshipId] = useState(null);
+  const hasWorkspaceHeroContext = Boolean(organizationId && activeAssetRelationshipId);
+  const effectiveHeroPlacementId =
+    hasWorkspaceHeroContext && relationshipHeroPlacementId
+      ? relationshipHeroPlacementId
+      : assetHeroPlacementId;
 
   // NEW: picker state
   const [systemPickerOpen, setSystemPickerOpen] = useState(false);
@@ -1244,6 +1290,52 @@ const isWide = IS_WEB && width >= 980;
       refresh?.();
     }, [assetId, refresh])
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadAssetHeroPlacement = async () => {
+      if (!assetId) {
+        setAssetHeroPlacementId(null);
+        return;
+      }
+      const [{ data, error }, relationshipResult] = await Promise.all([
+        supabase
+        .from("assets")
+        .select("hero_placement_id")
+        .eq("id", assetId)
+          .maybeSingle(),
+        organizationId
+          ? supabase
+              .from("asset_relationships")
+              .select("id,metadata")
+              .eq("asset_id", assetId)
+              .eq("organization_id", organizationId)
+              .eq("status", "active")
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
+      ]);
+      if (!cancelled && !error) setAssetHeroPlacementId(data?.hero_placement_id || null);
+      if (!cancelled) {
+        if (relationshipResult?.error || !relationshipResult?.data?.id) {
+          setActiveAssetRelationshipId(null);
+          setRelationshipHeroPlacementId(null);
+        } else {
+          setActiveAssetRelationshipId(relationshipResult.data.id);
+          setRelationshipHeroPlacementId(
+            relationshipResult.data.metadata?.presentation?.hero_placement_id ||
+              relationshipResult.data.metadata?.presentation?.heroPlacementId ||
+              null
+          );
+        }
+      }
+    };
+    loadAssetHeroPlacement();
+    return () => {
+      cancelled = true;
+    };
+  }, [assetId, organizationId, refresh]);
 
   // ✅ Load system + record name indexes for filters / labels (no schema changes required)
   useEffect(() => {
@@ -2332,6 +2424,66 @@ const openAdd = () => {
     }
   }, [assetId, canToggleShowcase, refresh, selected]);
 
+  const handleSetAssetHeroForRow = useCallback(async (row = selected) => {
+    const placementId = assetPlacementIdForRow(row, assetId);
+    if (!assetId || !placementId || !row?._isPhoto) return;
+    try {
+      setShowcaseBusy(true);
+      if (hasWorkspaceHeroContext) {
+        await setKeeprSpaceAssetHero({
+          assetId,
+          organizationId,
+          placementId,
+        });
+        setRelationshipHeroPlacementId(placementId);
+      } else {
+        const { error } = await supabase.rpc("set_asset_hero_placement", {
+          p_asset_id: assetId,
+          p_placement_id: placementId,
+        });
+        if (error) throw error;
+        setAssetHeroPlacementId(placementId);
+      }
+      setSelected((prev) =>
+        prev && (prev.attachment_id === row.attachment_id)
+          ? { ...prev, asset_placement_id: placementId }
+          : prev
+      );
+      try {
+        DeviceEventEmitter.emit("keepr:attachment:updated", {
+          assetId,
+          attachmentId: row.attachment_id,
+        });
+      } catch {}
+      await refresh();
+    } catch (e) {
+      Alert.alert("Hero update failed", e?.message || "Could not set this photo as Hero.");
+    } finally {
+      setShowcaseBusy(false);
+    }
+  }, [assetId, hasWorkspaceHeroContext, organizationId, refresh, selected]);
+
+  const handleSetAssetHero = useCallback(() => {
+    handleSetAssetHeroForRow(selected);
+  }, [handleSetAssetHeroForRow, selected]);
+
+  const handleClearWorkspaceHero = useCallback(async () => {
+    if (!assetId || !hasWorkspaceHeroContext) return;
+    try {
+      setShowcaseBusy(true);
+      await clearKeeprSpaceAssetHero({ assetId, organizationId });
+      setRelationshipHeroPlacementId(null);
+      try {
+        DeviceEventEmitter.emit("keepr:attachment:updated", { assetId });
+      } catch {}
+      await refresh();
+    } catch (e) {
+      Alert.alert("Hero update failed", e?.message || "Could not clear this workspace Hero.");
+    } finally {
+      setShowcaseBusy(false);
+    }
+  }, [assetId, hasWorkspaceHeroContext, organizationId, refresh]);
+
   const viewerRow = useMemo(() => {
     if (!viewerVisible) return null;
     return (filtered || [])[viewerIndex] || null;
@@ -2408,6 +2560,66 @@ const openAdd = () => {
       />
     </TouchableOpacity>
   ), [showcaseBusy, toggleShowcaseForRow]);
+
+  const renderHeroButton = useCallback((row, styleOverride) => {
+    const placementId = assetPlacementIdForRow(row, assetId);
+    if (!row?._isPhoto || !placementId) return null;
+    const isHero = effectiveHeroPlacementId && placementId === effectiveHeroPlacementId;
+    const isWorkspaceOverride =
+      hasWorkspaceHeroContext &&
+      relationshipHeroPlacementId &&
+      placementId === relationshipHeroPlacementId;
+    return (
+      <View style={styles.heroDesignationGroup}>
+        <TouchableOpacity
+          style={[
+            styles.heroDesignationButton,
+            isHero && styles.heroDesignationButtonActive,
+            showcaseBusy && { opacity: 0.55 },
+            styleOverride,
+          ]}
+          onPress={(e) => {
+            e?.stopPropagation?.();
+            handleSetAssetHeroForRow(row);
+          }}
+          disabled={showcaseBusy || isHero}
+          accessibilityRole="button"
+          accessibilityLabel={isHero ? "Current Hero" : "Make Hero"}
+        >
+          <Ionicons
+            name={isHero ? "image" : "image-outline"}
+            size={18}
+            color={isHero ? "#FFFFFF" : colors.primary}
+          />
+          <Text style={[styles.heroDesignationText, isHero && styles.heroDesignationTextActive]}>
+            {isHero ? "Hero" : "Make Hero"}
+          </Text>
+        </TouchableOpacity>
+        {isWorkspaceOverride ? (
+          <TouchableOpacity
+            style={[styles.heroClearButton, showcaseBusy && { opacity: 0.55 }]}
+            onPress={(e) => {
+              e?.stopPropagation?.();
+              handleClearWorkspaceHero();
+            }}
+            disabled={showcaseBusy}
+            accessibilityRole="button"
+            accessibilityLabel="Clear workspace Hero"
+          >
+            <Text style={styles.heroClearText}>Clear</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    );
+  }, [
+    assetId,
+    effectiveHeroPlacementId,
+    handleClearWorkspaceHero,
+    handleSetAssetHeroForRow,
+    hasWorkspaceHeroContext,
+    relationshipHeroPlacementId,
+    showcaseBusy,
+  ]);
 
 return (
   <SafeAreaView style={[layoutStyles.screen, styles.screen]}>
@@ -3031,17 +3243,24 @@ return (
                                 {row.kind === "link" ? safeStr(row.url) : row.file_name}
                               </Text>
 
+                              {!!row.attribution && (
+                                <Text style={styles.rowSubSmall} numberOfLines={1}>
+                                  {row.attribution}
+                                </Text>
+                              )}
+
                               <Text style={styles.rowSubSmall} numberOfLines={1}>
                                 Added: {formatDate(row.created_at)}
                               </Text>
                             </View>
                           </View>
 
-                          <View style={styles.rowRight}>
-                            <Badge text={row.badge} />
+	                          <View style={styles.rowRight}>
+	                            <Badge text={row.badge} />
+                              {renderHeroButton(row)}
 
-                            {/* ✅ Proof Builder and Keepr Intelligence entry point */}
-                            <View style={styles.rowRight}>
+	                            {/* ✅ Proof Builder and Keepr Intelligence entry point */}
+	                            <View style={styles.rowRight}>
 
 
                               {/* Proof Builder */}
@@ -3101,6 +3320,7 @@ return (
                     showcaseBusy={showcaseBusy}
                     canToggleShowcase={canToggleShowcase}
                     handleToggleShowcase={handleToggleShowcase}
+                    handleSetAssetHero={handleSetAssetHero}
                     draftTitle={draftTitle}
                     setDraftTitle={setDraftTitle}
                     draftUrl={draftUrl}
@@ -3255,6 +3475,19 @@ return (
                         </TouchableOpacity>
                       </View>
                     )}
+                    {selected?._isPhoto && selected?.asset_placement_id ? (
+                      <View style={styles.showcaseRow}>
+                        <Text style={styles.label}>Hero</Text>
+                        <TouchableOpacity
+                          onPress={handleSetAssetHero}
+                          disabled={showcaseBusy}
+                          style={[styles.showcaseToggle, showcaseBusy && { opacity: 0.6 }]}
+                        >
+                          <Ionicons name="image-outline" size={16} color={colors.primary} />
+                          <Text style={styles.showcaseToggleText}>Make asset Hero</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : null}
                     <View style={styles.sectionBlock}>
                     <Text style={styles.label}>“What role does this play in your ownership story?”</Text>
                         <Text style={styles.textSecondary}>
@@ -3601,17 +3834,24 @@ return (
                                 {row.kind === "link" ? safeStr(row.url) : row.file_name}
                               </Text>
 
+                              {!!row.attribution && (
+                                <Text style={styles.rowSubSmall} numberOfLines={1}>
+                                  {row.attribution}
+                                </Text>
+                              )}
+
                               <Text style={styles.rowSubSmall} numberOfLines={1}>
                                 Added: {formatDate(row.created_at)}
                               </Text>
                             </View>
                           </View>
 
-                          <View style={styles.rowRight}>
-                            <Badge text={row.badge} />
+	                          <View style={styles.rowRight}>
+	                            <Badge text={row.badge} />
+                              {renderHeroButton(row, styles.heroDesignationButtonMobile)}
 
-                            {/* ✅ Proof Builder and Keepr Intelligence entry point */}
-                            <View style={styles.rowRight}>
+	                            {/* ✅ Proof Builder and Keepr Intelligence entry point */}
+	                            <View style={styles.rowRight}>
                               {/* Keepr Intelligence */}
 
                               {/* Proof Builder */}
@@ -4010,6 +4250,44 @@ rowRight: {
 rowAction: {
   padding: 6,
   borderRadius: 6,
+},
+heroDesignationGroup: {
+  alignItems: "center",
+  gap: 6,
+},
+heroDesignationButton: {
+  alignItems: "center",
+  borderColor: colors.border,
+  borderRadius: radius.pill,
+  borderWidth: 1,
+  flexDirection: "row",
+  gap: 6,
+  minHeight: 34,
+  paddingHorizontal: 10,
+},
+heroDesignationButtonActive: {
+  backgroundColor: colors.primary,
+  borderColor: colors.primary,
+},
+heroDesignationButtonMobile: {
+  paddingHorizontal: 8,
+},
+heroDesignationText: {
+  color: colors.primary,
+  fontSize: 12,
+  fontWeight: "900",
+},
+heroDesignationTextActive: {
+  color: "#FFFFFF",
+},
+heroClearButton: {
+  paddingHorizontal: 8,
+  paddingVertical: 3,
+},
+heroClearText: {
+  color: colors.textSecondary,
+  fontSize: 11,
+  fontWeight: "800",
 },
 
 helperText: {

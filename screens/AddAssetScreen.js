@@ -185,6 +185,7 @@ export default function AddAssetScreen({ navigation, route }) {
     () => ASSET_TYPE_CONFIGS[initialType] || ASSET_TYPE_CONFIGS.other,
     [initialType]
   );
+  const fixedAssetType = typeConfig.id || "other";
 
   // Fields
   const [name, setName] = useState("");
@@ -194,7 +195,7 @@ export default function AddAssetScreen({ navigation, route }) {
   const [serialNumber, setSerialNumber] = useState("");
   const [condition, setCondition] = useState("");
   const [assetMode, setAssetMode] = useState("personal");
-  const [assetSubtype, setAssetSubtype] = useState("");
+  const [assetSubtype, setAssetSubtype] = useState(fixedAssetType === "other" ? "" : fixedAssetType);
 
   // Hero photo: select locally, upload on save
   const [heroLocalUri, setHeroLocalUri] = useState(null);
@@ -329,7 +330,7 @@ export default function AddAssetScreen({ navigation, route }) {
       const payload = {
         ownerId,
         name: name?.trim() || null,
-        type: "other",
+        type: fixedAssetType,
         make: make?.trim() || null,
         model: model?.trim() || null,
         year: safeInt(year),
@@ -337,7 +338,7 @@ export default function AddAssetScreen({ navigation, route }) {
         condition: condition?.trim() || null,
         assetMode,
         primaryPhotoUrl: null,
-        assetSubtype: assetSubtype?.trim() || null,
+        assetSubtype: assetSubtype?.trim() || fixedAssetType,
       };
 
       const asset = await createAssetWithDefaults(payload);
@@ -349,7 +350,7 @@ export default function AddAssetScreen({ navigation, route }) {
 
       await supabase
       .from("assets")
-      .update({ asset_subtype: assetSubtype?.trim() || null })
+      .update({ asset_subtype: assetSubtype?.trim() || fixedAssetType })
       .eq("id", asset.id);
 
 if (heroPending?.uri) {
@@ -432,7 +433,7 @@ if (heroPending?.uri) {
           showsVerticalScrollIndicator
         >
         <View style={styles.header}>
-          <Text style={styles.title}>Add asset</Text>
+          <Text style={styles.title}>Add {typeConfig.label.toLowerCase()}</Text>
           <Text style={styles.subtitle}>
             Add the basics now. Photos and documents can come later.
           </Text>
@@ -467,14 +468,18 @@ if (heroPending?.uri) {
           </View>
           <Text style={styles.modeHint}>Used for reporting and future business features.</Text>
 
-          <Text style={styles.label}>Asset type</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Guitar, camera, watch, collectible, tool..."
-            placeholderTextColor={colors.textMuted}
-            value={assetSubtype}
-            onChangeText={setAssetSubtype}
-          />
+          {fixedAssetType === "other" ? (
+            <>
+              <Text style={styles.label}>Asset type</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Guitar, camera, watch, collectible, tool..."
+                placeholderTextColor={colors.textMuted}
+                value={assetSubtype}
+                onChangeText={setAssetSubtype}
+              />
+            </>
+          ) : null}
           <Text style={styles.label}>Name</Text>
           <TextInput
             style={styles.input}

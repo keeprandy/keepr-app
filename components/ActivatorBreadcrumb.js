@@ -8,10 +8,11 @@ export default function ActivatorBreadcrumb({
   navigation,
   current = "Home",
   items = [],
+  homeRoute = "ActivatorHome",
   homeParams = null,
   right = null,
 }) {
-  const goHome = () => navigation?.navigate?.("ActivatorHome", homeParams || {});
+  const goHome = () => navigation?.navigate?.(homeRoute, homeParams || {});
 
   return (
     <View style={styles.shell}>

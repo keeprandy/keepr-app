@@ -42,6 +42,7 @@ import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 
 // ✅ attachments helpers (for hero placement resolution)
 import { getSignedUrl, listAttachmentsForTarget } from "../lib/attachmentsApi";
+import { formatContributionAttribution } from "../lib/provenance";
 
 // Context-aware Add Event pill
 import EventPill from "../components/EventPill";
@@ -127,6 +128,7 @@ function TimelineRow({ item, onPress, hasAttachment }) {
   if (!isService && item.description) subtitleBits.push(item.description);
 
   const subtitle = subtitleBits.filter(Boolean).join(" · ");
+  const attribution = item.attribution || null;
 
   return (
     <TouchableOpacity
@@ -151,6 +153,11 @@ function TimelineRow({ item, onPress, hasAttachment }) {
         {!!subtitle && (
           <Text style={styles.timelineSubtitle} numberOfLines={2}>
             {subtitle}
+          </Text>
+        )}
+        {!!attribution && (
+          <Text style={styles.timelineSubtitle} numberOfLines={1}>
+            {attribution}
           </Text>
         )}
 
@@ -950,6 +957,7 @@ const handleConfirmRemove = async () => {
         title: rec.title || "Service visit",
         description: rec.notes || "",
         provider: rec.location || null,
+        attribution: formatContributionAttribution(rec),
         serviceType: rec.service_type || null,
         systemName,
         cost: rec.cost,

@@ -19,6 +19,7 @@ import * as ImagePicker from "expo-image-picker";
 import { supabase } from "../lib/supabaseClient";
 import { fetchAssetHeroUris } from "../lib/assetHeroResolver";
 import { getSignedUrl } from "../lib/attachmentsApi";
+import { getActionScheduleLabel, getActionScheduledDueAt, isPlaybookDueDatePending } from "../lib/playbookSchedule";
 import { colors, radius, shadows, spacing, typography } from "../styles/theme";
 
 function compact(values) {
@@ -164,12 +165,15 @@ export default function KeeprProHomeScreen({ navigation }) {
     [assets]
   );
   const needsAttentionItems = useMemo(() => {
-    const actionItems = openActions.map((item) => ({
-      ...item,
-      item_type: "action",
-      queue_label: item.due_at ? "Scheduled Soon" : "New Request",
-      sort_at: item.due_at || item.updated_at || item.created_at || null,
-    }));
+    const actionItems = openActions.map((item) => {
+      const scheduledDueAt = getActionScheduledDueAt(item);
+      return {
+        ...item,
+        item_type: "action",
+        queue_label: scheduledDueAt ? "Scheduled Soon" : isPlaybookDueDatePending(item) ? "Unscheduled" : "New Request",
+        sort_at: scheduledDueAt || item.updated_at || item.created_at || null,
+      };
+    });
     const messageItems = recentMessages.map((item) => ({
       ...item,
       item_type: "message",
@@ -502,7 +506,8 @@ export default function KeeprProHomeScreen({ navigation }) {
             item.asset_name,
             item.kac_id,
             item.latest_message || null,
-            item.due_at ? `Due ${formatDate(item.due_at)}` : null,
+            item.item_type === "action" && getActionScheduledDueAt(item) ? `Due ${getActionScheduleLabel(item, formatDate)}` : null,
+            item.item_type === "action" && isPlaybookDueDatePending(item) ? "Unscheduled" : null,
           ]),
         onPress: (item) => openWorkspaceForAssetId(item.asset_id),
       })}

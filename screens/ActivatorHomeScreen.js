@@ -39,6 +39,8 @@ import {
   upsertKeeprSpaceOrgTeam,
 } from "../lib/keeprspaceApi";
 import { fetchAssetHeroUris } from "../lib/assetHeroResolver";
+import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
+import { getActionScheduledDueAt, isPlaybookDueDatePending } from "../lib/playbookSchedule";
 import { supabase } from "../lib/supabaseClient";
 import { layoutStyles } from "../styles/layout";
 import { colors, radius, shadows, spacing } from "../styles/theme";
@@ -330,7 +332,7 @@ const EMPTY_NEW_BOAT = {
   hin: "",
   newUsed: "Used",
   name: "",
-  heroImageUrl: "",
+  photos: [],
   location: "",
   engine: "",
   owner: "",
@@ -345,13 +347,48 @@ function labelize(value) {
   return String(value || "").replace(/_/g, " ");
 }
 
-function listFromValue(value) {
+export function listFromValue(value) {
   if (Array.isArray(value)) return value.filter(Boolean);
   if (!value) return [];
   return String(value)
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function textFromListValue(value) {
+  if (Array.isArray(value)) return value.filter(Boolean).join(", ");
+  return value == null ? "" : String(value);
+}
+
+function textFromLineListValue(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => item?.label || item?.title || item?.name || item)
+      .filter(Boolean)
+      .join("\n");
+  }
+  return value == null ? "" : String(value);
+}
+
+function confirmAdminChange(title, message, onConfirm) {
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    if (window.confirm(message || title)) onConfirm?.();
+    return;
+  }
+
+  Alert.alert(title, message, [
+    { text: "Cancel", style: "cancel" },
+    { text: "Continue", style: "destructive", onPress: onConfirm },
+  ]);
+}
+
+function isWideAdminField(key) {
+  return key.includes("description") || key === "source_url" || key === "service_items";
+}
+
+function isMultilineAdminField(key) {
+  return key.includes("description") || key === "service_items";
 }
 
 function initialsForName(value) {
@@ -380,6 +417,38 @@ function mediaAsset(media) {
 
 function heroMediaFromTemplate(template) {
   return (template?.showcase_media || []).find((item) => item.role === "hero" || item.metadata?.role === "hero");
+}
+
+function heroUriFromBoat(boat) {
+  return (
+    boat?.hero_image_url ||
+    boat?.hero_thumb_url ||
+    boat?.primary_photo_url ||
+    boat?.showcase_image_url ||
+    boat?.cover_image_url ||
+    boat?.image_url ||
+    boat?.asset?.hero_image_url ||
+    boat?.asset?.hero_thumb_url ||
+    null
+  );
+}
+
+function heroSourceForBoat(boat, heroUri = null) {
+  const rowHeroUri = heroUri || heroUriFromBoat(boat);
+  if (rowHeroUri) return { uri: rowHeroUri };
+
+  const model = normalizeModelName(compact([
+    boat?.identity?.make,
+    boat?.identity?.model,
+    boat?.template?.manufacturer,
+    boat?.template?.model,
+    boat?.asset_name,
+  ]));
+
+  if (model.includes("tiara39le")) return SHOWCASE_ASSETS.tiara_39le_hero;
+  if (model.includes("tiara39ls")) return SHOWCASE_ASSETS.tiara_39ls_hero;
+
+  return BOAT_HERO;
 }
 
 function normalizeModelName(value) {
@@ -550,7 +619,7 @@ function workAreasForProjection(workspace, projection) {
   return DEFAULT_WORK_AREAS;
 }
 
-function defaultBrandProfile(workspace) {
+export function defaultBrandProfile(workspace) {
   const kind = workspaceKind(workspace);
   const organizationId = workspace?.organization_id || workspace?.org_id || null;
   const slug = workspace?.slug || workspace?.organization_slug || workspace?.display?.slug || "";
@@ -626,7 +695,7 @@ function defaultBrandProfile(workspace) {
   };
 }
 
-function brandProfileFromKeeprSpaceContext(context, workspace) {
+export function brandProfileFromKeeprSpaceContext(context, workspace) {
   if (!context) return defaultBrandProfile(workspace);
   return {
     displayName: context.display_name || context.organization_name || defaultBrandProfile(workspace).displayName,
@@ -649,7 +718,7 @@ function brandProfileFromKeeprSpaceContext(context, workspace) {
   };
 }
 
-function brandProfileFromOrgConfig(config, workspace) {
+export function brandProfileFromOrgConfig(config, workspace) {
   if (!config?.organization) return brandProfileFromKeeprSpaceContext(config?.context, workspace);
   const fallback = defaultBrandProfile(workspace);
   const org = config.organization || {};
@@ -692,7 +761,50 @@ async function pickLocalImage() {
   return result.assets?.[0]?.uri || null;
 }
 
-async function pickAndUploadBrandImage({ profile, field }) {
+async function pickActivatorBoatPhotos() {
+  const pickerMediaTypes = ImagePicker.MediaType?.Images ?? ImagePicker.MediaTypeOptions?.Images;
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: pickerMediaTypes,
+    allowsMultipleSelection: true,
+    selectionLimit: 12,
+    quality: 0.9,
+  });
+
+  if (result.canceled) return null;
+  return (result.assets || []).filter((asset) => asset?.uri);
+}
+
+async function uploadActivatorBoatPhotos({ assetId, photos }) {
+  if (!assetId || !photos?.length) return;
+
+  for (let index = 0; index < photos.length; index += 1) {
+    const photo = photos[index];
+    const isHero = index === 0;
+    await uploadAttachmentFromUri({
+      assetId,
+      kind: "photo",
+      fileUri: photo.uri,
+      fileName: photo.fileName || `activator-boat-${index + 1}.jpg`,
+      mimeType: photo.mimeType || "image/jpeg",
+      sizeBytes: photo.fileSize || null,
+      title: isHero ? "Activator hero photo" : "Activator showcase photo",
+      sourceContext: "activator_boat_create",
+      setAsAssetHero: isHero,
+      placements: [
+        {
+          target_type: "asset",
+          target_id: assetId,
+          role: isHero ? "primary" : "showcase",
+          label: isHero ? "Hero" : "Showcase",
+          sort_order: index,
+          is_showcase: true,
+        },
+      ],
+    });
+  }
+}
+
+export async function pickAndUploadBrandImage({ profile, field }) {
   const keeprProId = profile?.keeprProId;
   const organizationId = profile?.organizationId;
   if (!keeprProId && !organizationId) return pickLocalImage();
@@ -880,10 +992,11 @@ function BoatCard({ boat, onPress, view = "default", heroUri = null }) {
   const isServiceView = view === "service";
   const roleLabel = dealer?.relationship_purpose || dealer?.relationship_type || "Service";
   const serviceStatus = dealer?.status || activation.status || boat?.owner_state || "Active";
+  const heroSource = heroSourceForBoat(boat, heroUri);
 
   return (
     <TouchableOpacity style={styles.boatCard} onPress={onPress} activeOpacity={0.9}>
-      <ImageBackground source={heroUri ? { uri: heroUri } : BOAT_HERO} resizeMode="cover" style={styles.cardImage} imageStyle={styles.cardImageAsset}>
+      <ImageBackground source={heroSource} resizeMode="cover" style={styles.cardImage} imageStyle={styles.cardImageAsset}>
         <View style={styles.cardShade}>
           <View style={styles.statusRibbon}>
             <Ionicons name="shield-checkmark-outline" size={13} color={colors.onPrimary} />
@@ -1453,7 +1566,7 @@ function BrandProfilePanel({
   );
 }
 
-function KeeprSpaceAdminPanel({
+export function KeeprSpaceAdminPanel({
   profile,
   kind,
   config,
@@ -1489,6 +1602,10 @@ function KeeprSpaceAdminPanel({
   const [serviceDraft, setServiceDraft] = useState({
     name: "",
     service_type: "",
+    asset_system_type: "boat",
+    brand_applicability: "",
+    interval_trigger: "",
+    service_items: "",
     owner_facing_label: "",
     owner_facing_description: "",
     status: "active",
@@ -1524,7 +1641,20 @@ function KeeprSpaceAdminPanel({
   const locations = config?.locations || [];
   const teams = config?.teams || [];
   const assignments = config?.member_assignments || [];
-  const services = config?.service_offerings || [];
+  const services = (config?.service_offerings || []).map((service) => {
+    const template = service.metadata?.service_template || service.metadata || {};
+    const serviceItems = template.service_items || template.checklist_items || service.service_items || [];
+    return {
+      ...service,
+      asset_system_type: service.asset_system_type || template.asset_system_type || "",
+      brand_applicability: service.brand_applicability || template.brand_applicability || "",
+      interval_trigger: service.interval_trigger || template.interval_trigger || "",
+      service_items: Array.isArray(serviceItems)
+        ? serviceItems.map((item) => item?.label || item?.title || item?.name || item).filter(Boolean).join("\n")
+        : "",
+      template_kind: service.template_kind || template.template_kind || "service_action_template",
+    };
+  });
   const relationships = config?.brand_relationships || [];
 
   const saveLocation = () => onSaveLocation?.(locationDraft);
@@ -1532,10 +1662,81 @@ function KeeprSpaceAdminPanel({
   const saveAssignment = () => onSaveAssignment?.(assignmentDraft);
   const saveService = () => onSaveService?.({
     ...serviceDraft,
+    template_kind: serviceDraft.template_kind || "service_action_template",
     relationship_purposes: listFromValue(serviceDraft.relationship_purposes),
     supported_asset_types: listFromValue(serviceDraft.supported_asset_types),
+    service_items: String(serviceDraft.service_items || "")
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .filter(Boolean),
   });
   const saveBrand = () => onSaveRelationship?.(brandDraft);
+  const editAssignment = (assignment) => setAssignmentDraft({
+    id: assignment.id || "",
+    user_id: assignment.user_id || "",
+    org_team_id: assignment.org_team_id || "",
+    org_location_id: assignment.org_location_id || "",
+    assignment_role: assignment.assignment_role || "",
+    is_primary: Boolean(assignment.is_primary),
+    status: assignment.status || "active",
+  });
+  const editBrand = (relationship) => setBrandDraft({
+    ...relationship,
+    to_org_name: relationship.to_org_name || relationship.org?.name || relationship.related_org_name || relationship.to_org_id || "",
+    relationship_type: relationship.relationship_type || "represented_brand",
+    status: relationship.status || "source_reported",
+    authority_state: relationship.authority_state || "public_source_reported",
+    evidence_state: relationship.evidence_state || "public_source_reported",
+    source_type: relationship.source_type || "org_reported",
+    source_name: relationship.source_name || "",
+    source_url: relationship.source_url || "",
+  });
+  const editService = (service) => setServiceDraft({
+    ...service,
+    relationship_purposes: textFromListValue(service.relationship_purposes),
+    supported_asset_types: textFromListValue(service.supported_asset_types),
+    service_items: textFromLineListValue(service.service_items),
+  });
+  const archiveLocation = (location) => confirmAdminChange(
+    "Archive location",
+    `Archive ${location.name || "this location"}? Existing history and relationships will remain intact.`,
+    () => onSaveLocation?.({ ...location, status: "archived" }),
+  );
+  const archiveTeam = (team) => confirmAdminChange(
+    "Archive team",
+    `Archive ${team.name || "this team"}? Existing assignments and history will remain intact.`,
+    () => onSaveTeam?.({ ...team, status: "archived" }),
+  );
+  const archiveService = (service) => confirmAdminChange(
+    "Deactivate service",
+    `Deactivate ${service.owner_facing_label || service.name || "this service"}? It will stop appearing as an active Playbook service, but existing Actions will remain intact.`,
+    () => onSaveService?.({
+      ...service,
+      status: "archived",
+      relationship_purposes: listFromValue(service.relationship_purposes),
+      supported_asset_types: listFromValue(service.supported_asset_types),
+      service_items: listFromValue(textFromLineListValue(service.service_items).replace(/\n/g, ",")),
+    }),
+  );
+  const activateService = (service) => onSaveService?.({
+    ...service,
+    status: "active",
+    relationship_purposes: listFromValue(service.relationship_purposes),
+    supported_asset_types: listFromValue(service.supported_asset_types),
+    service_items: listFromValue(textFromLineListValue(service.service_items).replace(/\n/g, ",")),
+  });
+  const serviceIsActive = (service) => String(service.status || "active").toLowerCase() === "active";
+  const serviceStatusLabel = (service) => serviceIsActive(service) ? "ACTIVE" : "INACTIVE";
+  const removeAssignment = (assignment) => confirmAdminChange(
+    "Remove assignment",
+    "Remove this team/location assignment? The member will remain in the organization.",
+    () => onSaveAssignment?.({ ...assignment, status: "inactive" }),
+  );
+  const disconnectBrand = (relationship) => confirmAdminChange(
+    "Disconnect relationship",
+    `Disconnect ${relationship.org?.name || relationship.to_org_name || relationship.related_org_name || "this organization"} from this KeeprSpace? The canonical organization will not be deleted.`,
+    () => onSaveRelationship?.({ ...relationship, status: "inactive" }),
+  );
 
   const resetLocation = () => setLocationDraft({
     name: "",
@@ -1548,14 +1749,36 @@ function KeeprSpaceAdminPanel({
     status: "active",
   });
   const resetTeam = () => setTeamDraft({ name: "", team_type: "", description: "", status: "active" });
+  const resetAssignment = () => setAssignmentDraft({
+    user_id: "",
+    org_team_id: "",
+    org_location_id: "",
+    assignment_role: "",
+    is_primary: false,
+    status: "active",
+  });
   const resetService = () => setServiceDraft({
     name: "",
     service_type: "",
+    asset_system_type: "boat",
+    brand_applicability: "",
+    interval_trigger: "",
+    service_items: "",
     owner_facing_label: "",
     owner_facing_description: "",
     status: "active",
     relationship_purposes: "service",
     supported_asset_types: "boat",
+  });
+  const resetBrand = () => setBrandDraft({
+    to_org_name: "",
+    relationship_type: "represented_brand",
+    status: "source_reported",
+    authority_state: "public_source_reported",
+    evidence_state: "public_source_reported",
+    source_type: "org_reported",
+    source_name: "",
+    source_url: "",
   });
 
   return (
@@ -1603,13 +1826,16 @@ function KeeprSpaceAdminPanel({
         >
           <View style={styles.adminList}>
             {locations.map((location) => (
-              <TouchableOpacity key={location.id || location.name} style={styles.adminRow} activeOpacity={0.86} onPress={() => setLocationDraft({ ...location })}>
-                <View>
+              <View key={location.id || location.name} style={styles.adminRow}>
+                <TouchableOpacity style={styles.adminRowContent} activeOpacity={0.86} onPress={() => setLocationDraft({ ...location })}>
                   <Text style={styles.adminRowTitle}>{location.name}</Text>
                   <Text style={styles.adminRowMeta}>{[location.location_type, location.city, location.region].filter(Boolean).join(" · ") || "Location"}</Text>
+                </TouchableOpacity>
+                <View style={styles.adminRowActions}>
+                  <Text style={styles.adminStatus}>{location.status || "active"}</Text>
+                  <AdminRowActions onEdit={() => setLocationDraft({ ...location })} onArchive={() => archiveLocation(location)} />
                 </View>
-                <Text style={styles.adminStatus}>{location.status || "active"}</Text>
-              </TouchableOpacity>
+              </View>
             ))}
           </View>
           <ConfigForm
@@ -1660,13 +1886,16 @@ function KeeprSpaceAdminPanel({
         >
           <View style={styles.adminList}>
             {teams.map((team) => (
-              <TouchableOpacity key={team.id || team.slug} style={styles.adminRow} activeOpacity={0.86} onPress={() => setTeamDraft({ ...team })}>
-                <View>
+              <View key={team.id || team.slug} style={styles.adminRow}>
+                <TouchableOpacity style={styles.adminRowContent} activeOpacity={0.86} onPress={() => setTeamDraft({ ...team })}>
                   <Text style={styles.adminRowTitle}>{team.name}</Text>
                   <Text style={styles.adminRowMeta}>{[team.team_type, team.description].filter(Boolean).join(" · ")}</Text>
+                </TouchableOpacity>
+                <View style={styles.adminRowActions}>
+                  <Text style={styles.adminStatus}>{team.status || "active"}</Text>
+                  <AdminRowActions onEdit={() => setTeamDraft({ ...team })} onArchive={() => archiveTeam(team)} />
                 </View>
-                <Text style={styles.adminStatus}>{team.status || "active"}</Text>
-              </TouchableOpacity>
+              </View>
             ))}
           </View>
           <ConfigForm
@@ -1686,6 +1915,9 @@ function KeeprSpaceAdminPanel({
             draft={assignmentDraft}
             onChange={setAssignmentDraft}
             onSave={saveAssignment}
+            onReset={resetAssignment}
+            onEditAssignment={editAssignment}
+            onRemoveAssignment={removeAssignment}
             saving={savingKey === "assignment"}
           />
         </AdminSection>
@@ -1698,13 +1930,23 @@ function KeeprSpaceAdminPanel({
         >
           <View style={styles.adminList}>
             {services.map((service) => (
-              <TouchableOpacity key={service.id || service.slug} style={styles.adminRow} activeOpacity={0.86} onPress={() => setServiceDraft({ ...service, relationship_purposes: (service.relationship_purposes || []).join(", "), supported_asset_types: (service.supported_asset_types || []).join(", ") })}>
-                <View>
+              <View key={service.id || service.slug} style={styles.adminRow}>
+                <TouchableOpacity style={styles.adminRowContent} activeOpacity={0.86} onPress={() => editService(service)}>
                   <Text style={styles.adminRowTitle}>{service.owner_facing_label || service.name}</Text>
-                  <Text style={styles.adminRowMeta}>{[service.service_type, service.description].filter(Boolean).join(" · ")}</Text>
+                  <Text style={styles.adminRowMeta}>
+                    {[service.service_type, service.asset_system_type, service.brand_applicability, service.interval_trigger].filter(Boolean).join(" · ") || service.description}
+                  </Text>
+                </TouchableOpacity>
+                <View style={styles.adminRowActions}>
+                  <Text style={styles.adminStatus}>{serviceStatusLabel(service)}</Text>
+                  <AdminRowActions
+                    onEdit={() => editService(service)}
+                    onArchive={() => serviceIsActive(service) ? archiveService(service) : activateService(service)}
+                    archiveLabel={serviceIsActive(service) ? "Deactivate" : "Activate"}
+                    archiveTone={serviceIsActive(service) ? "danger" : "primary"}
+                  />
                 </View>
-                <Text style={styles.adminStatus}>{service.status || "active"}</Text>
-              </TouchableOpacity>
+              </View>
             ))}
           </View>
           <ConfigForm
@@ -1712,6 +1954,10 @@ function KeeprSpaceAdminPanel({
             fields={[
               ["name", "Internal service name"],
               ["service_type", "Service type hint"],
+              ["asset_system_type", "Asset / system type"],
+              ["brand_applicability", "Brand / applicability"],
+              ["interval_trigger", "Interval / trigger"],
+              ["service_items", "Service items"],
               ["owner_facing_label", "Owner action label"],
               ["owner_facing_description", "Owner-facing description"],
               ["relationship_purposes", "Relationship purposes"],
@@ -1754,11 +2000,14 @@ function KeeprSpaceAdminPanel({
           <View style={styles.adminList}>
             {relationships.map((relationship) => (
               <View key={relationship.id} style={styles.adminRow}>
-                <View>
-                  <Text style={styles.adminRowTitle}>{relationship.org?.name || relationship.to_org_id}</Text>
+                <TouchableOpacity style={styles.adminRowContent} activeOpacity={0.86} onPress={() => editBrand(relationship)}>
+                  <Text style={styles.adminRowTitle}>{relationship.org?.name || relationship.to_org_name || relationship.related_org_name || relationship.to_org_id}</Text>
                   <Text style={styles.adminRowMeta}>{[relationship.relationship_type, relationship.authority_state, relationship.evidence_state].filter(Boolean).join(" · ")}</Text>
+                </TouchableOpacity>
+                <View style={styles.adminRowActions}>
+                  <Text style={styles.adminStatus}>{relationship.status || "source_reported"}</Text>
+                  <AdminRowActions onEdit={() => editBrand(relationship)} onArchive={() => disconnectBrand(relationship)} archiveLabel="Disconnect" />
                 </View>
-                <Text style={styles.adminStatus}>{relationship.status || "source_reported"}</Text>
               </View>
             ))}
           </View>
@@ -1776,6 +2025,7 @@ function KeeprSpaceAdminPanel({
             draft={brandDraft}
             onChange={setBrandDraft}
             onSave={saveBrand}
+            onReset={resetBrand}
             saving={savingKey === "relationship"}
           />
         </AdminSection>
@@ -1815,48 +2065,110 @@ function ConfigForm({ title, fields, draft, onChange, onSave, onReset, saving })
         ) : null}
       </View>
       <View style={styles.oemFormGrid}>
-        {fields.map(([key, label]) => (
-          <View key={key} style={key.includes("description") || key === "source_url" ? styles.oemFieldWide : styles.oemField}>
-            <Text style={styles.oemFieldLabel}>{label}</Text>
-            <TextInput
-              value={draft[key] == null ? "" : String(draft[key])}
-              onChangeText={(value) => onChange({ ...draft, [key]: value })}
-              multiline={key.includes("description")}
-              style={[styles.oemInput, key.includes("description") && styles.oemTextArea]}
-              placeholder={label}
-              placeholderTextColor={colors.textMuted}
-            />
-          </View>
-        ))}
+        {fields.map(([key, label]) => {
+          const wide = isWideAdminField(key);
+          const multiline = isMultilineAdminField(key);
+          return (
+            <View key={key} style={wide ? styles.oemFieldWide : styles.oemField}>
+              <Text style={styles.oemFieldLabel}>{label}</Text>
+              <TextInput
+                value={draft[key] == null ? "" : String(draft[key])}
+                onChangeText={(value) => onChange({ ...draft, [key]: value })}
+                multiline={multiline}
+                style={[styles.oemInput, multiline && styles.oemTextArea]}
+                placeholder={label}
+                placeholderTextColor={colors.textMuted}
+              />
+            </View>
+          );
+        })}
       </View>
       <AdminSaveButton label="Save" onPress={onSave} saving={saving} />
     </View>
   );
 }
 
-function AssignmentForm({ members, teams, locations, assignments, draft, onChange, onSave, saving }) {
+function AdminRowActions({ onEdit, onArchive, archiveLabel = "Archive", archiveTone = "danger" }) {
+  const archiveIsDanger = archiveTone === "danger";
+  return (
+    <View style={styles.adminMiniActions}>
+      <TouchableOpacity style={styles.adminMiniButton} onPress={onEdit} activeOpacity={0.86}>
+        <Text style={styles.adminMiniButtonText}>Edit</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.adminMiniButton, archiveIsDanger ? styles.adminMiniButtonDanger : styles.adminMiniButtonPrimary]}
+        onPress={onArchive}
+        activeOpacity={0.86}
+      >
+        <Text style={[styles.adminMiniButtonText, archiveIsDanger ? styles.adminMiniButtonDangerText : styles.adminMiniButtonPrimaryText]}>
+          {archiveLabel}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function AssignmentForm({ members, teams, locations, assignments, draft, onChange, onSave, onReset, onEditAssignment, onRemoveAssignment, saving }) {
+  const memberName = (userId) => {
+    const member = members.find((item) => (item.user_id || item.id) === userId);
+    return member?.profile?.full_name || member?.profile?.email || member?.email || userId || "Member";
+  };
+  const teamName = (teamId) => teams.find((team) => team.id === teamId)?.name || "No team";
+  const locationName = (locationId) => locations.find((location) => location.id === locationId)?.name || "No location";
+
   return (
     <View style={styles.adminForm}>
       <View style={styles.adminFormHeader}>
-        <Text style={styles.adminFormTitle}>Assign member to team / location</Text>
-        <Text style={styles.adminStatus}>{assignments.length} assignments</Text>
+        <View>
+          <Text style={styles.adminFormTitle}>Assign member to team / location</Text>
+          <Text style={styles.adminFormHint}>{assignments.length} assignments</Text>
+        </View>
+        {onReset ? (
+          <TouchableOpacity onPress={onReset} activeOpacity={0.86}>
+            <Text style={styles.adminResetText}>New</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
+      {assignments.length ? (
+        <View style={styles.adminList}>
+          {assignments.map((assignment) => (
+            <View
+              key={assignment.id || `${assignment.user_id}-${assignment.org_team_id}-${assignment.org_location_id}-${assignment.assignment_role}`}
+              style={styles.adminRow}
+            >
+              <TouchableOpacity style={styles.adminRowContent} activeOpacity={0.86} onPress={() => onEditAssignment?.(assignment)}>
+                <Text style={styles.adminRowTitle}>{memberName(assignment.user_id)}</Text>
+                <Text style={styles.adminRowMeta}>
+                  {[teamName(assignment.org_team_id), locationName(assignment.org_location_id), assignment.assignment_role].filter(Boolean).join(" · ")}
+                </Text>
+              </TouchableOpacity>
+              <View style={styles.adminRowActions}>
+                <Text style={styles.adminStatus}>{assignment.status || "active"}</Text>
+                <AdminRowActions onEdit={() => onEditAssignment?.(assignment)} onArchive={() => onRemoveAssignment?.(assignment)} archiveLabel="Remove" />
+              </View>
+            </View>
+          ))}
+        </View>
+      ) : null}
       <View style={styles.oemFormGrid}>
         <View style={styles.oemField}>
           <Text style={styles.oemFieldLabel}>Member</Text>
           <View style={styles.adminChipWrap}>
-            {members.map((member) => (
-              <TouchableOpacity
-                key={member.user_id || member.id}
-                style={[styles.adminChip, draft.user_id === member.user_id && styles.adminChipActive]}
-                onPress={() => onChange({ ...draft, user_id: member.user_id })}
-                activeOpacity={0.86}
-              >
-                <Text style={[styles.adminChipText, draft.user_id === member.user_id && styles.adminChipTextActive]}>
-                  {member.profile?.full_name || member.profile?.email || "Member"}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            {members.map((member) => {
+              const memberId = member.user_id || member.id;
+              return (
+                <TouchableOpacity
+                  key={memberId}
+                  style={[styles.adminChip, draft.user_id === memberId && styles.adminChipActive]}
+                  onPress={() => onChange({ ...draft, user_id: memberId })}
+                  activeOpacity={0.86}
+                >
+                  <Text style={[styles.adminChipText, draft.user_id === memberId && styles.adminChipTextActive]}>
+                    {member.profile?.full_name || member.profile?.email || "Member"}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </View>
         <View style={styles.oemField}>
@@ -1924,7 +2236,11 @@ function NeedsAttentionPanel({ data, onOpenAsset }) {
   const messages = data?.recent_messages || [];
   const upcoming = data?.upcoming_work || [];
   const items = [
-    ...actions.map((item) => ({ ...item, item_type: "action", label: item.due_at ? "Scheduled work" : "Open request" })),
+    ...actions.map((item) => ({
+      ...item,
+      item_type: "action",
+      label: getActionScheduledDueAt(item) ? "Scheduled work" : isPlaybookDueDatePending(item) ? "Unscheduled work" : "Open request",
+    })),
     ...messages.map((item) => ({ ...item, item_type: "message", label: "Customer message" })),
     ...upcoming.map((item) => ({ ...item, item_type: "upcoming", label: "Upcoming work" })),
   ];
@@ -1947,7 +2263,7 @@ function NeedsAttentionPanel({ data, onOpenAsset }) {
       <View style={styles.serviceList}>
         {items.length ? items.slice(0, 16).map((item, index) => (
           <TouchableOpacity
-            key={item.id || item.thread_id || `${item.item_type}-${index}`}
+            key={`${item.item_type}-${item.id || item.thread_id || item.asset_id || "item"}-${index}`}
             style={styles.serviceRow}
             activeOpacity={0.86}
             onPress={() => item.asset_id && onOpenAsset({ asset_id: item.asset_id, kac_id: item.kac_id, organization_id: item.organization_id })}
@@ -1999,7 +2315,7 @@ function MessagesPanel({ data, onOpenAsset }) {
       <View style={styles.serviceList}>
         {messages.length ? messages.map((message, index) => (
           <TouchableOpacity
-            key={message.id || message.thread_id || index}
+            key={`message-${message.id || message.thread_id || message.asset_id || "thread"}-${index}`}
             style={styles.serviceRow}
             activeOpacity={0.86}
             onPress={() => message.asset_id && onOpenAsset({ asset_id: message.asset_id, kac_id: message.kac_id, organization_id: message.organization_id })}
@@ -2053,6 +2369,7 @@ function AddBoatPanel({
   onToggleState,
   createDraft,
   onDraftChange,
+  onPickPhotos,
   onCreate,
   creating,
   organizationName,
@@ -2179,9 +2496,8 @@ function AddBoatPanel({
               ["location", "Location"],
               ["engine", "Propulsion / engine summary"],
               ["owner", "Owner optional"],
-              ["heroImageUrl", "Primary photo URL optional"],
             ].map(([key, label]) => (
-              <View key={key} style={key === "engine" || key === "heroImageUrl" ? styles.oemFieldWide : styles.oemField}>
+              <View key={key} style={key === "engine" ? styles.oemFieldWide : styles.oemField}>
                 <Text style={styles.oemFieldLabel}>{label}</Text>
                 <TextInput
                   value={createDraft[key]}
@@ -2192,6 +2508,29 @@ function AddBoatPanel({
                 />
               </View>
             ))}
+          </View>
+          <View style={styles.addBoatSection}>
+            <Text style={styles.oemFieldLabel}>Boat photos</Text>
+            <TouchableOpacity style={styles.photoPickButton} onPress={onPickPhotos} activeOpacity={0.86}>
+              <Ionicons name="images-outline" size={18} color={colors.brandBlue} />
+              <Text style={styles.photoPickText}>
+                {createDraft.photos?.length ? `${createDraft.photos.length} selected` : "Select photo"}
+              </Text>
+            </TouchableOpacity>
+            {createDraft.photos?.length ? (
+              <View style={styles.photoPreviewRow}>
+                {createDraft.photos.slice(0, 4).map((photo, index) => (
+                  <View key={`${photo.uri}-${index}`} style={styles.photoPreviewWrap}>
+                    <Image source={{ uri: photo.uri }} style={styles.photoPreview} resizeMode="cover" />
+                    {index === 0 ? (
+                      <View style={styles.photoHeroBadge}>
+                        <Text style={styles.photoHeroBadgeText}>Hero</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                ))}
+              </View>
+            ) : null}
           </View>
           <View style={styles.addBoatSection}>
             <Text style={styles.oemFieldLabel}>New / Used</Text>
@@ -2231,9 +2570,10 @@ function FoundationPending({ error }) {
   );
 }
 
-export default function ActivatorHomeScreen({ navigation, route }) {
+export default function ActivatorHomeScreen({ navigation, route, fixedMode = null }) {
   const { currentWorkspace, setCurrentWorkspaceId, workspaces } = useWorkspace();
-  const [mode, setMode] = useState("fleet");
+  const initialMode = fixedMode || route?.params?.initialMode || "fleet";
+  const [modeState, setModeState] = useState(initialMode);
   const [projectionMode, setProjectionMode] = useState(defaultWorkspaceProjection(currentWorkspace) || "service");
   const [search, setSearch] = useState("");
   const [orgs, setOrgs] = useState({});
@@ -2267,6 +2607,37 @@ export default function ActivatorHomeScreen({ navigation, route }) {
   const copy = useMemo(() => copyForWorkspace(currentWorkspace, activeProjection), [currentWorkspace, activeProjection]);
   const isPersonalKeepr = currentKind === "owner";
   const workAreas = useMemo(() => workAreasForProjection(currentWorkspace, activeProjection), [currentWorkspace, activeProjection]);
+  const mode = fixedMode || modeState;
+  const setMode = useCallback((nextMode) => {
+    if (!fixedMode) {
+      setModeState(nextMode);
+      return;
+    }
+
+    const routeForMode = {
+      needs: "KeeprSpaceHome",
+      fleet: "KeeprSpaceFleet",
+      messages: "KeeprSpaceMessages",
+      profile: "KeeprSpaceAdmin",
+    }[nextMode];
+
+    if (routeForMode) {
+      try {
+        const targetParams = { workspaceId: currentWorkspace?.workspace_id || null };
+        navigation.navigate(routeForMode, targetParams);
+      } catch (err) {
+        console.error("Wilson in-page navigation failed:", err);
+      }
+    }
+  }, [currentWorkspace?.workspace_id, fixedMode, navigation]);
+
+  const navigateWilsonBoat = useCallback((params) => {
+    try {
+      navigation.navigate("KeeprSpaceBoat", params);
+    } catch (err) {
+      console.error("Wilson boat navigation failed:", err);
+    }
+  }, [navigation]);
 
   useEffect(() => {
     const requestedWorkspaceId = route?.params?.workspaceId;
@@ -2298,22 +2669,32 @@ export default function ActivatorHomeScreen({ navigation, route }) {
   }, [projectionMode, projectionSwitchable]);
 
   useEffect(() => {
+    if (fixedMode) return;
     const requestedMode = route?.params?.initialMode;
     if (requestedMode && workAreas.some((area) => area.key === requestedMode)) {
       setMode(requestedMode);
     }
-  }, [route?.params?.initialMode, workAreas]);
+  }, [fixedMode, route?.params?.initialMode, setMode, workAreas]);
 
   useEffect(() => {
+    if (fixedMode) return;
+    if (!route?.params?.initialMode && currentKind === "pro" && mode === "fleet") {
+      setMode(workAreas[0]?.key || "needs");
+      return;
+    }
+
     if (!workAreas.some((area) => area.key === mode)) {
       setMode(workAreas[0]?.key || "fleet");
     }
-  }, [mode, workAreas]);
+  }, [currentKind, fixedMode, mode, route?.params?.initialMode, setMode, workAreas]);
 
   useEffect(() => {
     if (!isPersonalKeepr) return;
     if (route?.params?.workspaceId) return;
-    navigation.navigate("RootTabs", { screen: "Boats" });
+    navigation.navigate("PersonalModule", {
+      screen: "PersonalTabs",
+      params: { screen: "Boats" },
+    });
   }, [isPersonalKeepr, navigation, route?.params?.workspaceId]);
 
   const load = useCallback(async ({ quiet = false } = {}) => {
@@ -2395,7 +2776,7 @@ export default function ActivatorHomeScreen({ navigation, route }) {
 
   useEffect(() => {
     let active = true;
-    const ids = boats.map((boat) => boat.asset_id).filter(Boolean);
+    const ids = boats.map((boat) => boat.asset_id || boat.id).filter(Boolean);
 
     async function loadAssetHeroes() {
       const urls = await fetchAssetHeroUris(ids, {
@@ -2417,6 +2798,19 @@ export default function ActivatorHomeScreen({ navigation, route }) {
 
   const openBoat = (boat) => {
     if (activeProjection === "service") {
+      if (fixedMode) {
+        const params = {
+          assetId: boat.asset_id,
+          kac: boat.kac_id,
+          organizationId: boat.organization_id || currentWorkspace?.organization_id || currentWorkspace?.org_id || null,
+          stewardshipId: boat.stewardship_id || boat.service_relationship?.stewardship_id || null,
+          parentRoute: "KeeprSpaceFleet",
+          workspaceId: currentWorkspace?.workspace_id || null,
+        };
+        navigateWilsonBoat(params);
+        return;
+      }
+
       navigation.navigate("KeeprProStack", {
         screen: "KeeprProStewardshipView",
         params: {
@@ -2699,7 +3093,7 @@ export default function ActivatorHomeScreen({ navigation, route }) {
 
     setCreatingBoat(true);
     try {
-      await createKeeprSpaceBoat({
+      const created = await createKeeprSpaceBoat({
         organizationId: orgId,
         relationshipPurpose: addBoatPurpose,
         operatingStates: addBoatStates,
@@ -2710,18 +3104,21 @@ export default function ActivatorHomeScreen({ navigation, route }) {
           hin: newBoatDraft.hin,
           new_used: newBoatDraft.newUsed,
           name: newBoatDraft.name,
-          hero_image_url: newBoatDraft.heroImageUrl,
           location: newBoatDraft.location,
           engine: newBoatDraft.engine,
           owner: newBoatDraft.owner,
           operational_state: addBoatStates[0] || newBoatDraft.operationalState,
         },
       });
+      await uploadActivatorBoatPhotos({
+        assetId: created?.asset_id || created?.asset?.id || created?.id || null,
+        photos: newBoatDraft.photos || [],
+      });
       await load({ quiet: true });
       setMode("fleet");
       setNewBoatDraft(EMPTY_NEW_BOAT);
       setAddBoatQuery("");
-      setAddBoatResults([]);
+          setAddBoatResults([]);
     } catch (err) {
       Alert.alert("Could not create boat", err?.message || "Please try again.");
     } finally {
@@ -2798,6 +3195,7 @@ export default function ActivatorHomeScreen({ navigation, route }) {
       >
         <ActivatorBreadcrumb
           navigation={navigation}
+          homeRoute={fixedMode ? "KeeprSpaceHome" : "ActivatorHome"}
           current={breadcrumbCurrent}
           homeParams={{
             initialMode: "fleet",
@@ -2925,6 +3323,10 @@ export default function ActivatorHomeScreen({ navigation, route }) {
                 onToggleState={toggleAddBoatState}
                 createDraft={newBoatDraft}
                 onDraftChange={setNewBoatDraft}
+                onPickPhotos={async () => {
+                  const photos = await pickActivatorBoatPhotos();
+                  if (photos) setNewBoatDraft((current) => ({ ...current, photos }));
+                }}
                 onCreate={createAddBoat}
                 creating={creatingBoat}
                 organizationName={copy.name}
@@ -2962,7 +3364,7 @@ export default function ActivatorHomeScreen({ navigation, route }) {
                     boat={boat}
                     onPress={() => openBoat(boat)}
                     view={activeProjection === "service" ? "service" : "default"}
-                    heroUri={assetHeroUrls[boat.asset_id] || null}
+                    heroUri={assetHeroUrls[boat.asset_id] || assetHeroUrls[boat.id] || null}
                   />
                 ))}
               </View>
@@ -3526,6 +3928,52 @@ const styles = StyleSheet.create({
   addBoatSection: {
     gap: spacing.sm,
     marginTop: spacing.lg,
+  },
+  photoPickButton: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 42,
+    paddingHorizontal: spacing.md,
+  },
+  photoPickText: {
+    color: colors.brandBlue,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  photoPreviewRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  photoPreviewWrap: {
+    borderRadius: radius.sm,
+    height: 72,
+    overflow: "hidden",
+    width: 96,
+  },
+  photoPreview: {
+    height: "100%",
+    width: "100%",
+  },
+  photoHeroBadge: {
+    backgroundColor: "rgba(15, 23, 42, 0.78)",
+    borderRadius: radius.xs,
+    left: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    position: "absolute",
+    top: 6,
+  },
+  photoHeroBadgeText: {
+    color: colors.onPrimary,
+    fontSize: 10,
+    fontWeight: "900",
   },
   optionChipRow: {
     flexDirection: "row",
@@ -4480,6 +4928,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
+  adminRowContent: {
+    flex: 1,
+    minWidth: 0,
+  },
+  adminRowActions: {
+    alignItems: "flex-end",
+    gap: spacing.xs,
+  },
   adminRowTitle: {
     color: colors.textPrimary,
     fontSize: 14,
@@ -4525,10 +4981,48 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "900",
   },
+  adminFormHint: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: "800",
+    marginTop: 2,
+  },
   adminResetText: {
     color: colors.brandBlue,
     fontSize: 12,
     fontWeight: "900",
+  },
+  adminMiniActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    justifyContent: "flex-end",
+  },
+  adminMiniButton: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  adminMiniButtonDanger: {
+    borderColor: "#FCA5A5",
+  },
+  adminMiniButtonPrimary: {
+    borderColor: "#BFDBFE",
+    backgroundColor: "#EFF6FF",
+  },
+  adminMiniButtonText: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  adminMiniButtonDangerText: {
+    color: "#DC2626",
+  },
+  adminMiniButtonPrimaryText: {
+    color: colors.brandBlue,
   },
   adminChipWrap: {
     flexDirection: "row",

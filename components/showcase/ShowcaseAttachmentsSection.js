@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, radius, shadows } from "../../styles/theme";
+import { formatContributionAttribution } from "../../lib/provenance";
 
 const isImageFile = (file = {}) => {
   const mime = String(file.mime_type || "").toLowerCase();
@@ -111,7 +112,7 @@ export default function ShowcaseAttachmentsSection({
                 key={file.placement_id || file.attachment_id || file.id}
                 icon="document-text-outline"
                 title={file.title || file.file_name || "Showcase document"}
-                subtitle={file.notes || file.role || file.file_name}
+                subtitle={formatContributionAttribution(file) || file.notes || file.role || file.file_name}
                 actionLabel="Preview"
                 onPress={() => openFilePreview(file)}
               />
@@ -127,7 +128,7 @@ export default function ShowcaseAttachmentsSection({
                 key={link.placement_id || link.attachment_id || link.id}
                 icon="link-outline"
                 title={link.title || "Showcase link"}
-                subtitle={link.notes || link.url}
+                subtitle={formatContributionAttribution(link) || link.notes || link.url}
                 actionLabel="Visit"
                 onPress={() => link.url && Linking.openURL(link.url)}
               />

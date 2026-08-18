@@ -328,6 +328,7 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
             storage_path: row.storage_path,
             bucket: row.bucket,
             created_at: row.created_at,
+            attribution: row.attribution || null,
             // ✅ hero by placement id (persistent)
             isHero: effectiveHero ? effectiveHero === row.placement_id : false,
             fromTable: true,
@@ -453,7 +454,7 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
             is_showcase: true,
           },
         ],
-        source_context: {
+        sourceContext: {
           origin: "boat_showcase",
           asset_id: currentBoat.id,
         },
@@ -818,6 +819,13 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
                         style={styles.tileImage}
                         resizeMode="cover"
                       />
+                      {!!photo.attribution && (
+                        <View style={styles.attributionBadge}>
+                          <Text style={styles.attributionBadgeText} numberOfLines={1}>
+                            {photo.attribution}
+                          </Text>
+                        </View>
+                      )}
 
                       {photo.isHero && (
                         <View style={styles.heroBadge}>
@@ -1039,6 +1047,22 @@ const styles = StyleSheet.create({
   tileImage: {
     width: "100%",
     height: "100%",
+  },
+  attributionBadge: {
+    position: "absolute",
+    left: 6,
+    right: 6,
+    bottom: 38,
+    alignSelf: "flex-start",
+    backgroundColor: "#111827CC",
+    borderRadius: radius.pill,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  attributionBadgeText: {
+    fontSize: 10,
+    color: colors.brandWhite,
+    fontWeight: "600",
   },
 
   heroBadge: {

@@ -41,6 +41,11 @@ import {
   uploadAttachmentFromUri,
   createLinkAttachment,
 } from "../lib/attachmentsUploader";
+import {
+  getRelationshipServiceRecord,
+  shareAssetRecordToRelationship,
+} from "../lib/relationshipContributionsApi";
+import { formatContributionAttribution } from "../lib/provenance";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 const IS_WEB = Platform.OS === "web";
@@ -143,6 +148,7 @@ export default function TimelineRecordScreen({ route, navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [record, setRecord] = useState(null);
   const [recordSource, setRecordSource] = useState(null); // "service_records" | "timeline_records" | "story_events" | null
+  const [relationshipProofUnavailable, setRelationshipProofUnavailable] = useState(false);
 
   // Proof
   const [attachments, setAttachments] = useState([]); // [{id, kind:"photo"|"file", url, title, contentType, created_at}]
@@ -170,6 +176,24 @@ export default function TimelineRecordScreen({ route, navigation }) {
 
   const assetId = record?.asset_id || route?.params?.assetId || null;
   const systemId = record?.system_id || route?.params?.systemId || null;
+  const relationshipShareContext = {
+    organizationId: route?.params?.organizationId || null,
+    assetRelationshipId: route?.params?.assetRelationshipId || null,
+    stewardshipId: route?.params?.stewardshipId || null,
+  };
+  const relationshipReadContext = Boolean(
+    relationshipShareContext.organizationId ||
+      relationshipShareContext.assetRelationshipId ||
+      relationshipShareContext.stewardshipId
+  );
+  const canShareToRelationship =
+    recordSource === "service_records" &&
+    Boolean(
+      relationshipShareContext.organizationId ||
+        relationshipShareContext.assetRelationshipId ||
+        relationshipShareContext.stewardshipId ||
+        record?.keepr_pro_id
+    );
 
   const photos = useMemo(
     () => attachments.filter((a) => a.kind === "photo"),
@@ -281,6 +305,7 @@ useEffect(() => {
   const heroSubtitle = formatDate(
     record?.performed_at || record?.occurred_at || record?.created_at
   );
+  const attributionLine = formatContributionAttribution(record);
   const hasProof = (photos.length + files.length + linkAttachments.length) > 0;
   const confidenceLabel = hasProof ? "Documented" : "Unverified";
 
@@ -319,6 +344,8 @@ useEffect(() => {
         // 1) Load the primary record: prefer service_records, then fall back to timeline_records
         let rec = null;
         let source = null;
+        let scopedAttachmentRows = null;
+        setRelationshipProofUnavailable(false);
 
         if (sourceType === "story_event") {
           const { data: storyEvent, error: storyErr } = await supabase
@@ -341,6 +368,34 @@ useEffect(() => {
               source_type: storyEvent.event_type || "story_event",
             };
             source = "story_events";
+          }
+        } else if (relationshipReadContext) {
+          let scoped = null;
+          try {
+            scoped = await getRelationshipServiceRecord({
+              serviceRecordId: recordId,
+              assetId: route?.params?.assetId || null,
+              organizationId: relationshipShareContext.organizationId,
+              assetRelationshipId: relationshipShareContext.assetRelationshipId,
+              stewardshipId: relationshipShareContext.stewardshipId,
+            });
+          } catch (scopedError) {
+            console.warn("Relationship-scoped record unavailable:", scopedError?.message || scopedError);
+          }
+
+          if (scoped?.record) {
+            rec = scoped.record;
+            source = "service_records";
+            scopedAttachmentRows = Array.isArray(scoped.attachments) ? scoped.attachments : null;
+          } else if (route?.params?.serviceRecordSnapshot) {
+            rec = {
+              ...route.params.serviceRecordSnapshot,
+              id: recordId,
+              asset_id: route?.params?.assetId || route.params.serviceRecordSnapshot.asset_id || null,
+            };
+            source = "service_records";
+            scopedAttachmentRows = [];
+            setRelationshipProofUnavailable(true);
           }
         } else {
           const { data: sr, error: srErr } = await supabase
@@ -376,10 +431,12 @@ useEffect(() => {
         }
 
         // 2) Load proof from the NEW attachments model only
-        const newRows = await listAttachmentsForTarget(
-          source === "story_events" ? "story_event" : "service_record",
-          recordId
-        );
+        const newRows =
+          scopedAttachmentRows ||
+          (await listAttachmentsForTarget(
+            source === "story_events" ? "story_event" : "service_record",
+            recordId
+          ));
 
         const normalized = [];
         const linkRows = [];
@@ -400,6 +457,7 @@ useEffect(() => {
               url: a.url,
               title: a.title || null,
               created_at: a.created_at,
+              attribution: a.attribution || formatContributionAttribution(a),
               _source: "attachments_new",
             });
             continue;
@@ -431,6 +489,7 @@ useEffect(() => {
               title: a.title || a.file_name || "Photo",
               contentType: a.mime_type || "image/jpeg",
               created_at: a.created_at,
+              attribution: a.attribution || formatContributionAttribution(a),
             });
           } else {
             normalized.push({
@@ -442,6 +501,7 @@ useEffect(() => {
               title: a.title || a.file_name || "File",
               contentType: a.mime_type || "",
               created_at: a.created_at,
+              attribution: a.attribution || formatContributionAttribution(a),
             });
           }
         }
@@ -465,7 +525,16 @@ useEffect(() => {
         setLoading(false);
       }
     },
-    [recordId, sourceType, storyEventId]
+    [
+      recordId,
+      relationshipReadContext,
+      relationshipShareContext.assetRelationshipId,
+      relationshipShareContext.organizationId,
+      relationshipShareContext.stewardshipId,
+      route?.params?.assetId,
+      sourceType,
+      storyEventId,
+    ]
   );
 
   // Initial load + refresh
@@ -927,6 +996,22 @@ useFocusEffect(
     );
   };
 
+  const onShareToRelationship = async () => {
+    if (!recordId || !canShareToRelationship) return;
+    try {
+      await shareAssetRecordToRelationship({
+        serviceRecordId: recordId,
+        organizationId: relationshipShareContext.organizationId,
+        assetRelationshipId: relationshipShareContext.assetRelationshipId,
+        stewardshipId: relationshipShareContext.stewardshipId,
+      });
+      Alert.alert("Shared", "This owner-authored record is now visible in the relationship workspace.");
+      setReloadKey((k) => k + 1);
+    } catch (e) {
+      Alert.alert("Could not share record", e?.message || "Please try again.");
+    }
+  };
+
   if (loading && !record) {
     return (
       <SafeAreaView style={layoutStyles.screen}>
@@ -944,8 +1029,8 @@ useFocusEffect(
         <View style={styles.centerFill}>
           <Text style={styles.emptyTitle}>Record not found</Text>
           <Text style={styles.emptyBody}>
-            We couldn&apos;t find that timeline record. It may have been deleted
-            or moved.
+            We couldn&apos;t find that timeline record. It may have been deleted,
+            moved, or the relationship record migration may not be applied yet.
           </Text>
         </View>
       </SafeAreaView>
@@ -975,6 +1060,16 @@ useFocusEffect(
           </TouchableOpacity>
 
           <View style={styles.kHeaderRight}>
+            {canShareToRelationship ? (
+              <TouchableOpacity
+                style={styles.shareRelationshipBtn}
+                onPress={onShareToRelationship}
+                accessibilityLabel="Share record to relationship"
+              >
+                <Ionicons name="share-social-outline" size={16} color={UI.primary} />
+                <Text style={styles.shareRelationshipText}>Share</Text>
+              </TouchableOpacity>
+            ) : null}
             <TouchableOpacity
               style={styles.kHeaderIconBtn}
               onPress={onEdit}
@@ -1127,6 +1222,9 @@ useFocusEffect(
             ) : null}
             <Text style={styles.recordMetaText}>{summaryLine}</Text>
           </View>
+          {attributionLine ? (
+            <Text style={styles.recordMetaText}>{attributionLine}</Text>
+          ) : null}
         </View>
 
         {/* PROOF */}
@@ -1170,6 +1268,15 @@ useFocusEffect(
               ) : null}
             </View>
           </View>
+
+          {relationshipProofUnavailable ? (
+            <View style={styles.relationshipProofNotice}>
+              <Ionicons name="information-circle-outline" size={18} color={UI.primary} />
+              <Text style={styles.relationshipProofNoticeText}>
+                This shared relationship record is available, but proof requires the relationship records migration before Wilson can open the original attachments.
+              </Text>
+            </View>
+          ) : null}
 
           {/* Filter chips */}
           <View style={styles.proofTabsRow}>
@@ -1321,12 +1428,12 @@ useFocusEffect(
                         >
                           {f.title || "File"}
                         </Text>
-                        {f.contentType ? (
+                        {f.attribution || f.contentType ? (
                           <Text
                             numberOfLines={1}
                             style={styles.proofRowSub}
                           >
-                            {f.contentType}
+                            {f.attribution || f.contentType}
                           </Text>
                         ) : null}
                       </View>
@@ -1364,12 +1471,12 @@ useFocusEffect(
                         >
                           {l.title || domainFromUrl(l.url) || "Link"}
                         </Text>
-                        {l.url ? (
+                        {l.attribution || l.url ? (
                           <Text
                             numberOfLines={1}
                             style={styles.proofRowSub}
                           >
-                            {l.url}
+                            {l.attribution || l.url}
                           </Text>
                         ) : null}
                       </View>
@@ -1755,6 +1862,23 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: UI.borderSubtle,
   },
+  shareRelationshipBtn: {
+    minHeight: 36,
+    borderRadius: 18,
+    paddingHorizontal: spacing.sm,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    backgroundColor: "rgba(37, 99, 235, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(37, 99, 235, 0.22)",
+  },
+  shareRelationshipText: {
+    ...typography.caption,
+    color: UI.primary,
+    fontWeight: "900",
+  },
   breadcrumbRow: {
     marginHorizontal: spacing.lg,
     marginBottom: spacing.sm,
@@ -1928,6 +2052,24 @@ heroPdfOverlayHintText: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.xs,
+  },
+  relationshipProofNotice: {
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: "rgba(37, 99, 235, 0.22)",
+    backgroundColor: "rgba(37, 99, 235, 0.08)",
+    padding: spacing.sm,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.xs,
+  },
+  relationshipProofNoticeText: {
+    ...typography.caption,
+    color: UI.text2,
+    flex: 1,
+    lineHeight: 18,
   },
   iconButton: {
     width: 32,

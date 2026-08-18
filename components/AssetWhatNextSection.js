@@ -27,6 +27,7 @@ import {
   isWhatNextActionOverdue,
   projectWhatNextActions,
 } from "../lib/assetWhatNextProjection";
+import { getActionScheduleLabel } from "../lib/playbookSchedule";
 
 function getProjectLabel(action) {
   const meta =
@@ -45,25 +46,57 @@ function getProjectLabel(action) {
 }
 
 function getDueLabel(action) {
-  if (!action?.due_at) return null;
-  const label = formatKeeprDate(action.due_at);
+  const label = getActionScheduleLabel(action, formatKeeprDate);
+  if (!action?.due_at && label === "Unscheduled") return null;
+  if (label === "No estimated date" || String(label || "").startsWith("Estimated ")) {
+    return label;
+  }
   return isWhatNextActionOverdue(action) ? `Overdue: ${label}` : `Due ${label}`;
+}
+
+function getWhatNextContext(action) {
+  return action?.what_next && typeof action.what_next === "object"
+    ? action.what_next
+    : {};
+}
+
+function getPlaybookLine(action) {
+  const context = getWhatNextContext(action);
+  if (!context.is_playbook_action) return null;
+  const name = context.playbook_name || "care plan";
+  return `From your ${name} plan`;
+}
+
+function getPlaybookStepLabel(action) {
+  const context = getWhatNextContext(action);
+  if (!context.is_playbook_action || !context.playbook_step_position) return null;
+  return context.playbook_total_steps
+    ? `Step ${context.playbook_step_position} of ${context.playbook_total_steps}`
+    : `Step ${context.playbook_step_position}`;
 }
 
 function ActionMetaPill({ icon, label, tone }) {
   if (!label) return null;
   return (
-    <View style={[styles.metaPill, tone === "overdue" && styles.metaPillOverdue]}>
+    <View style={[
+      styles.metaPill,
+      tone === "overdue" && styles.metaPillOverdue,
+      tone === "next" && styles.metaPillNext,
+    ]}>
       {!!icon && (
         <Ionicons
           name={icon}
           size={13}
-          color={tone === "overdue" ? "#b42318" : colors.textSecondary}
+          color={tone === "overdue" ? "#b42318" : tone === "next" ? colors.primary : colors.textSecondary}
         />
       )}
       <Text
         numberOfLines={1}
-        style={[styles.metaPillText, tone === "overdue" && styles.metaPillTextOverdue]}
+        style={[
+          styles.metaPillText,
+          tone === "overdue" && styles.metaPillTextOverdue,
+          tone === "next" && styles.metaPillTextNext,
+        ]}
       >
         {label}
       </Text>
@@ -269,21 +302,49 @@ export default function AssetWhatNextSection({
             const responsibleLabel = getReminderResponsibilityLabel(action);
             const providerLabel = getReminderProviderLabel(action);
             const projectLabel = getProjectLabel(action);
+            const whatNextContext = getWhatNextContext(action);
+            const playbookLine = getPlaybookLine(action);
+            const stepLabel = getPlaybookStepLabel(action);
             const isBusy = busyId === action.id;
 
             return (
-              <View key={action.id} style={styles.actionRow}>
+              <View
+                key={action.id}
+                style={[
+                  styles.actionRow,
+                  whatNextContext.is_next_playbook_step && styles.nextPlaybookActionRow,
+                ]}
+              >
                 <TouchableOpacity
                   style={styles.actionBody}
                   onPress={() => openAction(action)}
                   activeOpacity={0.85}
                 >
-                  <View style={[styles.statusDot, overdue && styles.statusDotOverdue]} />
+                  <View
+                    style={[
+                      styles.statusDot,
+                      overdue && styles.statusDotOverdue,
+                      whatNextContext.is_next_playbook_step && styles.statusDotNext,
+                    ]}
+                  />
                   <View style={styles.actionTextWrap}>
+                    {whatNextContext.is_next_playbook_step ? (
+                      <Text style={styles.nextInPlanText}>Next in your care cycle</Text>
+                    ) : null}
                     <Text style={styles.actionTitle} numberOfLines={1}>
                       {action.title || "Untitled action"}
                     </Text>
+                    {playbookLine ? (
+                      <Text style={styles.playbookLine} numberOfLines={1}>
+                        {playbookLine}
+                      </Text>
+                    ) : null}
                     <View style={styles.metaRow}>
+                      <ActionMetaPill
+                        icon="map-outline"
+                        label={stepLabel}
+                        tone={whatNextContext.is_next_playbook_step ? "next" : null}
+                      />
                       <ActionMetaPill
                         icon="calendar-outline"
                         label={dueLabel || "No due date"}
@@ -433,6 +494,12 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border || "#e5e7eb",
   },
+  nextPlaybookActionRow: {
+    backgroundColor: "#EFF6FF",
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.sm,
+    borderTopColor: "#BFDBFE",
+  },
   actionBody: {
     flex: 1,
     minWidth: 0,
@@ -450,6 +517,12 @@ const styles = StyleSheet.create({
   statusDotOverdue: {
     backgroundColor: "#f97316",
   },
+  statusDotNext: {
+    backgroundColor: colors.primary,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
   actionTextWrap: {
     flex: 1,
     minWidth: 0,
@@ -458,6 +531,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "850",
     color: colors.textPrimary,
+  },
+  nextInPlanText: {
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: "900",
+    marginBottom: 2,
+  },
+  playbookLine: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: "750",
+    marginTop: 3,
   },
   metaRow: {
     flexDirection: "row",
@@ -481,6 +566,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff7ed",
     borderColor: "#fed7aa",
   },
+  metaPillNext: {
+    backgroundColor: "#DBEAFE",
+    borderColor: "#93C5FD",
+  },
   metaPillText: {
     fontSize: 11,
     fontWeight: "750",
@@ -488,6 +577,10 @@ const styles = StyleSheet.create({
   },
   metaPillTextOverdue: {
     color: "#b42318",
+  },
+  metaPillTextNext: {
+    color: colors.primary,
+    fontWeight: "900",
   },
   rowActions: {
     flexDirection: "row",

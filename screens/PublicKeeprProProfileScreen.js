@@ -4,27 +4,22 @@ import {
   Alert,
   Image,
   Linking,
-  Modal,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import * as DocumentPicker from "expo-document-picker";
-import * as ImagePicker from "expo-image-picker";
 
 import { supabase } from "../lib/supabaseClient";
 import { buildPrivateKeeprProActionPrefill } from "../lib/keeprProEngagement";
 import {
   buildMessagesNavigationParams,
-  sendThreadReply,
   startOwnerKeeprProRelationshipThread,
 } from "../lib/messagesService";
-import { createServiceRequestNotification } from "../lib/notificationsService";
+import { getKeeprSpaceOrgConfig } from "../lib/keeprspaceApi";
 import { colors, radius, shadows, spacing, typography } from "../styles/theme";
 
 function contactRows(profile) {
@@ -40,8 +35,107 @@ function asList(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [];
 }
 
+function listFromValue(value) {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (typeof value === "string") {
+    return value
+      .split(/[,\n]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
 function cleanId(value) {
   return value ? String(value).trim() : "";
+}
+
+function serviceLabel(service) {
+  if (typeof service === "string") return service;
+  return service?.owner_facing_label || service?.name || service?.label || "Service";
+}
+
+function serviceDescription(service) {
+  if (!service || typeof service === "string") return "";
+  return service.owner_facing_description || service.description || service.short_description || "";
+}
+
+function serviceEstimateLabel(service) {
+  if (!service || typeof service === "string") return null;
+  const metadata = service.metadata || {};
+  if (metadata.price_label) return metadata.price_label;
+  if (metadata.estimate_label) return metadata.estimate_label;
+  if (metadata.estimate_required || service.estimate_required) return "Estimate required";
+  if (service.price_label) return service.price_label;
+  return null;
+}
+
+function serviceItems(service) {
+  if (!service || typeof service === "string") return [];
+  const metadata = service.metadata || {};
+  const template = metadata.service_template || metadata;
+  const items = Array.isArray(template.service_items)
+    ? template.service_items
+    : Array.isArray(template.checklist_items)
+    ? template.checklist_items
+    : Array.isArray(service.service_items)
+    ? service.service_items
+    : [];
+  return items
+    .map((item) => {
+      if (typeof item === "string") return { label: item };
+      if (item && typeof item === "object") {
+        return {
+          ...item,
+          label: item.label || item.title || item.name || "",
+        };
+      }
+      return null;
+    })
+    .filter((item) => item?.label);
+}
+
+function serviceKey(service) {
+  if (typeof service === "string") return service;
+  return (
+    service?.id ||
+    service?.slug ||
+    service?.service_key ||
+    service?.key ||
+    serviceLabel(service)
+  );
+}
+
+function normalizeLegacyOffering(item) {
+  if (item && typeof item === "object") return item;
+  return {
+    id: null,
+    name: String(item || "Service"),
+    owner_facing_label: String(item || "Service"),
+    status: "active",
+    visibility: "owner_portal",
+    is_legacy_profile_offering: true,
+  };
+}
+
+function buildServiceTemplateSnapshot(service) {
+  if (!service) return null;
+  return {
+    id: service.id || null,
+    slug: service.slug || null,
+    key: service.service_key || service.key || service.slug || service.id || serviceLabel(service),
+    name: service.name || serviceLabel(service),
+    label: serviceLabel(service),
+    service_type: service.service_type || null,
+    asset_system_type: service.asset_system_type || service.metadata?.asset_system_type || null,
+    brand_applicability: service.brand_applicability || service.metadata?.brand_applicability || null,
+    interval_trigger: service.interval_trigger || service.metadata?.interval_trigger || null,
+    owner_facing_description: serviceDescription(service) || null,
+    service_items: serviceItems(service),
+    relationship_purposes: listFromValue(service.relationship_purposes),
+    supported_asset_types: listFromValue(service.supported_asset_types),
+    status: service.status || "active",
+  };
 }
 
 export default function PublicKeeprProProfileScreen({ route, navigation }) {
@@ -52,11 +146,9 @@ export default function PublicKeeprProProfileScreen({ route, navigation }) {
   const [loading, setLoading] = useState(true);
   const [relationshipLoading, setRelationshipLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [selectedOffering, setSelectedOffering] = useState(null);
-  const [requestText, setRequestText] = useState("");
-  const [preferredTiming, setPreferredTiming] = useState("");
-  const [pendingAttachments, setPendingAttachments] = useState([]);
-  const [submitting, setSubmitting] = useState(false);
+  const [configuredServices, setConfiguredServices] = useState([]);
+  const [servicesLoading, setServicesLoading] = useState(false);
+  const [servicesError, setServicesError] = useState(null);
   const [startingThread, setStartingThread] = useState(false);
 
   useEffect(() => {
@@ -170,6 +262,48 @@ export default function PublicKeeprProProfileScreen({ route, navigation }) {
     };
   }, [assetContext?.assetId, profile?.claimed_state, profile?.organization?.id]);
 
+  useEffect(() => {
+    let active = true;
+    const orgId = cleanId(profile?.organization?.id);
+    if (!orgId || profile?.claimed_state !== "claimed") {
+      setConfiguredServices([]);
+      setServicesError(null);
+      setServicesLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    setServicesLoading(true);
+    setServicesError(null);
+    getKeeprSpaceOrgConfig({ organizationId: orgId })
+      .then((config) => {
+        if (!active) return;
+        const services = Array.isArray(config?.service_offerings)
+          ? config.service_offerings
+          : [];
+        const ownerVisibleServices = services.filter((service) => {
+          const status = String(service?.status || "active").toLowerCase();
+          const visibility = String(service?.visibility || "owner_portal").toLowerCase();
+          return status === "active" && visibility !== "internal";
+        });
+        setConfiguredServices(ownerVisibleServices);
+      })
+      .catch((err) => {
+        if (!active) return;
+        console.log("Owner-facing KeeprSpace services unavailable:", err?.message || err);
+        setConfiguredServices([]);
+        setServicesError(err?.message || "Could not load configured Services.");
+      })
+      .finally(() => {
+        if (active) setServicesLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [profile?.claimed_state, profile?.organization?.id]);
+
   const rows = contactRows(profile);
   const isClaimed = profile?.claimed_state === "claimed";
   const isPublished = profile?.publish_status === "published" || profile?.publish_status === "demo";
@@ -180,8 +314,14 @@ export default function PublicKeeprProProfileScreen({ route, navigation }) {
   const offerings = asList(profile?.service_offerings);
   const packages = asList(profile?.packages);
   const offeringList = useMemo(
-    () => (offerings.length ? offerings : ["Marine Service", "Winterization", "Storage", "Commissioning"]),
-    [offerings]
+    () => {
+      if (configuredServices.length) return configuredServices;
+      const legacyOfferings = offerings.length
+        ? offerings
+        : ["Marine Service", "Winterization", "Storage", "Commissioning"];
+      return legacyOfferings.map(normalizeLegacyOffering);
+    },
+    [configuredServices, offerings]
   );
   const relationshipThreadId = relationship?.thread?.id || relationship?.projection_thread?.id || null;
   const relationshipActionId = relationship?.action?.id || null;
@@ -244,176 +384,73 @@ export default function PublicKeeprProProfileScreen({ route, navigation }) {
     });
   };
 
-  const pickPhoto = async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (permission?.status && permission.status !== "granted") return;
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaType?.Images ?? ImagePicker.MediaTypeOptions?.Images,
-      quality: 0.85,
-    });
-    const asset = result?.assets?.[0];
-    if (asset?.uri) {
-      setPendingAttachments((prev) => [
-        ...prev,
-        {
-          uri: asset.uri,
-          fileName: asset.fileName || "photo.jpg",
-          mimeType: asset.mimeType || "image/jpeg",
-          fileSize: asset.fileSize || null,
-          kind: "photo",
-        },
-      ]);
-    }
-  };
-
-  const pickFile = async () => {
-    const result = await DocumentPicker.getDocumentAsync({
-      multiple: false,
-      copyToCacheDirectory: true,
-    });
-    const asset = result?.assets?.[0];
-    if (asset?.uri) {
-      setPendingAttachments((prev) => [
-        ...prev,
-        {
-          uri: asset.uri,
-          fileName: asset.name || "attachment",
-          mimeType: asset.mimeType || null,
-          fileSize: asset.size || null,
-          kind: "file",
-        },
-      ]);
-    }
-  };
-
-  const submitServiceRequest = async () => {
-    if (!selectedOffering || !hasAssetContext || !profile?.id) return;
-    const cleanRequest = requestText.trim();
-    if (!cleanRequest) {
-      Alert.alert("Request needed", "Add a short note for Wilson Marine.");
+  const requestService = (service) => {
+    if (!hasAssetContext || !profile?.id) return;
+    if (!isLiveDestination) {
+      Alert.alert("Provider unavailable", "This provider is not ready for service requests yet.");
       return;
     }
 
-    setSubmitting(true);
-    try {
-      const { data: authData, error: authError } = await supabase.auth.getUser();
-      if (authError) throw authError;
-      const ownerId = assetContext.ownerId || authData?.user?.id || null;
-      if (!ownerId) throw new Error("You need to be signed in.");
-
-      const prefill = buildPrivateKeeprProActionPrefill({
-        actionTitle: `${selectedOffering}: ${assetName}`,
-        actionMessage: [cleanRequest, preferredTiming.trim() ? `Preferred timing: ${preferredTiming.trim()}` : null]
-          .filter(Boolean)
-          .join("\n"),
-        assetId: assetContext.assetId,
-        assetName,
-        keeprProId: profile.id,
-        keeprProLabel: profile.display_name,
-        assignmentScope: "asset",
-        sourceScreen: "owner_claimed_keeprpro_portal",
-        contact: {
-          profile_slug: profile.slug,
-          relationship_id: relationshipId,
-          provider_org_id: profile?.organization?.id || null,
-          thread_id: relationshipThreadId || null,
-          offering: selectedOffering,
-          kac,
-        },
-      });
-
-      let threadId = relationshipThreadId || null;
-      if (!threadId && relationshipId) {
-        const started = await startOwnerKeeprProRelationshipThread({
-          assetId: assetContext.assetId,
-          assetName,
-          kac,
-          keeprProId: profile.id,
-          keeprProName: profile.display_name,
-          organizationId: profile?.organization?.id || null,
-          stewardshipId: relationshipId,
-          providerMemberId,
-          ownerId,
-        });
-        threadId = started?.thread?.id || null;
-        setRelationship((prev) => ({
-          ...(prev || {}),
-          thread: started?.thread || null,
-        }));
-      }
-
-      const extraMetadata = {
-        ...(prefill.extra_metadata || {}),
-        provider_target: {
-          ...(prefill.extra_metadata?.provider_target || {}),
-          organization_id: profile?.organization?.id || null,
-          stewardship_id: relationshipId || null,
-          access_scope: "service_stewardship",
-        },
-        provider_access_scope: "service_stewardship",
-        service_offering: selectedOffering,
+    const label = serviceLabel(service);
+    const description = serviceDescription(service);
+    const snapshot = buildServiceTemplateSnapshot(service);
+    const providerOrgId = profile?.organization?.id || null;
+    const prefill = buildPrivateKeeprProActionPrefill({
+      actionTitle: `${label}: ${assetName}`,
+      actionMessage: description || `Request ${label} from ${profile.display_name}.`,
+      assetId: assetContext.assetId,
+      assetName,
+      keeprProId: profile.id,
+      keeprProLabel: profile.display_name,
+      assignmentScope: "asset",
+      sourceScreen: "owner_claimed_keeprpro_portal",
+      contact: {
+        profile_slug: profile.slug,
         relationship_id: relationshipId,
-        asset_thread_id: threadId || null,
-        requested_from: "claimed_keeprpro_portal",
-        requested_by_owner_name: ownerName,
-      };
-
-      const { data: saved, error: insertError } = await supabase
-        .from("reminders")
-        .insert({
-          owner_id: ownerId,
-          title: prefill.title,
-          notes: prefill.notes,
-          due_at: prefill.due_at,
-          has_time: prefill.has_time,
-          is_urgent: prefill.is_urgent,
-          repeat_rule: prefill.repeat_rule,
-          status: "open",
-          asset_id: assetContext.assetId,
-          system_id: null,
-          preferred_provider_id: profile.id,
-          extra_metadata: extraMetadata,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .select("id")
-        .single();
-      if (insertError) throw insertError;
-
-      if (threadId) {
-        await sendThreadReply(threadId, `${selectedOffering}: ${cleanRequest}`, {
-          assetId: assetContext.assetId,
-          kac,
-          organizationId: profile?.organization?.id || null,
-          stewardshipId: relationshipId,
-          actionId: saved?.id || null,
-          pendingAttachments,
-          suppressNotification: true,
-        });
-      }
-
-      await createServiceRequestNotification({
-        actorUserId: ownerId,
-        assetId: assetContext.assetId,
+        provider_org_id: providerOrgId,
+        thread_id: relationshipThreadId || null,
+        service_offering_id: service?.id || null,
+        service_offering_key: serviceKey(service),
+        offering: label,
         kac,
-        organizationId: profile?.organization?.id || null,
-        stewardshipId: relationshipId,
-        actionId: saved?.id || null,
-        threadId,
-        title: `${selectedOffering} request`,
-        body: `${ownerName || "Customer"} requested ${selectedOffering} for ${assetName}.`,
-      });
+      },
+    });
 
-      setSelectedOffering(null);
-      setRequestText("");
-      setPreferredTiming("");
-      setPendingAttachments([]);
-      Alert.alert("Request sent", "Wilson Marine will see this in Needs Attention.");
-    } catch (err) {
-      Alert.alert("Could not send request", err?.message || "Please try again.");
-    } finally {
-      setSubmitting(false);
-    }
+    prefill.extra_metadata = {
+      ...(prefill.extra_metadata || {}),
+      provider_target: {
+        ...(prefill.extra_metadata?.provider_target || {}),
+        org_id: providerOrgId,
+        organization_id: providerOrgId,
+        stewardship_id: relationshipId || null,
+        access_scope: "service_stewardship",
+      },
+      provider_access_scope: "service_stewardship",
+      action_type: "service",
+      service_action: true,
+      service_offering: label,
+      service_template_id: snapshot?.id || null,
+      service_template_key: snapshot?.key || serviceKey(service),
+      service_template_name: snapshot?.name || label,
+      service_template_label: snapshot?.label || label,
+      service_template_snapshot: snapshot,
+      service_template_org_id: providerOrgId,
+      relationship_id: relationshipId,
+      asset_thread_id: relationshipThreadId || null,
+      requested_from: "claimed_keeprpro_portal",
+      requested_by_owner_name: ownerName,
+    };
+
+    navigation.navigate("CreateReminder", {
+      assetId: assetContext.assetId,
+      organizationId: providerOrgId,
+      prefill,
+      afterSave: "PublicKeeprProProfile",
+      afterSaveParams: {
+        slug,
+        assetContext,
+      },
+    });
   };
 
   return (
@@ -521,17 +558,54 @@ export default function PublicKeeprProProfileScreen({ route, navigation }) {
 
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Service Offerings</Text>
-              <View style={styles.chipRow}>
-                {offeringList.map((item) => (
-                  <TouchableOpacity
-                    key={item}
-                    style={[styles.chip, hasAssetContext && isLiveDestination && styles.clickableChip]}
-                    disabled={!hasAssetContext || !isLiveDestination}
-                    onPress={() => setSelectedOffering(item)}
-                  >
-                    <Text style={styles.chipText}>{item}</Text>
-                  </TouchableOpacity>
-                ))}
+              {servicesLoading ? (
+                <View style={styles.inlineStateRow}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                  <Text style={styles.mutedText}>Loading Wilson Marine Services...</Text>
+                </View>
+              ) : null}
+              {!configuredServices.length && servicesError ? (
+                <Text style={styles.mutedText}>Published Services are shown while configured Services are unavailable.</Text>
+              ) : null}
+              <View style={styles.serviceGrid}>
+                {offeringList.map((service) => {
+                  const label = serviceLabel(service);
+                  const description = serviceDescription(service);
+                  const estimate = serviceEstimateLabel(service);
+                  const items = serviceItems(service).slice(0, 3);
+                  return (
+                    <View key={`offering-${serviceKey(service)}`} style={styles.serviceCard}>
+                      <View style={styles.serviceCardHeader}>
+                        <View style={styles.serviceIcon}>
+                          <Ionicons name="construct-outline" size={18} color="#2563EB" />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.serviceTitle}>{label}</Text>
+                          {estimate ? <Text style={styles.serviceMeta}>{estimate}</Text> : null}
+                        </View>
+                      </View>
+                      <Text style={styles.serviceDescriptionText}>
+                        {description || "Request this Service from Wilson Marine for your boat."}
+                      </Text>
+                      {items.length ? (
+                        <View style={styles.serviceItemList}>
+                          {items.map((item, index) => (
+                            <Text key={`${item.label}-${index}`} style={styles.serviceItemText} numberOfLines={1}>
+                              • {item.label}
+                            </Text>
+                          ))}
+                        </View>
+                      ) : null}
+                      <TouchableOpacity
+                        style={[styles.requestButton, (!hasAssetContext || !isLiveDestination) && styles.requestButtonDisabled]}
+                        disabled={!hasAssetContext || !isLiveDestination}
+                        onPress={() => requestService(service)}
+                      >
+                        <Text style={styles.requestButtonText}>Request Service</Text>
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })}
               </View>
             </View>
 
@@ -580,66 +654,18 @@ export default function PublicKeeprProProfileScreen({ route, navigation }) {
                 </TouchableOpacity>
                 <Text style={[styles.contextKicker, styles.sectionKicker]}>Start service</Text>
                 <View style={styles.chipRow}>
-                  {offeringList.map((item) => (
-                    <TouchableOpacity key={`workspace-${item}`} style={[styles.chip, styles.clickableChip]} onPress={() => setSelectedOffering(item)}>
-                      <Text style={styles.chipText}>{item}</Text>
+                  {offeringList.map((service) => (
+                    <TouchableOpacity
+                      key={`workspace-${serviceKey(service)}`}
+                      style={[styles.chip, styles.clickableChip]}
+                      onPress={() => requestService(service)}
+                    >
+                      <Text style={styles.chipText}>{serviceLabel(service)}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
               </View>
             ) : null}
-
-            <Modal visible={!!selectedOffering} transparent animationType="fade" onRequestClose={() => setSelectedOffering(null)}>
-              <View style={styles.modalBackdrop}>
-                <View style={styles.modalCard}>
-                  <Text style={styles.eyebrow}>Request Service</Text>
-                  <Text style={styles.modalTitle}>{selectedOffering}</Text>
-                  <Text style={styles.contextText}>{assetName}{kac ? ` · ${kac}` : ""}</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={requestText}
-                    onChangeText={setRequestText}
-                    placeholder="What do you need Wilson Marine to do?"
-                    multiline
-                  />
-                  <TextInput
-                    style={styles.singleInput}
-                    value={preferredTiming}
-                    onChangeText={setPreferredTiming}
-                    placeholder="Preferred timing (optional)"
-                  />
-                  <View style={styles.attachmentRow}>
-                    <TouchableOpacity style={styles.secondaryButton} onPress={pickPhoto} disabled={submitting}>
-                      <Ionicons name="image-outline" size={17} color={colors.primary} />
-                      <Text style={styles.secondaryButtonText}>Photo</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.secondaryButton} onPress={pickFile} disabled={submitting}>
-                      <Ionicons name="document-attach-outline" size={17} color={colors.primary} />
-                      <Text style={styles.secondaryButtonText}>File</Text>
-                    </TouchableOpacity>
-                  </View>
-                  {pendingAttachments.length ? (
-                    <View style={styles.pendingList}>
-                      {pendingAttachments.map((attachment, index) => (
-                        <View key={`${attachment.uri}-${index}`} style={styles.pendingItem}>
-                          <Ionicons name={attachment.kind === "photo" ? "image-outline" : "document-outline"} size={15} color={colors.primary} />
-                          <Text style={styles.pendingText} numberOfLines={1}>{attachment.fileName || attachment.name || "Attachment"}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  ) : null}
-                  <View style={styles.modalActions}>
-                    <TouchableOpacity style={styles.secondaryButton} onPress={() => setSelectedOffering(null)} disabled={submitting}>
-                      <Text style={styles.secondaryButtonText}>Cancel</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.primaryButton} onPress={submitServiceRequest} disabled={submitting}>
-                      <Ionicons name="send-outline" size={18} color="#FFFFFF" />
-                      <Text style={styles.primaryButtonText}>{submitting ? "Sending..." : "Submit"}</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              </View>
-            </Modal>
           </>
         )}
       </ScrollView>
@@ -781,6 +807,85 @@ const styles = StyleSheet.create({
     ...typography.h2,
     color: colors.textPrimary,
     marginBottom: spacing.sm,
+  },
+  inlineStateRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  serviceGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  serviceCard: {
+    flexBasis: 220,
+    flexGrow: 1,
+    minWidth: 220,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: "#FFFFFF",
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  serviceCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  serviceIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.sm,
+    backgroundColor: "#EFF6FF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  serviceTitle: {
+    ...typography.body,
+    color: colors.textPrimary,
+    fontWeight: "900",
+  },
+  serviceMeta: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    fontWeight: "800",
+    marginTop: 2,
+  },
+  serviceDescriptionText: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    lineHeight: 18,
+  },
+  serviceItemList: {
+    gap: 3,
+  },
+  serviceItemText: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    fontWeight: "700",
+  },
+  requestButton: {
+    minHeight: 36,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    backgroundColor: "#EFF6FF",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: spacing.sm,
+    marginTop: spacing.xs || 4,
+  },
+  requestButtonDisabled: {
+    opacity: 0.5,
+  },
+  requestButtonText: {
+    ...typography.caption,
+    color: "#1D4ED8",
+    fontWeight: "900",
   },
   contactRow: {
     flexDirection: "row",

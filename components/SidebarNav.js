@@ -56,31 +56,38 @@ function workspaceModeLabel(workspace) {
 function navItemsForWorkspace(workspace) {
   const type = workspace?.workspace_type;
   const name = workspaceLabel(workspace);
+  const homeLabel = name === "Workspace" ? "Home" : `${name} / Home`;
 
   if (type === "keeproem") {
     return [
-      { key: "ActivatorHome", label: name, icon: "business-outline" },
-      { key: "Messages", label: "Messages", icon: "chatbubbles-outline" },
+      { key: "KeeprSpaceHome", label: homeLabel, icon: "business-outline" },
+      { key: "KeeprSpaceFleet", label: "Active Fleet", icon: "boat-outline" },
+      { key: "KeeprSpaceMessages", label: "Messages", icon: "chatbubbles-outline" },
+      { key: "KeeprSpacePlaybooks", label: "Playbooks", icon: "list-outline" },
+      { key: "KeeprSpaceActivator", label: "Activator", icon: "sparkles-outline" },
       { key: "KeeprSpaceAdmin", label: "KeeprSpace Admin", icon: "image-outline" },
-      { key: "Settings", label: "Settings", icon: "settings-outline" },
     ];
   }
 
   if (type === "keeprdealer") {
     return [
-      { key: "ActivatorHome", label: name, icon: "storefront-outline" },
-      { key: "Messages", label: "Messages", icon: "chatbubbles-outline" },
+      { key: "KeeprSpaceHome", label: homeLabel, icon: "storefront-outline" },
+      { key: "KeeprSpaceFleet", label: "Active Fleet", icon: "boat-outline" },
+      { key: "KeeprSpaceMessages", label: "Messages", icon: "chatbubbles-outline" },
+      { key: "KeeprSpacePlaybooks", label: "Playbooks", icon: "list-outline" },
+      { key: "KeeprSpaceActivator", label: "Sales", icon: "pricetag-outline" },
       { key: "KeeprSpaceAdmin", label: "KeeprSpace Admin", icon: "image-outline" },
-      { key: "Settings", label: "Settings", icon: "settings-outline" },
     ];
   }
 
   if (type === "keeprpro") {
     return [
-      { key: "ActivatorHome", label: name, icon: "briefcase-outline" },
-      { key: "Messages", label: "Messages", icon: "chatbubbles-outline" },
+      { key: "KeeprSpaceHome", label: homeLabel, icon: "briefcase-outline" },
+      { key: "KeeprSpaceFleet", label: "Active Fleet", icon: "boat-outline" },
+      { key: "KeeprSpaceMessages", label: "Messages", icon: "chatbubbles-outline" },
+      { key: "KeeprSpacePlaybooks", label: "Playbooks", icon: "list-outline" },
+      { key: "KeeprSpaceActivator", label: "Activator", icon: "add-circle-outline" },
       { key: "KeeprSpaceAdmin", label: "KeeprSpace Admin", icon: "image-outline" },
-      { key: "Settings", label: "Settings", icon: "settings-outline" },
     ];
   }
 
@@ -111,21 +118,38 @@ function iconForWorkspace(workspace) {
 
 function destinationForWorkspace(workspace) {
   if (["keeproem", "keeprdealer", "keeprpro"].includes(workspace?.workspace_type)) {
-    return "ActivatorHome";
+    return "KeeprSpaceModule";
   }
-  return "ActivatorHome";
+  return "PersonalModule";
+}
+
+function personalWorkspace(workspaces = []) {
+  return workspaces.find((workspace) => workspace?.workspace_type === "keepr");
 }
 
 function activatorModeForSidebarKey(key, workspace) {
+  if (key === "KeeprSpaceAdmin" || key === "WilsonAdmin") return "profile";
+  if (key === "KeeprSpaceMessages" || key === "WilsonMessages") return "messages";
+  if (key === "KeeprSpaceFleet" || key === "WilsonFleet") return "fleet";
+  if (key === "KeeprSpaceHome" || key === "WilsonHome") return workspace?.workspace_type === "keeprpro" ? "needs" : "fleet";
   if (key === "KeeprSpaceAdmin") return "profile";
-  if (key === "Messages") {
+  if (key === "ActivatorMessages" || key === "Messages") {
     return workspace?.workspace_type === "keeprpro" ? "messages" : "fleet";
   }
+  if (key === "ActivatorFleet") return "fleet";
+  if (key === "ActivatorHome") return workspace?.workspace_type === "keeprpro" ? "needs" : "fleet";
   return "fleet";
 }
 
 const NAV_PERSIST_KEY = "keepr.nav.state.v1";
 const KEEPRPRO_HOME_PATH = "/pro-mode";
+
+function clearPersistedNavState() {
+  if (Platform.OS !== "web") return;
+  try {
+    window?.sessionStorage?.removeItem(NAV_PERSIST_KEY);
+  } catch {}
+}
 
 function returnToKeeprProHomeOnWeb() {
   if (Platform.OS !== "web") return false;
@@ -172,6 +196,22 @@ function getLeafRouteNameSafe() {
   }
 }
 
+function getLeafRouteSafe() {
+  try {
+    if (!navigationRef?.isReady?.() || !navigationRef.isReady()) return null;
+    const root = navigationRef.getRootState?.();
+    if (!root || !root.routes || typeof root.index !== "number") return null;
+
+    let route = root.routes[root.index];
+    while (route?.state?.routes && typeof route.state.index === "number") {
+      route = route.state.routes[route.state.index];
+    }
+    return route || null;
+  } catch {
+    return null;
+  }
+}
+
 /** map routeName -> section highlight */
 function normalizeToSection(routeName) {
   if (!routeName) return "Dashboard";
@@ -187,8 +227,32 @@ if (
   return "KeeprProHome";
 }
 
-if (routeName === "KeeprProStewardshipView" || routeName === "KeeprProActionDetail") {
+if (routeName === "KeeprSpaceBoat" || routeName === "WilsonBoat") return "KeeprSpaceFleet";
+if (routeName === "KeeprSpaceAddBoat") return "KeeprSpaceActivator";
+if (
+  routeName === "KeeprSpaceHome" ||
+  routeName === "KeeprSpaceFleet" ||
+  routeName === "KeeprSpaceActivator" ||
+  routeName === "KeeprSpaceAddBoat" ||
+  routeName === "KeeprSpaceMessages" ||
+  routeName === "KeeprSpacePlaybooks" ||
+  routeName === "KeeprSpaceAdmin" ||
+  routeName === "KeeprSpaceSettings"
+) {
   return routeName;
+}
+if (
+  routeName === "WilsonHome" ||
+  routeName === "WilsonFleet" ||
+  routeName === "WilsonMessages" ||
+  routeName === "WilsonAdmin" ||
+  routeName === "WilsonSettings"
+) {
+  return routeName.replace("Wilson", "KeeprSpace");
+}
+
+if (routeName === "KeeprProStewardshipView" || routeName === "KeeprProActionDetail") {
+  return "ActivatorFleet";
 }
 
 if (
@@ -277,6 +341,25 @@ if (
   return "Dashboard";
 }
 
+function normalizeActivatorToSection(routeName, params = {}) {
+  if (routeName === "ActivatorBoatWorkspace") return "ActivatorFleet";
+  if (routeName !== "ActivatorHome") return normalizeToSection(routeName);
+
+  if (params?.navSection) return params.navSection;
+
+  switch (params?.initialMode) {
+    case "messages":
+      return "ActivatorMessages";
+    case "profile":
+      return "KeeprSpaceAdmin";
+    case "fleet":
+      return "ActivatorFleet";
+    case "needs":
+    default:
+      return "ActivatorHome";
+  }
+}
+
 export default function SidebarNav({ currentRouteName }) {
   const { user } = useAuth();
   const { currentWorkspace, setCurrentWorkspaceId, workspaces } = useWorkspace();
@@ -320,6 +403,7 @@ useEffect(() => {
 }, [userId]);
 
   const [leafRouteName, setLeafRouteName] = useState(null);
+  const [leafRouteParams, setLeafRouteParams] = useState({});
   const [inboxCount, setInboxCount] = useState(0);
 
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -361,11 +445,14 @@ useEffect(() => {
 
       const leaf = getLeafRouteNameSafe();
       if (leaf) setLeafRouteName(leaf);
+      const route = getLeafRouteSafe();
+      if (route?.params) setLeafRouteParams(route.params);
 
       try {
         unsub = navigationRef.addListener("state", () => {
-          const next = getLeafRouteNameSafe();
-          if (next) setLeafRouteName(next);
+          const nextRoute = getLeafRouteSafe();
+          if (nextRoute?.name) setLeafRouteName(nextRoute.name);
+          setLeafRouteParams(nextRoute?.params || {});
         });
       } catch {
         // ignore
@@ -406,8 +493,8 @@ useEffect(() => {
   }, []);
 
   const activeKey = useMemo(
-    () => normalizeToSection(leafRouteName || currentRouteName),
-    [leafRouteName, currentRouteName]
+    () => normalizeActivatorToSection(leafRouteName || currentRouteName, leafRouteParams),
+    [leafRouteName, currentRouteName, leafRouteParams]
   );
 
   const inSuperKeepr = useMemo(() => {
@@ -427,7 +514,7 @@ useEffect(() => {
 
   const inActivator = useMemo(() => {
     const rn = String(leafRouteName || currentRouteName || "");
-    return rn === "ActivatorHome" || rn.startsWith("Activator");
+    return rn === "ActivatorHome" || rn.startsWith("Activator") || rn.startsWith("KeeprSpace");
   }, [leafRouteName, currentRouteName]);
 
   const sidebarWorkspace = useMemo(() => {
@@ -443,7 +530,20 @@ useEffect(() => {
 
 const navItems = useMemo(() => {
   const workspaceItems = navItemsForWorkspace(sidebarWorkspace);
-  if (workspaceItems) return workspaceItems;
+  if (workspaceItems) {
+    const personal = personalWorkspace(workspaces);
+    return personal?.workspace_id && sidebarWorkspace?.workspace_type !== "keepr"
+      ? [
+          ...workspaceItems,
+          {
+            key: "PersonalKeepr",
+            label: "Personal Keepr",
+            icon: "person-outline",
+            workspace: personal,
+          },
+        ]
+      : workspaceItems;
+  }
 
   if (inSuperKeepr) return SUPER_ITEMS;
   if (inKeeprPro) {
@@ -469,7 +569,7 @@ const navItems = useMemo(() => {
     ...workspaceNavItems,
     ...consumerItems.slice(1),
   ];
-}, [sidebarWorkspace, inSuperKeepr, inKeeprPro, userRole, workspaceNavItems]);
+}, [sidebarWorkspace, inSuperKeepr, inKeeprPro, userRole, workspaceNavItems, workspaces]);
 
     // Public View SideBar Collapse
   const isPublicFlow = useMemo(() => {
@@ -516,11 +616,63 @@ const navItems = useMemo(() => {
     if (returnToKeeprProHomeOnWeb()) return;
   }
 
-  if (!navigationRef?.isReady?.() || !navigationRef.isReady()) return;
+  if (!navigationRef?.isReady?.() || !navigationRef.isReady()) {
+    console.warn("Sidebar navigation skipped because navigationRef is not ready", { key });
+    return;
+  }
 
   try {
     const isOrgWorkspace =
       sidebarWorkspace?.workspace_type && sidebarWorkspace.workspace_type !== "keepr";
+    const resetToRoute = (name, params) => {
+      navigationRef.dispatch(
+        CommonActions.reset({
+          index: 0,
+          routes: [{ name, params }],
+        })
+      );
+    };
+    const resetToPersonalModule = () => {
+      navigationRef.dispatch(
+        CommonActions.reset({
+          index: 0,
+          routes: [
+            {
+              name: "PersonalModule",
+              state: {
+                index: 0,
+                routes: [
+                  {
+                    name: "PersonalTabs",
+                    state: {
+                      index: 0,
+                      routes: [{ name: "Dashboard" }],
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        })
+      );
+    };
+    const resetToKeeprSpaceModule = (screen = "KeeprSpaceHome", params = {}, moduleWorkspaceId = sidebarWorkspace?.workspace_id || null) => {
+      navigationRef.dispatch(
+        CommonActions.reset({
+          index: 0,
+          routes: [
+            {
+              name: "KeeprSpaceModule",
+              params: { workspaceId: moduleWorkspaceId },
+              state: {
+                index: 0,
+                routes: [{ name: screen, params }],
+              },
+            },
+          ],
+        })
+      );
+    };
     const navigateActivatorMode = (initialMode = "fleet", targetWorkspace = sidebarWorkspace) => {
       if (
         targetWorkspace?.workspace_id &&
@@ -530,6 +682,13 @@ const navItems = useMemo(() => {
       }
       navigationRef.navigate("ActivatorHome", {
         initialMode,
+        navSection: targetWorkspace?.workspace_type === "keeprpro" && initialMode === "needs"
+          ? "ActivatorHome"
+          : initialMode === "messages"
+          ? "ActivatorMessages"
+          : initialMode === "profile"
+          ? "KeeprSpaceAdmin"
+          : "ActivatorFleet",
         workspaceId: targetWorkspace?.workspace_id || null,
       });
     };
@@ -539,22 +698,24 @@ const navItems = useMemo(() => {
       const targetWorkspace = workspaces.find((workspace) => workspace.workspace_id === workspaceId);
       if (!targetWorkspace) return;
       setCurrentWorkspaceId(workspaceId);
+      clearPersistedNavState();
 
       const destination = destinationForWorkspace(targetWorkspace);
-      if (destination === "KeeprProStack") {
-        navigationRef.navigate("KeeprProStack", { screen: "KeeprProHome" });
+      if (destination === "PersonalModule") {
+        resetToPersonalModule();
       } else {
-        navigateActivatorMode("fleet", targetWorkspace);
+        resetToKeeprSpaceModule("KeeprSpaceHome", { workspaceId }, workspaceId);
       }
       return;
     }
 
-    if (key === "__exit__") {
+    if (key === "__exit__" || key === "PersonalKeepr") {
       const personal = workspaces.find((workspace) => workspace.workspace_type === "keepr");
       if (personal?.workspace_id) {
         setCurrentWorkspaceId(personal.workspace_id);
       }
-      navigationRef.navigate("RootTabs", { screen: "Dashboard" });
+      clearPersistedNavState();
+      resetToPersonalModule();
       return;
     }
 
@@ -577,7 +738,31 @@ const navItems = useMemo(() => {
       return;
     }
 
-    if (key === "ActivatorHome") {
+    if (
+      key === "KeeprSpaceHome" ||
+      key === "KeeprSpaceFleet" ||
+      key === "KeeprSpaceActivator" ||
+      key === "KeeprSpaceAddBoat" ||
+      key === "KeeprSpaceMessages" ||
+      key === "KeeprSpacePlaybooks" ||
+      key === "KeeprSpaceAdmin" ||
+      key === "KeeprSpaceSettings" ||
+      key === "WilsonHome" ||
+      key === "WilsonFleet" ||
+      key === "WilsonMessages" ||
+      key === "WilsonAdmin" ||
+      key === "WilsonSettings"
+    ) {
+      if (isOrgWorkspace) {
+        const targetScreen = key.startsWith("Wilson") ? key.replace("Wilson", "KeeprSpace") : key;
+        resetToKeeprSpaceModule(targetScreen, {
+          workspaceId: sidebarWorkspace?.workspace_id || null,
+        });
+      }
+      return;
+    }
+
+    if (key === "ActivatorHome" || key === "ActivatorFleet" || key === "ActivatorMessages") {
       if (isOrgWorkspace) {
         navigateActivatorMode(activatorModeForSidebarKey(key, sidebarWorkspace));
         return;
@@ -588,15 +773,25 @@ const navItems = useMemo(() => {
 
     if (key === "Messages") {
       if (isOrgWorkspace) {
-        navigateActivatorMode(activatorModeForSidebarKey(key, sidebarWorkspace));
+        resetToKeeprSpaceModule("KeeprSpaceMessages", {
+          scope: "global",
+          workspaceId: sidebarWorkspace?.workspace_id || null,
+          organizationId: sidebarWorkspace?.organization_id || sidebarWorkspace?.org_id || null,
+        });
         return;
       }
-      navigationRef.navigate("RootTabs", { screen: "Messages", params: { scope: "global" } });
+      navigationRef.navigate("PersonalModule", {
+        screen: "PersonalTabs",
+        params: { screen: "Messages", params: { scope: "global" } },
+      });
       return;
     }
 
     if (key === "Settings") {
-      navigationRef.navigate("RootTabs", { screen: "Settings" });
+      navigationRef.navigate("PersonalModule", {
+        screen: "PersonalTabs",
+        params: { screen: "Settings" },
+      });
       return;
     }
 
@@ -648,9 +843,12 @@ if (key === "MyHubs") {
   return;
 }
 
-    navigationRef.navigate("RootTabs", { screen: key });
-  } catch {
-    // no-op
+    navigationRef.navigate("PersonalModule", {
+      screen: "PersonalTabs",
+      params: { screen: key },
+    });
+  } catch (err) {
+    console.error("Sidebar navigation failed:", err);
   }
 };
 

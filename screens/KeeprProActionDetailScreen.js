@@ -13,6 +13,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
 import { supabase } from "../lib/supabaseClient";
+import { getActionScheduleLabel } from "../lib/playbookSchedule";
 import { colors, radius, shadows, spacing, typography } from "../styles/theme";
 
 function formatDate(value) {
@@ -24,6 +25,47 @@ function formatDate(value) {
 
 function compact(values) {
   return values.filter(Boolean).join(" · ");
+}
+
+function getActionMetadata(action) {
+  const candidates = [
+    action?.extra_metadata,
+    action?.metadata,
+    action?.reminder?.extra_metadata,
+    action?.reminder?.metadata,
+  ];
+  return candidates.find((candidate) => candidate && typeof candidate === "object") || {};
+}
+
+function getServiceSnapshot(action) {
+  const meta = getActionMetadata(action);
+  const snapshot = meta.service_template_snapshot || meta.serviceTemplateSnapshot || null;
+  return (
+    snapshot ||
+    (meta.service_action || meta.action_type === "service"
+      ? {
+          name: meta.service_template_name,
+          label: meta.service_template_label || meta.service_template_name,
+          interval_trigger: meta.service_interval_trigger,
+          owner_facing_description: meta.service_description,
+          service_items: [],
+        }
+      : null)
+  );
+}
+
+function normalizeServiceItems(snapshot) {
+  const items = snapshot?.service_items || snapshot?.checklist_items || [];
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((item) => {
+      if (typeof item === "string") return item.trim();
+      if (item && typeof item === "object") {
+        return String(item.label || item.title || item.name || "").trim();
+      }
+      return "";
+    })
+    .filter(Boolean);
 }
 
 export default function KeeprProActionDetailScreen({ route }) {
@@ -137,6 +179,8 @@ export default function KeeprProActionDetailScreen({ route }) {
 
   const asset = action?.asset || {};
   const provider = action?.provider || {};
+  const serviceSnapshot = getServiceSnapshot(action);
+  const serviceItems = normalizeServiceItems(serviceSnapshot);
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -182,9 +226,53 @@ export default function KeeprProActionDetailScreen({ route }) {
               </View>
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Timing</Text>
-                <Text style={styles.detailValue}>{formatDate(action.due_at)}</Text>
+                <Text style={styles.detailValue}>{getActionScheduleLabel(action, formatDate)}</Text>
               </View>
             </View>
+
+            {serviceSnapshot ? (
+              <View style={styles.serviceCard}>
+                <View style={styles.serviceHeader}>
+                  <View style={styles.serviceIcon}>
+                    <Ionicons name="construct-outline" size={18} color={colors.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.cardLabel}>Service template</Text>
+                    <Text style={styles.cardTitle}>
+                      {serviceSnapshot.label || serviceSnapshot.name || "Service"}
+                    </Text>
+                  </View>
+                </View>
+                {serviceSnapshot.owner_facing_description ? (
+                  <Text style={styles.bodyText}>{serviceSnapshot.owner_facing_description}</Text>
+                ) : null}
+                <View style={styles.serviceMetaGrid}>
+                  {[
+                    ["Type", serviceSnapshot.service_type],
+                    ["Applies to", compact([serviceSnapshot.asset_system_type, serviceSnapshot.brand_applicability])],
+                    ["Interval", serviceSnapshot.interval_trigger],
+                  ]
+                    .filter(([, value]) => !!value)
+                    .map(([label, value]) => (
+                      <View key={label} style={styles.serviceMetaItem}>
+                        <Text style={styles.detailLabel}>{label}</Text>
+                        <Text style={styles.detailValue}>{value}</Text>
+                      </View>
+                    ))}
+                </View>
+                {serviceItems.length ? (
+                  <View style={styles.serviceItems}>
+                    <Text style={styles.detailLabel}>Service items</Text>
+                    {serviceItems.map((item, index) => (
+                      <View key={`${item}-${index}`} style={styles.serviceItemRow}>
+                        <Ionicons name="checkmark-circle-outline" size={16} color={colors.primary} />
+                        <Text style={styles.serviceItemText}>{item}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
 
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Issue</Text>
@@ -289,6 +377,61 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     padding: spacing.lg,
     ...shadows.card,
+  },
+  serviceCard: {
+    backgroundColor: "#EFF6FF",
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    padding: spacing.lg,
+    gap: spacing.sm,
+  },
+  serviceHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.md,
+  },
+  serviceIcon: {
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderRadius: radius.md,
+    height: 42,
+    justifyContent: "center",
+    width: 42,
+  },
+  serviceMetaGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  serviceMetaItem: {
+    backgroundColor: "#FFFFFF",
+    borderColor: "#DBEAFE",
+    borderRadius: radius.md,
+    borderWidth: 1,
+    flexGrow: 1,
+    minWidth: 160,
+    padding: spacing.md,
+  },
+  serviceItems: {
+    backgroundColor: "#FFFFFF",
+    borderColor: "#DBEAFE",
+    borderRadius: radius.md,
+    borderWidth: 1,
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+    padding: spacing.md,
+  },
+  serviceItemRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  serviceItemText: {
+    ...typography.body,
+    color: colors.textPrimary,
+    flex: 1,
+    fontWeight: "700",
   },
   cardLabel: {
     ...typography.caption,

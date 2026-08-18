@@ -24,7 +24,9 @@ import { colors, shadows } from "../styles/theme";
 
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext";
+import { useWorkspace } from "../context/WorkspaceContext";
 import { getSignedUrl } from "../lib/attachmentsApi";
+import { getKeeprSpacePortfolio } from "../lib/keeprspaceApi";
 import { useFocusEffect } from "@react-navigation/native";
 import { parseMoneyInput } from "../lib/money";
 
@@ -36,6 +38,16 @@ const LIFECYCLE_STATES = [
   "For Rent",
   "Leased",
   "For Sale / Wholesale",
+  "Sold",
+];
+
+const BOAT_LIFECYCLE_STATES = [
+  "In Inventory",
+  "For Sale",
+  "Under Stewardship",
+  "In Service",
+  "Delivery Prep",
+  "Transfer Ready",
   "Sold",
 ];
 
@@ -52,6 +64,14 @@ const MODE_OPTIONS = [
   { key: "dealer", label: "Dealer" },
 ];
 
+const BOAT_MODE_OPTIONS = [
+  { key: "all", label: "All" },
+  { key: "inventory", label: "Inventory" },
+  { key: "for_sale", label: "For Sale" },
+  { key: "stewardship", label: "Stewardship" },
+  { key: "service", label: "Service" },
+];
+
 function getMd(asset) {
   return asset?.extra_metadata && typeof asset.extra_metadata === "object"
     ? asset.extra_metadata
@@ -60,6 +80,10 @@ function getMd(asset) {
 
 function getLifecycleState(asset) {
   const md = getMd(asset);
+  const kind = getAssetKind(asset);
+  if (kind === "boat" || kind === "marine") {
+    return md.lifecycle_state || md.inventory_state || md.operating_state || "In Inventory";
+  }
   return md.lifecycle_state || "Owned – Pre-Rehab";
 }
 
@@ -73,11 +97,21 @@ function daysSince(dateStrOrIso) {
 }
 
 function safeTitle(asset) {
+  const kind = getAssetKind(asset);
+  if ((kind === "boat" || kind === "marine") && !asset?.name) {
+    return [asset?.year, asset?.make, asset?.model].filter(Boolean).join(" ") || "Untitled boat";
+  }
   return asset?.name || "Untitled";
 }
 
 function safeSubtitle(asset) {
   const md = getMd(asset);
+  const kind = getAssetKind(asset);
+  if (kind === "boat" || kind === "marine") {
+    return [asset?.year || md.year, asset?.make || md.make, asset?.model || md.model]
+      .filter(Boolean)
+      .join(" • ") || asset?.location || "";
+  }
   const line1 = md.address_line1 || md.address || md.street || "";
   const city = md.city || "";
   const state = md.state || "";
@@ -98,6 +132,109 @@ function pickHeroUri(asset) {
     md.image_url ||
     null
   );
+}
+
+function assetLabelForClass(assetClass, count) {
+  if (assetClass === "boats") return `${count} boats`;
+  if (assetClass === "vehicles") return `${count} vehicles`;
+  return `${count} assets`;
+}
+
+function getAssetKind(asset) {
+  return String(asset?.asset_subtype || asset?.type || "")
+    .trim()
+    .toLowerCase();
+}
+
+function lifecycleStatesForClass(assetClass) {
+  return assetClass === "boats" ? BOAT_LIFECYCLE_STATES : LIFECYCLE_STATES;
+}
+
+function modesForClass(assetClass) {
+  return assetClass === "boats" ? BOAT_MODE_OPTIONS : MODE_OPTIONS;
+}
+
+function searchPlaceholderForClass(assetClass) {
+  if (assetClass === "boats") return "Search make, model, KAC, HIN, relationship...";
+  if (assetClass === "vehicles") return "Search vehicle, VIN, make, model...";
+  return "Search address, name, notes...";
+}
+
+function compact(parts) {
+  return (parts || [])
+    .map((part) => (part == null ? "" : String(part).trim()))
+    .filter(Boolean)
+    .join(" ");
+}
+
+function normalizeKeeprSpaceBoatForPortfolio(boat, workspace) {
+  const identity = boat?.identity || {};
+  const assetId = boat?.asset_id || boat?.id;
+  const relationship =
+    boat?.dealer_relationship ||
+    boat?.service_relationship ||
+    boat?.relationship ||
+    {};
+  const relationshipPurpose =
+    relationship.relationship_purpose ||
+    relationship.relationship_type ||
+    boat?.relationship_purpose ||
+    boat?.relationship_type ||
+    "stewardship";
+  const year = identity.year || boat?.year || null;
+  const make = identity.make || boat?.make || null;
+  const model = identity.model || boat?.model || null;
+  const name =
+    boat?.asset_name ||
+    boat?.name ||
+    compact([year, make, model]) ||
+    boat?.kac_id ||
+    "Connected boat";
+
+  return {
+    ...boat,
+    id: assetId,
+    name,
+    type: "boat",
+    asset_subtype: "boat",
+    year,
+    make,
+    model,
+    kac_id: boat?.kac_id || identity.kac_id || null,
+    hero_image_url:
+      boat?.hero_image_url ||
+      boat?.hero_thumb_url ||
+      boat?.asset?.hero_image_url ||
+      boat?.asset?.hero_thumb_url ||
+      null,
+    created_at:
+      relationship.created_at ||
+      boat?.created_at ||
+      boat?.asset_created_at ||
+      new Date().toISOString(),
+    extra_metadata: {
+      ...(boat?.extra_metadata || {}),
+      year,
+      make,
+      model,
+      relationship_purpose: relationshipPurpose,
+      relationship_type: relationship.relationship_type || boat?.relationship_type || null,
+      relationship_label:
+        relationship.relationship_label ||
+        relationshipPurpose ||
+        "Stewardship",
+      lifecycle_state:
+        relationshipPurpose === "selling_dealer" ||
+        relationshipPurpose === "inventory" ||
+        relationshipPurpose === "our_boat"
+          ? "In Inventory"
+          : "Under Stewardship",
+      dealer_name: workspace?.display_name || workspace?.name || "KeeprSpace",
+      owner_name: boat?.owner_name || boat?.owner?.name || null,
+      source: "keeprspace_relationship",
+    },
+    _readOnlyProjection: true,
+  };
 }
 
 function parseCsvLoose(csvText) {
@@ -148,6 +285,7 @@ function splitCsvLine(line) {
 export default function SuperKeeprDashboardScreen({ navigation }) {
   const { width: windowWidth } = useWindowDimensions();
   const { user } = useAuth();
+  const { currentWorkspace } = useWorkspace();
 
   const [assetClass, setAssetClass] = useState("homes"); // homes | boats | vehicles
   const [loading, setLoading] = useState(true);
@@ -195,6 +333,14 @@ export default function SuperKeeprDashboardScreen({ navigation }) {
     () => Math.round((cardWidth * 9) / 16),
     [cardWidth]
   );
+  const activeStates = useMemo(() => lifecycleStatesForClass(assetClass), [assetClass]);
+  const activeModes = useMemo(() => modesForClass(assetClass), [assetClass]);
+
+  useEffect(() => {
+    setStateFilter("All");
+    setModeFilter("all");
+    setQuery("");
+  }, [assetClass]);
 
 const fetchAssets = useCallback(async () => {
   if (!user?.id) {
@@ -216,6 +362,34 @@ const fetchAssets = useCallback(async () => {
     if (error) throw error;
 
     const allAssets = data || [];
+    let workspaceBoats = [];
+
+    if (
+      assetClass === "boats" &&
+      currentWorkspace?.workspace_type &&
+      currentWorkspace.workspace_type !== "keepr"
+    ) {
+      const organizationId =
+        currentWorkspace.organization_id || currentWorkspace.org_id || null;
+      if (organizationId) {
+        try {
+          const portfolio = await getKeeprSpacePortfolio({
+            organizationId,
+            search: "",
+            limit: 100,
+            offset: 0,
+          });
+          workspaceBoats = (portfolio?.boats || [])
+            .map((boat) => normalizeKeeprSpaceBoatForPortfolio(boat, currentWorkspace))
+            .filter((boat) => boat?.id);
+        } catch (portfolioError) {
+          console.log(
+            "SuperKeepr workspace boat overlay unavailable:",
+            portfolioError?.message || portfolioError
+          );
+        }
+      }
+    }
 
     const classFiltered = allAssets.filter((asset) => {
       const kind = String(asset?.asset_subtype || asset?.type || "")
@@ -237,11 +411,21 @@ const fetchAssets = useCallback(async () => {
       return true;
     });
 
+    const byId = new Map();
+    for (const asset of classFiltered) {
+      if (asset?.id) byId.set(asset.id, asset);
+    }
+    for (const asset of workspaceBoats) {
+      if (asset?.id) byId.set(asset.id, { ...(byId.get(asset.id) || {}), ...asset });
+    }
+
+    const nextAssets = Array.from(byId.values());
+
     // Render immediately so cards appear fast
-    setAssets(classFiltered);
+    setAssets(nextAssets);
     setLoading(false);
 
-    const heroPlacementIds = classFiltered
+    const heroPlacementIds = nextAssets
       .map((asset) => asset?.hero_placement_id)
       .filter(Boolean);
 
@@ -274,7 +458,7 @@ const fetchAssets = useCallback(async () => {
       placementMap[p.id] = p;
     }
 
-    for (const asset of classFiltered) {
+    for (const asset of nextAssets) {
       try {
         let heroUrl = null;
 
@@ -321,7 +505,7 @@ const fetchAssets = useCallback(async () => {
     Alert.alert("Error", e?.message || "Failed to load portfolio.");
     setLoading(false);
   }
-}, [assetClass, user?.id]);
+}, [assetClass, currentWorkspace, user?.id]);
 
   useFocusEffect(
   useCallback(() => {
@@ -703,8 +887,9 @@ const openAsset = useCallback(
     <TouchableOpacity
       onPress={(e) => {
         e.stopPropagation?.();
-        const idx = Math.max(0, LIFECYCLE_STATES.indexOf(state));
-        const next = LIFECYCLE_STATES[(idx + 1) % LIFECYCLE_STATES.length];
+        const states = lifecycleStatesForClass(assetClass);
+        const idx = Math.max(0, states.indexOf(state));
+        const next = states[(idx + 1) % states.length];
         updateLifecycleState(item.id, next);
       }}
       style={styles.quickBtn}
@@ -719,14 +904,22 @@ const openAsset = useCallback(
     );
   };
 
-  function getAssetKind(asset) {
-  return String(asset?.asset_subtype || asset?.type || "")
-    .trim()
-    .toLowerCase();
-}
-
 function getContextLine(asset) {
   const md = getMd(asset);
+  const kind = getAssetKind(asset);
+
+  if (kind === "boat" || kind === "marine") {
+    return (
+      md.relationship_label ||
+      md.relationship_purpose ||
+      md.relationship_type ||
+      md.dealer_name ||
+      md.oem ||
+      md.owner_name ||
+      asset?.kac_id ||
+      "Relationship portfolio"
+    );
+  }
 
   return (
     md.community ||
@@ -741,15 +934,35 @@ function getContextLine(asset) {
 
 function getFitType(asset) {
   const md = getMd(asset);
+  const kind = getAssetKind(asset);
+  if (kind === "boat" || kind === "marine") {
+    return md.visibility_state || md.sale_state || md.inventory_tag || md.fit_type || null;
+  }
   return md.fit_type || md.mode || null;
 }
 
 function getModeForAsset(asset) {
   const md = getMd(asset);
+  const state = String(getLifecycleState(asset)).toLowerCase();
   const fit = String(md.fit_type || md.mode || "")
     .trim()
     .toLowerCase();
   const kind = getAssetKind(asset);
+
+  if (kind === "boat" || kind === "marine") {
+    const relationship = String(
+      md.relationship_purpose ||
+      md.relationship_type ||
+      md.relationship_label ||
+      md.inventory_tag ||
+      ""
+    ).toLowerCase();
+    if (state.includes("sale") || relationship.includes("sale")) return "for_sale";
+    if (state.includes("steward") || relationship.includes("steward")) return "stewardship";
+    if (state.includes("service") || relationship.includes("service")) return "service";
+    if (state.includes("inventory") || relationship.includes("inventory") || relationship.includes("dealer")) return "inventory";
+    return "inventory";
+  }
 
   if (
     fit.includes("repair") ||
@@ -784,25 +997,38 @@ function getModeForAsset(asset) {
   return "all";
 }
 
-  const header = (
+	  const header = (
     <View style={styles.top}>
       <View style={styles.titleRow}>
         <View style={{ flex: 1 }}>
           <Text style={styles.h1}>SuperKeepr</Text>
-          <Text style={styles.h2}>Ownership Portfolio</Text>
+          <Text style={styles.h2}>
+            {assetClass === "boats" ? "Boat relationship portfolio" : "Ownership Portfolio"}
+          </Text>
         </View>
 
-        <TouchableOpacity
-          style={styles.importBtn}
-          onPress={() => {
-            setImportOpen(true);
-            setImportPreview(null);
-          }}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="cloud-upload-outline" size={18} color={colors.brandWhite} />
-          <Text style={styles.importBtnText}>Import CSV</Text>
-        </TouchableOpacity>
+        {assetClass === "boats" ? (
+          <TouchableOpacity
+            style={styles.importBtn}
+            onPress={() => navigation.navigate("AddAsset", { assetType: "boat" })}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="add-circle-outline" size={18} color={colors.brandWhite} />
+            <Text style={styles.importBtnText}>Add Boat</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={styles.importBtn}
+            onPress={() => {
+              setImportOpen(true);
+              setImportPreview(null);
+            }}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="cloud-upload-outline" size={18} color={colors.brandWhite} />
+            <Text style={styles.importBtnText}>Import CSV</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={styles.assetClassRow}>
@@ -828,7 +1054,7 @@ function getModeForAsset(asset) {
       </View>
 
       <View style={styles.modeRow}>
-  {MODE_OPTIONS.map((m) => {
+  {activeModes.map((m) => {
     const active = modeFilter === m.key;
     return (
       <TouchableOpacity
@@ -855,7 +1081,7 @@ function getModeForAsset(asset) {
         <TextInput
           value={query}
           onChangeText={setQuery}
-          placeholder="Search address, name, notes…"
+          placeholder={searchPlaceholderForClass(assetClass)}
           placeholderTextColor={colors.textMuted}
           style={styles.searchInput}
           autoCapitalize="none"
@@ -888,7 +1114,7 @@ function getModeForAsset(asset) {
           </Text>
         </TouchableOpacity>
 
-        {LIFECYCLE_STATES.map((s) => {
+        {activeStates.map((s) => {
           const active = stateFilter === s;
           return (
             <TouchableOpacity
@@ -905,7 +1131,7 @@ function getModeForAsset(asset) {
 
       <View style={styles.summaryRow}>
         <Text style={styles.summaryText}>
-          {filtered.length} assets • {stateFilter === "All" ? "All states" : stateFilter}
+          {assetLabelForClass(assetClass, filtered.length)} • {stateFilter === "All" ? "All states" : stateFilter}
         </Text>
 
         <View style={{ flexDirection: "row", gap: 10 }}>

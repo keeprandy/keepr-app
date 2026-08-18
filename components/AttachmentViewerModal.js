@@ -16,6 +16,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, radius, shadows } from "../styles/theme";
 import { confirmAction } from "../lib/confirm";
+import { getSignedUrl } from "../lib/attachmentsApi";
 import { WebView } from "react-native-webview";
 import LinkCoverCard from "./LinkCoverCard";
 
@@ -134,13 +135,15 @@ export default function AttachmentViewerModal({
   // Back-compat alias
   onIntelligence,
 }) {
-  const url = attachment?.urls?.signed || attachment?.urls?.public || attachment?.url || null;
   const [profileOpen, setProfileOpen] = useState(IS_WEB);
+  const [resolvedUrl, setResolvedUrl] = useState(null);
 
   const fileName =
     attachment?.fileName ||
+    attachment?.file_name ||
     attachment?.name ||
     attachment?.storage?.path?.split("/")?.slice(-1)[0] ||
+    attachment?.storage_path?.split("/")?.slice(-1)[0] ||
     "Attachment";
 
   const ext = getExt(fileName);
@@ -167,6 +170,49 @@ export default function AttachmentViewerModal({
     attachment?.mimeType ||
     attachment?.mime_type ||
     (attachment?.kind === "link" ? "Link" : "Unknown");
+  const storedBucket =
+    attachment?.bucket ||
+    attachment?.storage?.bucket ||
+    attachment?.storage_bucket ||
+    attachment?.storageBucket ||
+    null;
+  const storedPath =
+    attachment?.storage_path ||
+    attachment?.storagePath ||
+    attachment?.path ||
+    attachment?.storage?.path ||
+    attachment?.storage?.storage_path ||
+    null;
+  const hasStoredObject = Boolean(storedBucket && storedPath);
+  const explicitSignedUrl =
+    attachment?.urls?.signed ||
+    attachment?.signedUrl ||
+    attachment?.signed_url ||
+    null;
+  const explicitPublicUrl =
+    attachment?.urls?.public ||
+    attachment?.publicUrl ||
+    attachment?.public_url ||
+    attachment?.downloadUrl ||
+    attachment?.download_url ||
+    attachment?.url ||
+    null;
+  const rawUrl = explicitSignedUrl || (hasStoredObject ? null : explicitPublicUrl);
+  const bucket =
+    storedBucket ||
+    "asset-files";
+  const storagePath =
+    storedPath ||
+    null;
+  const url = resolvedUrl || rawUrl;
+  const fileProbe = [
+    fileName,
+    attachment?.file_name,
+    attachment?.title,
+    attachment?.url,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   const uploadedAt =
     attachment?.known?.uploadedAt ||
@@ -180,8 +226,8 @@ export default function AttachmentViewerModal({
     attachment?.metadata?.size ||
     null;
 
-  const isPhoto = isPhotoLike(ext, attachment?.contentType);
-  const isPdfDoc = isPdf(ext, attachment?.contentType);
+  const isPhoto = isPhotoLike(ext || getExt(fileProbe), typeLabel);
+  const isPdfDoc = isPdf(ext || getExt(fileProbe), typeLabel);
   const isLink = attachment?.kind === "link" || typeLabel === "Link";
   const isShowcase = !!(attachment?.is_showcase || attachment?.isShowcase);
   const linkCover = attachment?.ai_metadata?.link_cover;
@@ -216,6 +262,52 @@ export default function AttachmentViewerModal({
   useEffect(() => {
     setProfileOpen(IS_WEB);
   }, [attachment?.id, attachment?.attachment_id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function resolveUrl() {
+      setResolvedUrl(null);
+      if (!visible || !attachment) return;
+      if (rawUrl) {
+        setResolvedUrl(rawUrl);
+        return;
+      }
+      if (!bucket || !storagePath) return;
+      try {
+        let signed = await getSignedUrl({
+          bucket,
+          path: storagePath,
+          expiresIn: 3600,
+          transform: isPhoto ? { width: 1800, quality: 88 } : null,
+        });
+        if (!signed && isPhoto) {
+          signed = await getSignedUrl({
+            bucket,
+            path: storagePath,
+            expiresIn: 3600,
+          });
+        }
+        if (!cancelled) setResolvedUrl(signed || null);
+      } catch (error) {
+        if (isPhoto) {
+          try {
+            const signed = await getSignedUrl({
+              bucket,
+              path: storagePath,
+              expiresIn: 3600,
+            });
+            if (!cancelled) setResolvedUrl(signed || null);
+            return;
+          } catch {}
+        }
+        console.warn("AttachmentViewerModal signed URL unavailable:", error?.message || error);
+      }
+    }
+    resolveUrl();
+    return () => {
+      cancelled = true;
+    };
+  }, [attachment?.id, attachment?.attachment_id, bucket, isPhoto, rawUrl, storagePath, visible]);
 
   const goPrev = () => {
     if (!canNav) return;
