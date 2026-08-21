@@ -48,6 +48,7 @@ import { formatContributionAttribution } from "../lib/provenance";
 import EventPill from "../components/EventPill";
 import ReportsModal from "../components/ReportsModal";
 import AssetWhatNextSection from "../components/AssetWhatNextSection";
+import TransferOwnershipModal from "../components/TransferOwnershipModal";
 
 const HERO_ASPECT = 4 / 3;
 const IS_WEB = Platform.OS === "web";
@@ -325,6 +326,7 @@ useEffect(() => {
 
   // Delete state
   const [removeModalVisible, setRemoveModalVisible] = useState(false);
+  const [transferModalVisible, setTransferModalVisible] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
 
   /* --------------------------- HERO RESOLUTION --------------------------- */
@@ -860,6 +862,11 @@ const startRemove = () => {
   setRemoveModalVisible(true);
 };
 
+const startTransfer = () => {
+  if (!boat?.id) return;
+  setTransferModalVisible(true);
+};
+
 const handleConfirmRemove = async () => {
   if (!boat?.id) return;
 
@@ -1354,7 +1361,7 @@ const meta = {
         </View>
       
 
-  <ReportsModal
+      <ReportsModal
     visible={reportsOpen}
     onClose={() => setReportsOpen(false)}
     asset={boat}
@@ -1363,8 +1370,8 @@ const meta = {
     onOpenKeeprStory={goToKeeprStory}
   />
 </SafeAreaView>
-    );
-  }
+  );
+}
 
   if (error) {
     return (
@@ -1543,6 +1550,11 @@ const meta = {
               label="Edit boat"
               icon="create-outline"
               onPress={goToEditBoat}
+            />
+            <QuickActionChip
+              label="Transfer"
+              icon="swap-horizontal-outline"
+              onPress={startTransfer}
             />
 
             {/* Additional Buttons Not needed 
@@ -1972,6 +1984,13 @@ const meta = {
     navigation={navigation}
     onOpenStorySheet={goToStoryPrint}
     onOpenKeeprStory={goToKeeprStory}
+  />
+  <TransferOwnershipModal
+    visible={transferModalVisible}
+    onClose={() => setTransferModalVisible(false)}
+    assetId={boat?.id}
+    assetType="boat"
+    assetName={boatName}
   />
 </SafeAreaView>
   );

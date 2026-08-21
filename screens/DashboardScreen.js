@@ -20,6 +20,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useAssets } from "../hooks/useAssets";
+import { useAuth } from "../context/AuthContext";
 import { getSignedUrl } from "../lib/attachmentsApi";
 import { supabase } from "../lib/supabaseClient";
 import { DEFAULT_MEMBER_AVATAR } from "../lib/memberAvatar";
@@ -224,6 +225,7 @@ export default function DashboardScreen({ navigation }) {
   const MAX_WIDTH = 1200;
   const { width } = useWindowDimensions();
   const isWide = Platform.OS === "web" && width >= 900;
+  const { user, initializing: authInitializing } = useAuth();
 
   const {
     assets: rawHomes = [],
@@ -317,7 +319,18 @@ const keeprProgress = useMemo(
 const [systemModeSummary, setSystemModeSummary] = useState(null);
 const [systemModeLoading, setSystemModeLoading] = useState(false);
 
-const loadSystemModeSummary = useCallback(async () => {
+  const loadSystemModeSummary = useCallback(async () => {
+  if (authInitializing) {
+    setSystemModeLoading(true);
+    return;
+  }
+
+  if (!user?.id) {
+    setSystemModeLoading(false);
+    setSystemModeSummary({ status: "all_good" });
+    return;
+  }
+
   try {
     setSystemModeLoading(true);
 
@@ -363,7 +376,7 @@ const loadSystemModeSummary = useCallback(async () => {
   } finally {
     setSystemModeLoading(false);
   }
-}, []);
+}, [authInitializing, user?.id]);
 const handleSystemAttentionPress = useCallback(() => {
   navigation.navigate("Notifications", {
     filter: "draft",      // optional – future-proof
@@ -598,11 +611,15 @@ const shouldShowKeeprProgress =
 
   
   const loadIdentityAndAchievements = useCallback(async () => {
+    if (authInitializing) {
+      setAvatarResolving(true);
+      setAchLoading(true);
+      return;
+    }
+
     try {
       setAvatarResolving(true);
-      const { data: userRes, error: userErr } = await supabase.auth.getUser();
-      if (userErr) throw userErr;
-      const u = userRes?.user || null;
+      const u = user || null;
       if (!u?.id) {
         setProfileName("");
         setAvatarUrl(null);
@@ -655,7 +672,7 @@ setAch(null);
     } finally {
       setAchLoading(false);
     }
-  }, [hydrateAvatarFromAttachmentId]);
+  }, [authInitializing, hydrateAvatarFromAttachmentId, user]);
 
   useEffect(() => {
     loadIdentityAndAchievements();
@@ -696,9 +713,16 @@ const onRefresh = useCallback(async () => {
   }
 }, [reloadDashboard]);
 
+const focusRefreshReadyRef = React.useRef(false);
+
 useFocusEffect(
   React.useCallback(() => {
+    if (!focusRefreshReadyRef.current) {
+      focusRefreshReadyRef.current = true;
+      return undefined;
+    }
     reloadDashboard();
+    return undefined;
   }, [reloadDashboard])
 );
 

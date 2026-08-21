@@ -15,11 +15,12 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import ActivatorBreadcrumb from "../components/ActivatorBreadcrumb";
 import { useWorkspace } from "../context/WorkspaceContext";
-import { getKeeprSpacePortfolio } from "../lib/keeprspaceApi";
+import { getKeeprSpaceOrgConfig, getKeeprSpacePortfolio } from "../lib/keeprspaceApi";
 import { getActionScheduledDueAt, isPlaybookDueDatePending } from "../lib/playbookSchedule";
 import { colors, radius, shadows, spacing } from "../styles/theme";
 
-const BOAT_HERO = require("../assets/boats/tiara/tiara_39ls_hero.jpg");
+const MARINE_FALLBACK_HERO = require("../assets/boats/tiara/tiara_39ls_hero.jpg");
+const OEM_FALLBACK_HERO = require("../assets/boats/tiara/tiara_oem_banner.png");
 
 function compact(parts) {
   return parts.filter(Boolean).join(" • ");
@@ -46,6 +47,8 @@ function workspaceDisplayName(workspace, portfolio) {
 
 function workspaceHeaderImage(workspace, portfolio) {
   return (
+    portfolio?.org_brand?.header_image_url ||
+    portfolio?.org_brand?.team_photo_url ||
     portfolio?.context?.header_image_url ||
     portfolio?.context?.team_photo_url ||
     workspace?.header_image_url ||
@@ -58,6 +61,8 @@ function workspaceHeaderImage(workspace, portfolio) {
 
 function workspaceLogoImage(workspace, portfolio) {
   return (
+    portfolio?.org_brand?.logo_url ||
+    portfolio?.org_brand?.photo_url ||
     portfolio?.context?.logo_url ||
     portfolio?.context?.photo_url ||
     workspace?.logo_url ||
@@ -66,6 +71,24 @@ function workspaceLogoImage(workspace, portfolio) {
     workspace?.display?.photo_url ||
     null
   );
+}
+
+function workspaceFallbackHero(workspace) {
+  return workspace?.workspace_type === "keeproem" ? OEM_FALLBACK_HERO : MARINE_FALLBACK_HERO;
+}
+
+function orgBrandFromConfig(config, organizationId) {
+  const org = config?.organization || {};
+  const pro = config?.keepr_pro || {};
+  return {
+    id: org.id || organizationId || pro.organization_id || null,
+    display_name: org.display_name || org.name || pro.display_name || pro.name || null,
+    name: org.name || pro.name || null,
+    photo_url: pro.logo_url || org.logo_url || org.photo_url || null,
+    logo_url: pro.logo_url || org.logo_url || org.photo_url || null,
+    team_photo_url: pro.header_image_url || org.header_image_url || org.team_photo_url || null,
+    header_image_url: pro.header_image_url || org.header_image_url || org.team_photo_url || null,
+  };
 }
 
 function workspaceKind(workspace) {
@@ -305,6 +328,7 @@ export default function KeeprSpaceHomeScreen({ navigation }) {
   const { currentWorkspace } = useWorkspace();
   const organizationId = currentWorkspace?.organization_id || currentWorkspace?.org_id || null;
   const [portfolio, setPortfolio] = useState(null);
+  const [orgBrand, setOrgBrand] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
@@ -340,8 +364,35 @@ export default function KeeprSpaceHomeScreen({ navigation }) {
     load();
   }, [load]);
 
+  useEffect(() => {
+    if (!organizationId) {
+      setOrgBrand(null);
+      return undefined;
+    }
+
+    let mounted = true;
+    getKeeprSpaceOrgConfig({ organizationId })
+      .then((config) => {
+        if (!mounted) return;
+        setOrgBrand(orgBrandFromConfig(config, organizationId));
+      })
+      .catch((err) => {
+        if (!mounted) return;
+        console.warn("Workspace org brand image unavailable:", err?.message || err);
+        setOrgBrand(null);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [organizationId]);
+
   const boats = portfolio?.boats || [];
-  const copy = useMemo(() => workspaceCopy(currentWorkspace, portfolio), [currentWorkspace, portfolio]);
+  const brandedPortfolio = useMemo(
+    () => (orgBrand ? { ...(portfolio || {}), org_brand: orgBrand } : portfolio),
+    [orgBrand, portfolio]
+  );
+  const copy = useMemo(() => workspaceCopy(currentWorkspace, brandedPortfolio), [currentWorkspace, brandedPortfolio]);
   const currentWorkCount = openItems(portfolio).length;
   const boatsCount = boats.length || portfolio?.counts?.visible_boats || 0;
 
@@ -358,8 +409,8 @@ export default function KeeprSpaceHomeScreen({ navigation }) {
     });
   };
 
-  const heroLogo = workspaceLogoImage(currentWorkspace, portfolio);
-  const heroImage = workspaceHeaderImage(currentWorkspace, portfolio);
+  const heroLogo = workspaceLogoImage(currentWorkspace, brandedPortfolio);
+  const heroImage = workspaceHeaderImage(currentWorkspace, brandedPortfolio);
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -388,7 +439,7 @@ export default function KeeprSpaceHomeScreen({ navigation }) {
           )}
         />
 
-        <ImageBackground source={heroImage ? { uri: heroImage } : BOAT_HERO} resizeMode="cover" style={styles.hero} imageStyle={styles.heroImage}>
+        <ImageBackground source={heroImage ? { uri: heroImage } : workspaceFallbackHero(currentWorkspace)} resizeMode="cover" style={styles.hero} imageStyle={styles.heroImage}>
           <View style={styles.heroOverlay}>
             {heroLogo ? (
               <Image source={{ uri: heroLogo }} resizeMode="contain" style={styles.oemLogo} />

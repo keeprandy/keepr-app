@@ -22,12 +22,14 @@ import { useFocusEffect } from "@react-navigation/native";
 
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext";
+import { navigationRef } from "../navigationRoot";
+import { reconcileAcceptedAssetTransfer } from "../lib/assetTransferLifecycle";
 import { layoutStyles } from "../styles/layout";
 import { colors, spacing, radius, shadows } from "../styles/theme";
 import { buildTimelinePrefillFromEmailText } from "../utils/emailToTimeline";
 import * as Haptics from "expo-haptics";
 import { Swipeable } from "react-native-gesture-handler";
-import { acceptHubInviteByToken } from "../lib/hubsApi";
+import { acceptHubInviteByToken, claimPendingActionsForEmail } from "../lib/hubsApi";
 import { executeAction } from "../lib/actionsApi";
 import {
   fetchCoordinationActions,
@@ -778,6 +780,15 @@ const remindersByDate = useMemo(() => {
       if (!opts.silent) setLoading(true);
 
       try {
+        if (user?.email) {
+          await claimPendingActionsForEmail({
+            userId: ownerId,
+            email: user.email,
+          }).catch((claimError) => {
+            console.log("Notifications pending email claim skipped:", claimError);
+          });
+        }
+
         const intakePromise = supabase
           .from("email_intake_addresses")
           .select("token, owner_id")
@@ -965,7 +976,7 @@ const remindersByDate = useMemo(() => {
         if (!opts.silent) setLoading(false);
       }
     },
-    [ownerId, reminderFilter]
+    [ownerId, reminderFilter, user?.email]
   );
 
   const onRefresh = useCallback(async () => {
@@ -1270,17 +1281,56 @@ const remindersByDate = useMemo(() => {
 
   /* ------------------------- transfer handlers ------------------------- */
 
+  const openTransferredAsset = useCallback(
+    (payload = {}) => {
+      const assetId = payload?.asset_id || payload?.assetId || null;
+      if (!assetId) return;
+
+      const assetIdentity = payload?.asset_identity || payload?.transfer_package?.asset || {};
+      const assetType = String(
+        payload?.asset_type || payload?.assetType || assetIdentity?.type || ""
+      ).toLowerCase();
+      const routeName =
+        assetType === "boat" || assetType === "marine"
+          ? "BoatStory"
+          : assetType === "vehicle" || assetType === "car"
+          ? "VehicleStory"
+          : assetType === "home"
+          ? "HomeStory"
+          : "OtherAssetStory";
+      const params = {
+        assetId,
+        boatId: routeName === "BoatStory" ? assetId : undefined,
+        vehicleId: routeName === "VehicleStory" ? assetId : undefined,
+        homeId: routeName === "HomeStory" ? assetId : undefined,
+        assetName: payload?.asset_name || payload?.assetName || null,
+        assetType: assetType || null,
+      };
+
+      if (navigationRef?.isReady?.()) {
+        navigationRef.navigate(routeName, params);
+        return;
+      }
+      navigation.navigate(routeName, params);
+    },
+    [navigation]
+  );
+
   const handleAcceptTransfer = async (item) => {
     if (!item || !ownerId) return;
+    const payload = item?.payload || {};
+    const assetName = payload?.asset_name || payload?.assetName || item.asset_name || "this asset";
 
     const ok = await confirmDestructive(
-      "Accept this KeeprStory?",
-      `You'll become the steward of “${item.asset_name || "this asset"}”.`
+      "Accept this transfer?",
+      `You will become the owner of ${assetName}. The boat's history stays with the boat.`
     );
     if (!ok) return;
 
     setTransferBusyId(item.id);
     try {
+      // Existing KOG transfer contract: the RPC owns relationship/owner mutation.
+      // This source path only presents the package and calls the established accept flow.
       const { error } = await supabase.rpc("accept_asset_transfer", {
         p_inbox_item_id: item.id,
         p_user_id: ownerId,
@@ -1291,13 +1341,23 @@ const remindersByDate = useMemo(() => {
         throw error;
       }
 
+      try {
+        await reconcileAcceptedAssetTransfer({
+          assetId: payload?.asset_id || payload?.assetId || null,
+          previousOwnerId: item?.from_user_id || payload?.from_user_id || null,
+          newOwnerId: ownerId,
+          transferId: item?.id || null,
+        });
+      } catch (relationshipError) {
+        console.warn("transfer relationship reconciliation warning", relationshipError);
+      }
+
       await loadEverything({ silent: true });
+      openTransferredAsset(payload);
 
       Alert.alert(
-        "Torch received 🔦",
-        item.asset_name
-          ? `You now carry the KeeprStory for “${item.asset_name}”.`
-          : "You now carry this KeeprStory. Handle it with care."
+        "Transfer accepted",
+        `${assetName} is now in your Keepr. The boat's history stayed with the boat, and your access has been updated.`
       );
     } catch (e) {
       console.error("handleAcceptTransfer error", e);
@@ -1918,12 +1978,29 @@ return (
     const payload = item?.payload || {};
     const assetName =
       payload?.asset_name || payload?.assetName || "Unknown asset";
+    const transferPackage = payload?.transfer_package || null;
+    const packageAsset = transferPackage?.asset || {};
+    const counts = transferPackage?.counts || {};
+    const kac =
+      packageAsset?.kac ||
+      payload?.kac ||
+      payload?.kac_id ||
+      payload?.keepr_code ||
+      null;
     const fromName =
       payload?.from_name ||
+      payload?.from_email ||
       payload?.fromEmail ||
       payload?.from ||
       item?.from_email ||
       "Someone"; 
+    const countChips = [
+      ["Systems", counts.systems],
+      ["Service", counts.service_records],
+      ["Timeline", counts.timeline_records],
+      ["Photos", counts.showcase_photos],
+      ["Docs", counts.documents],
+    ].filter(([, value]) => value !== null && value !== undefined);
 
     return (
       <View key={item.id} style={styles.transferCard}>
@@ -1962,9 +2039,51 @@ return (
         </View>
 
         <Text style={styles.transferBody}>
-          Someone sent you ownership for this asset. Accept it to bring the
-          KeeprStory, history, and proof of care into your portfolio.
+          {fromName} sent you ownership of this boat. Accepting keeps the
+          boat's history intact and updates your access; Keepr does not create a copy.
         </Text>
+
+        <View style={styles.transferPackageBox}>
+          <Text style={styles.transferPackageTitle}>
+            What comes with the boat
+          </Text>
+          <Text style={styles.transferPackageMeta}>
+            The boat's history follows the boat. Personal, workspace, and explicitly private information stays private.
+          </Text>
+          {!!kac && (
+            <Text style={styles.transferPackageMeta}>
+              Keepr Code: {kac}
+            </Text>
+          )}
+          {countChips.length > 0 && (
+            <View style={styles.transferCountRow}>
+              {countChips.map(([label, value]) => (
+                <View key={label} style={styles.transferCountPill}>
+                  <Text style={styles.transferCountValue}>{value}</Text>
+                  <Text style={styles.transferCountLabel}>{label}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+          <View style={styles.transferPackageColumns}>
+            <View style={styles.transferPackageColumn}>
+              <Text style={styles.transferPackageHeading}>Follows the boat</Text>
+              {(transferPackage?.transfers || ["Boat identity", "Transferable history", "Care evidence tied to the boat"])
+                .slice(0, 5)
+                .map((line) => (
+                  <Text key={line} style={styles.transferPackageLine}>- {line}</Text>
+                ))}
+            </View>
+            <View style={styles.transferPackageColumn}>
+              <Text style={styles.transferPackageHeading}>Stays private</Text>
+              {(transferPackage?.remains_private || ["Personal notes", "Personal communications", "Private financial context"])
+                .slice(0, 5)
+                .map((line) => (
+                  <Text key={line} style={styles.transferPackageLine}>- {line}</Text>
+                ))}
+            </View>
+          </View>
+        </View>
 
         <View style={styles.transferActionsRow}>
           <TouchableOpacity
@@ -3917,6 +4036,72 @@ swipeDeleteText: {
     fontSize: 12,
     color: colors.textSecondary,
     lineHeight: 18,
+  },
+  transferPackageBox: {
+    marginTop: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surfaceSubtle,
+    padding: spacing.sm,
+  },
+  transferPackageTitle: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: colors.textPrimary,
+  },
+  transferPackageMeta: {
+    marginTop: 2,
+    fontSize: 11,
+    color: colors.textSecondary,
+  },
+  transferCountRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginTop: spacing.sm,
+  },
+  transferCountPill: {
+    minWidth: 64,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    paddingVertical: 5,
+    paddingHorizontal: 7,
+    marginRight: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+  transferCountValue: {
+    fontSize: 13,
+    fontWeight: "900",
+    color: colors.textPrimary,
+  },
+  transferCountLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: colors.textMuted,
+  },
+  transferPackageColumns: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginTop: spacing.xs,
+  },
+  transferPackageColumn: {
+    flex: 1,
+    minWidth: 180,
+    marginRight: spacing.sm,
+  },
+  transferPackageHeading: {
+    fontSize: 10,
+    fontWeight: "900",
+    color: colors.textMuted,
+    textTransform: "uppercase",
+    marginBottom: 3,
+  },
+  transferPackageLine: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    lineHeight: 16,
   },
   transferActionsRow: {
     marginTop: spacing.sm,

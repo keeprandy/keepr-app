@@ -491,7 +491,7 @@ export default function KeeprProHomeScreen({ navigation }) {
       <View style={styles.sectionHeader}>
         <View>
           <Text style={styles.sectionTitle}>Needs Attention</Text>
-          <Text style={styles.sectionSubtitle}>Who needs Wilson right now?</Text>
+          <Text style={styles.sectionSubtitle}>Who needs this workspace right now?</Text>
         </View>
         <Text style={styles.sectionCount}>{needsAttentionItems.length}</Text>
       </View>
@@ -577,7 +577,7 @@ export default function KeeprProHomeScreen({ navigation }) {
       </View>
       {renderSimpleRows(recentMessages, {
         emptyTitle: "No shared messages",
-        emptyBody: "Provider-scoped conversations appear here when a customer or Wilson message is connected to a stewarded asset.",
+        emptyBody: "Provider-scoped conversations appear here when a customer or workspace message is connected to a stewarded asset.",
         icon: "chatbubble-ellipses-outline",
         getTitle: (item) => item.subject || item.asset_name || "Message thread",
         getMeta: (item) =>
@@ -617,7 +617,7 @@ export default function KeeprProHomeScreen({ navigation }) {
         </View>
         <View style={styles.profileHeroCopy}>
           <Text style={styles.profileHeroEyebrow}>KeeprPro identity</Text>
-          <Text style={styles.profileHeroTitle}>{context?.display_name || "Wilson Marine"}</Text>
+          <Text style={styles.profileHeroTitle}>{context?.display_name || "Service Provider"}</Text>
           <Text style={styles.profileHeroSubtitle}>
             {compact([
               context?.claimed_state === "claimed" ? "Claimed" : context?.claimed_state,
@@ -714,7 +714,7 @@ export default function KeeprProHomeScreen({ navigation }) {
         <>
           <View style={styles.sectionHeader}>
             <View>
-              <Text style={styles.sectionTitle}>{context?.display_name || "Wilson Marine"}</Text>
+              <Text style={styles.sectionTitle}>{context?.display_name || "Service Provider"}</Text>
               <Text style={styles.sectionSubtitle}>Claimed professional identity</Text>
             </View>
             <TouchableOpacity style={styles.smallButton} onPress={() => setProfileMode("edit")} activeOpacity={0.86}>
@@ -769,7 +769,7 @@ export default function KeeprProHomeScreen({ navigation }) {
             </View>
             <View style={styles.profileFact}>
               <Text style={styles.assetMetricLabel}>Operator</Text>
-              <Text style={styles.assetMetricValue}>{context?.organization_name || "Wilson Marine"}</Text>
+              <Text style={styles.assetMetricValue}>{context?.organization_name || "Current Workspace"}</Text>
               <Text style={styles.assetSubmeta}>Signed-in role: {context?.member_role || "member"}</Text>
             </View>
           </View>
@@ -808,7 +808,7 @@ export default function KeeprProHomeScreen({ navigation }) {
           <View style={styles.sectionHeader}>
             <View>
               <Text style={styles.sectionTitle}>Edit Profile</Text>
-              <Text style={styles.sectionSubtitle}>Update Wilson Marine's claimed provider identity.</Text>
+              <Text style={styles.sectionSubtitle}>Update this workspace's claimed provider identity.</Text>
             </View>
           </View>
           <View style={styles.profileStatusRow}>
@@ -891,7 +891,7 @@ export default function KeeprProHomeScreen({ navigation }) {
           </View>
           <View style={styles.headerCopy}>
             <Text style={styles.eyebrow}>Pro Mode = portfolio</Text>
-            <Text style={styles.title}>{context?.display_name || "Wilson Marine"}</Text>
+            <Text style={styles.title}>{context?.display_name || "Service Provider"}</Text>
             <Text style={styles.subtitle}>{statusText}</Text>
           </View>
           <TouchableOpacity

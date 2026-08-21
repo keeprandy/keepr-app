@@ -52,12 +52,14 @@ const BOAT_HERO_OPTIONS = {
   expiresIn: 60 * 60 * 24,
 };
 
-const BOAT_EDIT_SECTIONS = [
+function boatEditSections(providerName = "Current Workspace") {
+  const workspaceLabel = providerName || "Current Workspace";
+  return [
   {
     title: "Boat details",
     fields: [
       ["year", "Year", "2026", "number-pad"],
-      ["make", "Make", "Tiara"],
+      ["make", "Make", "Make"],
       ["model", "Model", "39 LE"],
       ["lengthFeet", "Length (ft)", "39", "decimal-pad"],
       ["hin", "Serial / HIN", "Optional but preferred"],
@@ -71,12 +73,12 @@ const BOAT_EDIT_SECTIONS = [
     ],
   },
   {
-    title: "Wilson relationship metadata",
+    title: `${workspaceLabel} relationship metadata`,
     fields: [
-      ["stockNumber", "Wilson stock #", "57955"],
-      ["listingUrl", "Listing URL", "https://www.wilsonboats.com/..."],
+      ["stockNumber", "Stock #", "Stock number"],
+      ["listingUrl", "Listing URL", "https://..."],
       ["externalAssetId", "External / G2 asset ID", "Optional inventory system ID"],
-      ["wilsonLocation", "Wilson location", "Brighton, showroom, storage yard"],
+      ["wilsonLocation", "Workspace location", "Showroom, storage yard, service bay"],
     ],
   },
   {
@@ -97,7 +99,8 @@ const BOAT_EDIT_SECTIONS = [
       ["purchaseDate", "Purchase date", "YYYY-MM-DD"],
     ],
   },
-];
+  ];
+}
 
 const BOAT_EDIT_PATCH_KEYS = {
   lengthFeet: "length_feet",
@@ -301,7 +304,7 @@ function compactMessageTime(value) {
 }
 
 function messageSenderLabel(message, ownerName, providerName) {
-  if (message?.sender_type === "keepr_pro") return providerName || "Wilson Marine";
+  if (message?.sender_type === "keepr_pro") return providerName || "Service Team";
   if (message?.sender_name) return message.sender_name;
   return ownerName || "Owner";
 }
@@ -1467,7 +1470,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
   const sendReply = async ({ body = replyDraft, attachments = [] } = {}) => {
     const threadId = portal?.projection_thread?.id || messages?.[0]?.id || null;
     if (!threadId) {
-      Alert.alert("No thread", "No Harris/Wilson thread was returned by the projection.");
+      Alert.alert("No thread", "No relationship thread was returned by the projection.");
       return;
     }
 
@@ -1695,7 +1698,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
                 <TextInput
                   value={replyDraft}
                   onChangeText={setReplyDraft}
-                  placeholder="Reply as Wilson Marine..."
+                  placeholder={`Reply as ${providerName || "Service Team"}...`}
                   multiline
                   style={[styles.input, styles.compactReplyInput]}
                 />
@@ -1757,7 +1760,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
     if (!currentAction?.id) return;
     Alert.alert(
       "Complete Action",
-      "Complete this shared Action and add the resulting service record to Wilson-relevant Harris history?",
+      `Complete this shared Action and add the resulting service record to ${asset.name || "this boat"} history?`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -1790,7 +1793,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
   const submitContribution = async () => {
     if (!asset.id || !organizationId) return;
     if (!String(contributionTitle || "").trim()) {
-      Alert.alert("Title required", "Add a title for the record Wilson is contributing.");
+      Alert.alert("Title required", `Add a title for the record ${providerName || "this workspace"} is contributing.`);
       return;
     }
     setSavingContribution(true);
@@ -1818,7 +1821,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
       setContributionNote("");
       setContributionProof(null);
       setShowContributionForm(false);
-      Alert.alert("Sent to owner Inbox", "Andy can review and accept this record into Harris history.");
+      Alert.alert("Sent to owner Inbox", `${ownerName || "The owner"} can review and accept this record into the asset history.`);
     } catch (err) {
       Alert.alert("Could not send contribution", err?.message || "Please try again.");
     } finally {
@@ -2002,7 +2005,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
       <View style={styles.sectionHeader}>
         <View style={styles.sectionTitleBlock}>
           <Text style={styles.cardTitle}>Contribute a record</Text>
-          <Text style={styles.sectionHint}>Send a Wilson-authored record to Andy’s Inbox for review.</Text>
+          <Text style={styles.sectionHint}>Send a provider-authored record to the owner's Inbox for review.</Text>
         </View>
         <TouchableOpacity
           style={styles.inlineButton}
@@ -2056,7 +2059,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
           <TextInput
             value={contributionNote}
             onChangeText={setContributionNote}
-            placeholder="What should Andy review?"
+            placeholder={`What should ${ownerName || "the owner"} review?`}
             multiline
             style={[styles.input, styles.textArea]}
           />
@@ -2208,6 +2211,21 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
 
             {showBoatEdit ? (
               <View style={styles.boatEditPanel}>
+                <View style={styles.boatEditHeader}>
+                  <View style={styles.boatEditHeaderCopy}>
+                    <Text style={styles.boatEditSectionTitle}>Edit boat details</Text>
+                    <Text style={styles.boatEditHelper}>Update the shared boat profile, then save or cancel from either end of the form.</Text>
+                  </View>
+                  <View style={styles.boatEditTopActions}>
+                    <TouchableOpacity style={styles.secondaryButton} onPress={() => setShowBoatEdit(false)} activeOpacity={0.86}>
+                      <Text style={styles.secondaryButtonText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.primaryButton, savingBoatEdit && styles.disabled]} onPress={saveBoatEdit} disabled={savingBoatEdit} activeOpacity={0.86}>
+                      {savingBoatEdit ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name="save-outline" size={16} color="#FFFFFF" />}
+                      <Text style={styles.primaryButtonText}>Save boat</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
                 <View style={styles.boatEditSection}>
                   <Text style={styles.boatEditSectionTitle}>Basics</Text>
                   <View style={styles.boatEditModeRow}>
@@ -2250,7 +2268,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
                     </View>
                   ) : null}
                 </View>
-                {BOAT_EDIT_SECTIONS.map((section) => (
+                {boatEditSections(providerName).map((section) => (
                   <View key={section.title} style={styles.boatEditSection}>
                     <Text style={styles.boatEditSectionTitle}>{section.title}</Text>
                     <View style={styles.boatEditGrid}>
@@ -2537,7 +2555,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
                         <TextInput
                           value={actionNote}
                           onChangeText={setActionNote}
-                          placeholder="Add a timestamped Wilson update..."
+                          placeholder={`Add a timestamped ${providerName || "service"} update...`}
                           multiline
                           style={[styles.input, styles.textArea]}
                         />
@@ -3120,6 +3138,34 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginBottom: spacing.md,
     padding: spacing.md,
+  },
+  boatEditHeader: {
+    alignItems: "flex-start",
+    borderBottomColor: colors.border,
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.md,
+    justifyContent: "space-between",
+    marginBottom: spacing.md,
+    paddingBottom: spacing.md,
+  },
+  boatEditHeaderCopy: {
+    flex: 1,
+    minWidth: 260,
+  },
+  boatEditHelper: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    fontWeight: "700",
+    marginTop: 3,
+  },
+  boatEditTopActions: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    justifyContent: "flex-end",
   },
   boatEditSection: {
     gap: spacing.sm,

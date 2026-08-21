@@ -31,7 +31,7 @@ import { fetchAssetHeroUris, getCachedAssetHeroUris } from "../lib/assetHeroReso
 import { supabase } from "../lib/supabaseClient";
 import { colors, radius, shadows, spacing } from "../styles/theme";
 
-const DEFAULT_RESPONSIBLE_OPTIONS = ["Owner", "Wilson Marine", "Wilson Service"];
+const DEFAULT_RESPONSIBLE_OPTIONS = ["Owner", "Service Provider", "Service Team"];
 const PLAYBOOK_HERO_OPTIONS = {
   transform: { width: 720, quality: 80 },
   expiresIn: 60 * 60 * 24,
@@ -45,6 +45,11 @@ function workspaceDisplayName(workspace, config) {
     workspace?.label ||
     "KeeprSpace"
   );
+}
+
+function workspaceServiceTeamName(workspaceName) {
+  const name = String(workspaceName || "").trim();
+  return name ? `${name} Service` : "Service Team";
 }
 
 function compact(parts, separator = " • ") {
@@ -235,7 +240,7 @@ function PlaybookConfirmationModal({ confirmation, onCancel }) {
 }
 
 function buildServiceLabel(service) {
-  return service?.owner_facing_label || service?.name || "Wilson Service";
+  return service?.owner_facing_label || service?.name || "Service";
 }
 
 function playbookProgress(playbook) {
@@ -364,7 +369,7 @@ export default function KeeprSpacePlaybooksScreen({ navigation, route }) {
   const [selectedPlaybookId, setSelectedPlaybookId] = useState(null);
   const [sourcePlaybookId, setSourcePlaybookId] = useState(null);
   const [heroUrls, setHeroUrls] = useState({});
-  const [name, setName] = useState("Wilson Winter Storage & Care");
+  const [name, setName] = useState("");
   const [playbookStartDate, setPlaybookStartDate] = useState("");
   const [playbookStartTime, setPlaybookStartTime] = useState("");
   const [steps, setSteps] = useState([]);
@@ -545,7 +550,7 @@ export default function KeeprSpacePlaybooksScreen({ navigation, route }) {
         title: buildServiceLabel(service),
         step_type: "service",
         service_offering_id: service?.id || null,
-        responsible_party: `${workspaceName} Service`,
+        responsible_party: workspaceServiceTeamName(workspaceName),
         metadata: {
           service_label: buildServiceLabel(service),
         },
@@ -1349,7 +1354,7 @@ export default function KeeprSpacePlaybooksScreen({ navigation, route }) {
                 <View style={styles.emptyState}>
                   <Ionicons name="list-outline" size={28} color={colors.textMuted} />
                   <Text style={styles.emptyTitle}>Build the plan</Text>
-                  <Text style={styles.emptyText}>Add simple owner actions and Wilson services. Saving keeps a draft; activating creates the real Actions.</Text>
+                  <Text style={styles.emptyText}>Add simple owner actions and service work. Saving keeps a draft; activating creates the real Actions.</Text>
                 </View>
               )}
             </View>

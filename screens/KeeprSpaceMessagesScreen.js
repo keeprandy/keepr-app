@@ -159,7 +159,7 @@ function heroForThread(thread, portfolioItems = []) {
   );
 }
 
-function buildContext(thread, portfolioItems = [], workspaceName = "Wilson Marine") {
+function buildContext(thread, portfolioItems = [], workspaceName = "Service Provider") {
   const projection = findThreadAssetProjection(thread, portfolioItems);
   const relationship = projection?.relationship || projection?.service_relationship || projection?.dealer_relationship || {};
   const provider =
@@ -197,7 +197,7 @@ function getPersonName(thread, profilesById = {}, perspective = "keepr_pro") {
     if (latest.sender_type !== "keepr_pro") {
       return cleanName(latest.sender_name || profilesById[latest.from_user_id]?.display_name || profilesById[latest.from_user_id]?.full_name, "Customer");
     }
-    return cleanName(thread?.ownerDisplayName || thread?.asset?.owner_display_name || "Andy Drake", "Customer");
+    return cleanName(thread?.ownerDisplayName || thread?.asset?.owner_display_name, "Customer");
   }
   return cleanName(thread?.participantLabel || latest.sender_name, "Participant");
 }
@@ -282,7 +282,7 @@ function MessagesWithDates({ messages, currentUserId, profilesById, ownerName, p
         lastKey = key || lastKey;
         const mine = message?.sender_type === "keepr_pro";
         const label = mine
-          ? cleanName(message.sender_name, providerName || "Wilson Marine")
+          ? cleanName(message.sender_name, providerName || "Service Team")
           : cleanName(message.sender_name || profilesById[message.from_user_id]?.display_name, ownerName);
         return (
           <React.Fragment key={message.id}>
@@ -323,7 +323,7 @@ export default function KeeprSpaceMessagesScreen({ navigation, route }) {
     currentWorkspace?.display_name ||
     currentWorkspace?.name ||
     currentWorkspace?.label ||
-    "Wilson Marine";
+    "Current Workspace";
   const initialThreadId = route?.params?.threadId || null;
   const backAssetId = route?.params?.assetId || null;
   const backKac = route?.params?.kac || null;
@@ -386,7 +386,7 @@ export default function KeeprSpaceMessagesScreen({ navigation, route }) {
           projectionAsset(selectedProjection)?.owner_display_name ||
           selectedProjection?.owner_display_name ||
           selectedProjection?.owner?.display_name ||
-          "Andy Drake",
+          null,
         "Customer"
       )
     : "Customer";

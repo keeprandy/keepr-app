@@ -23,6 +23,7 @@ import {
   resolveKeeprSpaceKac,
 } from "../lib/keeprspaceApi";
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
+import { supabase } from "../lib/supabaseClient";
 import { colors, radius, shadows, spacing } from "../styles/theme";
 
 const EMPTY_BOAT = {
@@ -42,6 +43,19 @@ const EMPTY_BOAT = {
   customerDisplayName: "",
   customerEmail: "",
   customerPhone: "",
+  ownerName: "",
+  ownerEmail: "",
+  dealerName: "",
+  dealerContact: "",
+  dealerCrmUrl: "",
+  oemContactName: "",
+  oemContactEmail: "",
+  oemDepartment: "Customer Relations",
+  factoryResourceTitle: "",
+  factoryResourceUrl: "",
+  factoryResourceType: "build_sheet",
+  warrantyReference: "",
+  lifecycleState: "Unclaimed",
   engine: "",
   engineHours: "",
   hullMaterial: "",
@@ -57,6 +71,12 @@ const EMPTY_BOAT = {
 };
 
 const OPERATING_STATES = [
+  "Unclaimed",
+  "Owner Connected",
+  "Dealer Connected",
+  "Enriched",
+  "Active",
+  "Owner Ready",
   "In Inventory",
   "For Sale",
   "Delivery Prep",
@@ -69,10 +89,20 @@ const OPERATING_STATES = [
 
 const PURPOSES = [
   {
+    key: "oem_factory",
+    rpcPurpose: "selling_dealer",
+    label: "OEM / Factory Context",
+    description: "Connect the manufacturer workspace to model, build, resources, and owner handoff context.",
+    icon: "business-outline",
+    types: ["keeproem"],
+    capabilities: ["oem", "manufacturer", "catalog"],
+    defaultState: "Owner Ready",
+  },
+  {
     key: "our_boat",
     rpcPurpose: "selling_dealer",
     label: "Inventory / Selling Dealer",
-    description: "Connect this boat as Wilson inventory or represented sales stock.",
+    description: "Connect this boat as workspace inventory or represented sales stock.",
     icon: "storefront-outline",
     types: ["keeprpro", "keeprdealer"],
     capabilities: ["inventory", "sales"],
@@ -206,6 +236,66 @@ async function uploadActivatorBoatPhotos({ assetId, photos }) {
   }
 }
 
+async function addFactoryResourceForBoat({ assetId, organizationId, workspace, boat }) {
+  const title = cleanText(boat.factoryResourceTitle);
+  const url = cleanText(boat.factoryResourceUrl);
+  const warrantyReference = cleanText(boat.warrantyReference);
+  if (!assetId || !organizationId || (!title && !url && !warrantyReference)) return null;
+
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  if (userError) throw userError;
+
+  const resourceType = cleanText(boat.factoryResourceType) || "build_sheet";
+  const safeResourceType = [
+    "oem_catalog",
+    "model_page",
+    "manual",
+    "dealer_listing",
+    "build_sheet",
+    "survey",
+    "title",
+    "registration",
+    "photo",
+    "service_document",
+    "source_snapshot",
+    "other",
+  ].includes(resourceType)
+    ? resourceType
+    : "other";
+  const resourceTitle = title || warrantyReference || "Factory context";
+
+  const { data, error } = await supabase
+    .from("asset_resources")
+    .insert({
+      resource_type: safeResourceType,
+      title: resourceTitle,
+      url,
+      source_name: workspaceName(workspace),
+      source_platform: "Keepr OEM Activator",
+      source_url: url,
+      captured_at: new Date().toISOString(),
+      authority_state: "oem_as_built",
+      rights_status: "private",
+      applies_to_type: "asset",
+      applies_to_id: assetId,
+      created_by: userData?.user?.id || null,
+      metadata: cleanObject({
+        asset_id: assetId,
+        organization_id: organizationId,
+        source_context: "oem_activator_factory_context",
+        warranty_reference: warrantyReference,
+        oem_contact_name: cleanText(boat.oemContactName),
+        oem_contact_email: cleanText(boat.oemContactEmail),
+        oem_department: cleanText(boat.oemDepartment),
+      }),
+    })
+    .select("id,title,resource_type")
+    .single();
+
+  if (error) throw error;
+  return data || null;
+}
+
 function relationshipMetadataForBoat(boat, selectedPurpose, operatingStates) {
   const stockNumber = cleanText(boat.stockNumber);
   const externalAssetId = cleanText(boat.externalAssetId) || stockNumber;
@@ -222,6 +312,29 @@ function relationshipMetadataForBoat(boat, selectedPurpose, operatingStates) {
     email: cleanText(boat.customerEmail),
     phone: cleanText(boat.customerPhone),
   });
+  const owner = cleanObject({
+    display_name: cleanText(boat.ownerName) || cleanText(boat.customerDisplayName),
+    email: cleanText(boat.ownerEmail) || cleanText(boat.customerEmail),
+    connection_state: cleanText(boat.lifecycleState),
+  });
+  const dealer = cleanObject({
+    display_name: cleanText(boat.dealerName),
+    contact: cleanText(boat.dealerContact),
+    external_crm_url: cleanText(boat.dealerCrmUrl),
+  });
+  const oemContact = cleanObject({
+    display_name: cleanText(boat.oemContactName),
+    email: cleanText(boat.oemContactEmail),
+    department: cleanText(boat.oemDepartment),
+  });
+  const factoryContext = cleanObject({
+    source: selectedPurpose?.key === "oem_factory" ? "oem_activator" : null,
+    lifecycle_state: cleanText(boat.lifecycleState),
+    warranty_reference: cleanText(boat.warrantyReference),
+    resource_title: cleanText(boat.factoryResourceTitle),
+    resource_url: cleanText(boat.factoryResourceUrl),
+    resource_type: cleanText(boat.factoryResourceType),
+  });
   const storageIntent =
     selectedPurpose?.key === "storage" ||
     operatingStates.includes("Stored") ||
@@ -230,6 +343,18 @@ function relationshipMetadataForBoat(boat, selectedPurpose, operatingStates) {
   return cleanObject({
     inventory,
     customer,
+    owner,
+    dealer,
+    oem_contact: oemContact,
+    factory_context: factoryContext,
+    projection: selectedPurpose?.key === "oem_factory"
+      ? {
+          role: "oem",
+          relationship_label: "OEM / Factory Context",
+          connect_owner_next: Boolean(owner.email),
+          connect_dealer_next: Boolean(dealer.display_name || dealer.external_crm_url),
+        }
+      : {},
     intake: storageIntent
       ? {
           receive_for_storage: true,
@@ -468,6 +593,7 @@ export default function KeeprSpaceAddBoatScreen({ navigation }) {
   const [submitting, setSubmitting] = useState(false);
   const [confirmCreate, setConfirmCreate] = useState(false);
   const [message, setMessage] = useState(null);
+  const [showAllContext, setShowAllContext] = useState(false);
 
   useEffect(() => {
     if (!options.length) return;
@@ -590,19 +716,31 @@ export default function KeeprSpaceAddBoatScreen({ navigation }) {
   const connectSelected = async () => {
     const assetId = selectedMatch?.asset_id || selectedMatch?.id;
     if (!assetId || !organizationId || !selectedPurpose) return;
-    if (selectedMatch?.already_connected || selectedMatch?.source === "org") {
-      openBoat(selectedMatch);
-      return;
-    }
     setSubmitting(true);
     setMessage(null);
     try {
+      if (selectedMatch?.already_connected || selectedMatch?.source === "org") {
+        await addFactoryResourceForBoat({
+          assetId,
+          organizationId,
+          workspace: currentWorkspace,
+          boat,
+        });
+        openBoat(selectedMatch);
+        return;
+      }
       const result = await connectKeeprSpaceBoat({
         assetId,
         organizationId,
         relationshipPurpose: rpcRelationshipPurpose,
         operatingStates,
         relationshipMetadata: relationshipMetadataForBoat(boat, selectedPurpose, operatingStates),
+      });
+      await addFactoryResourceForBoat({
+        assetId,
+        organizationId,
+        workspace: currentWorkspace,
+        boat,
       });
       openBoat(result);
     } catch (err) {
@@ -640,7 +778,7 @@ export default function KeeprSpaceAddBoatScreen({ navigation }) {
         tone: "warning",
         text: hasStrongIdentity
           ? "Review once more. Keepr will check the KAC, HIN, stock, or listing identity before creating a new boat."
-          : "No HIN or KAC was entered. That is okay for inventory. Confirm if Wilson's stock/listing details identify this boat.",
+          : `No HIN or KAC was entered. That is okay for inventory. Confirm if ${workspaceName(currentWorkspace)}'s stock/listing details identify this boat.`,
       });
       return;
     }
@@ -682,6 +820,12 @@ export default function KeeprSpaceAddBoatScreen({ navigation }) {
         assetId: result?.asset_id || result?.asset?.id || result?.id || null,
         photos: boat.photos || [],
       });
+      await addFactoryResourceForBoat({
+        assetId: result?.asset_id || result?.asset?.id || result?.id || null,
+        organizationId,
+        workspace: currentWorkspace,
+        boat,
+      });
       openBoat(result);
     } catch (err) {
       setMessage({ tone: "danger", text: err?.message || "Could not create this boat." });
@@ -695,6 +839,14 @@ export default function KeeprSpaceAddBoatScreen({ navigation }) {
   const noSupportedPurpose = !options.length;
   const copy = useMemo(() => activatorCopy(currentWorkspace), [currentWorkspace]);
   const capabilities = useMemo(() => capabilityItems(currentWorkspace), [currentWorkspace]);
+  const isOemWorkspace = currentWorkspace?.workspace_type === "keeproem";
+  const selectedBoatLabel = selectedMatch?.asset_name || (selectedMatch ? titleForMatch(selectedMatch) : null);
+  const activationState = boat.lifecycleState || operatingStates[0] || "Unclaimed";
+  const ownerLabel = boat.ownerName || boat.ownerEmail || boat.customerDisplayName || boat.customerEmail || "Unclaimed / not connected yet";
+  const dealerLabel = boat.dealerName || "Not connected yet";
+  const oemContactLabel = compact([boat.oemContactName, boat.oemDepartment]) || "Not assigned yet";
+  const factoryResourceLabel = boat.factoryResourceTitle || boat.warrantyReference || boat.factoryResourceUrl || "No factory resource added yet";
+  const selectedKacLabel = selectedMatch?.kac_id || boat.kac || "Resolves after create";
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -734,6 +886,128 @@ export default function KeeprSpaceAddBoatScreen({ navigation }) {
               <Text style={styles.gapText}>
                 The current production connect RPC supports service, stewardship, storage, sales, and delivery purposes. It does not yet expose an OEM/manufacturer relationship purpose.
               </Text>
+            </View>
+          </View>
+        ) : null}
+
+        {isOemWorkspace ? (
+          <View style={styles.crWorkflowPanel}>
+            <View style={styles.crWorkflowHeader}>
+              <View style={styles.crWorkflowTitleWrap}>
+                <Text style={styles.panelKicker}>Customer Relations workflow</Text>
+                <Text style={styles.crWorkflowTitle}>Activate ownership context</Text>
+                <Text style={styles.panelText}>
+                  Help the owner while they are on the phone: find the boat, connect the right people, add factory context, and activate the same KAC for their Keepr experience.
+                </Text>
+              </View>
+              <View style={styles.crStatePill}>
+                <Text style={styles.crStatePillText}>{activationState}</Text>
+              </View>
+            </View>
+
+            <View style={styles.crStepGrid}>
+              <View style={styles.crStepCard}>
+                <View style={styles.crStepHeader}>
+                  <View style={styles.crStepIcon}><Ionicons name="boat-outline" size={18} color={colors.brandBlue} /></View>
+                  <Text style={styles.crStepTitle}>1. Find the boat</Text>
+                </View>
+                <Text style={styles.crStepValue}>{selectedBoatLabel || compact([boat.year, boat.make, boat.model]) || "Search first, or enter a new boat below"}</Text>
+                <View style={styles.formGrid}>
+                  <Field label="Keepr Code / KAC" value={boat.kac} onChangeText={(value) => updateBoat("kac", value)} placeholder="BOAT-..." />
+                  <Field label="Serial / HIN" value={boat.hin} onChangeText={(value) => updateBoat("hin", value)} placeholder="Hull identification number" />
+                  <Field label="Year" value={boat.year} onChangeText={(value) => updateBoat("year", value)} placeholder="2026" keyboardType="number-pad" />
+                  <Field label="Make" value={boat.make} onChangeText={(value) => updateBoat("make", value)} placeholder="Make" />
+                  <Field label="Model" value={boat.model} onChangeText={(value) => updateBoat("model", value)} placeholder="Model" />
+                </View>
+              </View>
+
+              <View style={styles.crStepCard}>
+                <View style={styles.crStepHeader}>
+                  <View style={styles.crStepIcon}><Ionicons name="person-circle-outline" size={18} color={colors.brandBlue} /></View>
+                  <Text style={styles.crStepTitle}>2. Connect owner</Text>
+                </View>
+                <Text style={styles.crStepValue}>{ownerLabel}</Text>
+                <View style={styles.formGrid}>
+                  <Field label="Owner name" value={boat.ownerName} onChangeText={(value) => updateBoat("ownerName", value)} placeholder="Current owner name" />
+                  <Field label="Owner Keepr email" value={boat.ownerEmail} onChangeText={(value) => updateBoat("ownerEmail", value)} placeholder="owner@example.com" keyboardType="email-address" />
+                  <Field label="Relationship state" value={boat.lifecycleState} onChangeText={(value) => updateBoat("lifecycleState", value)} placeholder="Unclaimed, Owner Connected, Active" />
+                </View>
+              </View>
+
+              <View style={styles.crStepCard}>
+                <View style={styles.crStepHeader}>
+                  <View style={styles.crStepIcon}><Ionicons name="storefront-outline" size={18} color={colors.brandBlue} /></View>
+                  <Text style={styles.crStepTitle}>3. Connect dealer</Text>
+                </View>
+                <Text style={styles.crStepValue}>{dealerLabel}</Text>
+                <View style={styles.formGrid}>
+                  <Field label="Dealer / service provider" value={boat.dealerName} onChangeText={(value) => updateBoat("dealerName", value)} placeholder="Current dealer or service provider" />
+                  <Field label="Dealer contact" value={boat.dealerContact} onChangeText={(value) => updateBoat("dealerContact", value)} placeholder="Advisor, salesperson, or location contact" />
+                  <Field label="External CRM reference" value={boat.dealerCrmUrl} onChangeText={(value) => updateBoat("dealerCrmUrl", value)} placeholder="https://crm.example.com/record/..." />
+                </View>
+              </View>
+
+              <View style={styles.crStepCard}>
+                <View style={styles.crStepHeader}>
+                  <View style={styles.crStepIcon}><Ionicons name="people-outline" size={18} color={colors.brandBlue} /></View>
+                  <Text style={styles.crStepTitle}>4. Assign OEM contact</Text>
+                </View>
+                <Text style={styles.crStepValue}>{oemContactLabel}</Text>
+                <View style={styles.formGrid}>
+                  <Field label="OEM contact" value={boat.oemContactName} onChangeText={(value) => updateBoat("oemContactName", value)} placeholder="Customer relations contact" />
+                  <Field label="OEM contact email" value={boat.oemContactEmail} onChangeText={(value) => updateBoat("oemContactEmail", value)} placeholder="contact@example.com" keyboardType="email-address" />
+                  <Field label="OEM department" value={boat.oemDepartment} onChangeText={(value) => updateBoat("oemDepartment", value)} placeholder="Customer Relations, Sales, Engineering" />
+                </View>
+              </View>
+
+              <View style={styles.crStepCardWide}>
+                <View style={styles.crStepHeader}>
+                  <View style={styles.crStepIcon}><Ionicons name="document-attach-outline" size={18} color={colors.brandBlue} /></View>
+                  <Text style={styles.crStepTitle}>5. Add factory context</Text>
+                </View>
+                <Text style={styles.crStepValue}>{factoryResourceLabel}</Text>
+                <View style={styles.formGrid}>
+                  <Field label="Resource title" value={boat.factoryResourceTitle} onChangeText={(value) => updateBoat("factoryResourceTitle", value)} placeholder="Build sheet, owner's manual, warranty packet" />
+                  <Field label="Resource URL / reference" value={boat.factoryResourceUrl} onChangeText={(value) => updateBoat("factoryResourceUrl", value)} placeholder="https://... or internal reference" />
+                  <Field label="Resource type" value={boat.factoryResourceType} onChangeText={(value) => updateBoat("factoryResourceType", value)} placeholder="build_sheet, manual, oem_catalog, other" />
+                  <Field label="Warranty reference" value={boat.warrantyReference} onChangeText={(value) => updateBoat("warrantyReference", value)} placeholder="Warranty registration, hull warranty, transfer packet" />
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.crActivationSummary}>
+              <View style={styles.summaryBox}>
+                <Text style={styles.summaryTitle}>Activation summary</Text>
+                <Text style={styles.summaryLine}>OEM: {workspaceName(currentWorkspace)}</Text>
+                <Text style={styles.summaryLine}>Boat: {selectedBoatLabel || compact([boat.year, boat.make, boat.model]) || "Not identified yet"}</Text>
+                <Text style={styles.summaryLine}>Owner: {ownerLabel}</Text>
+                <Text style={styles.summaryLine}>Dealer: {dealerLabel}</Text>
+                <Text style={styles.summaryLine}>OEM contact: {oemContactLabel}</Text>
+                <Text style={styles.summaryLine}>KAC: {selectedKacLabel}</Text>
+                <Text style={styles.summaryState}>{activationState}</Text>
+              </View>
+              <View style={styles.crActionColumn}>
+                <TouchableOpacity
+                  style={[styles.primaryButton, (!selectedMatch || submitting || noSupportedPurpose) && styles.buttonDisabled]}
+                  disabled={!selectedMatch || submitting || noSupportedPurpose}
+                  onPress={connectSelected}
+                >
+                  {submitting ? (
+                    <ActivityIndicator color={colors.onPrimary} />
+                  ) : (
+                    <Text style={styles.primaryButtonText}>
+                      {selectedMatch?.already_connected || selectedMatch?.source === "org" ? "Save Context & Open Boat" : "Connect OEM Context"}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.secondaryButton, (submitting || noSupportedPurpose) && styles.buttonDisabled]}
+                  disabled={submitting || noSupportedPurpose}
+                  onPress={createNew}
+                >
+                  <Text style={styles.secondaryButtonText}>{confirmCreate ? "Confirm Create New Boat" : "Create New Boat"}</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         ) : null}
@@ -855,7 +1129,24 @@ export default function KeeprSpaceAddBoatScreen({ navigation }) {
           </View>
         </View>
 
-        <View style={styles.grid}>
+        {isOemWorkspace ? (
+          <TouchableOpacity
+            style={styles.advancedToggle}
+            activeOpacity={0.86}
+            onPress={() => setShowAllContext((value) => !value)}
+          >
+            <View style={styles.advancedToggleIcon}>
+              <Ionicons name={showAllContext ? "chevron-up-outline" : "options-outline"} size={18} color={colors.brandBlue} />
+            </View>
+            <View style={styles.advancedToggleTextWrap}>
+              <Text style={styles.advancedToggleTitle}>{showAllContext ? "Hide Advanced / All Context" : "Advanced / All Context"}</Text>
+              <Text style={styles.panelText}>Open the complete asset, relationship, storage, value, photo, and catalog capture form.</Text>
+            </View>
+          </TouchableOpacity>
+        ) : null}
+
+        {(!isOemWorkspace || showAllContext) ? (
+          <View style={styles.grid}>
           <View style={[styles.panel, styles.createPanel]}>
             <Text style={styles.panelKicker}>Create new</Text>
             <Text style={styles.panelTitle}>Add marine asset</Text>
@@ -895,7 +1186,7 @@ export default function KeeprSpaceAddBoatScreen({ navigation }) {
               <Text style={styles.sectionLabel}>Boat details</Text>
             <View style={styles.formGrid}>
               <Field label="Year" value={boat.year} onChangeText={(value) => updateBoat("year", value)} placeholder="2026" keyboardType="number-pad" />
-              <Field label="Make" value={boat.make} onChangeText={(value) => updateBoat("make", value)} placeholder="Tiara" />
+              <Field label="Make" value={boat.make} onChangeText={(value) => updateBoat("make", value)} placeholder="Make" />
               <Field label="Model" value={boat.model} onChangeText={(value) => updateBoat("model", value)} placeholder="39 LE" />
               <Field label="Length (ft)" value={boat.lengthFeet} onChangeText={(value) => updateBoat("lengthFeet", value)} placeholder="39" keyboardType="decimal-pad" />
               <Field label="KAC / Keepr code" value={boat.kac} onChangeText={(value) => updateBoat("kac", value)} placeholder="Optional existing KAC" />
@@ -912,19 +1203,37 @@ export default function KeeprSpaceAddBoatScreen({ navigation }) {
             </View>
 
             <View style={styles.formSection}>
-              <Text style={styles.sectionLabel}>Wilson relationship metadata</Text>
-              <Text style={styles.panelText}>These fields belong to Wilson's relationship with this boat, not the global boat identity.</Text>
+              <Text style={styles.sectionLabel}>{workspaceName(currentWorkspace)} relationship metadata</Text>
+              <Text style={styles.panelText}>These fields belong to this workspace's relationship with the boat, not the global boat identity.</Text>
               <View style={styles.formGrid}>
-                <Field label="Wilson stock #" value={boat.stockNumber} onChangeText={(value) => updateBoat("stockNumber", value)} placeholder="57955" />
-                <Field label="Listing URL" value={boat.listingUrl} onChangeText={(value) => updateBoat("listingUrl", value)} placeholder="https://www.wilsonboats.com/..." />
+                <Field label="Stock #" value={boat.stockNumber} onChangeText={(value) => updateBoat("stockNumber", value)} placeholder="Stock number" />
+                <Field label="Listing URL" value={boat.listingUrl} onChangeText={(value) => updateBoat("listingUrl", value)} placeholder="https://..." />
                 <Field label="External / G2 asset ID" value={boat.externalAssetId} onChangeText={(value) => updateBoat("externalAssetId", value)} placeholder="Optional inventory system ID" />
-                <Field label="Wilson location" value={boat.location} onChangeText={(value) => updateBoat("location", value)} placeholder="Brighton, showroom, storage yard" />
+                <Field label="Workspace location" value={boat.location} onChangeText={(value) => updateBoat("location", value)} placeholder="Showroom, storage yard, service bay" />
               </View>
             </View>
 
+            {isOemWorkspace ? (
+              <View style={styles.formSection}>
+                <Text style={styles.sectionLabel}>OEM relationship activation</Text>
+                <Text style={styles.panelText}>Capture who owns the boat, who supports it, and who inside this workspace owns the customer relationship.</Text>
+                <View style={styles.formGrid}>
+                  <Field label="Owner name" value={boat.ownerName} onChangeText={(value) => updateBoat("ownerName", value)} placeholder="Current owner name" />
+                  <Field label="Owner Keepr email" value={boat.ownerEmail} onChangeText={(value) => updateBoat("ownerEmail", value)} placeholder="owner@example.com" keyboardType="email-address" />
+                  <Field label="Dealer / service provider" value={boat.dealerName} onChangeText={(value) => updateBoat("dealerName", value)} placeholder="Current dealer or service provider" />
+                  <Field label="Dealer contact" value={boat.dealerContact} onChangeText={(value) => updateBoat("dealerContact", value)} placeholder="Advisor, salesperson, or location contact" />
+                  <Field label="External CRM reference" value={boat.dealerCrmUrl} onChangeText={(value) => updateBoat("dealerCrmUrl", value)} placeholder="https://crm.example.com/record/..." />
+                  <Field label="Relationship state" value={boat.lifecycleState} onChangeText={(value) => updateBoat("lifecycleState", value)} placeholder="Unclaimed, Owner Connected, Active" />
+                  <Field label="OEM contact" value={boat.oemContactName} onChangeText={(value) => updateBoat("oemContactName", value)} placeholder="Customer relations contact" />
+                  <Field label="OEM contact email" value={boat.oemContactEmail} onChangeText={(value) => updateBoat("oemContactEmail", value)} placeholder="contact@example.com" keyboardType="email-address" />
+                  <Field label="OEM department" value={boat.oemDepartment} onChangeText={(value) => updateBoat("oemDepartment", value)} placeholder="Customer Relations, Sales, Engineering" />
+                </View>
+              </View>
+            ) : null}
+
             <View style={styles.formSection}>
               <Text style={styles.sectionLabel}>Existing customer / storage intake</Text>
-              <Text style={styles.panelText}>Use this when Wilson knows the customer but the customer does not have a Keepr account yet. No fake user is created.</Text>
+              <Text style={styles.panelText}>Use this when this workspace knows the customer but the customer does not have a Keepr account yet. No fake user is created.</Text>
               <View style={styles.formGrid}>
                 <Field label="Customer system" value={boat.customerExternalSystem} onChangeText={(value) => updateBoat("customerExternalSystem", value)} placeholder="g2" />
                 <Field label="Customer ID" value={boat.customerExternalId} onChangeText={(value) => updateBoat("customerExternalId", value)} placeholder="Optional external customer ID" />
@@ -951,6 +1260,19 @@ export default function KeeprSpaceAddBoatScreen({ navigation }) {
                 <Field label="Purchase date" value={boat.purchaseDate} onChangeText={(value) => updateBoat("purchaseDate", value)} placeholder="YYYY-MM-DD" />
               </View>
             </View>
+
+            {isOemWorkspace ? (
+              <View style={styles.formSection}>
+                <Text style={styles.sectionLabel}>Factory records / resources</Text>
+                <Text style={styles.panelText}>Attach a build sheet, manual, warranty reference, or source link as OEM factory context for this KAC.</Text>
+                <View style={styles.formGrid}>
+                  <Field label="Resource title" value={boat.factoryResourceTitle} onChangeText={(value) => updateBoat("factoryResourceTitle", value)} placeholder="Build sheet, owner's manual, warranty packet" />
+                  <Field label="Resource URL / reference" value={boat.factoryResourceUrl} onChangeText={(value) => updateBoat("factoryResourceUrl", value)} placeholder="https://... or internal reference" />
+                  <Field label="Resource type" value={boat.factoryResourceType} onChangeText={(value) => updateBoat("factoryResourceType", value)} placeholder="build_sheet, manual, oem_catalog, other" />
+                  <Field label="Warranty reference" value={boat.warrantyReference} onChangeText={(value) => updateBoat("warrantyReference", value)} placeholder="Warranty registration, hull warranty, transfer packet" />
+                </View>
+              </View>
+            ) : null}
 
             <View style={styles.formSection}>
               <Text style={styles.sectionLabel}>Boat photos</Text>
@@ -1048,6 +1370,17 @@ export default function KeeprSpaceAddBoatScreen({ navigation }) {
             <Text style={styles.panelText}>
               Authorized org assets open directly. Network identity matches can be requested/connected into this workspace through the production connect RPC.
             </Text>
+            {isOemWorkspace ? (
+              <View style={styles.summaryBox}>
+                <Text style={styles.summaryTitle}>Relationship summary</Text>
+                <Text style={styles.summaryLine}>OEM: {workspaceName(currentWorkspace)}</Text>
+                <Text style={styles.summaryLine}>Owner: {boat.ownerName || boat.ownerEmail || "Unclaimed / not connected yet"}</Text>
+                <Text style={styles.summaryLine}>Dealer: {boat.dealerName || "Not connected yet"}</Text>
+                <Text style={styles.summaryLine}>OEM contact: {compact([boat.oemContactName, boat.oemDepartment]) || "Not assigned yet"}</Text>
+                <Text style={styles.summaryLine}>KAC: {(selectedMatch?.kac_id || boat.kac || "Resolves after create")}</Text>
+                <Text style={styles.summaryState}>{boat.lifecycleState || "Unclaimed"}</Text>
+              </View>
+            ) : null}
             {selectedMatch ? (
               <View style={styles.selectedBox}>
                 <Text style={styles.selectedTitle}>{selectedMatch.asset_name || titleForMatch(selectedMatch)}</Text>
@@ -1064,10 +1397,23 @@ export default function KeeprSpaceAddBoatScreen({ navigation }) {
               disabled={!selectedMatch || submitting || noSupportedPurpose}
               onPress={connectSelected}
             >
-              {submitting ? <ActivityIndicator color={colors.onPrimary} /> : <Text style={styles.primaryButtonText}>{selectedMatch?.already_connected || selectedMatch?.source === "org" ? "Open Authorized Boat" : "Connect Existing Boat"}</Text>}
+              {submitting ? (
+                <ActivityIndicator color={colors.onPrimary} />
+              ) : (
+                <Text style={styles.primaryButtonText}>
+                  {isOemWorkspace
+                    ? selectedMatch?.already_connected || selectedMatch?.source === "org"
+                      ? "Save Context & Open Boat"
+                      : "Connect OEM Context"
+                    : selectedMatch?.already_connected || selectedMatch?.source === "org"
+                    ? "Open Authorized Boat"
+                    : "Connect Existing Boat"}
+                </Text>
+              )}
             </TouchableOpacity>
           </View>
-        </View>
+          </View>
+        ) : null}
 
         {message ? (
           <View style={[styles.messageBox, styles[`messageBox_${message.tone}`]]}>
@@ -1250,6 +1596,134 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
     lineHeight: 19,
+  },
+  crWorkflowPanel: {
+    backgroundColor: colors.surface,
+    borderColor: "#BFDBFE",
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    gap: spacing.lg,
+    padding: spacing.lg,
+    ...shadows.sm,
+  },
+  crWorkflowHeader: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.md,
+    justifyContent: "space-between",
+  },
+  crWorkflowTitleWrap: {
+    flex: 1,
+    minWidth: 320,
+  },
+  crWorkflowTitle: {
+    color: colors.textPrimary,
+    fontSize: 24,
+    fontWeight: "900",
+  },
+  crStatePill: {
+    backgroundColor: "#DBEAFE",
+    borderColor: "#BFDBFE",
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  crStatePillText: {
+    color: colors.brandNavy,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  crStepGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.md,
+  },
+  crStepCard: {
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexBasis: 420,
+    flexGrow: 1,
+    gap: spacing.sm,
+    padding: spacing.md,
+  },
+  crStepCardWide: {
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexBasis: 860,
+    flexGrow: 1,
+    gap: spacing.sm,
+    padding: spacing.md,
+  },
+  crStepHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  crStepIcon: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: "#BFDBFE",
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    height: 34,
+    justifyContent: "center",
+    width: 34,
+  },
+  crStepTitle: {
+    color: colors.brandNavy,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  crStepValue: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  crActivationSummary: {
+    alignItems: "stretch",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.md,
+  },
+  crActionColumn: {
+    flexBasis: 280,
+    flexGrow: 1,
+    gap: spacing.sm,
+    justifyContent: "flex-end",
+  },
+  advancedToggle: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.md,
+    padding: spacing.md,
+    ...shadows.sm,
+  },
+  advancedToggleIcon: {
+    alignItems: "center",
+    backgroundColor: "#EFF6FF",
+    borderRadius: radius.sm,
+    height: 38,
+    justifyContent: "center",
+    width: 38,
+  },
+  advancedToggleTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  advancedToggleTitle: {
+    color: colors.brandNavy,
+    fontSize: 15,
+    fontWeight: "900",
   },
   segmentedControl: {
     alignItems: "center",
@@ -1493,6 +1967,36 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "900",
   },
+  summaryBox: {
+    backgroundColor: "#F8FAFC",
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    gap: 4,
+    padding: spacing.md,
+  },
+  summaryTitle: {
+    color: colors.brandNavy,
+    fontSize: 14,
+    fontWeight: "900",
+    marginBottom: 2,
+  },
+  summaryLine: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  summaryState: {
+    alignSelf: "flex-start",
+    backgroundColor: "#DBEAFE",
+    borderRadius: 999,
+    color: colors.brandNavy,
+    fontSize: 11,
+    fontWeight: "900",
+    marginTop: spacing.xs,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+  },
   selectedBox: {
     backgroundColor: "#EFF6FF",
     borderColor: "#BFDBFE",
@@ -1532,6 +2036,21 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     color: colors.onPrimary,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  secondaryButton: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    justifyContent: "center",
+    minHeight: 48,
+    paddingHorizontal: spacing.lg,
+  },
+  secondaryButtonText: {
+    color: colors.brandBlue,
     fontSize: 14,
     fontWeight: "900",
   },

@@ -1,5 +1,5 @@
 // components/TransferOwnershipModal.js
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -14,6 +14,11 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 
 import { supabase } from "../lib/supabaseClient";
+import {
+  DEFAULT_TRANSFER_PREVIEW,
+  buildAssetTransferPreview,
+} from "../lib/assetTransferPreview";
+import { useAuth } from "../context/AuthContext";
 import { colors, spacing, radius } from "../styles/theme";
 
 function normalizeEmail(v) {
@@ -31,8 +36,8 @@ function isValidEmail(v) {
  * Creates an inbox transfer request for a recipient (they must accept).
  *
  * Requires:
- * - inbox_items table with: to_user_id, from_user_id, type, status, payload
- * - profiles table with: id, email (or adjust query)
+ * - inbox_items table with: to_user_id, to_email, from_user_id, type, status, payload
+ * - existing email-claim behavior for pending inbox items when to_user_id is not resolved yet
  */
 export default function TransferOwnershipModal({
   visible,
@@ -41,21 +46,104 @@ export default function TransferOwnershipModal({
   assetType, // "boat" | "vehicle" | "home" | etc
   assetName,
 }) {
+  const { user, initializing: authInitializing } = useAuth();
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [pendingLoading, setPendingLoading] = useState(false);
+  const [pendingOutgoing, setPendingOutgoing] = useState(null);
 
   const title = useMemo(() => assetName || "This asset", [assetName]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!visible || !assetId) {
+      setPreview(null);
+      setPreviewLoading(false);
+      setPendingOutgoing(null);
+      setPendingLoading(false);
+      return undefined;
+    }
+
+    setPreviewLoading(true);
+    buildAssetTransferPreview({ assetId })
+      .then((nextPreview) => {
+        if (!cancelled) setPreview(nextPreview);
+      })
+      .catch((error) => {
+        console.log("buildAssetTransferPreview error:", error);
+        if (!cancelled) setPreview(null);
+      })
+      .finally(() => {
+        if (!cancelled) setPreviewLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [assetId, visible]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const userId = user?.id || null;
+
+    if (!visible || !assetId || !userId) {
+      setPendingOutgoing(null);
+      setPendingLoading(false);
+      return undefined;
+    }
+
+    setPendingLoading(true);
+    supabase
+      .from("inbox_items")
+      .select("id, to_email, to_user_id, payload, created_at")
+      .eq("from_user_id", userId)
+      .eq("type", "asset_transfer")
+      .eq("status", "pending")
+      .filter("payload->>asset_id", "eq", assetId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (error) {
+          console.log("pending transfer lookup skipped:", error);
+          if (!cancelled) setPendingOutgoing(null);
+          return;
+        }
+        if (!cancelled) setPendingOutgoing(data || null);
+      })
+      .finally(() => {
+        if (!cancelled) setPendingLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [assetId, user?.id, visible]);
+
   const findRecipientByEmail = async (emailNorm) => {
+    const { data: rpcUserId, error: rpcError } = await supabase.rpc(
+      "keepr_profile_id_by_email",
+      { p_email: emailNorm }
+    );
+    if (!rpcError && rpcUserId) {
+      return { id: rpcUserId, email: emailNorm };
+    }
+    if (rpcError) {
+      console.log("keepr_profile_id_by_email skipped:", rpcError);
+    }
+
     const { data, error } = await supabase
       .from("profiles")
-      .select("id, email")
-      .eq("email", emailNorm)
+      .select("id, email, preferred_contact_email")
+      .or(`email.eq.${emailNorm},preferred_contact_email.eq.${emailNorm}`)
       .maybeSingle();
 
     if (error) {
       console.error("findRecipientByEmail error", error);
-      throw new Error("Could not look up that account.");
+      return null;
     }
     return data || null;
   };
@@ -71,42 +159,52 @@ export default function TransferOwnershipModal({
 
     setLoading(true);
     try {
-      const { data: authData, error: authErr } = await supabase.auth.getUser();
-      if (authErr) throw authErr;
-
-      const myId = authData?.user?.id || null;
+      const myId = user?.id || null;
       if (!myId) throw new Error("You must be signed in to transfer ownership.");
 
       const recipient = await findRecipientByEmail(emailNorm);
-      if (!recipient?.id) {
-        Alert.alert(
-          "Account not found",
-          "That email doesn’t match a Keepr account yet. Have them create an account first, then try again."
-        );
-        return;
-      }
 
-      if (recipient.id === myId) {
+      if (recipient?.id === myId) {
         Alert.alert("Already yours", "That account is already the current owner.");
         return;
       }
 
-      const payload = {
-        asset_id: assetId,
-        asset_type: assetType || null,
-        asset_name: title,
-        // Future-proof fields:
-        // include_package: false,
-        // package_scope: "summary",
+      const transferPackage = preview || {
+        ...DEFAULT_TRANSFER_PREVIEW,
+        asset: {
+          id: assetId,
+          name: title,
+          type: assetType || null,
+          kac: null,
+        },
+        projection_note:
+          "This boat's history stays with the boat. When ownership changes, Keepr updates access without starting over.",
       };
 
-      const { error: insErr } = await supabase.from("inbox_items").insert({
-        to_user_id: recipient.id,
-        from_user_id: myId,
-        type: "asset_transfer",
-        status: "pending",
-        payload,
-      });
+      const payload = {
+        asset_id: assetId,
+        asset_type: assetType || transferPackage?.asset?.type || null,
+        asset_name: title,
+        asset_kac: transferPackage?.asset?.kac || null,
+        asset_identity: transferPackage?.asset || null,
+        transfer_model: "persistent_kac_relationship_change",
+        transfer_package: transferPackage,
+        projection_note:
+          "This boat's history stays with the boat. When ownership changes, Keepr updates access without starting over.",
+        from_email: user?.email || null,
+        to_email: emailNorm,
+      };
+
+      const { data: insertedRequest, error: insErr } = await supabase.from("inbox_items").insert({
+          to_user_id: recipient?.id || null,
+          to_email: emailNorm,
+          from_user_id: myId,
+          type: "asset_transfer",
+          status: "pending",
+          payload,
+        })
+        .select("id, to_email, to_user_id, payload, created_at")
+        .single();
 
       if (insErr) {
         console.error("asset_transfer insert error", insErr);
@@ -119,15 +217,72 @@ export default function TransferOwnershipModal({
 
       Alert.alert(
         "Transfer sent",
-        "They’ll need to accept it in their Inbox."
+        "They’ll need to accept it in their Inbox. If the request was sent by email, it will attach to that account when they sign in."
       );
 
       // reset + close
       setEmail("");
-      onClose?.();
+      setPendingOutgoing(insertedRequest || {
+        id: null,
+        to_email: emailNorm,
+        to_user_id: recipient?.id || null,
+        payload,
+        created_at: new Date().toISOString(),
+      });
     } catch (e) {
       console.log("TransferOwnershipModal handleSend error:", e);
       Alert.alert("Transfer failed", e?.message || "Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const confirmWithdraw = () =>
+    new Promise((resolve) => {
+      if (typeof window !== "undefined" && typeof window.confirm === "function") {
+        resolve(window.confirm("Withdraw this transfer request before it is accepted?"));
+        return;
+      }
+      Alert.alert(
+        "Withdraw transfer?",
+        "The recipient will no longer be able to accept this request.",
+        [
+          { text: "Keep request", style: "cancel", onPress: () => resolve(false) },
+          { text: "Withdraw", style: "destructive", onPress: () => resolve(true) },
+        ]
+      );
+    });
+
+  const handleWithdraw = async () => {
+    const requestId = pendingOutgoing?.id;
+    const myId = user?.id || null;
+    if (!requestId || !myId) return;
+
+    const ok = await confirmWithdraw();
+    if (!ok) return;
+
+    setLoading(true);
+    try {
+      const { error } = await supabase
+        .from("inbox_items")
+        .update({
+          status: "declined",
+          responded_at: new Date().toISOString(),
+        })
+        .eq("id", requestId)
+        .eq("from_user_id", myId)
+        .eq("type", "asset_transfer")
+        .eq("status", "pending");
+
+      if (error) throw error;
+      setPendingOutgoing(null);
+      Alert.alert("Transfer withdrawn", "The boat has not changed hands.");
+    } catch (error) {
+      console.log("handleWithdraw transfer error:", error);
+      Alert.alert(
+        "Could not withdraw",
+        error?.message || "Please try again or ask the recipient to decline it."
+      );
     } finally {
       setLoading(false);
     }
@@ -154,14 +309,100 @@ export default function TransferOwnershipModal({
             <View style={styles.infoBox}>
               <Ionicons name="swap-horizontal-outline" size={18} color={colors.textSecondary} />
               <Text style={styles.infoText}>
-                Ownership transfers to another Keepr account.{"\n"}
-                The recipient must accept the request in their Inbox.
+                This boat's history stays with the boat. Your private
+                information stays with you. When ownership changes, Keepr
+                updates access without starting over.
               </Text>
             </View>
 
             <Text style={styles.helper}>
-              Asset: <Text style={{ fontWeight: "700", color: colors.textPrimary }}>{title}</Text>
+              Boat: <Text style={{ fontWeight: "700", color: colors.textPrimary }}>{title}</Text>
             </Text>
+
+            {!!pendingOutgoing && (
+              <View style={styles.pendingCard}>
+                <View style={styles.pendingHeader}>
+                  <Ionicons name="time-outline" size={16} color={colors.textSecondary} />
+                  <Text style={styles.pendingTitle}>Transfer request pending</Text>
+                </View>
+                <Text style={styles.pendingText}>
+                  This boat has not changed hands yet. The request is waiting for{" "}
+                  <Text style={styles.pendingStrong}>
+                    {pendingOutgoing.to_email || pendingOutgoing.payload?.to_email || "the recipient"}
+                  </Text>{" "}
+                  to accept it.
+                </Text>
+                <TouchableOpacity
+                  style={[styles.withdrawButton, loading && { opacity: 0.6 }]}
+                  onPress={handleWithdraw}
+                  disabled={loading || !pendingOutgoing?.id}
+                >
+                  <Ionicons name="close-circle-outline" size={15} color="#DC2626" />
+                  <Text style={styles.withdrawButtonText}>Withdraw request</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            <View style={styles.previewCard}>
+              <View style={styles.previewHeader}>
+                <Ionicons name="git-network-outline" size={16} color={colors.brandBlue} />
+                <Text style={styles.previewTitle}>What comes with the boat</Text>
+              </View>
+              <Text style={styles.previewIntro}>
+                Keepr is not copying this boat. It is showing what boat history and
+                records follow the boat and what remains private to the current
+                person or workspace.
+              </Text>
+
+              {previewLoading ? (
+                <View style={styles.previewLoadingRow}>
+                  <ActivityIndicator size="small" color={colors.brandBlue} />
+                  <Text style={styles.previewMuted}>Checking what follows the boat...</Text>
+                </View>
+              ) : (
+                <>
+                  {!!preview?.asset?.kac && (
+                    <Text style={styles.kacText}>
+                      Keepr Code: <Text style={styles.kacStrong}>{preview.asset.kac}</Text>
+                    </Text>
+                  )}
+
+                  {!!preview?.counts && (
+                    <View style={styles.countGrid}>
+                      {[
+                        ["Systems", preview.counts.systems],
+                        ["Service", preview.counts.service_records],
+                        ["Timeline", preview.counts.timeline_records],
+                        ["Photos", preview.counts.showcase_photos],
+                        ["Docs", preview.counts.documents],
+                      ]
+                        .filter(([, value]) => value !== null && value !== undefined)
+                        .map(([label, value]) => (
+                          <View key={label} style={styles.countPill}>
+                            <Text style={styles.countValue}>{value}</Text>
+                            <Text style={styles.countLabel}>{label}</Text>
+                          </View>
+                        ))}
+                    </View>
+                  )}
+
+                  <View style={styles.packageColumns}>
+                    <View style={styles.packageColumn}>
+                      <Text style={styles.packageHeading}>Follows the boat</Text>
+                      {(preview?.transfers || []).map((line) => (
+                        <Text key={line} style={styles.packageLine}>- {line}</Text>
+                      ))}
+                    </View>
+                    <View style={styles.packageColumn}>
+                      <Text style={styles.packageHeading}>Stays private</Text>
+                      {(preview?.remains_private || []).map((line) => (
+                        <Text key={line} style={styles.packageLine}>- {line}</Text>
+                      ))}
+                    </View>
+                  </View>
+                </>
+              )}
+            </View>
 
             <Text style={styles.label}>Recipient email</Text>
             <TextInput
@@ -188,18 +429,25 @@ export default function TransferOwnershipModal({
               <TouchableOpacity
                 style={[styles.button, styles.buttonPrimary, !assetId && { opacity: 0.6 }]}
                 onPress={handleSend}
-                disabled={loading || !assetId}
+                disabled={loading || previewLoading || pendingLoading || authInitializing || !assetId || !!pendingOutgoing}
               >
                 {loading ? (
                   <ActivityIndicator color="white" />
                 ) : (
-                  <Text style={styles.buttonPrimaryText}>Send request</Text>
+                  <Text style={styles.buttonPrimaryText}>
+                    {previewLoading || pendingLoading
+                      ? "Checking..."
+                      : pendingOutgoing
+                      ? "Request pending"
+                      : "Send request"}
+                  </Text>
                 )}
               </TouchableOpacity>
             </View>
 
             <Text style={styles.footerHint}>
-              Tip: If you’re selling, you can send the request now and keep using the asset until they accept.
+              Trainer note: Owner, dealer, and manufacturer views all explain the same idea:
+              what you can see depends on your relationship to the boat.
             </Text>
           </ScrollView>
         </View>
@@ -311,6 +559,142 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     fontSize: 11,
     color: colors.textMuted,
+    lineHeight: 16,
+  },
+  pendingCard: {
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+    borderRadius: radius.lg,
+    backgroundColor: "#FFFBEB",
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  pendingHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 4,
+  },
+  pendingTitle: {
+    marginLeft: spacing.xs,
+    fontSize: 12,
+    fontWeight: "900",
+    color: colors.textPrimary,
+  },
+  pendingText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    lineHeight: 17,
+  },
+  pendingStrong: {
+    fontWeight: "800",
+    color: colors.textPrimary,
+  },
+  withdrawButton: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderWidth: 1,
+    borderColor: "#FCA5A5",
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 7,
+    marginTop: spacing.sm,
+  },
+  withdrawButtonText: {
+    fontSize: 11,
+    fontWeight: "900",
+    color: "#DC2626",
+  },
+  previewCard: {
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surfaceSubtle,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  previewHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: spacing.sm,
+  },
+  previewTitle: {
+    marginLeft: spacing.xs,
+    fontSize: 13,
+    fontWeight: "800",
+    color: colors.textPrimary,
+  },
+  previewLoadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  previewIntro: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    lineHeight: 17,
+    marginBottom: spacing.sm,
+  },
+  previewMuted: {
+    marginLeft: spacing.sm,
+    fontSize: 12,
+    color: colors.textSecondary,
+  },
+  kacText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
+  },
+  kacStrong: {
+    fontWeight: "800",
+    color: colors.textPrimary,
+  },
+  countGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginBottom: spacing.sm,
+  },
+  countPill: {
+    minWidth: 72,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    marginRight: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+  countValue: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: colors.textPrimary,
+  },
+  countLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: colors.textMuted,
+  },
+  packageColumns: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+  },
+  packageColumn: {
+    flex: 1,
+    minWidth: 180,
+    marginRight: spacing.sm,
+  },
+  packageHeading: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: colors.textSecondary,
+    marginBottom: 4,
+    textTransform: "uppercase",
+  },
+  packageLine: {
+    fontSize: 11,
+    color: colors.textSecondary,
     lineHeight: 16,
   },
 });

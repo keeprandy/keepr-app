@@ -561,6 +561,7 @@ function OnboardingStack() {
 function MainTabs() {
   const isWeb = Platform.OS === "web";
   const { width } = useWindowDimensions();
+  const { user, initializing: authInitializing } = useAuth();
   const hideTabsOnWeb = isWeb && width >= 1024;
   const [showQuickCapture, setShowQuickCapture] = React.useState(false);
   const [showAssetPicker, setShowAssetPicker] = React.useState(false);
@@ -572,7 +573,6 @@ function MainTabs() {
 
     const loadLast = async () => {
       try {
-        const user = (await supabase.auth.getUser()).data?.user;
         const userId = user?.id;
 
         if (!userId) {
@@ -641,44 +641,14 @@ function MainTabs() {
       }
     };
 
-    loadLast();
+    if (!authInitializing) {
+      loadLast();
+    }
 
     return () => {
       active = false;
     };
-  }, []);
-
-  React.useEffect(() => {
-  const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
-    if (event === "SIGNED_OUT" || !session?.user?.id) {
-      setSelectedCaptureAsset(null);
-      setPickerAssets([]);
-      return;
-    }
-
-    const scopedKey = `lastCaptureAsset:${session.user.id}`;
-
-    try {
-      const stored =
-        Platform.OS === "web"
-          ? window?.localStorage?.getItem(scopedKey)
-          : await AsyncStorage.getItem(scopedKey);
-
-      if (stored) {
-        setSelectedCaptureAsset(safeParseStoredAsset(stored));
-      } else {
-        setSelectedCaptureAsset(null);
-      }
-    } catch (e) {
-      console.log("Failed to restore scoped capture asset", e);
-      setSelectedCaptureAsset(null);
-    }
-  });
-
-  return () => {
-    sub?.subscription?.unsubscribe?.();
-  };
-}, []);
+  }, [authInitializing, user?.id]);
 
   const [pickerAssets, setPickerAssets] = React.useState([]);
   const [pickerAssetsLoading, setPickerAssetsLoading] = React.useState(false);
@@ -702,7 +672,6 @@ const handleQuickCaptureFile = () => {
 
 const handleSelectCaptureAsset = async (asset) => {
   try {
-    const user = (await supabase.auth.getUser()).data?.user;
     const userId = user?.id;
 
     if (!userId) {
@@ -748,15 +717,29 @@ React.useEffect(() => {
   let isActive = true;
 
   const loadPickerAssets = async () => {
+    if (!showAssetPicker) {
+      setPickerAssetsLoading(false);
+      return;
+    }
+
+    if (authInitializing) {
+      setPickerAssetsLoading(true);
+      return;
+    }
+
+    if (!user?.id) {
+      setPickerAssets([]);
+      setPickerAssetsLoading(false);
+      return;
+    }
+
     try {
       setPickerAssetsLoading(true);
-
-  const user = (await supabase.auth.getUser()).data?.user;
 
   const { data, error } = await supabase
     .from("assets")
     .select("id, name, status, deleted_at")
-    .eq("owner_id", user?.id)
+    .eq("owner_id", user.id)
     .is("deleted_at", null)
     .eq("status", "active")
     .order("name", { ascending: true });
@@ -788,7 +771,7 @@ React.useEffect(() => {
     isActive = false;
   };
   
-}, []);
+}, [authInitializing, showAssetPicker, user?.id]);
 
   return (
     <>
@@ -2228,9 +2211,9 @@ React.useEffect(() => {
   setInitialNavState(undefined);
 }, [initializing, user]);
 
-  const [role, setRole] = React.useState("consumer");
-const [onboardingState, setOnboardingState] = React.useState("not_started");
-const [assetCount, setAssetCount] = React.useState(0);
+  const [role, setRole] = React.useState(null);
+const [onboardingState, setOnboardingState] = React.useState(null);
+const [assetCount, setAssetCount] = React.useState(null);
   const [loadingRole, setLoadingRole] = React.useState(false);
 
   React.useEffect(() => {
@@ -2274,7 +2257,8 @@ identifyCurrentUser();
     normalizedOnboardingState === "completed";
 
   const isOnboardingDismissed = normalizedOnboardingState === "dismissed";
-  const hasAssets = typeof assetCount === "number" ? assetCount > 0 : false;
+  const assetCountKnown = typeof assetCount === "number";
+  const hasAssets = assetCountKnown ? assetCount > 0 : false;
 
   const activeTrigger = React.useMemo(() => {
     if (Platform.OS !== "web") return null;
@@ -2298,6 +2282,7 @@ identifyCurrentUser();
   }, []);
 
   const shouldShowOnboarding =
+  assetCountKnown &&
   !activeTrigger &&
   !hasAssets &&
   !isOnboardingComplete &&
@@ -2333,7 +2318,7 @@ identifyCurrentUser();
     if (initializing) return "SplashIntro";
     if (!user) return isResetLink ? "ResetPassword" : "Auth";
     if ((loadingRole && role === null) || loadingWorkspaces) return "SplashIntro";
-    if (!role || onboardingState === null || assetCount === null) return null;
+    if (!role || onboardingState === null) return null;
     const webRoute = routeForCurrentWebPath();
     if (webRoute && isOrgWorkspaceActive) return webRoute;
 
@@ -2445,10 +2430,10 @@ if (error || aErr) {
   );
 
 
-  // Store-safe fallback: do not deadlock behind splash
+  // Keep asset count unknown so a transient auth/network failure cannot become onboarding.
   setRole("consumer");
 setOnboardingState("not_started");
-setAssetCount(0);
+setAssetCount(null);
 setLoadingRole(false);
 return;
 }
@@ -2462,10 +2447,10 @@ return;
   console.log("PROFILE ROLE LOAD EXCEPTION:", e?.message || e);
   if (!mounted) return;
 
-  // Store-safe fallback: do not deadlock behind splash
+  // Keep asset count unknown so a transient auth/network failure cannot become onboarding.
   setRole("consumer");
   setOnboardingState("not_started");
-  setAssetCount(0);
+  setAssetCount(null);
   return;
 } finally {
   if (!mounted) return;
@@ -2474,17 +2459,9 @@ return;
 
     };
     loadRole("boot", { force: true });
-    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
-      // Token refresh happens on tab focus; don't treat it like a cold boot.
-      // We still refresh role info, but throttled and without remounting navigation.
-      if (event === "TOKEN_REFRESHED" || event === "SIGNED_IN" || event === "USER_UPDATED" || event === "INITIAL_SESSION") {
-        loadRole(event);
-      }
-    });
 
     return () => {
       mounted = false;
-      sub?.subscription?.unsubscribe?.();
     };
   }, [user?.id]);
 

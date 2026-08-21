@@ -19,7 +19,7 @@ import { useAuth } from "../context/AuthContext";
  * - listens to Postgres changes on public.assets and refetches
  */
 export function useAssets(type, options = {}) {
-  const { user } = useAuth();
+  const { user, initializing: authInitializing } = useAuth();
 
   const includeAllOwners = !!options.includeAllOwners;
   const includeDeleted = !!options.includeDeleted;
@@ -36,6 +36,11 @@ export function useAssets(type, options = {}) {
   const ownerId = user?.id || null;
 
   const fetchAssets = useCallback(async () => {
+    if (!includeAllOwners && authInitializing) {
+      setLoading(true);
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
@@ -78,11 +83,10 @@ export function useAssets(type, options = {}) {
     } catch (err) {
       console.error("useAssets fetchAssets error", err);
       setError(err?.message || "Failed to load assets.");
-      setAssets([]);
     } finally {
       setLoading(false);
     }
-  }, [includeAllOwners, includeDeleted, ownerId, typeFilter]);
+  }, [authInitializing, includeAllOwners, includeDeleted, ownerId, typeFilter]);
 
   useEffect(() => {
     fetchAssets();
@@ -91,7 +95,7 @@ export function useAssets(type, options = {}) {
   // ✅ Live updates (keeps Dashboard in sync for deletes/edits/transfers)
   useEffect(() => {
     // If we only care about my assets and we don't have a user yet, don't subscribe
-    if (!includeAllOwners && !ownerId) return;
+    if (!includeAllOwners && (authInitializing || !ownerId)) return;
 
     const filterParts = [];
 
@@ -119,9 +123,9 @@ export function useAssets(type, options = {}) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [fetchAssets, includeAllOwners, ownerId, typeFilter]);
+  }, [authInitializing, fetchAssets, includeAllOwners, ownerId, typeFilter]);
 
-  return { assets, loading, error, refetch: fetchAssets };
+  return { assets, loading: authInitializing || loading, error, refetch: fetchAssets };
 }
 
 export default useAssets;
