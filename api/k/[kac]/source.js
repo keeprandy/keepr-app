@@ -16,14 +16,25 @@ function getBearer(req) {
   return match?.[1] || "";
 }
 
-function getSupabase(req) {
+function getSupabase(req, { service = false } = {}) {
   const url = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.SUPABASE_ANON_KEY || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anonKey) return null;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const key = service ? serviceKey : anonKey;
+  if (!url || !key) return null;
   const bearer = getBearer(req);
-  return createClient(url, anonKey, {
+  return createClient(url, key, {
     auth: { persistSession: false },
-    global: bearer ? { headers: { Authorization: `Bearer ${bearer}` } } : undefined,
+    global: !service && bearer ? { headers: { Authorization: `Bearer ${bearer}` } } : undefined,
+  });
+}
+
+function getServiceSupabase() {
+  const url = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  return createClient(url, key, {
+    auth: { persistSession: false },
   });
 }
 
@@ -254,17 +265,19 @@ export default async function handler(req, res) {
   const kac = safeString(Array.isArray(req.query?.kac) ? req.query.kac[0] : req.query?.kac);
   if (!kac) return res.status(400).json({ error: "missing_kac" });
 
-  const supabase = getSupabase(req);
-  if (!supabase) return res.status(503).json({ error: "source_unavailable" });
+  const publicSupabase = getServiceSupabase();
+  const userSupabase = getSupabase(req);
+  if (!publicSupabase || !userSupabase) return res.status(503).json({ error: "source_unavailable" });
 
   try {
     const bearer = getBearer(req);
     const { data: authData } = bearer
-      ? await supabase.auth.getUser(bearer)
+      ? await userSupabase.auth.getUser(bearer)
       : { data: { user: null } };
     const isAuthenticated = !!authData?.user?.id;
+    const sourceSupabase = isAuthenticated ? userSupabase : publicSupabase;
 
-    const { data: asset, error: assetError } = await supabase
+    const { data: asset, error: assetError } = await publicSupabase
       .from("assets")
       .select("id, name, type, kac_id, year, make, model, owner_id, extra_metadata")
       .eq("kac_id", kac)
@@ -274,7 +287,7 @@ export default async function handler(req, res) {
     if (assetError) throw assetError;
     if (!asset?.id) return res.status(404).json({ error: "asset_not_found" });
 
-    const { data: systems, error: systemsError } = await supabase
+    const { data: systems, error: systemsError } = await publicSupabase
       .from("systems")
       .select("id, name, system_type, ksc_code, mode, status")
       .eq("asset_id", asset.id)
@@ -282,7 +295,7 @@ export default async function handler(req, res) {
 
     if (systemsError) throw systemsError;
 
-    const sources = await listAuthorizedAISources(supabase, asset.id, { isAuthenticated });
+    const sources = await listAuthorizedAISources(sourceSupabase, asset.id, { isAuthenticated });
 
     res.setHeader("Cache-Control", "no-store");
     return res.status(200).json({
