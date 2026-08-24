@@ -148,20 +148,34 @@ function requestBaseUrl(req) {
   return (/^https?:\/\//i.test(configured) ? configured : `https://${configured}`).replace(/\/+$/, "");
 }
 
-function publicMediaUrl(baseUrl, placementId) {
-  const cleanId = safeString(placementId);
-  if (!cleanId || !baseUrl) return null;
-  return `${baseUrl}/api/public-media/${encodeURIComponent(cleanId)}`;
+function sourceFileUrl(baseUrl, { kac, attachmentId, fileName }) {
+  const cleanAttachmentId = safeString(attachmentId);
+  const cleanKac = safeString(kac);
+  if (!cleanAttachmentId || !cleanKac || !baseUrl) return null;
+
+  const displayName = safeString(fileName || "source.pdf")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/[^\w.\- ]+/g, "_")
+    .replace(/\s+/g, "_")
+    .slice(0, 160) || "source.pdf";
+
+  return `${baseUrl}/k/${encodeURIComponent(cleanKac)}/source/files/${encodeURIComponent(cleanAttachmentId)}/${encodeURIComponent(displayName)}`;
 }
 
-async function urlForSource(supabase, attachment, { isAuthenticated, privacy, placementId, baseUrl }) {
+async function urlForSource(supabase, attachment, { isAuthenticated, privacy, baseUrl, kac }) {
   if (!attachment) return null;
   const normalizedPrivacy = safeString(privacy).toLowerCase();
 
   if (!isAuthenticated) {
     if (isPrivatePrivacy(normalizedPrivacy)) return null;
     if (/^https?:\/\//i.test(safeString(attachment.url))) return attachment.url;
-    if (attachment.bucket && attachment.storage_path) return publicMediaUrl(baseUrl, placementId);
+    if (attachment.bucket && attachment.storage_path) {
+      return sourceFileUrl(baseUrl, {
+        kac,
+        attachmentId: attachment.id,
+        fileName: attachment.file_name || attachment.title,
+      });
+    }
     return null;
   }
 
@@ -175,7 +189,7 @@ async function urlForSource(supabase, attachment, { isAuthenticated, privacy, pl
   return data?.signedUrl || null;
 }
 
-async function listAuthorizedAISources(supabase, assetId, { isAuthenticated, baseUrl }) {
+async function listAuthorizedAISources(supabase, assetId, { isAuthenticated, baseUrl, kac }) {
   const { data: assetPlacements, error: placementError } = await supabase
     .from("attachment_placements")
     .select(`
@@ -245,8 +259,8 @@ async function listAuthorizedAISources(supabase, assetId, { isAuthenticated, bas
     const sourceUrl = await urlForSource(supabase, attachment, {
       isAuthenticated,
       privacy,
-      placementId: row.id,
       baseUrl,
+      kac,
     });
     const placements = (placementsByAttachment.get(row.attachment_id) || [])
       .map((placement) => ({
@@ -328,6 +342,7 @@ export default async function handler(req, res) {
     const sources = await listAuthorizedAISources(sourceSupabase, asset.id, {
       isAuthenticated,
       baseUrl: requestBaseUrl(req),
+      kac,
     });
 
     return res.status(200).json({
