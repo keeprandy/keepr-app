@@ -27,6 +27,8 @@
     { "source": "/m/:token", "destination": "/api/og/message/:token" },
     { "source": "/invite/:slug", "destination": "/api/og/invite/:slug" },
     { "source": "/k/:kac/n/:nodeId", "destination": "/api/og/system/:kac/:nodeId" },
+    { "source": "/k/:kac/source.json", "destination": "/api/k/:kac/source" },
+    { "source": "/k/:kac/source", "destination": "/" },
     { "source": "/k/:kac/actions", "destination": "/" },
     { "source": "/k/:kac", "destination": "/api/og/k/:kac" },
     { "source": "/h/:slug", "destination": "/api/og/h/:slug" },

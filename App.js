@@ -124,6 +124,7 @@ import SplashIntroScreen from "./screens/SplashIntroScreen";
 // Deep link resolver
 import KacResolveScreen from "./screens/KacResolveScreen";
 import KacRouteScreen from "./screens/KacRouteScreen";
+import KacSourceScreen from "./screens/KacSourceScreen";
 import ShareKeeprScreen from "./screens/ShareKeeprScreen";
 import KeeprEffectScreen from "./screens/KeeprEffectScreen";
 import ActivatorHomeScreen from "./screens/ActivatorHomeScreen";
@@ -181,6 +182,7 @@ import PublicKeeprProProfileScreen from "./screens/PublicKeeprProProfileScreen";
 import AssetAttachmentsScreen from "./screens/AssetAttachmentsScreen";
 import AssetAttachmentsMobileScreen from "./screens/AssetAttachmentsMobileScreen";
 import AssetAttachmentDetailMobileScreen from "./screens/AssetAttachmentDetailMobileScreen";
+import AssetAIContextScreen from "./screens/AssetAIContextScreen";
 import ScanDocumentMobileScreen from "./screens/ScanDocumentMobileScreen";
 import UploadLabScreen from "./screens/UploadLabScreen";
 
@@ -513,6 +515,8 @@ const linking = {
     SystemStoryPrint: "SystemStoryPrint",
     UploadLab: "upload-lab",
     AssetAttachments: "asset/:assetId/attachments",
+    AssetAIContext: "asset/:assetId/ai-context",
+    KacSource: "k/:kac/source",
     HomePublic: "public/home/:assetId",
     GaragePublic: "public/garage/:assetId",
     BoatPublic: "public/boat/:assetId",
@@ -1304,6 +1308,8 @@ function GlobalEventFab({ currentRouteName, role }) {
     "AssetAttachments",
     "AssetAttachmentsMobile",
     "AssetAttachmentDetailMobile",
+    "AssetAIContext",
+    "KacSource",
     "ProofBuilder",
     "ScanDocumentMobile",
     "Scan",
@@ -2732,6 +2738,11 @@ const initialRouteName = isBootLoading
             component={BoatSystemStoryScreen}
           />
 
+          <RootStack.Screen
+            name="AssetAIContext"
+            component={AssetAIContextScreen}
+          />
+
           <RootStack.Screen name="AddAsset" component={AddAssetScreen} />
 
           {/* Home */}
@@ -2874,6 +2885,11 @@ const initialRouteName = isBootLoading
           <RootStack.Screen
             name="KacRoute"
             component={KacRouteScreen}
+            options={{ headerShown: false }}
+          />
+          <RootStack.Screen
+            name="KacSource"
+            component={KacSourceScreen}
             options={{ headerShown: false }}
           />
 

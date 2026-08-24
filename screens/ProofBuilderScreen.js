@@ -20,7 +20,15 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { getSignedUrl } from "../lib/attachmentsApi";
+import {
+  AI_CONTEXT_SCOPE_VALUES,
+  AI_CONTEXT_VALUES,
+  formatAIContextLabel,
+  formatAIContextScopeLabel,
+  getSignedUrl,
+  normalizeAIContext,
+  normalizeAIContextScope,
+} from "../lib/attachmentsApi";
 import { supabase } from "../lib/supabaseClient";
 import { colors, radius, spacing } from "../styles/theme";
 import KeeprDateField from "../components/KeeprDateField";
@@ -50,6 +58,18 @@ const ROLE_GROUPS = [
     items: ["Photo", "Condition Report", "Before / After"],
   },
   { group: "Other", items: ["Other"] },
+];
+
+const AI_CONTEXT_OPTIONS = [
+  { value: AI_CONTEXT_VALUES.OFF, label: "Off" },
+  { value: AI_CONTEXT_VALUES.SUPPORTING, label: "Supporting Source" },
+  { value: AI_CONTEXT_VALUES.PRIMARY, label: "Primary Source" },
+];
+
+const AI_SCOPE_OPTIONS = [
+  { value: AI_CONTEXT_SCOPE_VALUES.ASSET, label: "Entire Asset" },
+  { value: AI_CONTEXT_SCOPE_VALUES.SYSTEMS, label: "Selected Systems" },
+  { value: AI_CONTEXT_SCOPE_VALUES.RECORD, label: "Associated Record" },
 ];
 
 function safeStr(v) {
@@ -243,6 +263,8 @@ export default function ProofBuilderScreen({ route, navigation }) {
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
   const [privacy, setPrivacy] = useState("moves_with_asset"); // moves_with_asset | owner_only
+  const [aiContext, setAiContext] = useState(AI_CONTEXT_VALUES.OFF);
+  const [aiScope, setAiScope] = useState(AI_CONTEXT_SCOPE_VALUES.ASSET);
 
   // Warranty object meta (objects.data)
   const [wProvider, setWProvider] = useState("");
@@ -572,6 +594,14 @@ if (__DEV__) {
       setNotes(safeStr(att?.notes));
       const savedPrivacy = safeStr(att?.ai_metadata?.privacy) || safeStr(att?.privacy) || "";
       setPrivacy(savedPrivacy === "owner_only" ? "owner_only" : "moves_with_asset");
+      setAiContext(normalizeAIContext(att?.ai_metadata?.ai_context || att?.ai_metadata?.aiContext));
+      setAiScope(
+        normalizeAIContextScope(
+          att?.ai_metadata?.ai_scope ||
+            att?.ai_metadata?.aiContextScope ||
+            att?.ai_metadata?.scope
+        )
+      );
 
       const sys = await fetchSystems();
       setSystems(sys);
@@ -737,6 +767,8 @@ setWExpires(isoToMDY(safeStr(d.end_date || d.expiration_date)));
         ...(attachment?.ai_metadata || {}),
         role: roleValue,
         privacy,
+        ai_context: normalizeAIContext(aiContext),
+        ai_scope: normalizeAIContextScope(aiScope),
       };
 
       const { data, error } = await supabase
@@ -753,7 +785,7 @@ setWExpires(isoToMDY(safeStr(d.end_date || d.expiration_date)));
       if (error) throw new Error(error.message || "Failed to save attachment");
       if (!data?.id) throw new Error(`Attachment not found (id mismatch): ${idToUse}`);
     },
-    [attachmentId, attachment, title, notes, roleValue, privacy]
+    [aiContext, aiScope, attachmentId, attachment, title, notes, roleValue, privacy]
   );
 
   const syncPlacements = useCallback(
@@ -1356,6 +1388,48 @@ const androidPdfViewerUrl =
             <Ionicons name="chevron-down" size={16} color={colors.textMuted} />
           </TouchableOpacity>
 
+          <Text style={styles.fieldLabel}>AI Context</Text>
+          <View style={styles.optionGrid}>
+            {AI_CONTEXT_OPTIONS.map((option) => {
+              const selected = aiContext === option.value;
+              return (
+                <TouchableOpacity
+                  key={option.value}
+                  style={[styles.optionBtn, selected ? styles.privacyBtnActive : null]}
+                  onPress={() => setAiContext(option.value)}
+                >
+                  <Text style={[styles.optionBtnText, selected ? styles.privacyBtnTextActive : null]}>
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <Text style={styles.fieldLabel}>Scope</Text>
+          <View style={styles.optionGrid}>
+            {AI_SCOPE_OPTIONS.map((option) => {
+              const selected = aiScope === option.value;
+              return (
+                <TouchableOpacity
+                  key={option.value}
+                  style={[styles.optionBtn, selected ? styles.privacyBtnActive : null]}
+                  onPress={() => setAiScope(option.value)}
+                >
+                  <Text style={[styles.optionBtnText, selected ? styles.privacyBtnTextActive : null]}>
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {aiContext !== AI_CONTEXT_VALUES.OFF ? (
+            <Text style={styles.helperText}>
+              {formatAIContextLabel(aiContext)} · {formatAIContextScopeLabel(aiScope)}
+            </Text>
+          ) : null}
+
           <Text style={styles.fieldLabel}>Title</Text>
           <TextInput
             value={title}
@@ -1831,6 +1905,21 @@ const styles = StyleSheet.create({
   privacyBtnActive: { borderColor: colors.primary, backgroundColor: colors.card },
   privacyBtnText: { fontSize: 13, fontWeight: "800", color: colors.textPrimary },
   privacyBtnTextActive: { color: colors.primary },
+  optionGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 8,
+  },
+  optionBtn: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.bg,
+    borderRadius: radius.md,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  optionBtnText: { fontSize: 13, fontWeight: "800", color: colors.textPrimary },
 
 systemList: {
   marginTop: spacing.sm,

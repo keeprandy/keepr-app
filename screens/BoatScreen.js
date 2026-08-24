@@ -136,6 +136,15 @@ export default function BoatScreen({ navigation, route }) {
     navigation.navigate("BoatShowcase", { boatId: currentBoat.id });
   };
 
+  const goToAIContext = () => {
+    if (!currentBoat?.id) return;
+    navigation.navigate("AssetAIContext", {
+      assetId: currentBoat.id,
+      assetName: currentBoat.name || "Boat",
+      assetKind: "boat",
+    });
+  };
+
   // Add service record from anywhere
   const goToAddServiceRecord = () => {
     if (!currentBoat?.id) return;
@@ -310,6 +319,11 @@ export default function BoatScreen({ navigation, route }) {
               icon="images-outline"
               label="Showcase"
               onPress={goToBoatShowcase}
+            />
+            <QuickActionChip
+              icon="sparkles-outline"
+              label="AI Context"
+              onPress={goToAIContext}
             />
             <QuickActionChip
               icon="hammer-outline"

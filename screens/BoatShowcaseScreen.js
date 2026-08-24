@@ -233,6 +233,15 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
     navigation.navigate("EditAsset", { assetId: currentBoat.id });
   };
 
+  const goToAIContext = () => {
+    if (!currentBoat?.id) return;
+    navigation.navigate("AssetAIContext", {
+      assetId: currentBoat.id,
+      assetName: boatDisplayName,
+      assetKind: "boat",
+    });
+  };
+
   // Pull the latest hero_placement_id from DB so we don’t rely on stale context
   const refreshHeroPlacementId = useCallback(async () => {
     if (!currentBoat?.id) return null;
@@ -751,6 +760,7 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
               isPrimary
               onPress={() => {}}
             />
+            <QuickActionChip icon="sparkles-outline" label="AI Context" onPress={goToAIContext} />
             <QuickActionChip icon="book-outline" label="Story" onPress={goToBoatStory} />
             <QuickActionChip icon="grid-outline" label="Systems" onPress={goToBoatSystems} />
             <QuickActionChip
