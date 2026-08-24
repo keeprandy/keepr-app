@@ -257,6 +257,8 @@ async function listAuthorizedAISources(supabase, assetId, { isAuthenticated }) {
 }
 
 export default async function handler(req, res) {
+  res.setHeader("Cache-Control", "no-store");
+
   if (req.method !== "GET") {
     res.setHeader("Allow", "GET");
     return res.status(405).json({ error: "method_not_allowed" });
@@ -297,7 +299,6 @@ export default async function handler(req, res) {
 
     const sources = await listAuthorizedAISources(sourceSupabase, asset.id, { isAuthenticated });
 
-    res.setHeader("Cache-Control", "no-store");
     return res.status(200).json({
       manifest_version: "keepr.source.v0.1",
       generated_at: new Date().toISOString(),
