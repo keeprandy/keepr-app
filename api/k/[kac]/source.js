@@ -133,13 +133,36 @@ function isPrivatePrivacy(privacy) {
   return PRIVATE_PRIVACY_VALUES.has(safeString(privacy).toLowerCase());
 }
 
-async function urlForSource(supabase, attachment, { isAuthenticated, privacy }) {
+function requestBaseUrl(req) {
+  const forwardedProto = safeString(req.headers["x-forwarded-proto"]).split(",")[0];
+  const forwardedHost = safeString(req.headers["x-forwarded-host"]).split(",")[0];
+  const host = forwardedHost || safeString(req.headers.host);
+  if (host) return `${forwardedProto || "https"}://${host}`.replace(/\/+$/, "");
+
+  const configured = safeString(
+    process.env.EXPO_PUBLIC_KEEPR_BASE_URL ||
+      process.env.PUBLIC_KEEPR_BASE_URL ||
+      process.env.VERCEL_URL
+  );
+  if (!configured) return "";
+  return (/^https?:\/\//i.test(configured) ? configured : `https://${configured}`).replace(/\/+$/, "");
+}
+
+function publicMediaUrl(baseUrl, placementId) {
+  const cleanId = safeString(placementId);
+  if (!cleanId || !baseUrl) return null;
+  return `${baseUrl}/api/public-media/${encodeURIComponent(cleanId)}`;
+}
+
+async function urlForSource(supabase, attachment, { isAuthenticated, privacy, placementId, baseUrl }) {
   if (!attachment) return null;
   const normalizedPrivacy = safeString(privacy).toLowerCase();
 
   if (!isAuthenticated) {
     if (isPrivatePrivacy(normalizedPrivacy)) return null;
-    return /^https?:\/\//i.test(safeString(attachment.url)) ? attachment.url : null;
+    if (/^https?:\/\//i.test(safeString(attachment.url))) return attachment.url;
+    if (attachment.bucket && attachment.storage_path) return publicMediaUrl(baseUrl, placementId);
+    return null;
   }
 
   if (/^https?:\/\//i.test(safeString(attachment.url))) return attachment.url;
@@ -152,7 +175,7 @@ async function urlForSource(supabase, attachment, { isAuthenticated, privacy }) 
   return data?.signedUrl || null;
 }
 
-async function listAuthorizedAISources(supabase, assetId, { isAuthenticated }) {
+async function listAuthorizedAISources(supabase, assetId, { isAuthenticated, baseUrl }) {
   const { data: assetPlacements, error: placementError } = await supabase
     .from("attachment_placements")
     .select(`
@@ -219,7 +242,12 @@ async function listAuthorizedAISources(supabase, assetId, { isAuthenticated }) {
 
     const scope = normalizeScope(meta.ai_scope || meta.aiContextScope || meta.scope);
     const role = normalizeRole(meta.role || row.role || "other");
-    const sourceUrl = await urlForSource(supabase, attachment, { isAuthenticated, privacy });
+    const sourceUrl = await urlForSource(supabase, attachment, {
+      isAuthenticated,
+      privacy,
+      placementId: row.id,
+      baseUrl,
+    });
     const placements = (placementsByAttachment.get(row.attachment_id) || [])
       .map((placement) => ({
         target_type: placement.target_type || null,
@@ -297,7 +325,10 @@ export default async function handler(req, res) {
 
     if (systemsError) throw systemsError;
 
-    const sources = await listAuthorizedAISources(sourceSupabase, asset.id, { isAuthenticated });
+    const sources = await listAuthorizedAISources(sourceSupabase, asset.id, {
+      isAuthenticated,
+      baseUrl: requestBaseUrl(req),
+    });
 
     return res.status(200).json({
       manifest_version: "keepr.source.v0.1",
