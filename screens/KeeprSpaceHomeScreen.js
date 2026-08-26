@@ -327,11 +327,56 @@ function NeedsAttentionPanel({ portfolio, onOpenAsset }) {
 export default function KeeprSpaceHomeScreen({ navigation }) {
   const { currentWorkspace } = useWorkspace();
   const organizationId = currentWorkspace?.organization_id || currentWorkspace?.org_id || null;
+  const isOemWorkspace = currentWorkspace?.workspace_type === "keeproem";
+  const isWorkspaceAssetPath =
+    typeof window !== "undefined" &&
+    window.location?.pathname?.startsWith("/workspace/boats/");
   const [portfolio, setPortfolio] = useState(null);
   const [orgBrand, setOrgBrand] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!isWorkspaceAssetPath) return;
+    if (typeof window === "undefined") return;
+
+    const match = window.location.pathname.match(/^\/workspace\/boats\/([^/?#]+)/);
+    const assetId = match?.[1] ? decodeURIComponent(match[1]) : null;
+    if (!assetId) return;
+
+    const params = new URLSearchParams(window.location.search || "");
+    navigation.navigate("KeeprSpaceBoat", {
+      assetId,
+      kac: params.get("kac") || null,
+      organizationId: params.get("organizationId") || organizationId || null,
+      stewardshipId: params.get("stewardshipId") || null,
+      parentRoute: params.get("parentRoute") || "KeeprSpaceFleet",
+      workspaceId: params.get("workspaceId") || currentWorkspace?.workspace_id || null,
+      systemsRole: params.get("systemsRole") || "oem",
+    });
+  }, [currentWorkspace?.workspace_id, isWorkspaceAssetPath, navigation, organizationId]);
+
+  useEffect(() => {
+    if (!isOemWorkspace) return;
+    if (isWorkspaceAssetPath) return;
+    const params = {
+      initialMode: "fleet",
+      navSection: "ActivatorFleet",
+      workspaceId: currentWorkspace?.workspace_id || null,
+    };
+
+    try {
+      const parent = navigation.getParent?.();
+      if (parent?.navigate) {
+        parent.navigate("ActivatorHome", params);
+        return;
+      }
+      navigation.navigate("ActivatorHome", params);
+    } catch (err) {
+      console.error("OEM workspace home redirect failed:", err);
+    }
+  }, [currentWorkspace?.workspace_id, isOemWorkspace, isWorkspaceAssetPath, navigation]);
 
   const load = useCallback(async ({ quiet = false } = {}) => {
     if (!organizationId) {
@@ -386,6 +431,17 @@ export default function KeeprSpaceHomeScreen({ navigation }) {
       mounted = false;
     };
   }, [organizationId]);
+
+  if (isOemWorkspace) {
+    return (
+      <SafeAreaView style={styles.screen}>
+        <View style={styles.centered}>
+          <ActivityIndicator color={colors.brandBlue} />
+          <Text style={styles.centeredText}>Opening OEM Activator...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   const boats = portfolio?.boats || [];
   const brandedPortfolio = useMemo(

@@ -15,7 +15,18 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import ActivatorBreadcrumb from "../components/ActivatorBreadcrumb";
-import { getCatalogTemplateDetail } from "../lib/activatorApi";
+import {
+  getCatalogTemplateDetail,
+  getTiaraFactoryBuildWorkspace,
+} from "../lib/activatorApi";
+import {
+  TIARA_56_LS_TEMPLATE_KEY,
+  TIARA_SYSTEM_CATEGORIES,
+  getDefaultTiaraExactFactoryBuildForTemplate,
+  getTiaraExactFactoryBuild,
+  tiara56LsCatalogTemplate,
+  tiaraKf018FactoryBuild,
+} from "../data/tiaraKf018FactoryBuild";
 import { layoutStyles } from "../styles/layout";
 import { colors, radius, shadows, spacing } from "../styles/theme";
 
@@ -197,6 +208,50 @@ function unique(values) {
   return [...new Set(values.filter(Boolean))];
 }
 
+function statusLabel(status) {
+  if (status === "mapped") return "Mapped";
+  if (status === "partially_mapped") return "Partially mapped";
+  if (status === "needs_review") return "Needs review";
+  if (status === "unmapped") return "Unmapped";
+  return status || "Needs review";
+}
+
+function relationshipLabel(type) {
+  if (type === "build_only") return "Build-only";
+  return String(type || "mapping").replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+}
+
+function mappingPath(item) {
+  if (!item?.system_category) return "—";
+  if (item.relationship_type === "configuration") return item.system_category;
+  if (item.relationship_type === "system") return item.system_category;
+  return `${item.system_category} > ${item.normalized_name || item.factory_description}`;
+}
+
+function statusTone(status) {
+  if (status === "mapped") return styles.statusMapped;
+  if (status === "partially_mapped") return styles.statusPartial;
+  if (status === "needs_review") return styles.statusReview;
+  return styles.statusUnmapped;
+}
+
+function manualStatusLabel(status) {
+  if (status === "needs_exact_model") return "Needs exact model";
+  if (status === "found") return "Found";
+  if (status === "missing") return "Missing";
+  return status || "Missing";
+}
+
+function webSearchParam(...keys) {
+  if (typeof window === "undefined" || !window.location?.search) return null;
+  const params = new URLSearchParams(window.location.search);
+  for (const key of keys) {
+    const value = params.get(key);
+    if (value) return value;
+  }
+  return null;
+}
+
 function ToggleRow({ option, onToggle }) {
   const selected = option.selected;
   const icon = option.mode === "single"
@@ -226,8 +281,8 @@ function ToggleRow({ option, onToggle }) {
         </View>
         <Text style={styles.optionMeta}>Adds:</Text>
         <View style={styles.addsRow}>
-          {adds.map((item) => (
-            <View key={item} style={[styles.addChip, selected && styles.addChipSelected]}>
+          {adds.map((item, index) => (
+            <View key={`${option.key || option.label}-add-${index}-${item}`} style={[styles.addChip, selected && styles.addChipSelected]}>
               <Text style={[styles.addChipText, selected && styles.addChipTextSelected]}>{item}</Text>
             </View>
           ))}
@@ -273,6 +328,74 @@ function CompileColumn({ title, icon, items, empty }) {
       )) : (
         <Text style={styles.compileEmpty}>{empty}</Text>
       )}
+    </View>
+  );
+}
+
+function FactoryBuildTable({ lines, selectedLineId, onPressLine }) {
+  return (
+    <View style={styles.factoryTable}>
+      <View style={[styles.factoryRow, styles.factoryHeaderRow]}>
+        <Text style={[styles.factoryHeaderText, styles.factoryCodeCell]}>Tiara Code</Text>
+        <Text style={[styles.factoryHeaderText, styles.factoryDescriptionCell]}>Factory Description</Text>
+        <Text style={[styles.factoryHeaderText, styles.factoryMappingCell]}>Keepr Mapping</Text>
+        <Text style={[styles.factoryHeaderText, styles.factoryStatusCell]}>Status</Text>
+      </View>
+      {lines.map((item) => (
+        <TouchableOpacity
+          key={item.id}
+          activeOpacity={0.84}
+          onPress={() => onPressLine(item)}
+          style={[styles.factoryRow, selectedLineId === item.id && styles.factoryRowSelected]}
+        >
+          <Text style={[styles.factoryCellText, styles.factoryCodeCell]} numberOfLines={1}>
+            {item.factory_item_code || "Derived"}
+          </Text>
+          <View style={styles.factoryDescriptionCell}>
+            <Text style={styles.factoryDescriptionText}>{item.factory_description}</Text>
+            <Text style={styles.factoryRawText} numberOfLines={1}>{item.raw_source_text}</Text>
+          </View>
+          <View style={styles.factoryMappingCell}>
+            <Text style={styles.factoryMappingText}>{mappingPath(item)}</Text>
+            <Text style={styles.factoryRelationshipText}>
+              {relationshipLabel(item.relationship_type)} · {Math.round((item.mapping_confidence || 0) * 100)}% · {item.mapping_method}
+            </Text>
+          </View>
+          <View style={styles.factoryStatusCell}>
+            <View style={[styles.statusPill, statusTone(item.mapping_status)]}>
+              <Text style={styles.statusPillText}>{statusLabel(item.mapping_status)}</Text>
+            </View>
+          </View>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
+
+function ManualQueuePanel({ queue }) {
+  return (
+    <View style={styles.queueList}>
+      {queue.map((item) => (
+        <View key={item.system_id} style={styles.queueItem}>
+          <View style={styles.queueItemHeader}>
+            <View>
+              <Text style={styles.queueTitle}>{item.normalized_name}</Text>
+              <Text style={styles.queueMeta}>{item.system_category} · {item.evidence_lines.length} factory evidence line{item.evidence_lines.length === 1 ? "" : "s"}</Text>
+            </View>
+            <View style={styles.manualPill}>
+              <Text style={styles.manualPillText}>{manualStatusLabel(item.manual_status)}</Text>
+            </View>
+          </View>
+          <View style={styles.sourceSlots}>
+            {item.missing_sources.map((source) => (
+              <View key={source} style={styles.sourceSlot}>
+                <Ionicons name="document-attach-outline" size={13} color={colors.textMuted} />
+                <Text style={styles.sourceSlotText}>{source.replace(/_/g, " ")}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      ))}
     </View>
   );
 }
@@ -336,36 +459,87 @@ function FreshwaterFlowdownPanel({ items }) {
 }
 
 export default function ActivatorExactBuildScreen({ navigation, route }) {
-  const templateKey = route?.params?.templateKey || "tiara-2027-39-ls";
+  const templateKey = route?.params?.templateKey || TIARA_56_LS_TEMPLATE_KEY;
+  const exactBuildKey = route?.params?.buildKey || route?.params?.exactBuildKey || webSearchParam("build", "buildKey", "exactBuildKey") || null;
+  const hullNumber = route?.params?.hullNumber || route?.params?.hin || webSearchParam("hull", "hullNumber", "hin") || null;
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
+  const [factoryBuild, setFactoryBuild] = useState(() => (
+    getTiaraExactFactoryBuild({ templateKey, buildKey: exactBuildKey, hullNumber })
+    || getDefaultTiaraExactFactoryBuildForTemplate(templateKey)
+  ));
+  const [factoryBuildSource, setFactoryBuildSource] = useState("none");
   const [options, setOptions] = useState(DEMO_FACTORY_OPTIONS);
   const [finish, setFinish] = useState(FINISH_FIELDS);
+  const [selectedFactoryLineId, setSelectedFactoryLineId] = useState(() => (
+    getTiaraExactFactoryBuild({ templateKey, buildKey: exactBuildKey, hullNumber })
+    || getDefaultTiaraExactFactoryBuildForTemplate(templateKey)
+  )?.line_items?.[0]?.id || null);
+  const [assignmentDraft, setAssignmentDraft] = useState({
+    system_category: TIARA_SYSTEM_CATEGORIES[0],
+    target: "existing_system",
+    relationship_type: "system",
+  });
   const [identity, setIdentity] = useState({
-    hin: "SSUXA039L627",
-    buildNumber: "LS-2027-014",
-    buildDate: "2026-11-18",
-    dealer: "SkipperBud's",
-    location: "Lake Fenton Marina",
+    hin: "",
+    buildNumber: "",
+    buildDate: "",
+    dealer: "",
+    location: "",
   });
 
   const load = useCallback(async ({ quiet = false } = {}) => {
     if (!quiet) setLoading(true);
     setError(null);
     try {
-      const next = await getCatalogTemplateDetail({ templateKey });
-      setDetail(next);
+      const localBuild = getTiaraExactFactoryBuild({ templateKey, buildKey: exactBuildKey, hullNumber })
+        || (!exactBuildKey && !hullNumber ? getDefaultTiaraExactFactoryBuildForTemplate(templateKey) : null);
+      const localTemplateFallback = templateKey === TIARA_56_LS_TEMPLATE_KEY
+        ? { template: tiara56LsCatalogTemplate, resources: [], showcase_media: [], items: [] }
+        : null;
+      const [next, buildWorkspace] = await Promise.allSettled([
+        getCatalogTemplateDetail({ templateKey }),
+        getTiaraFactoryBuildWorkspace({
+          hullNumber: hullNumber || localBuild?.work_order?.hull_number || null,
+          templateKey,
+          buildKey: exactBuildKey || localBuild?.build_key || null,
+        }),
+      ]);
+      if (next.status === "fulfilled" && next.value) setDetail(next.value);
+      else if (localTemplateFallback) setDetail(localTemplateFallback);
+      else {
+        console.warn("Activator catalog detail unavailable for exact-build route.", next.reason);
+        setDetail(null);
+      }
+
+      if (buildWorkspace.status === "fulfilled" && buildWorkspace.value?.line_items?.length) {
+        setFactoryBuild(buildWorkspace.value);
+        setFactoryBuildSource("staging");
+        setSelectedFactoryLineId(buildWorkspace.value.line_items[0]?.id || null);
+      } else if (localBuild) {
+        setFactoryBuild(localBuild);
+        setFactoryBuildSource("local");
+        setSelectedFactoryLineId(localBuild.line_items?.[0]?.id || null);
+      } else {
+        setFactoryBuild(null);
+        setFactoryBuildSource("none");
+        setSelectedFactoryLineId(null);
+      }
     } catch (err) {
       console.error("Activator exact build failed:", err);
       setError(err?.message || "Could not open this build workspace.");
       setDetail(null);
+      const localBuild = getTiaraExactFactoryBuild({ templateKey, buildKey: exactBuildKey, hullNumber })
+        || (!exactBuildKey && !hullNumber ? getDefaultTiaraExactFactoryBuildForTemplate(templateKey) : null);
+      setFactoryBuild(localBuild);
+      setFactoryBuildSource(localBuild ? "local" : "none");
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [templateKey]);
+  }, [exactBuildKey, hullNumber, templateKey]);
 
   useEffect(() => {
     load();
@@ -373,6 +547,18 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
 
   const template = detail?.template || {};
   const resources = detail?.resources || [];
+  const workOrder = factoryBuild?.work_order || null;
+  const catalogTemplate = factoryBuild?.catalog_template || template || {};
+  const publicModelContext = factoryBuild?.public_model_context || null;
+  const factoryLines = factoryBuild?.line_items || [];
+  const manualQueue = factoryBuild?.manual_queue || [];
+  const selectedFactoryLine = factoryLines.find((item) => item.id === selectedFactoryLineId) || factoryLines[0];
+  const exactBuildLabel = workOrder?.build_code || exactBuildKey || "Exact build";
+  const modelLabel = catalogTemplate?.model || template?.model || "model";
+  const modelYearLabel = catalogTemplate?.model_year || template?.model_year || "2027";
+  const hasFactoryBuild = Boolean(factoryBuild && factoryLines.length);
+  const digitalTwinAssetId = workOrder?.asset_id || factoryBuild?.asset_id || null;
+  const digitalTwinKac = workOrder?.kac_id || factoryBuild?.kac_id || (workOrder?.build_code ? `KAC-TIARA-56LS-${String(workOrder.build_code).toUpperCase()}` : null);
   const showcaseMedia = detail?.showcase_media || [];
   const heroMedia = mediaByRole(showcaseMedia, "hero");
   const templateItems = useMemo(() => groupTemplateItems(detail?.items || []), [detail?.items]);
@@ -388,27 +574,54 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
     const templatePlaybooks = standardItems
       .filter((item) => item.item_type === "playbook")
       .map((item) => item.label);
+    const optionSystems = hasFactoryBuild ? [] : selectedOptions.flatMap((option) => option.systems);
+    const optionResources = hasFactoryBuild ? [] : selectedOptions.flatMap((option) => option.resources);
+    const optionPlaybooks = hasFactoryBuild ? [] : selectedOptions.flatMap((option) => option.playbooks);
+    const optionRequirements = hasFactoryBuild ? [] : selectedOptions.flatMap((option) => option.requirements);
     return {
-      systems: unique([...baselineSystems, ...selectedOptions.flatMap((option) => option.systems)]),
-      resources: unique([...resources.map((resource) => resource.title), ...selectedOptions.flatMap((option) => option.resources)]),
+      systems: unique([...baselineSystems, ...optionSystems, ...(factoryBuild?.systems || []).map((system) => system.name)]),
+      resources: unique([...resources.map((resource) => resource.title), ...optionResources]),
       playbooks: unique([
         "Factory configuration review",
+        hasFactoryBuild ? `${exactBuildLabel} factory work-order evidence reconciliation` : null,
         "HIN and KAC verification",
         "OEM as-built evidence packet",
         ...templatePlaybooks,
-        ...selectedOptions.flatMap((option) => option.playbooks),
+        ...optionPlaybooks,
       ]),
       requirements: unique([
         "HIN",
-        "Build number",
-        "Factory build date",
-        "Destination dealer",
-        ...selectedOptions.flatMap((option) => option.requirements),
+        hasFactoryBuild ? "Hull number" : "Build number",
+        hasFactoryBuild ? "Order number" : "Factory build date",
+        hasFactoryBuild ? "Factory completion date" : "Destination dealer",
+        hasFactoryBuild ? "Manual/source queue" : null,
+        ...optionRequirements,
       ]),
     };
-  }, [operationalTemplateItems, resources, selectedOptions, standardItems]);
+  }, [exactBuildLabel, factoryBuild?.systems, hasFactoryBuild, operationalTemplateItems, resources, selectedOptions, standardItems]);
 
   const readyToFreeze = Boolean(identity.hin && identity.buildNumber && identity.buildDate && identity.dealer && selectedOptions.length);
+
+  useEffect(() => {
+    if (!workOrder) {
+      setIdentity({
+        hin: "",
+        buildNumber: "",
+        buildDate: "",
+        dealer: "",
+        location: "",
+      });
+      return;
+    }
+
+    setIdentity({
+      hin: workOrder.hin || "",
+      buildNumber: workOrder.build_code || "",
+      buildDate: workOrder.order_date || "",
+      dealer: workOrder.dealer || "",
+      location: workOrder.dealer_location || "Stuart, FL",
+    });
+  }, [workOrder]);
 
   const toggleOption = (option) => {
     if (option.locked) return;
@@ -423,9 +636,37 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
 
   const updateIdentity = (key, value) => setIdentity((current) => ({ ...current, [key]: value }));
   const updateFinish = (key, value) => setFinish((current) => current.map((item) => item.key === key ? { ...item, value } : item));
+  const pressFactoryLine = (item) => {
+    setSelectedFactoryLineId(item.id);
+    setAssignmentDraft({
+      system_category: item.system_category || TIARA_SYSTEM_CATEGORIES[0],
+      target: item.relationship_type === "build_only" ? "build_only" : item.system_id ? "existing_system" : "new_system",
+      relationship_type: item.relationship_type || "system",
+    });
+
+    if (item.system_id && item.asset_id) {
+      navigation.navigate("BoatSystemStory", {
+        boatId: item.asset_id,
+        systemId: item.system_id,
+        systemName: item.normalized_name || item.system_category,
+      });
+    }
+  };
+  const updateAssignmentDraft = (key, value) => setAssignmentDraft((current) => ({ ...current, [key]: value }));
   const refresh = () => {
     setRefreshing(true);
     load({ quiet: true });
+  };
+  const openDigitalTwin = () => {
+    if (!digitalTwinAssetId && !digitalTwinKac) return;
+    navigation.navigate("KeeprSpaceBoat", {
+      assetId: digitalTwinAssetId,
+      kac: digitalTwinKac,
+      organizationId: route?.params?.organizationId || null,
+      parentRoute: route?.params?.parentRoute === "KeeprSpaceFleet" ? "KeeprSpaceFleet" : "ActivatorHome",
+      workspaceId: route?.params?.workspaceId || null,
+      systemsRole: "oem",
+    });
   };
 
   return (
@@ -437,13 +678,22 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
         <ActivatorBreadcrumb
           navigation={navigation}
           items={[
-            { label: "Configure Hulls", route: "ActivatorHome", params: { initialMode: "builds" } },
+            {
+              label: "Configure Hulls",
+              route: "ActivatorHome",
+              params: {
+                initialMode: "builds",
+                navSection: "ActivatorBuilds",
+                organizationId: route?.params?.organizationId || null,
+                workspaceId: route?.params?.workspaceId || null,
+              },
+            },
           ]}
-          current={`Build ${template.model || "39 LS"}`}
+          current={hasFactoryBuild ? `${exactBuildLabel} · ${modelLabel}` : `Build ${modelLabel}`}
           right={(
             <View style={styles.breadcrumbKac}>
               <Ionicons name="key-outline" size={14} color={colors.brandNavy} />
-              <Text style={styles.breadcrumbKacText}>KAC-TIARA-39LS-BUILD-DEMO</Text>
+              <Text style={styles.breadcrumbKacText}>{hasFactoryBuild ? `${exactBuildLabel} · ${workOrder?.hin || "HIN pending"}` : templateKey}</Text>
             </View>
           )}
         />
@@ -456,25 +706,27 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
                 <Text style={styles.heroBrandMeta}>Holland, Michigan · OEM factory build</Text>
               </View>
             </View>
-            <Text style={styles.modelWatermark}>39 LS</Text>
+            <Text style={styles.modelWatermark}>{hasFactoryBuild ? exactBuildLabel : modelLabel}</Text>
             <View style={styles.heroCopy}>
-              <Text style={styles.eyebrow}>Keepr Activator · OEM Build</Text>
-              <Text style={styles.title}>Build a Tiara 39 LS</Text>
+              <Text style={styles.eyebrow}>Keepr Activator · Exact Factory Build</Text>
+              <Text style={styles.title}>{hasFactoryBuild ? `${exactBuildLabel} exact build metadata` : `Build a Tiara ${modelLabel}`}</Text>
               <Text style={styles.subtitle}>
-                Configure one exact hull from the published MY{template.model_year || "2027"} 39 LS template. Selections compile into the systems, manuals, playbooks, and verification requirements that will flow to dealer and owner.
+                {hasFactoryBuild
+                  ? `Tiara work order ${workOrder?.order_number} is preserved line by line, then mapped into Keepr systems, components, options, configuration, and source-material work queues for this exact hull.`
+                  : `Configure one exact hull from the published MY${modelYearLabel} ${modelLabel} template. A factory work order can then turn that model definition into as-built systems, components, options, and source queues.`}
               </Text>
               <View style={styles.heroBadges}>
                 <View style={styles.heroBadge}>
                   <Ionicons name="layers-outline" size={14} color={colors.brandNavy} />
-                  <Text style={styles.heroBadgeText}>Template v{template.version || 1}</Text>
+                  <Text style={styles.heroBadgeText}>{hasFactoryBuild ? `${factoryLines.length} factory lines` : `Template v${template.version || catalogTemplate.version || 1}`}</Text>
                 </View>
                 <View style={styles.heroBadge}>
                   <Ionicons name="boat-outline" size={14} color={colors.brandNavy} />
-                  <Text style={styles.heroBadgeText}>Exact hull workspace</Text>
+                  <Text style={styles.heroBadgeText}>{hasFactoryBuild ? `HIN ${workOrder?.hin}` : "Exact hull workspace"}</Text>
                 </View>
                 <View style={styles.heroBadge}>
-                  <Ionicons name="lock-open-outline" size={14} color={colors.brandNavy} />
-                  <Text style={styles.heroBadgeText}>OEM Build</Text>
+                  <Ionicons name="document-text-outline" size={14} color={colors.brandNavy} />
+                  <Text style={styles.heroBadgeText}>{hasFactoryBuild ? (factoryBuildSource === "staging" ? "Factory build source" : "Local factory fallback") : "Model template"}</Text>
                 </View>
               </View>
             </View>
@@ -497,48 +749,165 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
         ) : (
           <View style={styles.workspaceGrid}>
             <View style={styles.leftColumn}>
-              <View style={styles.panel}>
-                <View style={styles.panelHeader}>
-                  <View>
-                    <Text style={styles.kicker}>Starter Pack</Text>
-                    <Text style={styles.panelTitle}>Factory configuration</Text>
+              {hasFactoryBuild ? (
+                <View style={styles.panel}>
+                  <View style={styles.panelHeader}>
+                    <View>
+                      <Text style={styles.kicker}>Factory Build</Text>
+                      <Text style={styles.panelTitle}>Tiara work-order ingestion</Text>
+                    </View>
+                    <Text style={styles.panelCount}>{factoryLines.length} lines</Text>
                   </View>
-                  <Text style={styles.panelCount}>{selectedOptions.length} selected</Text>
+                  <Text style={styles.panelText}>
+                    Factory codes and original descriptions remain authoritative evidence. Keepr mappings sit beside them and resolve to the exact systems graph for {exactBuildLabel}.
+                  </Text>
+                  <View style={styles.workOrderSummary}>
+                    <View style={styles.workOrderFact}>
+                      <Text style={styles.workOrderFactLabel}>Order</Text>
+                      <Text style={styles.workOrderFactValue}>{workOrder?.order_number}</Text>
+                    </View>
+                    <View style={styles.workOrderFact}>
+                      <Text style={styles.workOrderFactLabel}>Order date</Text>
+                      <Text style={styles.workOrderFactValue}>{workOrder?.order_date}</Text>
+                    </View>
+                    <View style={styles.workOrderFact}>
+                      <Text style={styles.workOrderFactLabel}>Hull / HIN</Text>
+                      <Text style={styles.workOrderFactValue}>{workOrder?.hin}</Text>
+                    </View>
+                    <View style={styles.workOrderFact}>
+                      <Text style={styles.workOrderFactLabel}>Completion</Text>
+                      <Text style={styles.workOrderFactValue}>{workOrder?.completion_date}</Text>
+                    </View>
+                  </View>
+                  <FactoryBuildTable
+                    lines={factoryLines}
+                    selectedLineId={selectedFactoryLine?.id}
+                    onPressLine={pressFactoryLine}
+                  />
                 </View>
-                <Text style={styles.panelText}>
-                  Standard model content is inherited. Factory choices and options add the operational context that will become the owner passport.
-                </Text>
-                {Object.entries(optionGroups).map(([group, groupOptions]) => (
-                  <View key={group} style={styles.optionGroup}>
-                    <Text style={styles.optionGroupTitle}>{group}</Text>
-                    {groupOptions.map((option) => (
-                      <ToggleRow key={option.key} option={option} onToggle={() => toggleOption(option)} />
-                    ))}
-                  </View>
-                ))}
-              </View>
+              ) : null}
 
-              <View style={styles.panel}>
-                <View style={styles.panelHeader}>
-                  <View>
-                    <Text style={styles.kicker}>Finish</Text>
-                    <Text style={styles.panelTitle}>Factory selections</Text>
+              {hasFactoryBuild ? (
+                <View style={styles.panel}>
+                  <View style={styles.panelHeader}>
+                    <View>
+                      <Text style={styles.kicker}>Mapping Assignment</Text>
+                      <Text style={styles.panelTitle}>Resolve selected line</Text>
+                    </View>
                   </View>
+                  {selectedFactoryLine ? (
+                    <View style={styles.assignmentPanel}>
+                      <View style={styles.selectedEvidenceBox}>
+                        <Text style={styles.selectedEvidenceCode}>{selectedFactoryLine.factory_item_code || "Derived line"}</Text>
+                        <Text style={styles.selectedEvidenceDescription}>{selectedFactoryLine.factory_description}</Text>
+                        <Text style={styles.selectedEvidenceRaw}>{selectedFactoryLine.raw_source_text}</Text>
+                      </View>
+                      {selectedFactoryLine.review_note ? (
+                        <View style={styles.reviewNote}>
+                          <Ionicons name="alert-circle-outline" size={15} color="#92400E" />
+                          <Text style={styles.reviewNoteText}>{selectedFactoryLine.review_note}</Text>
+                        </View>
+                      ) : null}
+                      <View style={styles.assignmentControls}>
+                        <View style={styles.assignmentControl}>
+                          <Text style={styles.inputLabel}>System category</Text>
+                          <View style={styles.segmentWrap}>
+                            {TIARA_SYSTEM_CATEGORIES.map((category) => (
+                              <TouchableOpacity
+                                key={category}
+                                activeOpacity={0.82}
+                                onPress={() => updateAssignmentDraft("system_category", category)}
+                                style={[styles.segmentChip, assignmentDraft.system_category === category && styles.segmentChipSelected]}
+                              >
+                                <Text style={[styles.segmentChipText, assignmentDraft.system_category === category && styles.segmentChipTextSelected]}>
+                                  {category}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+                        </View>
+                        <View style={styles.assignmentControl}>
+                          <Text style={styles.inputLabel}>Assign as</Text>
+                          <View style={styles.segmentWrap}>
+                            {[
+                              ["existing_system", "Existing system"],
+                              ["new_system", "New system"],
+                              ["component", "Component"],
+                              ["option", "Option"],
+                              ["build_only", "Build-only"],
+                            ].map(([key, label]) => (
+                              <TouchableOpacity
+                                key={key}
+                                activeOpacity={0.82}
+                                onPress={() => updateAssignmentDraft("target", key)}
+                                style={[styles.segmentChip, assignmentDraft.target === key && styles.segmentChipSelected]}
+                              >
+                                <Text style={[styles.segmentChipText, assignmentDraft.target === key && styles.segmentChipTextSelected]}>{label}</Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+                        </View>
+                      </View>
+                      <TouchableOpacity activeOpacity={0.86} style={styles.assignButton}>
+                        <Ionicons name="git-merge-outline" size={17} color={colors.onPrimary} />
+                        <Text style={styles.assignButtonText}>Save mapping in staging</Text>
+                      </TouchableOpacity>
+                      <Text style={styles.stopNote}>
+                        Staging-only first version: the selected assignment is local UI state until the factory-build migration is applied.
+                      </Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.panelText}>Select a factory line to review or assign its Keepr mapping.</Text>
+                  )}
                 </View>
-                <View style={styles.fieldGrid}>
-                  {finish.map((field) => (
-                    <View key={field.key} style={styles.inputWrap}>
-                      <Text style={styles.inputLabel}>{field.label}</Text>
-                      <TextInput
-                        value={field.value}
-                        onChangeText={(value) => updateFinish(field.key, value)}
-                        style={styles.input}
-                        placeholderTextColor={colors.textMuted}
-                      />
+              ) : null}
+
+              {!hasFactoryBuild ? (
+                <View style={styles.panel}>
+                  <View style={styles.panelHeader}>
+                    <View>
+                      <Text style={styles.kicker}>Starter Pack</Text>
+                      <Text style={styles.panelTitle}>Factory configuration</Text>
+                    </View>
+                    <Text style={styles.panelCount}>{selectedOptions.length} selected</Text>
+                  </View>
+                  <Text style={styles.panelText}>
+                    Standard model content is inherited. Factory choices and options add the operational context that will become the owner passport.
+                  </Text>
+                  {Object.entries(optionGroups).map(([group, groupOptions]) => (
+                    <View key={group} style={styles.optionGroup}>
+                      <Text style={styles.optionGroupTitle}>{group}</Text>
+                      {groupOptions.map((option) => (
+                        <ToggleRow key={option.key} option={option} onToggle={() => toggleOption(option)} />
+                      ))}
                     </View>
                   ))}
                 </View>
-              </View>
+              ) : null}
+
+              {!hasFactoryBuild ? (
+                <View style={styles.panel}>
+                  <View style={styles.panelHeader}>
+                    <View>
+                      <Text style={styles.kicker}>Finish</Text>
+                      <Text style={styles.panelTitle}>Factory selections</Text>
+                    </View>
+                  </View>
+                  <View style={styles.fieldGrid}>
+                    {finish.map((field) => (
+                      <View key={field.key} style={styles.inputWrap}>
+                        <Text style={styles.inputLabel}>{field.label}</Text>
+                        <TextInput
+                          value={field.value}
+                          onChangeText={(value) => updateFinish(field.key, value)}
+                          style={styles.input}
+                          placeholderTextColor={colors.textMuted}
+                        />
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              ) : null}
 
               <FreshwaterFlowdownPanel items={freshwaterItems} />
 
@@ -546,7 +915,7 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
                 <View style={styles.panelHeader}>
                   <View>
                     <Text style={styles.kicker}>Inherited Standards</Text>
-                    <Text style={styles.panelTitle}>From published 39 LS template</Text>
+                    <Text style={styles.panelTitle}>From published {modelLabel} template</Text>
                   </View>
                   <Text style={styles.panelCount}>{operationalTemplateItems.length}</Text>
                 </View>
@@ -567,7 +936,7 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
                 <View style={styles.panelHeader}>
                   <View>
                     <Text style={styles.kicker}>Exact Hull Identity</Text>
-                    <Text style={styles.panelTitle}>Freeze inputs</Text>
+                    <Text style={styles.panelTitle}>{hasFactoryBuild ? "From Tiara work order" : "Freeze inputs"}</Text>
                   </View>
                   <View style={[styles.freezePill, readyToFreeze && styles.freezePillReady]}>
                     <Text style={[styles.freezePillText, readyToFreeze && styles.freezePillTextReady]}>
@@ -581,11 +950,11 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
                     <TextInput value={identity.hin} onChangeText={(value) => updateIdentity("hin", value)} style={styles.input} />
                   </View>
                   <View style={styles.inputWrap}>
-                    <Text style={styles.inputLabel}>Build number</Text>
+                    <Text style={styles.inputLabel}>Build code</Text>
                     <TextInput value={identity.buildNumber} onChangeText={(value) => updateIdentity("buildNumber", value)} style={styles.input} />
                   </View>
                   <View style={styles.inputWrap}>
-                    <Text style={styles.inputLabel}>Build date</Text>
+                    <Text style={styles.inputLabel}>Order date</Text>
                     <TextInput value={identity.buildDate} onChangeText={(value) => updateIdentity("buildDate", value)} style={styles.input} />
                   </View>
                   <View style={styles.inputWrap}>
@@ -597,18 +966,20 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
                     <TextInput value={identity.location} onChangeText={(value) => updateIdentity("location", value)} style={styles.input} />
                   </View>
                 </View>
-                <View style={styles.kacCard}>
-                  <Text style={styles.kacLabel}>Keepr Code</Text>
-                  <Text style={styles.kacValue}>KAC-TIARA-39LS-BUILD-DEMO</Text>
-                </View>
+                {hasFactoryBuild ? (
+                  <View style={styles.kacCard}>
+                    <Text style={styles.kacLabel}>Factory source role</Text>
+                    <Text style={styles.kacValue}>{workOrder?.source_role}</Text>
+                  </View>
+                ) : null}
                 <View style={[styles.milestoneCard, readyToFreeze && styles.milestoneCardReady]}>
-                  <Text style={styles.milestoneKicker}>Factory Configuration Ready</Text>
-                  <Text style={styles.milestoneTitle}>OEM layer can be frozen for this HIN.</Text>
+                  <Text style={styles.milestoneKicker}>{hasFactoryBuild ? "Factory Build Evidence" : "Factory Configuration Ready"}</Text>
+                  <Text style={styles.milestoneTitle}>{hasFactoryBuild ? "Tiara proof is attached before normalization." : "OEM layer can be frozen for this hull."}</Text>
                   <View style={styles.milestoneStats}>
                     <Text style={styles.milestoneStat}>{compiled.systems.length} systems</Text>
-                    <Text style={styles.milestoneStat}>{compiled.resources.length} resources</Text>
+                    <Text style={styles.milestoneStat}>{hasFactoryBuild ? `${factoryLines.length} factory lines` : `${compiled.resources.length} resources`}</Text>
                     <Text style={styles.milestoneStat}>{compiled.playbooks.length} playbooks</Text>
-                    <Text style={styles.milestoneStat}>{compiled.requirements.length} verification items</Text>
+                    <Text style={styles.milestoneStat}>{hasFactoryBuild ? `${manualQueue.length} source queues` : `${compiled.requirements.length} verification items`}</Text>
                   </View>
                   <View style={styles.milestoneChecks}>
                     <View style={styles.milestoneCheck}>
@@ -622,13 +993,79 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
                   </View>
                 </View>
                 <TouchableOpacity activeOpacity={0.86} style={[styles.freezeButton, !readyToFreeze && styles.freezeButtonDisabled]}>
-                  <Ionicons name="arrow-forward-circle-outline" size={18} color={colors.onPrimary} />
-                  <Text style={styles.freezeButtonText}>Freeze & Hand Off</Text>
+                  <Ionicons name="cloud-upload-outline" size={18} color={colors.onPrimary} />
+                  <Text style={styles.freezeButtonText}>{hasFactoryBuild ? `Stage ${exactBuildLabel} Ingestion` : "Freeze & Hand Off"}</Text>
                 </TouchableOpacity>
+                {hasFactoryBuild ? (
+                  <TouchableOpacity
+                    activeOpacity={0.86}
+                    style={[styles.digitalTwinButton, !digitalTwinAssetId && !digitalTwinKac && styles.freezeButtonDisabled]}
+                    onPress={openDigitalTwin}
+                    disabled={!digitalTwinAssetId && !digitalTwinKac}
+                  >
+                    <Ionicons name="boat-outline" size={18} color={colors.brandBlue} />
+                    <Text style={styles.digitalTwinButtonText}>View Digital Twin</Text>
+                  </TouchableOpacity>
+                ) : null}
                 <Text style={styles.stopNote}>
-                  Review checkpoint: this action is intentionally not wired to Dealer Handoff yet.
+                  {hasFactoryBuild ? "No production changes: this action is intentionally staged before Dealer Handoff." : "Review checkpoint: this action is intentionally not wired to Dealer Handoff yet."}
                 </Text>
               </View>
+
+              {hasFactoryBuild ? (
+                <View style={styles.panel}>
+                  <View style={styles.panelHeader}>
+                    <View>
+                      <Text style={styles.kicker}>Missing Source Queue</Text>
+                      <Text style={styles.panelTitle}>Manual resolution</Text>
+                    </View>
+                    <Text style={styles.panelCount}>{manualQueue.length}</Text>
+                  </View>
+                  <Text style={styles.panelText}>
+                    Every mapped system/component is factory-confirmed, then queued for owner manual, service manual, installation manual, and warranty-source resolution.
+                  </Text>
+                  <ManualQueuePanel queue={manualQueue} />
+                </View>
+              ) : null}
+
+              {publicModelContext ? (
+                <View style={styles.panel}>
+                  <View style={styles.panelHeader}>
+                    <View>
+                      <Text style={styles.kicker}>Public Model Context</Text>
+                      <Text style={styles.panelTitle}>Website, specs & gallery</Text>
+                    </View>
+                    <Ionicons name="globe-outline" size={18} color={colors.brandBlue} />
+                  </View>
+                  <Text style={styles.panelText}>
+                    Tiara public model content supports presentation and catalog alignment. It does not replace the {exactBuildLabel} work order as proof that equipment belongs on this hull.
+                  </Text>
+                  <View style={styles.publicContextGrid}>
+                    {(publicModelContext?.specs || []).slice(0, 6).map((spec) => (
+                      <View key={spec.label} style={styles.publicSpecCard}>
+                        <Text style={styles.publicSpecLabel}>{spec.label}</Text>
+                        <Text style={styles.publicSpecValue}>{spec.value}</Text>
+                      </View>
+                    ))}
+                  </View>
+                  <View style={styles.publicResourceList}>
+                    {(publicModelContext?.resources || []).map((resource) => (
+                      <View key={resource.label} style={styles.publicResourceItem}>
+                        <Ionicons name="link-outline" size={14} color={colors.brandBlue} />
+                        <Text style={styles.publicResourceText}>{resource.label}</Text>
+                      </View>
+                    ))}
+                  </View>
+                  <View style={styles.galleryChipRow}>
+                    {(publicModelContext?.media_gallery || []).map((item) => (
+                      <View key={item} style={styles.galleryChip}>
+                        <Ionicons name="images-outline" size={13} color={colors.textMuted} />
+                        <Text style={styles.galleryChipText}>{item}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              ) : null}
 
               <View style={styles.panel}>
                 <View style={styles.panelHeader}>
@@ -1158,6 +1595,24 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "900",
   },
+  digitalTwinButton: {
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderColor: "#BFDBFE",
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.sm,
+    justifyContent: "center",
+    marginTop: spacing.sm,
+    minHeight: 44,
+    paddingHorizontal: spacing.md,
+  },
+  digitalTwinButtonText: {
+    color: colors.brandBlue,
+    fontSize: 13,
+    fontWeight: "900",
+  },
   inheritedPill: {
     backgroundColor: "#DCFCE7",
     borderRadius: radius.sm,
@@ -1293,6 +1748,354 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     marginTop: spacing.sm,
+  },
+  workOrderSummary: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  workOrderFact: {
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexGrow: 1,
+    minWidth: 150,
+    padding: spacing.md,
+  },
+  workOrderFactLabel: {
+    color: colors.textMuted,
+    fontSize: 10,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  workOrderFactValue: {
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: "900",
+    marginTop: 4,
+  },
+  factoryTable: {
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    marginTop: spacing.md,
+    overflow: "hidden",
+  },
+  factoryRow: {
+    alignItems: "stretch",
+    backgroundColor: colors.surface,
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 58,
+    padding: spacing.sm,
+  },
+  factoryHeaderRow: {
+    backgroundColor: colors.surfaceSubtle,
+    borderTopWidth: 0,
+    minHeight: 38,
+  },
+  factoryRowSelected: {
+    backgroundColor: "#EFF6FF",
+  },
+  factoryHeaderText: {
+    color: colors.textMuted,
+    fontSize: 10,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  factoryCellText: {
+    color: colors.textPrimary,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  factoryCodeCell: {
+    minWidth: 112,
+    width: "18%",
+  },
+  factoryDescriptionCell: {
+    flex: 1.2,
+    minWidth: 150,
+  },
+  factoryMappingCell: {
+    flex: 1,
+    minWidth: 150,
+  },
+  factoryStatusCell: {
+    alignItems: "flex-start",
+    minWidth: 112,
+    width: "16%",
+  },
+  factoryDescriptionText: {
+    color: colors.textPrimary,
+    fontSize: 12,
+    fontWeight: "900",
+    lineHeight: 17,
+  },
+  factoryRawText: {
+    color: colors.textMuted,
+    fontSize: 10,
+    lineHeight: 15,
+    marginTop: 3,
+  },
+  factoryMappingText: {
+    color: colors.brandNavy,
+    fontSize: 12,
+    fontWeight: "900",
+    lineHeight: 17,
+  },
+  factoryRelationshipText: {
+    color: colors.textMuted,
+    fontSize: 10,
+    lineHeight: 15,
+    marginTop: 3,
+  },
+  statusPill: {
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 5,
+  },
+  statusMapped: {
+    backgroundColor: "#DCFCE7",
+  },
+  statusPartial: {
+    backgroundColor: "#DBEAFE",
+  },
+  statusReview: {
+    backgroundColor: "#FEF3C7",
+  },
+  statusUnmapped: {
+    backgroundColor: "#FEE2E2",
+  },
+  statusPillText: {
+    color: colors.brandNavy,
+    fontSize: 10,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  assignmentPanel: {
+    gap: spacing.md,
+    marginTop: spacing.md,
+  },
+  selectedEvidenceBox: {
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    padding: spacing.md,
+  },
+  selectedEvidenceCode: {
+    color: colors.brandBlue,
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  selectedEvidenceDescription: {
+    color: colors.textPrimary,
+    fontSize: 15,
+    fontWeight: "900",
+    lineHeight: 20,
+    marginTop: spacing.xs,
+  },
+  selectedEvidenceRaw: {
+    color: colors.textMuted,
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: spacing.xs,
+  },
+  reviewNote: {
+    alignItems: "flex-start",
+    backgroundColor: "#FFFBEB",
+    borderColor: "#FDE68A",
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.sm,
+    padding: spacing.md,
+  },
+  reviewNoteText: {
+    color: "#92400E",
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "800",
+    lineHeight: 17,
+  },
+  assignmentControls: {
+    gap: spacing.md,
+  },
+  assignmentControl: {
+    gap: spacing.xs,
+  },
+  segmentWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+  },
+  segmentChip: {
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    minHeight: 30,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+  },
+  segmentChipSelected: {
+    backgroundColor: "#EFF6FF",
+    borderColor: "#93C5FD",
+  },
+  segmentChipText: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  segmentChipTextSelected: {
+    color: colors.brandNavy,
+  },
+  assignButton: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: colors.brandBlue,
+    borderRadius: radius.sm,
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 38,
+    paddingHorizontal: spacing.md,
+  },
+  assignButtonText: {
+    color: colors.onPrimary,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  queueList: {
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  queueItem: {
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    padding: spacing.md,
+  },
+  queueItemHeader: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    gap: spacing.sm,
+    justifyContent: "space-between",
+  },
+  queueTitle: {
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  queueMeta: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: "800",
+    marginTop: 3,
+  },
+  manualPill: {
+    backgroundColor: "#FEF3C7",
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 5,
+  },
+  manualPillText: {
+    color: "#92400E",
+    fontSize: 10,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  sourceSlots: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    marginTop: spacing.md,
+  },
+  sourceSlot: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.xs,
+    minHeight: 28,
+    paddingHorizontal: spacing.sm,
+  },
+  sourceSlotText: {
+    color: colors.textMuted,
+    fontSize: 10,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  publicContextGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  publicSpecCard: {
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexGrow: 1,
+    minWidth: 118,
+    padding: spacing.sm,
+  },
+  publicSpecLabel: {
+    color: colors.textMuted,
+    fontSize: 10,
+    fontWeight: "900",
+    lineHeight: 14,
+    textTransform: "uppercase",
+  },
+  publicSpecValue: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: "900",
+    marginTop: 4,
+  },
+  publicResourceList: {
+    gap: spacing.xs,
+    marginTop: spacing.md,
+  },
+  publicResourceItem: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  publicResourceText: {
+    color: colors.textSecondary,
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  galleryChipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    marginTop: spacing.md,
+  },
+  galleryChip: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.xs,
+    minHeight: 30,
+    paddingHorizontal: spacing.sm,
+  },
+  galleryChipText: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: "800",
   },
   centered: {
     alignItems: "center",

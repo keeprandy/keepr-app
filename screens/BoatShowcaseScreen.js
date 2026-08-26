@@ -28,6 +28,7 @@ import {
   getSignedUrl,
   removePlacementById,
 } from "../lib/attachmentsApi";
+import { getKeeprSpacePortfolio } from "../lib/keeprspaceApi";
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import { buildServiceActionRouteParams } from "../lib/serviceActionPrefill";
 import LightboxModal from "../components/LightboxModal";
@@ -164,15 +165,133 @@ async function persistLegacySetHeroOnAsset(assetId, url) {
 }
 
 export default function BoatShowcaseScreen({ navigation, route }) {
-  const boatId = route?.params?.boatId ?? null;
+  const boatId = route?.params?.boatId ?? route?.params?.assetId ?? null;
+  const routeOrganizationId = route?.params?.organizationId || null;
+  const routeWorkspaceId = route?.params?.workspaceId || null;
+  const routeKac = route?.params?.kac || null;
+  const relationshipRole = route?.params?.relationshipRole || null;
+  const teamMemberType = route?.params?.teamMemberType || null;
+  const systemsRole = route?.params?.systemsRole || null;
+  const parentRoute = route?.params?.parentRoute || null;
+  const returnRoute = route?.params?.returnRoute || null;
 
   const { assets: boats = [], loading, error } = useAssets("boat");
+  const [routeBoatSnapshot, setRouteBoatSnapshot] = useState(null);
+  const [routeBoatLoading, setRouteBoatLoading] = useState(!!boatId);
 
   const currentBoat = useMemo(() => {
-    if (!boats || boats.length === 0) return null;
-    if (!boatId) return boats[0];
-    return boats.find((b) => b.id === boatId) || boats[0] || null;
-  }, [boats, boatId]);
+    const personalBoats = Array.isArray(boats) ? boats : [];
+    if (!boatId) return personalBoats[0] || null;
+    return (
+      personalBoats.find((b) => b.id === boatId) ||
+      (routeBoatSnapshot?.id === boatId ? routeBoatSnapshot : null)
+    );
+  }, [boats, boatId, routeBoatSnapshot]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadRouteBoat() {
+      if (!boatId) {
+        setRouteBoatSnapshot(null);
+        setRouteBoatLoading(false);
+        return;
+      }
+
+      const personalBoats = Array.isArray(boats) ? boats : [];
+      if (personalBoats.some((b) => b.id === boatId)) {
+        setRouteBoatSnapshot(null);
+        setRouteBoatLoading(false);
+        return;
+      }
+
+      setRouteBoatLoading(true);
+
+      const { data, error: fetchError } = await supabase
+        .from("assets")
+        .select("*")
+        .eq("id", boatId)
+        .maybeSingle();
+      let resolved = data || null;
+
+      if (!resolved && routeOrganizationId) {
+        try {
+          const portfolio = await getKeeprSpacePortfolio({
+            organizationId: routeOrganizationId,
+            search: routeKac || boatId,
+            limit: 100,
+            offset: 0,
+          });
+          const match = (portfolio?.boats || []).find((item) => {
+            const assetId = item?.asset_id || item?.asset?.id || item?.id;
+            return assetId === boatId;
+          });
+          const identity = match?.identity || {};
+          const asset = match?.asset || {};
+          if (match) {
+            resolved = {
+              ...asset,
+              id: match.asset_id || asset.id || match.id || boatId,
+              name:
+                asset.name ||
+                match.asset_name ||
+                match.name ||
+                route?.params?.assetName ||
+                "Boat",
+              type: asset.type || "boat",
+              kac_id: asset.kac_id || match.kac_id || routeKac || null,
+              year: asset.year || identity.year || null,
+              make: asset.make || identity.make || null,
+              model: asset.model || identity.model || null,
+              serial_number:
+                asset.serial_number ||
+                identity.hin ||
+                identity.serial_number ||
+                null,
+              hin: asset.hin || identity.hin || null,
+              location:
+                asset.location ||
+                match?.dealer_relationship?.location_name ||
+                match?.service_relationship?.location_name ||
+                null,
+              hero_image_url:
+                asset.hero_image_url ||
+                match?.hero_image_url ||
+                match?.hero?.url ||
+                null,
+            };
+          }
+        } catch (portfolioError) {
+          console.log("BoatShowcase portfolio route asset load error", portfolioError);
+        }
+      }
+
+      if (!resolved) {
+        resolved = {
+          id: boatId,
+          name: route?.params?.assetName || "Boat",
+          type: "boat",
+          kac_id: routeKac,
+        };
+      }
+
+      if (!cancelled) {
+        if (fetchError && !resolved) {
+          console.log("BoatShowcase route asset load error", fetchError);
+          setRouteBoatSnapshot(null);
+        } else {
+          setRouteBoatSnapshot(resolved || null);
+        }
+        setRouteBoatLoading(false);
+      }
+    }
+
+    loadRouteBoat();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [boats, boatId, route?.params?.assetName, routeKac, routeOrganizationId]);
 
   const [photos, setPhotos] = useState([]);
   const [photosLoading, setPhotosLoading] = useState(false);
@@ -196,7 +315,38 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
   const { width, height } = useWindowDimensions();
   const numColumns = width >= 1200 ? 3 : width >= 768 ? 2 : 1;
 
+  const routeContext = useMemo(
+    () => ({
+      kac: routeKac || currentBoat?.kac_id || currentBoat?.kac || null,
+      organizationId: routeOrganizationId,
+      workspaceId: routeWorkspaceId,
+      relationshipRole,
+      teamMemberType,
+      systemsRole,
+      parentRoute,
+    }),
+    [
+      currentBoat?.kac,
+      currentBoat?.kac_id,
+      parentRoute,
+      relationshipRole,
+      routeKac,
+      routeOrganizationId,
+      routeWorkspaceId,
+      systemsRole,
+      teamMemberType,
+    ]
+  );
+
   const handleBack = () => {
+    if (returnRoute === "BoatStory" && currentBoat?.id) {
+      navigation.navigate("BoatStory", {
+        boatId: currentBoat.id,
+        assetId: currentBoat.id,
+        ...routeContext,
+      });
+      return;
+    }
     if (navigation.canGoBack()) navigation.goBack();
     else navigation.navigate("Boat");
   };
@@ -207,14 +357,20 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
 
   const goToBoatStory = () => {
     if (!currentBoat?.id) return;
-    navigation.navigate("BoatStory", { boatId: currentBoat.id });
+    navigation.navigate("BoatStory", {
+      boatId: currentBoat.id,
+      assetId: currentBoat.id,
+      ...routeContext,
+    });
   };
 
   const goToBoatSystems = () => {
     if (!currentBoat?.id) return;
     navigation.navigate("BoatSystems", {
       boatId: currentBoat.id,
+      assetId: currentBoat.id,
       boatName: currentBoat.name || "Boat",
+      ...routeContext,
     });
   };
 
@@ -230,7 +386,10 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
 
   const goToEditBoat = () => {
     if (!currentBoat?.id) return;
-    navigation.navigate("EditAsset", { assetId: currentBoat.id });
+    navigation.navigate("EditAsset", {
+      assetId: currentBoat.id,
+      ...routeContext,
+    });
   };
 
   const goToAIContext = () => {
@@ -239,6 +398,7 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
       assetId: currentBoat.id,
       assetName: boatDisplayName,
       assetKind: "boat",
+      ...routeContext,
     });
   };
 
@@ -642,7 +802,7 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
 
   /* ---------- guards ---------- */
 
-  if (loading) {
+  if (loading || routeBoatLoading) {
     return (
       <SafeAreaView style={layoutStyles.screen}>
         <View style={styles.centered}>

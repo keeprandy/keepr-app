@@ -42,6 +42,15 @@ import { fetchAssetHeroUris } from "../lib/assetHeroResolver";
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import { getActionScheduledDueAt, isPlaybookDueDatePending } from "../lib/playbookSchedule";
 import { supabase } from "../lib/supabaseClient";
+import {
+  TIARA_56_LS_TEMPLATE_KEY,
+  TIARA_KF018_BUILD_KEY,
+  tiaraKf018FactoryBuild,
+} from "../data/tiaraKf018FactoryBuild";
+import {
+  TIARA_43_LS_DRAFT_KEY,
+  TIARA_43_LS_TEMPLATE_KEY,
+} from "../data/tiara43LsTemplateDraft";
 import { layoutStyles } from "../styles/layout";
 import { colors, radius, shadows, spacing } from "../styles/theme";
 
@@ -53,6 +62,51 @@ const SHOWCASE_ASSETS = {
   tiara_39le_hero: require("../assets/boats/tiara/tiara_39le_hero.jpg"),
   tiara_39ls_hero: require("../assets/boats/tiara/tiara_39ls_hero.jpg"),
 };
+const ENABLE_KF018_LOCAL_FLEET_FALLBACK = process.env.EXPO_PUBLIC_ENABLE_KF018_LOCAL_FLEET_FALLBACK === "1";
+
+function navSectionForActivatorMode(nextMode) {
+  return (
+    nextMode === "messages" ? "ActivatorEngage" :
+    nextMode === "profile" ? "KeeprSpaceAdmin" :
+    nextMode === "addBoat" ? "ActivatorAdd" :
+    nextMode === "connect" ? "ActivatorConnect" :
+    nextMode === "fleet" ? "ActivatorFind" :
+    nextMode === "builds" ? "ActivatorWork" :
+    nextMode === "templates" ? "ActivatorTemplates" :
+    "ActivatorHome"
+  );
+}
+
+function activatorModeUrl(nextMode, { workspaceId = null, organizationId = null } = {}) {
+  const params = new URLSearchParams();
+  params.set("initialMode", nextMode || "fleet");
+  params.set("navSection", navSectionForActivatorMode(nextMode || "fleet"));
+  if (organizationId) params.set("organizationId", String(organizationId));
+  if (workspaceId) params.set("workspaceId", String(workspaceId));
+  return `/activator?${params.toString()}`;
+}
+
+function setActivatorWebUrl(nextMode, context = {}) {
+  if (Platform.OS !== "web" || typeof window === "undefined") return false;
+  const nextUrl = activatorModeUrl(nextMode, context);
+  const currentUrl = `${window.location.pathname || ""}${window.location.search || ""}`;
+  if (currentUrl === nextUrl) return true;
+  window.history.pushState({}, "", nextUrl);
+  return true;
+}
+
+function openActivatorWebPath(path, params = {}) {
+  if (Platform.OS !== "web" || typeof window === "undefined") return false;
+  const query = new URLSearchParams();
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") query.set(key, String(value));
+  });
+  const nextUrl = `${path}${query.toString() ? `?${query.toString()}` : ""}`;
+  const currentUrl = `${window.location.pathname || ""}${window.location.search || ""}`;
+  if (currentUrl === nextUrl) return true;
+  window.location.assign(nextUrl);
+  return true;
+}
 
 const KEEPRSPACE_ADMIN_TABS = [
   { key: "profile", label: "Profile", icon: "business-outline" },
@@ -67,35 +121,55 @@ const KEEPRSPACE_ADMIN_TABS = [
 const OEM_WORK_AREAS = [
   {
     key: "fleet",
-    label: "Active Fleet",
-    icon: "boat-outline",
-    description: "Searchable portfolio of activated boats and connected KACs.",
+    label: "Find",
+    icon: "search-outline",
+    description: "Search boats, owners, HINs, dealers, and active KACs.",
   },
   {
-    key: "builds",
-    label: "Configure Hulls",
-    icon: "construct-outline",
-    description: "Configure exact hulls, assign HINs, and freeze factory layers.",
+    key: "addBoat",
+    label: "Add / Connect",
+    icon: "add-circle-outline",
+    description: "Resolve a boat, create one if needed, and connect the owner context.",
+  },
+  {
+    key: "connect",
+    label: "Connect",
+    icon: "people-outline",
+    description: "Connect or leave owner unknown, then continue the relationship handoff.",
+  },
+  {
+    key: "messages",
+    label: "Engage",
+    icon: "chatbubbles-outline",
+    description: "Customer, dealer, and internal activation conversations.",
   },
   {
     key: "templates",
-    label: "Customize Catalog",
+    label: "Model Catalog",
     icon: "library-outline",
-    description: "Configure OEM model templates, sources, systems, and playbooks.",
-    authority: "Admin",
+    description: "Reusable model templates, sources, systems, manuals, and media.",
+    authority: "Detail",
   },
   {
-    key: "network",
-    label: "Dealer Network",
-    icon: "storefront-outline",
-    description: "Authorized dealers, locations, and connected vessels.",
+    key: "needs",
+    label: "Needs Attention",
+    icon: "notifications-outline",
+    description: "Recent follow-ups and activation exceptions.",
+    hidden: true,
+  },
+  {
+    key: "builds",
+    label: "Work",
+    icon: "construct-outline",
+    description: "Open exact builds, factory sources, handoff queues, and work context.",
+    hidden: true,
   },
   {
     key: "profile",
-    label: "KeeprSpace Admin",
+    label: "Admin",
     icon: "settings-outline",
-    description: "Profile, members, locations, teams, services, capabilities, and relationships.",
-    authority: "Admin",
+    description: "Organization profile and operating setup.",
+    hidden: true,
   },
 ];
 
@@ -114,6 +188,18 @@ const DEMO_PRODUCTION_STATUS = [
 ];
 
 const DEMO_BUILDS_IN_PROGRESS = [
+  {
+    key: "kf018",
+    model: "MY2027 Tiara Yachts 56 LS",
+    identifier: "KF018 · HIN SSUKF018H627 · Work order 68398",
+    state: "OEM Build",
+    action: "Open Factory Build",
+    templateKey: "tiara-2027-56-ls",
+    buildKey: "kf018",
+    hullNumber: "SSUKF018H627",
+    assetId: "a5b0d793-0aa2-4c3b-842e-5d2375aba8ed",
+    kac: "KAC-TIARA-56LS-KF018",
+  },
   {
     key: "ls-2027-014",
     model: "MY2027 Tiara Yachts 39 LS",
@@ -412,15 +498,68 @@ function statusTone(value) {
 }
 
 function mediaAsset(media) {
-  return SHOWCASE_ASSETS[media?.local_asset_key] || SHOWCASE_ASSETS[media?.metadata?.local_asset_key] || BOAT_HERO;
+  const localKey = media?.local_asset_key || media?.metadata?.local_asset_key;
+  if (SHOWCASE_ASSETS[localKey]) return SHOWCASE_ASSETS[localKey];
+
+  const uri =
+    media?.url ||
+    media?.signed_url ||
+    media?.public_url ||
+    media?.publicUrl ||
+    media?.uri ||
+    media?.metadata?.url ||
+    media?.metadata?.uri ||
+    null;
+  if (uri && !String(uri).startsWith("app://")) return { uri };
+
+  return TIARA_OEM_BANNER;
 }
 
 function heroMediaFromTemplate(template) {
+  const configured = template?.metadata?.presentation?.hero_media ||
+    template?.metadata?.hero_media ||
+    template?.metadata?.model_hero_media ||
+    null;
+  if (configured) return configured;
+
   return (template?.showcase_media || []).find((item) => item.role === "hero" || item.metadata?.role === "hero");
 }
 
-function heroUriFromBoat(boat) {
+function assetIdForBoat(boat) {
+  return boat?.asset_id || boat?.asset?.id || boat?.id || null;
+}
+
+function uriFromHeroMedia(media) {
+  if (!media) return null;
+  if (typeof media === "string") return media;
   return (
+    media.url ||
+    media.signed_url ||
+    media.public_url ||
+    media.publicUrl ||
+    media.hero_image_url ||
+    media.hero_thumb_url ||
+    media.uri ||
+    null
+  );
+}
+
+function heroUriFromBoat(boat) {
+  const presentation = boat?.metadata?.presentation || {};
+  const assetPresentation = boat?.asset?.metadata?.presentation || {};
+
+  return (
+    uriFromHeroMedia(boat?.hero_media) ||
+    uriFromHeroMedia(boat?.relationship_hero_media) ||
+    uriFromHeroMedia(boat?.asset?.hero_media) ||
+    uriFromHeroMedia(boat?.media?.hero) ||
+    uriFromHeroMedia(boat?.metadata?.hero_media) ||
+    presentation.hero_url ||
+    presentation.hero_image_url ||
+    presentation.hero_thumb_url ||
+    assetPresentation.hero_url ||
+    assetPresentation.hero_image_url ||
+    assetPresentation.hero_thumb_url ||
     boat?.hero_image_url ||
     boat?.hero_thumb_url ||
     boat?.primary_photo_url ||
@@ -447,6 +586,7 @@ function heroSourceForBoat(boat, heroUri = null) {
 
   if (model.includes("tiara39le")) return SHOWCASE_ASSETS.tiara_39le_hero;
   if (model.includes("tiara39ls")) return SHOWCASE_ASSETS.tiara_39ls_hero;
+  if (model.includes("tiara56ls")) return TIARA_OEM_BANNER;
 
   return BOAT_HERO;
 }
@@ -455,9 +595,61 @@ function normalizeModelName(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+function isPersonalFallbackWorkspaceId(value) {
+  return value === "keepr:fallback";
+}
+
+function workspaceOrganizationId(workspace) {
+  const workspaceId = String(workspace?.workspace_id || workspace?.id || "");
+  return (
+    workspace?.organization_id ||
+    workspace?.org_id ||
+    workspace?.authority?.organization_id ||
+    workspace?.authority?.org_id ||
+    workspace?.authority?.subject_id ||
+    (workspaceId.startsWith("org:") ? workspaceId.slice(4) : null) ||
+    null
+  );
+}
+
+function organizationIdFromWorkspaceId(workspaceId) {
+  const id = String(workspaceId || "");
+  return id.startsWith("org:") ? id.slice(4) : null;
+}
+
+function workspaceMatchesOrganization(workspace, organizationId) {
+  const orgId = String(organizationId || "");
+  if (!workspace || !orgId) return false;
+
+  return (
+    workspaceOrganizationId(workspace) === orgId ||
+    workspace.workspace_id === `org:${orgId}` ||
+    workspace.id === `org:${orgId}`
+  );
+}
+
 function templateForCatalogModel(templates, modelName) {
   const normalized = normalizeModelName(modelName);
   return templates.find((template) => normalizeModelName(template.model) === normalized);
+}
+
+function draftForCatalogModel(modelName) {
+  if (normalizeModelName(modelName) !== normalizeModelName("43 LS")) return null;
+  return {
+    draft_key: TIARA_43_LS_DRAFT_KEY,
+    template_key: TIARA_43_LS_TEMPLATE_KEY,
+    manufacturer: "Tiara Yachts",
+    model: "43 LS",
+    model_year: 2027,
+  };
+}
+
+function fallbackTemplateStats(template = {}) {
+  const model = String(template.model || "").toLowerCase();
+  if (model.includes("56 ls")) {
+    return { loa: "56'2\"", beam: "16'0\"", max_hp: "2,400 HP" };
+  }
+  return { loa: "39'6\"", beam: "12'6\"", max_hp: "1,200 HP" };
 }
 
 function workspaceKind(workspace) {
@@ -486,21 +678,28 @@ function projectionLabel(value) {
 
 function copyForWorkspace(workspace, projection = null) {
   const kind = workspaceKind(workspace);
-  const name = workspace?.display?.name || workspace?.org_name || workspace?.label || "Keepr";
+  const name =
+    workspace?.display?.name ||
+    workspace?.display_name ||
+    workspace?.name ||
+    workspace?.org_name ||
+    workspace?.organization_name ||
+    workspace?.label ||
+    "Keepr";
 
   if (kind === "oem") {
     return {
-      eyebrow: "KeeprOEM",
-      title: "Your boats, catalog, and dealer network",
-      subtitle: "A continuity workspace for every model you build and every vessel that returns through your network.",
-      search: "Search boats, model lines, HIN, dealer, customer",
-      primaryMetric: "Fleet boats",
+      eyebrow: "Customer Experience",
+      title: "Find the boat and complete the next job",
+      subtitle: "Search first, then open the boat, update details, connect the owner, or continue the handoff work.",
+      search: "Search HIN, Keepr code, boat, owner, dealer, or customer",
+      primaryMetric: "Visible boats",
       filteredMetric: "In view",
-      modeMetric: "OEM",
-      networkTitle: "Dealer network",
-      networkBody: "Authorized dealer evidence and model catalog context live here, while each boat appears only when it is specifically connected.",
-      emptyTitle: "No boats visible for this OEM workspace yet",
-      emptyBody: "Once a vessel is connected through an OEM relationship or template binding, it becomes part of this fleet view.",
+      modeMetric: "CX",
+      networkTitle: "Connected organizations",
+      networkBody: "Dealers, service teams, and OEM contacts stay connected through the boat they support.",
+      emptyTitle: "No boats found",
+      emptyBody: "Search by HIN, Keepr code, owner, dealer, or model. If Keepr cannot find it, use Add Boat.",
       name,
     };
   }
@@ -602,6 +801,108 @@ function normalizeFilters({ workspace, search, orgs }) {
   return filters;
 }
 
+function kf018FleetProjection() {
+  const workOrder = tiaraKf018FactoryBuild.work_order || {};
+  const catalog = tiaraKf018FactoryBuild.catalog_template || {};
+  return {
+    id: "factory-build-kf018",
+    asset_id: "factory-build-kf018",
+    source_type: "factory_build_workspace",
+    asset_name: "KF018 · 2027 Tiara 56 LS",
+    kac_id: "KAC-TIARA-56LS-KF018",
+    owner_state: "OEM Build",
+    organization_id: null,
+    template: {
+      template_key: TIARA_56_LS_TEMPLATE_KEY,
+      manufacturer: catalog.manufacturer || "Tiara Yachts",
+      model: catalog.model || "56 LS",
+      model_year: catalog.model_year || 2027,
+    },
+    identity: {
+      year: String(catalog.model_year || 2027),
+      make: catalog.manufacturer || "Tiara Yachts",
+      model: catalog.model || "56 LS",
+      hin: workOrder.hin,
+      hull_number: workOrder.hull_number,
+      build_code: workOrder.build_code,
+      order_number: workOrder.order_number,
+    },
+    activation: {
+      status: "OEM Build",
+      stage: "factory_build",
+    },
+    verification: {
+      percent: 70,
+      status: "factory_confirmed",
+    },
+    oem_relationship: {
+      organization_name: "Tiara Yachts",
+      relationship_type: "builder",
+      relationship_purpose: "Factory build",
+      status: "Active",
+    },
+    dealer_relationship: {
+      organization_name: workOrder.dealer || "Ocean Blue Yachts",
+      relationship_type: "dealer",
+      relationship_purpose: "Delivery",
+      status: "Pending",
+      location_name: "Stuart, FL",
+    },
+    exact_build: {
+      template_key: TIARA_56_LS_TEMPLATE_KEY,
+      build_key: TIARA_KF018_BUILD_KEY,
+      hull_number: workOrder.hull_number,
+      source_type: workOrder.source_type,
+      source_document: workOrder.source_document,
+    },
+  };
+}
+
+function withKf018FleetProjection(data, workspace, search) {
+  if (!ENABLE_KF018_LOCAL_FLEET_FALLBACK) return data;
+  if (workspaceKind(workspace) !== "oem") return data;
+
+  const query = String(search || "").trim().toLowerCase();
+  const projection = kf018FleetProjection();
+  const searchable = [
+    projection.asset_name,
+    projection.kac_id,
+    projection.identity?.hin,
+    projection.identity?.hull_number,
+    projection.identity?.build_code,
+    projection.identity?.order_number,
+    projection.template?.model,
+    projection.template?.manufacturer,
+  ].filter(Boolean).join(" ").toLowerCase();
+
+  if (query && !searchable.includes(query)) return data;
+
+  const currentBoats = Array.isArray(data?.boats) ? data.boats : [];
+  const alreadyPresent = currentBoats.some((boat) => {
+    const haystack = [boat.asset_id, boat.id, boat.kac_id, boat.identity?.hin, boat.identity?.hull_number, boat.asset_name]
+      .filter(Boolean)
+      .map((value) => String(value).toLowerCase());
+    return haystack.includes("factory-build-kf018")
+      || haystack.includes("kac-tiara-56ls-kf018")
+      || haystack.includes("ssukf018h627")
+      || haystack.some((value) => value.includes("kf018"));
+  });
+
+  if (alreadyPresent) return data;
+
+  const nextBoats = [projection, ...currentBoats];
+  const counts = data?.counts || {};
+  return {
+    ...(data || {}),
+    boats: nextBoats,
+    counts: {
+      ...counts,
+      visible_boats: Math.max(Number(counts.visible_boats || 0), nextBoats.length),
+      filtered_boats: Math.max(Number(counts.filtered_boats || 0), nextBoats.length),
+    },
+  };
+}
+
 function workAreasForWorkspace(workspace) {
   const kind = workspaceKind(workspace);
   if (kind === "oem") return OEM_WORK_AREAS;
@@ -621,6 +922,14 @@ function workAreasForProjection(workspace, projection) {
 
 export function defaultBrandProfile(workspace) {
   const kind = workspaceKind(workspace);
+  const workspaceName =
+    workspace?.display?.name ||
+    workspace?.display_name ||
+    workspace?.name ||
+    workspace?.org_name ||
+    workspace?.organization_name ||
+    workspace?.label ||
+    null;
   const organizationId = workspace?.organization_id || workspace?.org_id || null;
   const slug = workspace?.slug || workspace?.organization_slug || workspace?.display?.slug || "";
   const logoUri =
@@ -635,7 +944,7 @@ export function defaultBrandProfile(workspace) {
     null;
   if (kind === "pro") {
     return {
-      displayName: workspace?.display?.name || workspace?.org_name || workspace?.label || "Wilson Marine",
+      displayName: workspaceName || "Wilson Marine",
       location: "Howell, Michigan",
       profileStatus: "Published",
       shortDescription: "Marine service, storage, stewardship, and customer continuity for supported boats.",
@@ -656,7 +965,7 @@ export function defaultBrandProfile(workspace) {
 
   if (kind === "dealer") {
     return {
-      displayName: workspace?.display?.name || workspace?.org_name || workspace?.label || "SkipperBud's",
+      displayName: workspaceName || "SkipperBud's",
       location: "Lake Fenton Marina · Fenton, Michigan",
       profileStatus: "Published",
       shortDescription: "Dealer sales, delivery, marina locations, and service continuity for activated boats.",
@@ -676,7 +985,7 @@ export function defaultBrandProfile(workspace) {
   }
 
   return {
-    displayName: workspace?.display?.name || workspace?.org_name || workspace?.label || "Tiara Yachts",
+    displayName: workspaceName || "Tiara Yachts",
     location: "Holland, Michigan",
     profileStatus: "Published",
     shortDescription: "Luxury yachts crafted by hand, driven by innovation, and built for life on the water.",
@@ -945,7 +1254,7 @@ function WorkAreaRail({ areas, mode, onChange, copy, projectionMode, onProjectio
         ) : null}
       </View>
       <View style={styles.railList}>
-        {areas.map((item) => (
+        {areas.filter((item) => !item.hidden).map((item) => (
           <WorkAreaButton
             key={item.key}
             item={item}
@@ -981,32 +1290,253 @@ function MetricTile({ label, value, icon }) {
   );
 }
 
+const FLEET_FILTERS = [
+  { key: "all", label: "All" },
+  { key: "needs_owner", label: "Needs Owner" },
+  { key: "connected", label: "Connected Owners" },
+  { key: "dealer", label: "Dealer Connected" },
+  { key: "56ls", label: "56 LS" },
+  { key: "39", label: "39 Series" },
+];
+
+function boatSearchText(boat) {
+  return [
+    boat?.asset_name,
+    boat?.kac_id,
+    boat?.identity?.hin,
+    boat?.identity?.hull_number,
+    boat?.identity?.year,
+    boat?.identity?.make,
+    boat?.identity?.model,
+    boat?.dealer_relationship?.organization_name,
+    boat?.oem_relationship?.organization_name,
+    boat?.owner_relationship?.owner_name,
+    boat?.template?.manufacturer,
+    boat?.template?.model,
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function fleetFilterMatchesBoat(boat, filter) {
+  const state = String(boat?.activation?.status || boat?.owner_state || "").toLowerCase();
+  const text = boatSearchText(boat);
+  if (filter === "needs_owner") return state.includes("pending owner") || state.includes("unclaimed") || state.includes("owner unknown");
+  if (filter === "connected") return Boolean(boat?.owner_relationship?.owner_name) || state.includes("activated") || state.includes("connected");
+  if (filter === "dealer") return Boolean(boat?.dealer_relationship?.organization_name);
+  if (filter === "56ls") return text.includes("56 ls") || text.includes("56ls");
+  if (filter === "39") return text.includes("39 ls") || text.includes("39 le") || text.includes("39ls") || text.includes("39le");
+  return true;
+}
+
+function imageContextLabelForBoat(boat, heroUri) {
+  const rowHeroUri = heroUri || heroUriFromBoat(boat);
+  if (rowHeroUri) return "Asset photo";
+  return "Catalog image";
+}
+
+function FleetFilters({ value, onChange }) {
+  return (
+    <View style={styles.fleetFilterRow}>
+      {FLEET_FILTERS.map((filter) => {
+        const selected = value === filter.key;
+        return (
+          <TouchableOpacity
+            key={filter.key}
+            accessibilityRole="button"
+            accessibilityLabel={`Filter ${filter.label}`}
+            style={[styles.fleetFilterChip, selected && styles.fleetFilterChipActive]}
+            onPress={() => onChange(filter.key)}
+            activeOpacity={0.86}
+          >
+            <Text style={[styles.fleetFilterText, selected && styles.fleetFilterTextActive]}>{filter.label}</Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
+
+function BoatResultRow({ boat, onPress, heroUri = null }) {
+  const dealer = boat?.dealer_relationship;
+  const oem = boat?.oem_relationship;
+  const activation = boat?.activation || {};
+  const state = activation.status || boat?.owner_state || "in review";
+  const tone = statusTone(state);
+  const heroSource = heroSourceForBoat(boat, heroUri);
+  const imageLabel = imageContextLabelForBoat(boat, heroUri);
+
+  return (
+    <TouchableOpacity
+      accessibilityRole="button"
+      accessibilityLabel={`Open ${boat?.asset_name || "boat"}`}
+      style={styles.resultRow}
+      onPress={onPress}
+      activeOpacity={0.88}
+    >
+      <ImageBackground source={heroSource} resizeMode="cover" style={styles.resultThumb} imageStyle={styles.resultThumbImage}>
+        <View style={styles.resultImageBadge}>
+          <Text style={styles.resultImageBadgeText}>{imageLabel}</Text>
+        </View>
+      </ImageBackground>
+      <View style={styles.resultMain}>
+        <View style={styles.resultTitleRow}>
+          <View style={styles.resultTitleWrap}>
+            <Text style={styles.resultTitle} numberOfLines={1}>{boat?.asset_name || "Untitled boat"}</Text>
+            <Text style={styles.resultSubtitle} numberOfLines={1}>{titleForBoat(boat)}</Text>
+          </View>
+          <View style={[styles.statePill, styles[`statePill_${tone}`]]}>
+            <Text style={[styles.statePillText, styles[`statePillText_${tone}`]]} numberOfLines={1}>
+              {labelize(state)}
+            </Text>
+          </View>
+        </View>
+        <View style={styles.resultMetaGrid}>
+          <View style={styles.resultMetaCell}>
+            <Text style={styles.relationshipLabel}>Keepr Code</Text>
+            <Text style={styles.relationshipValue} numberOfLines={1}>{boat?.kac_id || "Pending"}</Text>
+          </View>
+          <View style={styles.resultMetaCell}>
+            <Text style={styles.relationshipLabel}>HIN</Text>
+            <Text style={styles.relationshipValue} numberOfLines={1}>{boat?.identity?.hin || boat?.identity?.hull_number || "Not set"}</Text>
+          </View>
+          <View style={styles.resultMetaCell}>
+            <Text style={styles.relationshipLabel}>Dealer</Text>
+            <Text style={styles.relationshipValue} numberOfLines={1}>{dealer?.organization_name || "Not connected"}</Text>
+          </View>
+          <View style={styles.resultMetaCell}>
+            <Text style={styles.relationshipLabel}>Builder</Text>
+            <Text style={styles.relationshipValue} numberOfLines={1}>{oem?.organization_name || boat?.template?.manufacturer || "Not connected"}</Text>
+          </View>
+        </View>
+      </View>
+      <View style={styles.resultOpen}>
+        <Text style={styles.openTwinText}>Open Keepr</Text>
+        <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+const CX_JOB_CARDS = [
+  {
+    key: "find",
+    title: "Find a Boat / Owner",
+    meta: "Global search",
+    icon: "search-outline",
+    mode: "fleet",
+  },
+  {
+    key: "add",
+    title: "Add Boat",
+    meta: "Create or resolve",
+    icon: "add-circle-outline",
+    mode: "addBoat",
+    addBoatMode: "create",
+  },
+  {
+    key: "import",
+    title: "Import Fleet",
+    meta: "Factory and list work",
+    icon: "cloud-upload-outline",
+    mode: "builds",
+  },
+  {
+    key: "needs-owner",
+    title: "Needs Owner",
+    meta: "Unclaimed handoffs",
+    icon: "person-add-outline",
+    mode: "addBoat",
+    addBoatMode: "find",
+  },
+  {
+    key: "connected",
+    title: "Connected Owners",
+    meta: "Active relationships",
+    icon: "people-outline",
+    mode: "fleet",
+  },
+  {
+    key: "recent",
+    title: "Recent / Needs Attention",
+    meta: "Follow-up queue",
+    icon: "notifications-outline",
+    mode: "needs",
+  },
+];
+
+function CxJobLanding({ counts, onSelect }) {
+  return (
+    <View style={styles.cxLanding}>
+      <View style={styles.cxLandingHeader}>
+        <View>
+          <Text style={styles.sectionKicker}>CX workspace</Text>
+          <Text style={styles.sectionTitle}>What job are you doing?</Text>
+        </View>
+        <View style={styles.commandBadge}>
+          <Text style={styles.commandBadgeText}>{counts?.visible_boats || 0} boats</Text>
+        </View>
+      </View>
+      <View style={styles.cxJobGrid}>
+        {CX_JOB_CARDS.map((item) => (
+          <TouchableOpacity
+            key={item.key}
+            accessibilityRole="button"
+            accessibilityLabel={item.title}
+            style={styles.cxJobCard}
+            onPress={() => onSelect(item)}
+            activeOpacity={0.86}
+          >
+            <View style={styles.cxJobIcon}>
+              <Ionicons name={item.icon} size={18} color={colors.brandBlue} />
+            </View>
+            <View style={styles.cxJobText}>
+              <Text style={styles.cxJobTitle} numberOfLines={1}>{item.title}</Text>
+              <Text style={styles.cxJobMeta} numberOfLines={1}>{item.meta}</Text>
+            </View>
+          </TouchableOpacity>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 function BoatCard({ boat, onPress, view = "default", heroUri = null }) {
   const dealer = boat?.dealer_relationship;
   const oem = boat?.oem_relationship;
-  const verification = boat?.verification || {};
   const activation = boat?.activation || {};
-  const readiness = `${verification.percent || 0}% verified`;
   const state = activation.status || boat?.owner_state || "in review";
   const tone = statusTone(state);
   const isServiceView = view === "service";
   const roleLabel = dealer?.relationship_purpose || dealer?.relationship_type || "Service";
   const serviceStatus = dealer?.status || activation.status || boat?.owner_state || "Active";
   const heroSource = heroSourceForBoat(boat, heroUri);
+  const imageLabel = imageContextLabelForBoat(boat, heroUri);
 
   return (
-    <TouchableOpacity style={styles.boatCard} onPress={onPress} activeOpacity={0.9}>
-      <ImageBackground source={heroSource} resizeMode="cover" style={styles.cardImage} imageStyle={styles.cardImageAsset}>
+    <View style={styles.boatCard}>
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel={`Open ${boat?.asset_name || "boat"}`}
+        onPress={onPress}
+        activeOpacity={0.9}
+      >
+        <ImageBackground source={heroSource} resizeMode="cover" style={styles.cardImage} imageStyle={styles.cardImageAsset}>
         <View style={styles.cardShade}>
           <View style={styles.statusRibbon}>
-            <Ionicons name="shield-checkmark-outline" size={13} color={colors.onPrimary} />
-            <Text style={styles.statusRibbonText}>{readiness}</Text>
+            <Ionicons name="image-outline" size={13} color={colors.onPrimary} />
+            <Text style={styles.statusRibbonText}>{imageLabel}</Text>
           </View>
         </View>
-      </ImageBackground>
+        </ImageBackground>
+      </TouchableOpacity>
 
       <View style={styles.cardBody}>
-        <View style={styles.cardHeader}>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel={`Open ${boat?.asset_name || "boat"}`}
+          style={styles.cardHeader}
+          onPress={onPress}
+          activeOpacity={0.86}
+        >
           <View style={styles.cardTitleWrap}>
             <Text style={styles.cardTitle} numberOfLines={1}>{boat?.asset_name || "Untitled boat"}</Text>
             <Text style={styles.cardSubtitle} numberOfLines={1}>{titleForBoat(boat)}</Text>
@@ -1016,7 +1546,7 @@ function BoatCard({ boat, onPress, view = "default", heroUri = null }) {
               {labelize(state)}
             </Text>
           </View>
-        </View>
+        </TouchableOpacity>
 
         {isServiceView ? (
           <View style={styles.serviceRelationshipStrip}>
@@ -1034,20 +1564,33 @@ function BoatCard({ boat, onPress, view = "default", heroUri = null }) {
                 </Text>
               </View>
             </View>
-            <View style={styles.serviceRelationshipOpen}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={`Open service workspace for ${boat?.asset_name || "boat"}`}
+              style={styles.serviceRelationshipOpen}
+              onPress={onPress}
+              activeOpacity={0.86}
+            >
               <Text style={styles.serviceRelationshipOpenText}>Open service workspace</Text>
               <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-            </View>
+            </TouchableOpacity>
           </View>
         ) : (
           <>
-            <View style={styles.identityStrip}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={`Open digital twin for ${boat?.asset_name || "boat"}`}
+              style={styles.identityStrip}
+              onPress={onPress}
+              activeOpacity={0.86}
+            >
               <View>
                 <Text style={styles.stripLabel}>Keepr Code</Text>
                 <Text style={styles.stripValue} numberOfLines={1}>{boat?.kac_id || "Pending"}</Text>
               </View>
+              <Text style={styles.openTwinText}>Open Digital Twin</Text>
               <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-            </View>
+            </TouchableOpacity>
 
             <View style={styles.relationshipGrid}>
               <View style={styles.relationshipCell}>
@@ -1072,7 +1615,7 @@ function BoatCard({ boat, onPress, view = "default", heroUri = null }) {
           </>
         )}
       </View>
-    </TouchableOpacity>
+    </View>
   );
 }
 
@@ -1122,14 +1665,16 @@ function NetworkPanel({ data, copy, workspace }) {
 
 function CatalogCard({ template, onPress }) {
   const stats = template?.metadata?.hero_specs || {};
+  const fallbackStats = fallbackTemplateStats(template);
   const heroMedia = heroMediaFromTemplate(template);
+  const imageLabel = heroMedia ? "Model media" : "Needs model hero";
   return (
     <TouchableOpacity style={styles.catalogCard} onPress={onPress} activeOpacity={0.9}>
       <ImageBackground source={mediaAsset(heroMedia)} resizeMode="cover" style={styles.catalogImage} imageStyle={styles.catalogImageAsset}>
         <View style={styles.catalogShade}>
           <View style={styles.catalogBadge}>
             <Ionicons name="library-outline" size={13} color={colors.onPrimary} />
-            <Text style={styles.catalogBadgeText}>OEM catalog</Text>
+            <Text style={styles.catalogBadgeText}>{imageLabel}</Text>
           </View>
         </View>
       </ImageBackground>
@@ -1142,16 +1687,19 @@ function CatalogCard({ template, onPress }) {
           Published model guide with standards, options, resources, care, and exact-hull activation context.
         </Text>
         <View style={styles.catalogSpecs}>
-          <Text style={styles.catalogSpec}>{stats.loa || "39'6\""} LOA</Text>
-          <Text style={styles.catalogSpec}>{stats.beam || "12'6\""} Beam</Text>
-          <Text style={styles.catalogSpec}>{stats.max_hp || "1,200 HP"}</Text>
+          <Text style={styles.catalogSpec}>{stats.loa || fallbackStats.loa} LOA</Text>
+          <Text style={styles.catalogSpec}>{stats.beam || fallbackStats.beam} Beam</Text>
+          <Text style={styles.catalogSpec}>{stats.max_hp || fallbackStats.max_hp}</Text>
         </View>
       </View>
     </TouchableOpacity>
   );
 }
 
-function CatalogPanel({ templates, loading, onOpen, adminView = false }) {
+function CatalogPanel({ templates, loading, onOpen, onOpenDraft, onOpenSourceReview, adminView = false }) {
+  const draftModels = [draftForCatalogModel("43 LS")].filter(Boolean);
+  const sourceReviewTemplates = templates.filter((template) => template.template_key === TIARA_43_LS_TEMPLATE_KEY);
+
   return (
     <View style={styles.catalogPanel}>
       <View style={styles.networkHeader}>
@@ -1173,16 +1721,89 @@ function CatalogPanel({ templates, loading, onOpen, adminView = false }) {
         <View style={styles.centeredSmall}>
           <ActivityIndicator color={colors.brandBlue} />
         </View>
-      ) : templates.length ? (
-        <View style={styles.catalogGrid}>
-          {templates.map((template) => (
-            <CatalogCard
-              key={template.id}
-              template={template}
-              onPress={() => onOpen(template)}
-            />
-          ))}
-        </View>
+      ) : templates.length || draftModels.length ? (
+        <>
+          {draftModels.length ? (
+            <View style={styles.draftNotice}>
+              <View style={styles.draftNoticeIcon}>
+                <Ionicons name="sparkles-outline" size={17} color={colors.brandBlue} />
+              </View>
+              <View style={styles.draftNoticeText}>
+                <Text style={styles.draftNoticeTitle}>43 LS source draft ready for review</Text>
+                <Text style={styles.draftNoticeBody}>
+                  Review extracted source facts before publishing them into the reusable Model Catalog.
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.draftNoticeButton}
+                onPress={() => onOpenDraft?.(draftModels[0])}
+                activeOpacity={0.86}
+              >
+                <Text style={styles.draftNoticeButtonText}>Review Draft</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+          {templates.length ? (
+            <View style={styles.catalogGrid}>
+              {templates.map((template) => (
+                <CatalogCard
+                  key={template.id}
+                  template={template}
+                  onPress={() => onOpen(template)}
+                />
+              ))}
+            </View>
+          ) : null}
+          {(draftModels.length || sourceReviewTemplates.length) ? (
+            <View style={styles.templateWorkPanel}>
+              <View style={styles.templateWorkHeader}>
+                <View>
+                  <Text style={styles.sectionKicker}>Template Work</Text>
+                  <Text style={styles.sectionTitle}>Drafts and source reviews</Text>
+                </View>
+                <Text style={styles.mutedText}>
+                  {draftModels.length + sourceReviewTemplates.length} visible
+                </Text>
+              </View>
+              <View style={styles.templateWorkGrid}>
+                {draftModels.map((draft) => (
+                  <TouchableOpacity
+                    key={draft.draft_key}
+                    activeOpacity={0.86}
+                    style={styles.templateWorkCard}
+                    onPress={() => onOpenDraft?.(draft)}
+                  >
+                    <View style={styles.templateWorkIcon}>
+                      <Ionicons name="document-text-outline" size={17} color={colors.brandBlue} />
+                    </View>
+                    <View style={styles.templateWorkText}>
+                      <Text style={styles.templateWorkTitle}>43 LS template draft</Text>
+                      <Text style={styles.templateWorkMeta}>Review source facts before publishing to Models.</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+                  </TouchableOpacity>
+                ))}
+                {sourceReviewTemplates.map((template) => (
+                  <TouchableOpacity
+                    key={`${template.template_key}-source-review`}
+                    activeOpacity={0.86}
+                    style={styles.templateWorkCard}
+                    onPress={() => onOpenSourceReview?.(template)}
+                  >
+                    <View style={styles.templateWorkIcon}>
+                      <Ionicons name="git-branch-outline" size={17} color={colors.brandBlue} />
+                    </View>
+                    <View style={styles.templateWorkText}>
+                      <Text style={styles.templateWorkTitle}>43 LS source review</Text>
+                      <Text style={styles.templateWorkMeta}>Review extracted model-source knowledge for the published template.</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          ) : null}
+        </>
       ) : (
         <Text style={styles.mutedTextLeft}>No published model guides are visible for this workspace yet.</Text>
       )}
@@ -1190,7 +1811,7 @@ function CatalogPanel({ templates, loading, onOpen, adminView = false }) {
   );
 }
 
-function ProductionBuildsPanel({ templates, loading, onBuild, workspaceKindValue, onOpenAsset, onAddBoat }) {
+function ProductionBuildsPanel({ templates, loading, onBuild, onOpenDraft, workspaceKindValue, onOpenAsset, onAddBoat }) {
   const isDealerLike = workspaceKindValue === "dealer" || workspaceKindValue === "pro";
   if (isDealerLike) {
     const primaryBrands = WILSON_REPRESENTED_BRANDS.slice(0, 8);
@@ -1312,6 +1933,18 @@ function ProductionBuildsPanel({ templates, loading, onBuild, workspaceKindValue
       <Text style={styles.networkText}>
         Builders create new KACs from the customized OEM catalog, configure exact hull options, assign HIN/build details, then freeze the factory layer for dealer assignment.
       </Text>
+      <View style={styles.layerMap}>
+        {[
+          ["Model Catalog", "Tiara 56 LS template"],
+          ["Factory Build", "KF018 work order"],
+          ["Digital Twin", "Operational asset"],
+        ].map(([label, value]) => (
+          <View key={label} style={styles.layerMapItem}>
+            <Text style={styles.layerMapLabel}>{label}</Text>
+            <Text style={styles.layerMapValue}>{value}</Text>
+          </View>
+        ))}
+      </View>
       <View style={styles.newBuildCatalog}>
         <View style={styles.newBuildHeader}>
           <View>
@@ -1330,19 +1963,33 @@ function ProductionBuildsPanel({ templates, loading, onBuild, workspaceKindValue
               <View style={styles.modelList}>
                 {series.models.map((model) => {
                   const template = templateForCatalogModel(templates, model);
+                  const draft = template ? null : draftForCatalogModel(model);
+                  const enabled = Boolean(template || draft);
                   return (
                     <TouchableOpacity
                       key={model}
-                      activeOpacity={template ? 0.86 : 1}
-                      disabled={!template}
-                      onPress={() => template && onBuild(template)}
-                      style={[styles.modelOption, template && styles.modelOptionReady]}
+                      activeOpacity={enabled ? 0.86 : 1}
+                      disabled={!enabled}
+                      onPress={() => template ? onBuild(template) : onOpenDraft?.(draft)}
+                      style={[
+                        styles.modelOption,
+                        template && styles.modelOptionReady,
+                        draft && styles.modelOptionDraft,
+                      ]}
                     >
-                      <Text style={[styles.modelOptionText, template && styles.modelOptionTextReady]}>
+                      <Text style={[
+                        styles.modelOptionText,
+                        template && styles.modelOptionTextReady,
+                        draft && styles.modelOptionTextDraft,
+                      ]}>
                         {model}
                       </Text>
-                      <Text style={[styles.modelOptionState, template && styles.modelOptionStateReady]}>
-                        {template ? "Start" : "Not configured"}
+                      <Text style={[
+                        styles.modelOptionState,
+                        template && styles.modelOptionStateReady,
+                        draft && styles.modelOptionStateDraft,
+                      ]}>
+                        {template ? "Start" : draft ? "Draft" : "Not configured"}
                       </Text>
                     </TouchableOpacity>
                   );
@@ -1375,7 +2022,7 @@ function ProductionBuildsPanel({ templates, loading, onBuild, workspaceKindValue
         ) : (
           <View style={styles.buildQueue}>
             {DEMO_BUILDS_IN_PROGRESS.map((build) => {
-              const template = templates.find((item) => item.template_key === build.templateKey);
+              const template = templates.find((item) => item.template_key === build.templateKey) || { template_key: build.templateKey };
               const tone = statusTone(build.state);
               return (
                 <View key={build.key} style={styles.buildQueueRow}>
@@ -1393,12 +2040,27 @@ function ProductionBuildsPanel({ templates, loading, onBuild, workspaceKindValue
                   </View>
                   <TouchableOpacity
                     style={styles.buildQueueButton}
-                    onPress={() => template && onBuild(template)}
+                    onPress={() => onBuild({
+                      ...template,
+                      template_key: template.template_key,
+                      buildKey: build.buildKey || null,
+                      hullNumber: build.hullNumber || null,
+                    })}
                     activeOpacity={0.86}
                   >
                     <Ionicons name="construct-outline" size={15} color={colors.onPrimary} />
                     <Text style={styles.buildQueueButtonText}>{build.action}</Text>
                   </TouchableOpacity>
+                  {build.assetId && onOpenAsset ? (
+                    <TouchableOpacity
+                      style={styles.buildQueueSecondaryButton}
+                      onPress={() => onOpenAsset({ asset_id: build.assetId, kac_id: build.kac })}
+                      activeOpacity={0.86}
+                    >
+                      <Ionicons name="boat-outline" size={15} color={colors.brandBlue} />
+                      <Text style={styles.buildQueueSecondaryButtonText}>Open Digital Twin</Text>
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
               );
             })}
@@ -2576,6 +3238,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   const [modeState, setModeState] = useState(initialMode);
   const [projectionMode, setProjectionMode] = useState(defaultWorkspaceProjection(currentWorkspace) || "service");
   const [search, setSearch] = useState("");
+  const [fleetFilter, setFleetFilter] = useState("all");
   const [orgs, setOrgs] = useState({});
   const [brandProfile, setBrandProfile] = useState(defaultBrandProfile(currentWorkspace));
   const [data, setData] = useState(null);
@@ -2608,9 +3271,61 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   const isPersonalKeepr = currentKind === "owner";
   const workAreas = useMemo(() => workAreasForProjection(currentWorkspace, activeProjection), [currentWorkspace, activeProjection]);
   const mode = fixedMode || modeState;
+  const routeInitialMode = route?.params?.initialMode || null;
+  const routeWorkspaceId = route?.params?.workspaceId || null;
+  const routeNavSection = route?.params?.navSection || null;
+  const syncModeRoute = useCallback((nextMode) => {
+    if (fixedMode) return;
+
+    const navSection = navSectionForActivatorMode(nextMode);
+    const routeOrganizationId = route?.params?.organizationId || organizationIdFromWorkspaceId(routeWorkspaceId);
+    const routeOrgWorkspace = routeOrganizationId
+      ? workspaces.find((workspace) =>
+          workspaceMatchesOrganization(workspace, routeOrganizationId) &&
+          workspace.workspace_type &&
+          workspace.workspace_type !== "keepr"
+        )
+      : null;
+    const activeWorkspace = currentWorkspace?.workspace_type === "keepr" && routeOrgWorkspace
+      ? routeOrgWorkspace
+      : currentWorkspace;
+    const workspaceId = activeWorkspace?.workspace_type === "keepr"
+      ? routeWorkspaceId || null
+      : activeWorkspace?.workspace_id || routeWorkspaceId || null;
+    const organizationId = workspaceOrganizationId(activeWorkspace) || routeOrganizationId || null;
+    if (
+      routeInitialMode === nextMode &&
+      routeNavSection === navSection &&
+      routeWorkspaceId === workspaceId
+    ) {
+      return;
+    }
+
+    setActivatorWebUrl(nextMode, { workspaceId, organizationId });
+
+    try {
+      navigation.setParams?.({ initialMode: nextMode, navSection, workspaceId, organizationId });
+    } catch (err) {
+      console.error("Activator mode route update failed:", err);
+    }
+  }, [
+    currentWorkspace?.org_id,
+    currentWorkspace?.organization_id,
+    currentWorkspace?.workspace_id,
+    currentWorkspace?.workspace_type,
+    fixedMode,
+    navigation,
+    route?.params?.organizationId,
+    routeInitialMode,
+    routeNavSection,
+    routeWorkspaceId,
+    workspaces,
+  ]);
+
   const setMode = useCallback((nextMode) => {
     if (!fixedMode) {
-      setModeState(nextMode);
+      setModeState((current) => current === nextMode ? current : nextMode);
+      syncModeRoute(nextMode);
       return;
     }
 
@@ -2626,21 +3341,58 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
         const targetParams = { workspaceId: currentWorkspace?.workspace_id || null };
         navigation.navigate(routeForMode, targetParams);
       } catch (err) {
-        console.error("Wilson in-page navigation failed:", err);
+        console.error("KeeprSpace in-page navigation failed:", err);
       }
     }
-  }, [currentWorkspace?.workspace_id, fixedMode, navigation]);
+  }, [currentWorkspace?.workspace_id, fixedMode, navigation, syncModeRoute]);
 
-  const navigateWilsonBoat = useCallback((params) => {
+  const navigateKeeprSpaceBoat = useCallback((params) => {
     try {
-      navigation.navigate("KeeprSpaceBoat", params);
+      navigation.navigate("KeeprSpaceModule", {
+        screen: "KeeprSpaceBoat",
+        params,
+      });
     } catch (err) {
-      console.error("Wilson boat navigation failed:", err);
+      console.error("KeeprSpace boat navigation failed:", err);
+    }
+  }, [navigation]);
+
+  const navigateCanonicalBoatStory = useCallback((params) => {
+    try {
+      navigation.navigate("BoatStory", params);
+    } catch (err) {
+      console.error("Canonical boat story navigation failed:", err);
     }
   }, [navigation]);
 
   useEffect(() => {
     const requestedWorkspaceId = route?.params?.workspaceId;
+    const requestedOrganizationId = route?.params?.organizationId || organizationIdFromWorkspaceId(requestedWorkspaceId);
+    if (
+      isPersonalFallbackWorkspaceId(requestedWorkspaceId) &&
+      requestedOrganizationId
+    ) {
+      const orgWorkspace = workspaces.find((workspace) =>
+        workspaceMatchesOrganization(workspace, requestedOrganizationId) &&
+        workspace.workspace_type &&
+        workspace.workspace_type !== "keepr"
+      );
+      if (orgWorkspace?.workspace_id && orgWorkspace.workspace_id !== currentWorkspace?.workspace_id) {
+        setCurrentWorkspaceId(orgWorkspace.workspace_id);
+      }
+      return;
+    }
+    if (requestedOrganizationId && requestedWorkspaceId?.startsWith?.("org:")) {
+      const orgWorkspace = workspaces.find((workspace) =>
+        workspaceMatchesOrganization(workspace, requestedOrganizationId) &&
+        workspace.workspace_type &&
+        workspace.workspace_type !== "keepr"
+      );
+      if (orgWorkspace?.workspace_id && orgWorkspace.workspace_id !== currentWorkspace?.workspace_id) {
+        setCurrentWorkspaceId(orgWorkspace.workspace_id);
+      }
+      return;
+    }
     if (
       requestedWorkspaceId &&
       requestedWorkspaceId !== currentWorkspace?.workspace_id &&
@@ -2648,7 +3400,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
     ) {
       setCurrentWorkspaceId(requestedWorkspaceId);
     }
-  }, [currentWorkspace?.workspace_id, route?.params?.workspaceId, setCurrentWorkspaceId, workspaces]);
+  }, [currentWorkspace?.workspace_id, route?.params?.organizationId, route?.params?.workspaceId, setCurrentWorkspaceId, workspaces]);
 
   useEffect(() => {
     setBrandProfile(defaultBrandProfile(currentWorkspace));
@@ -2670,15 +3422,22 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
 
   useEffect(() => {
     if (fixedMode) return;
-    const requestedMode = route?.params?.initialMode;
+    const requestedMode = routeInitialMode;
     if (requestedMode && workAreas.some((area) => area.key === requestedMode)) {
-      setMode(requestedMode);
+      setModeState((current) => current === requestedMode ? current : requestedMode);
     }
-  }, [fixedMode, route?.params?.initialMode, setMode, workAreas]);
+  }, [fixedMode, routeInitialMode, workAreas]);
 
   useEffect(() => {
     if (fixedMode) return;
-    if (!route?.params?.initialMode && currentKind === "pro" && mode === "fleet") {
+    if (
+      currentWorkspace?.workspace_type === "keepr" &&
+      route?.params?.organizationId &&
+      route?.params?.workspaceId?.startsWith?.("org:")
+    ) {
+      return;
+    }
+    if (!routeInitialMode && currentKind === "pro" && mode === "fleet") {
       setMode(workAreas[0]?.key || "needs");
       return;
     }
@@ -2686,7 +3445,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
     if (!workAreas.some((area) => area.key === mode)) {
       setMode(workAreas[0]?.key || "fleet");
     }
-  }, [currentKind, fixedMode, mode, route?.params?.initialMode, setMode, workAreas]);
+  }, [currentKind, fixedMode, mode, routeInitialMode, setMode, workAreas]);
 
   useEffect(() => {
     if (!isPersonalKeepr) return;
@@ -2727,6 +3486,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
         if (!Object.keys(orgs || {}).length) setOrgs(nextOrgs);
         const nextFilters = normalizeFilters({ workspace: currentWorkspace, search, orgs: nextOrgs });
         nextData = await getActivatorBoatBrowser(nextFilters);
+        nextData = withKf018FleetProjection(nextData, currentWorkspace, search);
       }
       setData(nextData);
 
@@ -2773,14 +3533,29 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
 
   const boats = data?.boats || [];
   const counts = data?.counts || {};
+  const fleetResults = useMemo(
+    () => boats.filter((boat) => fleetFilterMatchesBoat(boat, fleetFilter)),
+    [boats, fleetFilter]
+  );
+  const heroOrganizationId = currentWorkspace?.organization_id || currentWorkspace?.org_id || route?.params?.organizationId || null;
+  const heroAssetIds = useMemo(
+    () => Array.from(new Set(boats.map(assetIdForBoat).filter(Boolean))),
+    [boats]
+  );
+  const heroAssetIdsKey = heroAssetIds.join("|");
 
   useEffect(() => {
     let active = true;
-    const ids = boats.map((boat) => boat.asset_id || boat.id).filter(Boolean);
 
     async function loadAssetHeroes() {
-      const urls = await fetchAssetHeroUris(ids, {
+      if (!heroAssetIds.length) {
+        setAssetHeroUrls({});
+        return;
+      }
+
+      const urls = await fetchAssetHeroUris(heroAssetIds, {
         transform: { width: 900, quality: 80 },
+        organizationId: heroOrganizationId,
       });
       if (active) setAssetHeroUrls(urls);
     }
@@ -2789,7 +3564,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
     return () => {
       active = false;
     };
-  }, [boats]);
+  }, [heroAssetIdsKey, heroOrganizationId]);
 
   const refresh = () => {
     setRefreshing(true);
@@ -2797,28 +3572,68 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   };
 
   const openBoat = (boat) => {
+    const resolvedAssetId = boat?.asset_id || boat?.id || null;
+    const resolvedOrgId = boat?.organization_id || currentWorkspace?.organization_id || currentWorkspace?.org_id || null;
+
+    if (mode === "builds" && (boat?.source_type === "factory_build_workspace" || boat?.exact_build?.build_key)) {
+      if (openActivatorWebPath(`/activator/build/${encodeURIComponent(boat?.exact_build?.template_key || boat?.template?.template_key || TIARA_56_LS_TEMPLATE_KEY)}`, {
+        buildKey: boat?.exact_build?.build_key || null,
+        hullNumber: boat?.exact_build?.hull_number || boat?.identity?.hull_number || boat?.identity?.hin || null,
+        parentRoute: fixedMode ? "KeeprSpaceFleet" : "ActivatorHome",
+        organizationId: resolvedOrgId,
+        workspaceId: currentWorkspace?.workspace_id || null,
+      })) return;
+
+      navigation.navigate("ActivatorExactBuild", {
+        templateKey: boat?.exact_build?.template_key || boat?.template?.template_key || TIARA_56_LS_TEMPLATE_KEY,
+        buildKey: boat?.exact_build?.build_key || null,
+        hullNumber: boat?.exact_build?.hull_number || boat?.identity?.hull_number || boat?.identity?.hin || null,
+        parentRoute: fixedMode ? "KeeprSpaceFleet" : "ActivatorHome",
+        organizationId: resolvedOrgId,
+        workspaceId: currentWorkspace?.workspace_id || null,
+      });
+      return;
+    }
+
+    const assetParams = {
+      assetId: resolvedAssetId,
+      kac: boat.kac_id,
+      organizationId: resolvedOrgId,
+      stewardshipId: boat.stewardship_id || boat.service_relationship?.stewardship_id || null,
+      parentRoute: fixedMode ? "KeeprSpaceFleet" : "ActivatorHome",
+      workspaceId: currentWorkspace?.workspace_id || null,
+      systemsRole: activeProjection || (currentKind === "oem" ? "oem" : null),
+    };
+
+    if (mode === "fleet" && resolvedAssetId && currentKind === "oem") {
+      navigateCanonicalBoatStory({
+        boatId: resolvedAssetId,
+        assetId: resolvedAssetId,
+        kac: boat.kac_id,
+        organizationId: resolvedOrgId,
+        workspaceId: currentWorkspace?.workspace_id || null,
+        relationshipRole: "oem",
+        teamMemberType: "oem",
+        systemsRole: activeProjection || "oem",
+        parentRoute: fixedMode ? "KeeprSpaceFleet" : "ActivatorHome",
+      });
+      return;
+    }
+
+    if (mode === "fleet" && resolvedAssetId) {
+      navigateKeeprSpaceBoat(assetParams);
+      return;
+    }
+
     if (activeProjection === "service") {
       if (fixedMode) {
-        const params = {
-          assetId: boat.asset_id,
-          kac: boat.kac_id,
-          organizationId: boat.organization_id || currentWorkspace?.organization_id || currentWorkspace?.org_id || null,
-          stewardshipId: boat.stewardship_id || boat.service_relationship?.stewardship_id || null,
-          parentRoute: "KeeprSpaceFleet",
-          workspaceId: currentWorkspace?.workspace_id || null,
-        };
-        navigateWilsonBoat(params);
+        navigateKeeprSpaceBoat(assetParams);
         return;
       }
 
       navigation.navigate("KeeprProStack", {
         screen: "KeeprProStewardshipView",
-        params: {
-          assetId: boat.asset_id,
-          kac: boat.kac_id,
-          organizationId: boat.organization_id || currentWorkspace?.organization_id || currentWorkspace?.org_id || null,
-          stewardshipId: boat.stewardship_id || boat.service_relationship?.stewardship_id || null,
-        },
+        params: assetParams,
       });
       return;
     }
@@ -2830,16 +3645,77 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   };
 
   const openCatalogTemplate = (template) => {
+    if (openActivatorWebPath(`/activator/catalog/${encodeURIComponent(template.template_key)}`, {
+      organizationId: workspaceOrganizationId(currentWorkspace),
+      workspaceId: currentWorkspace?.workspace_id || null,
+    })) return;
+
     navigation.navigate("ActivatorCatalogTemplate", {
       templateKey: template.template_key,
     });
   };
 
-  const openExactBuild = (template) => {
-    navigation.navigate("ActivatorExactBuild", {
-      templateKey: template.template_key,
+  const openTemplateDraft = (draft) => {
+    if (openActivatorWebPath(`/activator/catalog-drafts/${encodeURIComponent(draft.draft_key)}`, {
+      organizationId: workspaceOrganizationId(currentWorkspace),
+      workspaceId: currentWorkspace?.workspace_id || null,
+    })) return;
+
+    navigation.navigate("ActivatorTemplateDraft", {
+      draftKey: draft.draft_key,
+      organizationId: workspaceOrganizationId(currentWorkspace),
+      workspaceId: currentWorkspace?.workspace_id || null,
     });
   };
+
+  const openTemplateSourceReview = (template) => {
+    if (openActivatorWebPath(`/activator/catalog/${encodeURIComponent(template.template_key)}/customize`, {
+      organizationId: workspaceOrganizationId(currentWorkspace),
+      workspaceId: currentWorkspace?.workspace_id || null,
+    })) return;
+
+    navigation.navigate("ActivatorTemplateCustomize", {
+      templateKey: template.template_key,
+      organizationId: workspaceOrganizationId(currentWorkspace),
+      workspaceId: currentWorkspace?.workspace_id || null,
+    });
+  };
+
+  const openExactBuild = (template) => {
+    if (openActivatorWebPath(`/activator/build/${encodeURIComponent(template.template_key)}`, {
+      buildKey: template.buildKey || null,
+      hullNumber: template.hullNumber || null,
+      parentRoute: fixedMode ? "KeeprSpaceFleet" : "ActivatorHome",
+      organizationId: workspaceOrganizationId(currentWorkspace),
+      workspaceId: currentWorkspace?.workspace_id || null,
+    })) return;
+
+    navigation.navigate("ActivatorExactBuild", {
+      templateKey: template.template_key,
+      buildKey: template.buildKey || null,
+      hullNumber: template.hullNumber || null,
+      parentRoute: fixedMode ? "KeeprSpaceFleet" : "ActivatorHome",
+      organizationId: workspaceOrganizationId(currentWorkspace),
+      workspaceId: currentWorkspace?.workspace_id || null,
+    });
+  };
+
+  const openCoreAddBoat = useCallback((intent = "add_boat") => {
+    navigation.navigate("KeeprSpaceModule", {
+      screen: "KeeprSpaceActivator",
+      params: {
+        workspaceId: currentWorkspace?.workspace_id || null,
+        organizationId: workspaceOrganizationId(currentWorkspace),
+        intent,
+        parentRoute: "ActivatorHome",
+      },
+    });
+  }, [
+    currentWorkspace?.org_id,
+    currentWorkspace?.organization_id,
+    currentWorkspace?.workspace_id,
+    navigation,
+  ]);
 
   const pickBrandLogo = async () => {
     try {
@@ -3127,17 +4003,17 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   };
 
   const isDealerSalesMode = mode === "builds" && activeProjection === "sales" && currentKind !== "oem";
-  const buildsKicker = isDealerSalesMode ? "Dealer Activation" : "Hull Configuration";
-  const buildsTitle = isDealerSalesMode ? "Delivery Prep" : "Configure Hulls";
-  const buildsMetricLabel = isDealerSalesMode ? "Brand paths" : "Monthly pace";
-  const buildsMetricValue = isDealerSalesMode ? String(WILSON_REPRESENTED_BRANDS.length) : "~600";
+  const buildsKicker = isDealerSalesMode ? "Delivery" : "Work";
+  const buildsTitle = isDealerSalesMode ? "Delivery Prep" : "Work Queue";
+  const buildsMetricLabel = isDealerSalesMode ? "Brand paths" : "Work items";
+  const buildsMetricValue = isDealerSalesMode ? String(WILSON_REPRESENTED_BRANDS.length) : String(catalogTemplates.length + DEMO_BUILDS_IN_PROGRESS.length);
   const breadcrumbCurrent =
-    mode === "fleet" ? "Active Fleet" :
+    mode === "fleet" ? "Find" :
     mode === "builds" ? buildsTitle :
-    mode === "needs" ? "Needs Attention" :
+    mode === "needs" ? "Recent / Needs Attention" :
     mode === "messages" ? "Messages" :
-    mode === "addBoat" ? "Add Boat" :
-    mode === "templates" ? "Customize Catalog" :
+    mode === "addBoat" ? "Add / Connect" :
+    mode === "templates" ? "Model Catalog" :
     mode === "profile" ? (projectionSwitchable ? `${projectionLabel(activeProjection)} Profile` : currentKind === "oem" ? "OEM Profile" : "Profile") :
     "Dealer Network";
   const heroSource =
@@ -3225,24 +4101,32 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
         )}
 
         <View style={styles.workspaceShell}>
-          <WorkAreaRail
-            areas={workAreas}
-            mode={mode}
-            onChange={setMode}
-            copy={copy}
-            projectionMode={projectionMode}
-            onProjectionModeChange={setProjectionMode}
-            showProjectionSwitch={projectionSwitchable}
-          />
+          {currentKind !== "oem" ? (
+            <WorkAreaRail
+              areas={workAreas}
+              mode={mode}
+              onChange={(nextMode) => {
+                if (nextMode === "addBoat" && currentKind === "oem") {
+                  openCoreAddBoat("add_boat");
+                  return;
+                }
+                setMode(nextMode);
+              }}
+              copy={copy}
+              projectionMode={activeProjection}
+              onProjectionModeChange={setProjectionMode}
+              showProjectionSwitch={projectionSwitchable}
+            />
+          ) : null}
           <View style={styles.workspaceMain}>
             <View style={styles.commandBar}>
               <View style={styles.commandHeader}>
                 <View>
                   <Text style={styles.commandKicker}>
-                    {mode === "fleet" ? "Portfolio" : mode === "builds" ? buildsKicker : mode === "templates" ? "Catalog Customization" : mode === "profile" ? `${copy.modeMetric} Identity` : mode === "needs" ? "Service Queue" : mode === "messages" ? "Relationship Threads" : mode === "addBoat" ? "Resolve Before Create" : "Ecosystem"}
+                    {mode === "fleet" ? "Find" : mode === "builds" ? buildsKicker : mode === "templates" ? "Reference" : mode === "profile" ? "Admin" : mode === "needs" ? "Needs Attention" : mode === "messages" ? "Engage" : mode === "addBoat" ? "Add / Connect" : "Network"}
                   </Text>
                   <Text style={styles.commandTitle}>
-                    {mode === "fleet" ? "Active Fleet" : mode === "builds" ? buildsTitle : mode === "templates" ? "Customize Catalog" : mode === "profile" ? `${copy.modeMetric} Profile` : mode === "needs" ? "Needs Attention" : mode === "messages" ? "Messages" : mode === "addBoat" ? "Add Boat" : copy.networkTitle}
+                    {mode === "fleet" ? "Find a Boat / Owner" : mode === "builds" ? buildsTitle : mode === "templates" ? "Model Catalog" : mode === "profile" ? `${copy.modeMetric} Profile` : mode === "needs" ? "Recent / Needs Attention" : mode === "messages" ? "Messages" : mode === "addBoat" ? "Add Boat or Connect Owner" : copy.networkTitle}
                   </Text>
                 </View>
                 <View style={styles.commandBadge}>
@@ -3252,7 +4136,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
               {projectionSwitchable ? (
                 <View style={styles.commandProjectionRow}>
                   <Text style={styles.projectionHint}>
-                    Same organization, different operating projection.
+                    Choose whether this job is sales or service focused.
                   </Text>
                   <ProjectionModeSwitch
                     value={projectionMode}
@@ -3271,6 +4155,9 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
                   returnKeyType="search"
                 />
               </View>
+              {mode === "fleet" ? (
+                <FleetFilters value={fleetFilter} onChange={setFleetFilter} />
+              ) : null}
             </View>
 
             <View style={styles.metricsRow}>
@@ -3306,9 +4193,9 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
               <NeedsAttentionPanel data={data} onOpenAsset={openBoat} />
             ) : mode === "messages" ? (
               <MessagesPanel data={data} onOpenAsset={openBoat} />
-            ) : mode === "addBoat" ? (
+            ) : mode === "addBoat" || mode === "connect" ? (
               <AddBoatPanel
-                mode={addBoatMode}
+                mode={mode === "connect" ? "find" : addBoatMode}
                 onModeChange={setAddBoatMode}
                 query={addBoatQuery}
                 onQueryChange={setAddBoatQuery}
@@ -3336,6 +4223,8 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
                 templates={catalogTemplates}
                 loading={catalogLoading}
                 onOpen={openCatalogTemplate}
+                onOpenDraft={openTemplateDraft}
+                onOpenSourceReview={openTemplateSourceReview}
                 adminView
               />
             ) : mode === "builds" ? (
@@ -3343,6 +4232,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
                 templates={catalogTemplates}
                 loading={catalogLoading}
                 onBuild={openExactBuild}
+                onOpenDraft={openTemplateDraft}
                 workspaceKindValue={currentKind}
                 onOpenAsset={openBoat}
                 onAddBoat={() => setMode("addBoat")}
@@ -3357,17 +4247,45 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
             ) : error ? (
               <FoundationPending error={error} />
             ) : boats.length ? (
-              <View style={styles.cardGrid}>
-                {boats.map((boat) => (
-                  <BoatCard
-                    key={boat.asset_id}
-                    boat={boat}
-                    onPress={() => openBoat(boat)}
-                    view={activeProjection === "service" ? "service" : "default"}
-                    heroUri={assetHeroUrls[boat.asset_id] || assetHeroUrls[boat.id] || null}
-                  />
-                ))}
-              </View>
+              mode === "fleet" ? (
+                <View style={styles.resultList}>
+                  <View style={styles.resultListHeader}>
+                    <Text style={styles.sectionKicker}>Results</Text>
+                    <Text style={styles.mutedText}>{fleetResults.length} of {boats.length} visible</Text>
+                  </View>
+                  {fleetResults.length ? fleetResults.map((boat, index) => {
+                    const cardAssetId = assetIdForBoat(boat) || `boat-${index}`;
+                    return (
+                      <BoatResultRow
+                        key={cardAssetId}
+                        boat={boat}
+                        onPress={() => openBoat(boat)}
+                        heroUri={assetHeroUrls[cardAssetId] || null}
+                      />
+                    );
+                  }) : (
+                    <View style={styles.emptyPanel}>
+                      <Text style={styles.emptyTitle}>No boats match this filter</Text>
+                      <Text style={styles.mutedText}>Clear the filter or search by HIN, Keepr code, model, owner, or dealer.</Text>
+                    </View>
+                  )}
+                </View>
+              ) : (
+                <View style={styles.cardGrid}>
+                  {boats.map((boat, index) => {
+                  const cardAssetId = assetIdForBoat(boat) || `boat-${index}`;
+                  return (
+                    <BoatCard
+                      key={cardAssetId}
+                      boat={boat}
+                      onPress={() => openBoat(boat)}
+                      view={activeProjection === "service" ? "service" : "default"}
+                      heroUri={assetHeroUrls[cardAssetId] || null}
+                    />
+                  );
+                  })}
+                </View>
+              )
             ) : (
               <View style={styles.emptyPanel}>
                 <View style={styles.emptyIcon}>
@@ -3761,6 +4679,63 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     outlineStyle: "none",
+  },
+  cxLanding: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    gap: spacing.md,
+    padding: spacing.md,
+    ...shadows.sm,
+  },
+  cxLandingHeader: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    gap: spacing.md,
+    justifyContent: "space-between",
+  },
+  cxJobGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  cxJobCard: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexBasis: "31%",
+    flexDirection: "row",
+    flexGrow: 1,
+    gap: spacing.sm,
+    minHeight: 64,
+    minWidth: 190,
+    padding: spacing.md,
+  },
+  cxJobIcon: {
+    alignItems: "center",
+    backgroundColor: "#EFF6FF",
+    borderRadius: radius.sm,
+    height: 36,
+    justifyContent: "center",
+    width: 36,
+  },
+  cxJobText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  cxJobTitle: {
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  cxJobMeta: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: "800",
+    marginTop: 2,
   },
   modeRow: {
     flexDirection: "row",
@@ -4307,12 +5282,20 @@ const styles = StyleSheet.create({
     backgroundColor: "#EFF6FF",
     borderColor: "#BFDBFE",
   },
+  modelOptionDraft: {
+    backgroundColor: "#FFFBEB",
+    borderColor: "#FDE68A",
+  },
   modelOptionText: {
     color: colors.textMuted,
     fontSize: 13,
     fontWeight: "800",
   },
   modelOptionTextReady: {
+    color: colors.textPrimary,
+    fontWeight: "900",
+  },
+  modelOptionTextDraft: {
     color: colors.textPrimary,
     fontWeight: "900",
   },
@@ -4324,6 +5307,106 @@ const styles = StyleSheet.create({
   },
   modelOptionStateReady: {
     color: colors.brandBlue,
+  },
+  modelOptionStateDraft: {
+    color: "#B45309",
+  },
+  draftNotice: {
+    alignItems: "center",
+    backgroundColor: "#FFFBEB",
+    borderColor: "#FDE68A",
+    borderRadius: radius.md,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.md,
+    marginTop: spacing.lg,
+    padding: spacing.md,
+  },
+  draftNoticeIcon: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderRadius: radius.sm,
+    height: 36,
+    justifyContent: "center",
+    width: 36,
+  },
+  draftNoticeText: {
+    flex: 1,
+  },
+  draftNoticeTitle: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  draftNoticeBody: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 2,
+  },
+  draftNoticeButton: {
+    backgroundColor: colors.primary,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  draftNoticeButtonText: {
+    color: colors.onPrimary,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  templateWorkPanel: {
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
+    gap: spacing.md,
+    marginTop: spacing.lg,
+    paddingTop: spacing.lg,
+  },
+  templateWorkHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  templateWorkGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.md,
+  },
+  templateWorkCard: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexDirection: "row",
+    flexGrow: 1,
+    gap: spacing.md,
+    minHeight: 76,
+    minWidth: 280,
+    padding: spacing.md,
+  },
+  templateWorkIcon: {
+    alignItems: "center",
+    backgroundColor: "#EFF6FF",
+    borderRadius: radius.sm,
+    height: 38,
+    justifyContent: "center",
+    width: 38,
+  },
+  templateWorkText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  templateWorkTitle: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  templateWorkMeta: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 3,
   },
   brandMatrix: {
     flexDirection: "row",
@@ -4478,6 +5561,49 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "900",
   },
+  buildQueueSecondaryButton: {
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderColor: "#BFDBFE",
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 38,
+    paddingHorizontal: spacing.md,
+  },
+  buildQueueSecondaryButtonText: {
+    color: colors.brandBlue,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  layerMap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  layerMapItem: {
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flex: 1,
+    minWidth: 180,
+    padding: spacing.md,
+  },
+  layerMapLabel: {
+    color: colors.brandBlue,
+    fontSize: 11,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  layerMapValue: {
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: "900",
+    marginTop: 3,
+  },
   smallChip: {
     backgroundColor: colors.surfaceSubtle,
     borderColor: colors.border,
@@ -4503,6 +5629,123 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: spacing.md,
+  },
+  fleetFilterRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  fleetFilterChip: {
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  fleetFilterChipActive: {
+    backgroundColor: "#EFF6FF",
+    borderColor: "#93C5FD",
+  },
+  fleetFilterText: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  fleetFilterTextActive: {
+    color: colors.brandBlue,
+  },
+  resultList: {
+    gap: spacing.sm,
+  },
+  resultListHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  resultRow: {
+    alignItems: "stretch",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.md,
+    minHeight: 118,
+    overflow: "hidden",
+    padding: spacing.sm,
+    ...shadows.sm,
+  },
+  resultThumb: {
+    backgroundColor: "#0B1220",
+    borderRadius: radius.sm,
+    height: 96,
+    justifyContent: "flex-end",
+    overflow: "hidden",
+    width: 144,
+  },
+  resultThumbImage: {
+    borderRadius: radius.sm,
+    objectFit: "cover",
+  },
+  resultImageBadge: {
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(19,26,68,0.84)",
+    borderRadius: radius.sm,
+    margin: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+  },
+  resultImageBadgeText: {
+    color: colors.onPrimary,
+    fontSize: 10,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  resultMain: {
+    flex: 1,
+    gap: spacing.sm,
+    justifyContent: "center",
+    minWidth: 0,
+  },
+  resultTitleRow: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    gap: spacing.md,
+    justifyContent: "space-between",
+  },
+  resultTitleWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  resultTitle: {
+    color: colors.textPrimary,
+    fontSize: 16,
+    fontWeight: "900",
+  },
+  resultSubtitle: {
+    color: colors.textMuted,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  resultMetaGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.md,
+  },
+  resultMetaCell: {
+    minWidth: 128,
+  },
+  resultOpen: {
+    alignItems: "center",
+    borderLeftColor: colors.border,
+    borderLeftWidth: 1,
+    flexDirection: "row",
+    gap: spacing.xs,
+    justifyContent: "center",
+    minWidth: 120,
+    paddingHorizontal: spacing.sm,
   },
   boatCard: {
     backgroundColor: colors.surface,
@@ -4619,6 +5862,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "800",
     marginTop: 2,
+  },
+  openTwinText: {
+    color: colors.brandBlue,
+    flexShrink: 0,
+    fontSize: 12,
+    fontWeight: "900",
   },
   relationshipGrid: {
     flexDirection: "row",

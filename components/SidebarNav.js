@@ -36,6 +36,33 @@ const SUPER_ITEMS = [
   { key: "__exit__", label: "Exit SuperKeepr", icon: "log-out-outline" },
 ];
 
+const WORKSPACE_NAV_CONFIG = {
+  keeproem: [
+    { key: "ActivatorHome", label: "Home", icon: "home-outline", initialMode: "needs", navSection: "ActivatorHome" },
+    { key: "ActivatorWork", label: "Work", icon: "construct-outline", initialMode: "builds", navSection: "ActivatorWork" },
+    { key: "ActivatorFind", label: "Fleet", icon: "boat-outline", initialMode: "fleet", navSection: "ActivatorFind" },
+    { key: "ActivatorTemplates", label: "Models", icon: "library-outline", initialMode: "templates", navSection: "ActivatorTemplates" },
+    { key: "ActivatorConnect", label: "Relationships", icon: "people-outline", initialMode: "connect", navSection: "ActivatorConnect" },
+    { key: "KeeprSpaceAdmin", label: "Settings", icon: "settings-outline", initialMode: "profile", navSection: "KeeprSpaceAdmin", secondary: true },
+  ],
+  keeprdealer: [
+    { key: "KeeprSpaceHome", label: "Home", icon: "storefront-outline" },
+    { key: "KeeprSpaceFleet", label: "Fleet", icon: "boat-outline" },
+    { key: "KeeprSpaceMessages", label: "Messages", icon: "chatbubbles-outline" },
+    { key: "KeeprSpacePlaybooks", label: "Playbooks", icon: "list-outline" },
+    { key: "KeeprSpaceActivator", label: "Sales", icon: "pricetag-outline" },
+    { key: "KeeprSpaceAdmin", label: "Settings", icon: "settings-outline", secondary: true },
+  ],
+  keeprpro: [
+    { key: "KeeprSpaceHome", label: "Home", icon: "briefcase-outline" },
+    { key: "KeeprSpaceFleet", label: "Fleet", icon: "boat-outline" },
+    { key: "KeeprSpaceMessages", label: "Messages", icon: "chatbubbles-outline" },
+    { key: "KeeprSpacePlaybooks", label: "Playbooks", icon: "list-outline" },
+    { key: "KeeprSpaceActivator", label: "Activator", icon: "add-circle-outline" },
+    { key: "KeeprSpaceAdmin", label: "Settings", icon: "settings-outline", secondary: true },
+  ],
+};
+
 function workspaceLabel(workspace) {
   return workspace?.display_name || workspace?.name || workspace?.label || "Workspace";
 }
@@ -43,58 +70,70 @@ function workspaceLabel(workspace) {
 function workspaceModeLabel(workspace) {
   switch (workspace?.workspace_type) {
     case "keeproem":
-      return "KeeprOEM workspace";
+      return `${workspaceLabel(workspace)} OEM`;
     case "keeprdealer":
-      return "KeeprDealer workspace";
+      return `${workspaceLabel(workspace)} Dealer`;
     case "keeprpro":
-      return "KeeprPro workspace";
+      return `${workspaceLabel(workspace)} Service`;
     default:
       return "Asset Lifecycle Intelligence";
   }
 }
 
+function workspaceOrganizationId(workspace) {
+  const workspaceId = String(workspace?.workspace_id || workspace?.id || "");
+  return (
+    workspace?.organization_id ||
+    workspace?.org_id ||
+    workspace?.authority?.organization_id ||
+    workspace?.authority?.org_id ||
+    workspace?.authority?.subject_id ||
+    (workspaceId.startsWith("org:") ? workspaceId.slice(4) : null) ||
+    null
+  );
+}
+
+function workspaceMatchesOrganization(workspace, organizationId) {
+  const orgId = String(organizationId || "");
+  if (!workspace || !orgId) return false;
+
+  return (
+    workspaceOrganizationId(workspace) === orgId ||
+    workspace.workspace_id === `org:${orgId}` ||
+    workspace.id === `org:${orgId}`
+  );
+}
+
 function navItemsForWorkspace(workspace) {
   const type = workspace?.workspace_type;
-  const name = workspaceLabel(workspace);
-  const homeLabel = name === "Workspace" ? "Home" : `${name} / Home`;
-
-  if (type === "keeproem") {
-    return [
-      { key: "KeeprSpaceHome", label: homeLabel, icon: "business-outline" },
-      { key: "KeeprSpaceFleet", label: "Active Fleet", icon: "boat-outline" },
-      { key: "KeeprSpaceMessages", label: "Messages", icon: "chatbubbles-outline" },
-      { key: "KeeprSpacePlaybooks", label: "Playbooks", icon: "list-outline" },
-      { key: "KeeprSpaceActivator", label: "Activator", icon: "sparkles-outline" },
-      { key: "KeeprSpaceAdmin", label: "KeeprSpace Admin", icon: "image-outline" },
-    ];
-  }
-
-  if (type === "keeprdealer") {
-    return [
-      { key: "KeeprSpaceHome", label: homeLabel, icon: "storefront-outline" },
-      { key: "KeeprSpaceFleet", label: "Active Fleet", icon: "boat-outline" },
-      { key: "KeeprSpaceMessages", label: "Messages", icon: "chatbubbles-outline" },
-      { key: "KeeprSpacePlaybooks", label: "Playbooks", icon: "list-outline" },
-      { key: "KeeprSpaceActivator", label: "Sales", icon: "pricetag-outline" },
-      { key: "KeeprSpaceAdmin", label: "KeeprSpace Admin", icon: "image-outline" },
-    ];
-  }
-
-  if (type === "keeprpro") {
-    return [
-      { key: "KeeprSpaceHome", label: homeLabel, icon: "briefcase-outline" },
-      { key: "KeeprSpaceFleet", label: "Active Fleet", icon: "boat-outline" },
-      { key: "KeeprSpaceMessages", label: "Messages", icon: "chatbubbles-outline" },
-      { key: "KeeprSpacePlaybooks", label: "Playbooks", icon: "list-outline" },
-      { key: "KeeprSpaceActivator", label: "Activator", icon: "add-circle-outline" },
-      { key: "KeeprSpaceAdmin", label: "KeeprSpace Admin", icon: "image-outline" },
-    ];
-  }
-
-  return null;
+  return WORKSPACE_NAV_CONFIG[type] || null;
 }
 
 function firstActivatorWorkspace(workspaces = [], currentWorkspace) {
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    try {
+      const params = new URLSearchParams(window.location.search || "");
+      const requestedWorkspaceId = params.get("workspaceId");
+      const requestedOrganizationId = params.get("organizationId");
+      if (requestedOrganizationId) {
+        const requestedOrgWorkspace = workspaces.find((workspace) =>
+          workspaceMatchesOrganization(workspace, requestedOrganizationId) &&
+          workspace.workspace_type &&
+          workspace.workspace_type !== "keepr"
+        );
+        if (requestedOrgWorkspace) return requestedOrgWorkspace;
+      }
+      if (requestedWorkspaceId) {
+        const requestedWorkspace = workspaces.find((workspace) =>
+          workspace.workspace_id === requestedWorkspaceId || workspace.id === requestedWorkspaceId
+        );
+        if (requestedWorkspace?.workspace_type && requestedWorkspace.workspace_type !== "keepr") {
+          return requestedWorkspace;
+        }
+      }
+    } catch {}
+  }
+
   if (currentWorkspace?.workspace_type && currentWorkspace.workspace_type !== "keepr") {
     return currentWorkspace;
   }
@@ -128,17 +167,129 @@ function personalWorkspace(workspaces = []) {
 }
 
 function activatorModeForSidebarKey(key, workspace) {
+  const configItem = WORKSPACE_NAV_CONFIG[workspace?.workspace_type]?.find((item) => item.key === key);
+  if (configItem?.initialMode) return configItem.initialMode;
+
   if (key === "KeeprSpaceAdmin" || key === "WilsonAdmin") return "profile";
   if (key === "KeeprSpaceMessages" || key === "WilsonMessages") return "messages";
   if (key === "KeeprSpaceFleet" || key === "WilsonFleet") return "fleet";
+  if (key === "KeeprSpaceActivator" || key === "KeeprSpaceAddBoat") return "addBoat";
   if (key === "KeeprSpaceHome" || key === "WilsonHome") return workspace?.workspace_type === "keeprpro" ? "needs" : "fleet";
   if (key === "KeeprSpaceAdmin") return "profile";
   if (key === "ActivatorMessages" || key === "Messages") {
     return workspace?.workspace_type === "keeprpro" ? "messages" : "fleet";
   }
+  if (key === "ActivatorFind") return "fleet";
+  if (key === "ActivatorAdd") return "addBoat";
+  if (key === "ActivatorConnect") return "connect";
+  if (key === "ActivatorWork") return "builds";
+  if (key === "ActivatorEngage") return "messages";
   if (key === "ActivatorFleet") return "fleet";
+  if (key === "ActivatorBuilds") return "builds";
+  if (key === "ActivatorTemplates") return "templates";
   if (key === "ActivatorHome") return workspace?.workspace_type === "keeprpro" ? "needs" : "fleet";
   return "fleet";
+}
+
+function activatorNavSectionForSidebarKey(key) {
+  const configItem = WORKSPACE_NAV_CONFIG.keeproem.find((item) => item.key === key);
+  if (configItem?.navSection) return configItem.navSection;
+
+  if (key === "ActivatorFind") return "ActivatorFind";
+  if (key === "ActivatorAdd") return "ActivatorAdd";
+  if (key === "ActivatorConnect") return "ActivatorConnect";
+  if (key === "ActivatorWork") return "ActivatorWork";
+  if (key === "ActivatorEngage") return "ActivatorEngage";
+  if (key === "ActivatorTemplates") return "ActivatorTemplates";
+  if (key === "KeeprSpaceAdmin") return "KeeprSpaceAdmin";
+  return null;
+}
+
+function activatorWorkspaceFromRoute(workspace) {
+  let urlWorkspaceId = null;
+  let urlOrganizationId = null;
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    try {
+    const searchParams = new URLSearchParams(window.location.search || "");
+    urlWorkspaceId = searchParams.get("workspaceId");
+    urlOrganizationId = searchParams.get("organizationId");
+    } catch {}
+  }
+
+  const workspaceType = workspace?.workspace_type && workspace.workspace_type !== "keepr"
+    ? workspace.workspace_type
+    : urlWorkspaceId?.startsWith("org:")
+    ? "keeproem"
+    : workspace?.workspace_type;
+  const workspaceId = workspace?.workspace_type && workspace.workspace_type !== "keepr"
+    ? workspace.workspace_id
+    : urlWorkspaceId?.startsWith("org:")
+    ? urlWorkspaceId
+    : urlOrganizationId
+    ? `org:${urlOrganizationId}`
+    : null;
+  const orgId = workspaceOrganizationId(workspace) ||
+    urlOrganizationId ||
+    (workspaceId?.startsWith("org:") ? workspaceId.slice(4) : null);
+
+  if (!workspaceId || workspaceType === "keepr") return null;
+  return {
+    ...workspace,
+    workspace_id: workspaceId,
+    workspace_type: workspaceType,
+    organization_id: orgId,
+  };
+}
+
+function activatorHrefForSidebarKey(key, workspace) {
+  if (Platform.OS !== "web") return null;
+
+  const routeWorkspace = activatorWorkspaceFromRoute(workspace);
+  const workspaceId = routeWorkspace?.workspace_id;
+  const orgId = workspaceOrganizationId(routeWorkspace);
+  if (!workspaceId) return null;
+
+  if (key === "ActivatorAdd") {
+    const params = new URLSearchParams();
+    params.set("workspaceId", workspaceId);
+    if (orgId) params.set("organizationId", orgId);
+    params.set("initialMode", "addBoat");
+    params.set("navSection", "ActivatorAdd");
+    return `/activator?${params.toString()}`;
+  }
+
+  if (
+    key === "ActivatorHome" ||
+    key === "ActivatorFind" ||
+    key === "ActivatorWork" ||
+    key === "ActivatorEngage" ||
+    key === "ActivatorConnect" ||
+    key === "ActivatorFleet" ||
+    key === "ActivatorMessages" ||
+    key === "ActivatorBuilds" ||
+    key === "ActivatorTemplates" ||
+    key === "KeeprSpaceAdmin"
+  ) {
+    const params = new URLSearchParams();
+    params.set("workspaceId", workspaceId);
+    if (orgId) params.set("organizationId", orgId);
+    params.set("initialMode", activatorModeForSidebarKey(key, routeWorkspace));
+    params.set("navSection", activatorNavSectionForSidebarKey(key) || (
+      activatorModeForSidebarKey(key, routeWorkspace) === "templates"
+        ? "ActivatorTemplates"
+        : "ActivatorFind"
+    ));
+    return `/activator?${params.toString()}`;
+  }
+
+  return null;
+}
+
+function normalizeActivatorJobSection(section) {
+  if (section === "ActivatorFleet") return "ActivatorFind";
+  if (section === "ActivatorBuilds") return "ActivatorWork";
+  if (section === "ActivatorMessages") return "ActivatorEngage";
+  return section;
 }
 
 const NAV_PERSIST_KEY = "keepr.nav.state.v1";
@@ -165,6 +316,26 @@ function returnToKeeprProHomeOnWeb() {
     } else {
       window.location.assign(KEEPRPRO_HOME_PATH);
     }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function replaceWebLocation(path, params = {}) {
+  if (Platform.OS !== "web") return false;
+
+  try {
+    const query = new URLSearchParams();
+    Object.entries(params || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        query.set(key, String(value));
+      }
+    });
+    const nextUrl = `${path}${query.toString() ? `?${query.toString()}` : ""}`;
+    const currentUrl = `${window.location.pathname || ""}${window.location.search || ""}`;
+    if (currentUrl === nextUrl) return true;
+    window.location.assign(nextUrl);
     return true;
   } catch {
     return false;
@@ -342,21 +513,52 @@ if (
 }
 
 function normalizeActivatorToSection(routeName, params = {}) {
-  if (routeName === "ActivatorBoatWorkspace") return "ActivatorFleet";
+  if (routeName === "ActivatorBoatWorkspace") return "ActivatorFind";
   if (routeName !== "ActivatorHome") return normalizeToSection(routeName);
 
-  if (params?.navSection) return params.navSection;
+  if (params?.navSection) return normalizeActivatorJobSection(params.navSection);
 
   switch (params?.initialMode) {
     case "messages":
-      return "ActivatorMessages";
+      return "ActivatorEngage";
     case "profile":
       return "KeeprSpaceAdmin";
+    case "addBoat":
+      return "ActivatorAdd";
+    case "connect":
+      return "ActivatorConnect";
+    case "network":
+      return "ActivatorConnect";
     case "fleet":
-      return "ActivatorFleet";
+      return "ActivatorFind";
+    case "builds":
+      return "ActivatorWork";
+    case "templates":
+      return "ActivatorTemplates";
     case "needs":
     default:
       return "ActivatorHome";
+  }
+}
+
+function activeActivatorSectionFromWebLocation() {
+  if (Platform.OS !== "web" || typeof window === "undefined") return null;
+
+  try {
+    const path = window.location.pathname || "";
+    if (path.startsWith("/activator/build/")) return "ActivatorWork";
+    if (path.startsWith("/activator/catalog/")) return "ActivatorTemplates";
+    if (path !== "/activator") return null;
+
+    const params = new URLSearchParams(window.location.search || "");
+    const navSection = params.get("navSection");
+    if (navSection) return normalizeActivatorJobSection(navSection);
+
+    return normalizeActivatorToSection("ActivatorHome", {
+      initialMode: params.get("initialMode") || null,
+    });
+  } catch {
+    return null;
   }
 }
 
@@ -492,10 +694,11 @@ useEffect(() => {
     };
   }, []);
 
-  const activeKey = useMemo(
-    () => normalizeActivatorToSection(leafRouteName || currentRouteName, leafRouteParams),
-    [leafRouteName, currentRouteName, leafRouteParams]
-  );
+  const activeKey = useMemo(() => {
+    const webSection = activeActivatorSectionFromWebLocation();
+    if (webSection) return webSection;
+    return normalizeActivatorToSection(leafRouteName || currentRouteName, leafRouteParams);
+  }, [leafRouteName, currentRouteName, leafRouteParams]);
 
   const inSuperKeepr = useMemo(() => {
     const rn = String(leafRouteName || currentRouteName || "");
@@ -673,24 +876,52 @@ const navItems = useMemo(() => {
         })
       );
     };
-    const navigateActivatorMode = (initialMode = "fleet", targetWorkspace = sidebarWorkspace) => {
+    const navigateActivatorMode = (initialMode = "fleet", targetWorkspace = sidebarWorkspace, navSectionOverride = null) => {
+      const resolvedWorkspace = activatorWorkspaceFromRoute(targetWorkspace) || targetWorkspace;
       if (
-        targetWorkspace?.workspace_id &&
-        targetWorkspace.workspace_id !== currentWorkspace?.workspace_id
+        resolvedWorkspace?.workspace_id &&
+        resolvedWorkspace.workspace_id !== currentWorkspace?.workspace_id
       ) {
-        setCurrentWorkspaceId(targetWorkspace.workspace_id);
+        setCurrentWorkspaceId(resolvedWorkspace.workspace_id);
       }
-      navigationRef.navigate("ActivatorHome", {
+      const params = {
         initialMode,
-        navSection: targetWorkspace?.workspace_type === "keeprpro" && initialMode === "needs"
+        navSection: navSectionOverride || (resolvedWorkspace?.workspace_type === "keeprpro" && initialMode === "needs"
           ? "ActivatorHome"
           : initialMode === "messages"
-          ? "ActivatorMessages"
+          ? "ActivatorEngage"
           : initialMode === "profile"
           ? "KeeprSpaceAdmin"
-          : "ActivatorFleet",
-        workspaceId: targetWorkspace?.workspace_id || null,
-      });
+          : initialMode === "addBoat"
+          ? "ActivatorAdd"
+          : initialMode === "builds"
+          ? "ActivatorWork"
+          : initialMode === "templates"
+          ? "ActivatorTemplates"
+          : "ActivatorFind"),
+        workspaceId: resolvedWorkspace?.workspace_id || null,
+        organizationId: workspaceOrganizationId(resolvedWorkspace),
+      };
+
+      if (
+        leafRouteName === "ActivatorHome" &&
+        leafRouteParams?.initialMode === params.initialMode &&
+        leafRouteParams?.navSection === params.navSection &&
+        (leafRouteParams?.workspaceId || null) === (params.workspaceId || null)
+      ) {
+        return;
+      }
+
+      if (Platform.OS === "web") {
+        if (replaceWebLocation("/activator", params)) return;
+      }
+
+      navigationRef.dispatch(
+        CommonActions.reset({
+          index: 0,
+          routes: [{ name: "ActivatorHome", params }],
+        })
+      );
     };
 
     if (String(key).startsWith("workspace:")) {
@@ -703,6 +934,8 @@ const navItems = useMemo(() => {
       const destination = destinationForWorkspace(targetWorkspace);
       if (destination === "PersonalModule") {
         resetToPersonalModule();
+      } else if (targetWorkspace.workspace_type === "keeproem") {
+        navigateActivatorMode("fleet", targetWorkspace);
       } else {
         resetToKeeprSpaceModule("KeeprSpaceHome", { workspaceId }, workspaceId);
       }
@@ -754,6 +987,10 @@ const navItems = useMemo(() => {
       key === "WilsonSettings"
     ) {
       if (isOrgWorkspace) {
+        if (sidebarWorkspace?.workspace_type === "keeproem") {
+          navigateActivatorMode(activatorModeForSidebarKey(key, sidebarWorkspace));
+          return;
+        }
         const targetScreen = key.startsWith("Wilson") ? key.replace("Wilson", "KeeprSpace") : key;
         resetToKeeprSpaceModule(targetScreen, {
           workspaceId: sidebarWorkspace?.workspace_id || null,
@@ -762,9 +999,49 @@ const navItems = useMemo(() => {
       return;
     }
 
-    if (key === "ActivatorHome" || key === "ActivatorFleet" || key === "ActivatorMessages") {
+    if (key === "ActivatorHome") {
       if (isOrgWorkspace) {
-        navigateActivatorMode(activatorModeForSidebarKey(key, sidebarWorkspace));
+        const targetWorkspace = sidebarWorkspace;
+        navigateActivatorMode(
+          activatorModeForSidebarKey(key, targetWorkspace),
+          targetWorkspace,
+          activatorNavSectionForSidebarKey(key)
+        );
+        return;
+      }
+      navigationRef.dispatch(CommonActions.reset({
+        index: 0,
+        routes: [{ name: "ActivatorHome", params: { initialMode: "fleet", navSection: "ActivatorHome" } }],
+      }));
+      return;
+    }
+
+    if (
+      key === "ActivatorFind" ||
+      key === "ActivatorAdd" ||
+      key === "ActivatorConnect" ||
+      key === "ActivatorWork" ||
+      key === "ActivatorEngage" ||
+      key === "ActivatorFleet" ||
+      key === "ActivatorMessages" ||
+      key === "ActivatorBuilds" ||
+      key === "ActivatorTemplates"
+    ) {
+      if (isOrgWorkspace) {
+        if (key === "ActivatorAdd") {
+          resetToKeeprSpaceModule("KeeprSpaceActivator", {
+            workspaceId: sidebarWorkspace?.workspace_id || null,
+            organizationId: workspaceOrganizationId(sidebarWorkspace),
+            intent: "add_boat",
+            parentRoute: "ActivatorHome",
+          });
+          return;
+        }
+        navigateActivatorMode(
+          activatorModeForSidebarKey(key, sidebarWorkspace),
+          sidebarWorkspace,
+          activatorNavSectionForSidebarKey(key)
+        );
         return;
       }
       navigationRef.navigate("ActivatorHome", { initialMode: "fleet" });
@@ -776,7 +1053,7 @@ const navItems = useMemo(() => {
         resetToKeeprSpaceModule("KeeprSpaceMessages", {
           scope: "global",
           workspaceId: sidebarWorkspace?.workspace_id || null,
-          organizationId: sidebarWorkspace?.organization_id || sidebarWorkspace?.org_id || null,
+          organizationId: workspaceOrganizationId(sidebarWorkspace),
         });
         return;
       }
@@ -893,13 +1170,22 @@ if (isPublicFlow) return null;
       <View style={styles.navList}>
         {navItems.map((item) => {
           const isActive = item.key === activeKey;
+          const handleNavPress = () => {
+            const navHref = activatorHrefForSidebarKey(item.key, sidebarWorkspace);
+            if (navHref && Platform.OS === "web" && typeof window !== "undefined") {
+              window.location.assign(navHref);
+              return;
+            }
+            go(item.key);
+          };
 
           return (
             <TouchableOpacity
               key={item.key}
               style={[styles.navItem, isActive && styles.navItemActive, isCollapsed && styles.navItemCollapsed]}
-              onPress={() => go(item.key)}
+              onPress={handleNavPress}
               activeOpacity={0.85}
+              accessibilityRole="button"
             >
               <View style={[styles.navIcon, isCollapsed && styles.navIconCollapsed]}>
                 <Ionicons name={item.icon} size={18} color={isActive ? "#E5E7EB" : "#9CA3AF"} />

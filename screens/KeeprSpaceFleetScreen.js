@@ -22,6 +22,11 @@ import { getSignedUrl } from "../lib/attachmentsApi";
 import { fetchAssetHeroUris, getCachedAssetHeroUris } from "../lib/assetHeroResolver";
 import { getKeeprSpacePortfolio, removeKeeprSpaceBoatRelationship } from "../lib/keeprspaceApi";
 import { supabase } from "../lib/supabaseClient";
+import {
+  TIARA_56_LS_TEMPLATE_KEY,
+  TIARA_KF018_BUILD_KEY,
+  tiaraKf018FactoryBuild,
+} from "../data/tiaraKf018FactoryBuild";
 import { colors, radius, shadows, spacing } from "../styles/theme";
 
 const FALLBACK_HERO = require("../assets/boats/tiara/tiara_39ls_hero.jpg");
@@ -36,6 +41,7 @@ const APP_ASSET_HERO_MAP = {
   "app://assets/boats/tiara/tiara_39ls_hero.jpg": FALLBACK_HERO,
   "app://assets/boats/tiara/tiara_39le_hero.jpg": require("../assets/boats/tiara/tiara_39le_hero.jpg"),
 };
+const ENABLE_KF018_LOCAL_FLEET_FALLBACK = process.env.EXPO_PUBLIC_ENABLE_KF018_LOCAL_FLEET_FALLBACK === "1";
 
 function compact(parts) {
   return parts.filter(Boolean).join(" • ");
@@ -136,6 +142,9 @@ function heroSourceForBoat(boat, heroUri = null) {
 }
 
 function workspaceConnectionLabel(boat) {
+  if (hasFactoryBuildLayer(boat)) {
+    return "Factory build";
+  }
   if (boat?.stewardship_id || boat?.service_relationship?.stewardship_id) {
     return "Connected";
   }
@@ -143,6 +152,130 @@ function workspaceConnectionLabel(boat) {
     return "Workspace only";
   }
   return "Not connected";
+}
+
+function hasFactoryBuildLayer(boat) {
+  const kac = String(boat?.kac_id || "").toUpperCase();
+  const source = String(boat?.source_type || boat?.data_source || boat?.relationship_source || "").toLowerCase();
+  const identity = boat?.identity || {};
+  return Boolean(
+    boat?.exact_build?.build_key
+      || boat?.exact_build?.hull_number
+      || identity.build_code
+      || identity.hull_number
+      || source.includes("factory_build")
+      || source.includes("tiara_factory_build")
+      || kac === "KAC-TIARA-56LS-KF018"
+      || kac.includes("56LS-KF")
+  );
+}
+
+function factoryBuildParamsForBoat(boat) {
+  const identity = boat?.identity || {};
+  const exact = boat?.exact_build || {};
+  const buildCode = exact.build_key || exact.build_code || identity.build_code;
+  const kac = String(boat?.kac_id || "").toUpperCase();
+  return {
+    templateKey: exact.template_key || boat?.template?.template_key || (kac.includes("56LS") ? TIARA_56_LS_TEMPLATE_KEY : TIARA_56_LS_TEMPLATE_KEY),
+    buildKey: buildCode ? String(buildCode).toLowerCase() : kac.includes("KF018") ? TIARA_KF018_BUILD_KEY : null,
+    hullNumber: exact.hull_number || exact.hin || identity.hull_number || identity.hin || boat?.hin || null,
+  };
+}
+
+function kf018FleetProjection() {
+  const workOrder = tiaraKf018FactoryBuild.work_order || {};
+  const catalog = tiaraKf018FactoryBuild.catalog_template || {};
+  return {
+    id: "factory-build-kf018",
+    asset_id: "factory-build-kf018",
+    source_type: "factory_build_workspace",
+    asset_name: "KF018 · 2027 Tiara 56 LS",
+    kac_id: "KAC-TIARA-56LS-KF018",
+    owner_state: "OEM Build",
+    identity: {
+      year: String(catalog.model_year || 2027),
+      make: catalog.manufacturer || "Tiara Yachts",
+      model: catalog.model || "56 LS",
+      hin: workOrder.hin,
+      hull_number: workOrder.hull_number,
+      build_code: workOrder.build_code,
+      order_number: workOrder.order_number,
+    },
+    activation: {
+      status: "OEM Build",
+      stage: "factory_build",
+    },
+    verification: {
+      percent: 70,
+      status: "factory_confirmed",
+    },
+    oem_relationship: {
+      organization_name: "Tiara Yachts",
+      relationship_type: "builder",
+      relationship_purpose: "Factory build",
+      status: "Active",
+    },
+    exact_build: {
+      template_key: TIARA_56_LS_TEMPLATE_KEY,
+      build_key: TIARA_KF018_BUILD_KEY,
+      hull_number: workOrder.hull_number,
+      source_type: workOrder.source_type,
+      source_document: workOrder.source_document,
+    },
+  };
+}
+
+function withKf018FleetProjection(portfolio, workspace, search) {
+  if (!ENABLE_KF018_LOCAL_FLEET_FALLBACK) return portfolio;
+  if (workspace?.workspace_type !== "keeproem") return portfolio;
+
+  const query = String(search || "").trim().toLowerCase();
+  const projection = kf018FleetProjection();
+  const searchable = [
+    projection.asset_name,
+    projection.kac_id,
+    projection.identity?.hin,
+    projection.identity?.hull_number,
+    projection.identity?.build_code,
+    projection.identity?.order_number,
+    projection.identity?.model,
+    projection.identity?.make,
+  ].filter(Boolean).join(" ").toLowerCase();
+
+  if (query && !searchable.includes(query)) return portfolio;
+
+  const currentBoats = Array.isArray(portfolio?.boats) ? portfolio.boats : [];
+  const alreadyPresent = currentBoats.some((boat) => {
+    const haystack = [
+      boat.asset_id,
+      boat.id,
+      boat.kac_id,
+      boat.identity?.hin,
+      boat.identity?.hull_number,
+      boat.asset_name,
+      boat.name,
+    ]
+      .filter(Boolean)
+      .map((value) => String(value).toLowerCase());
+    return haystack.includes("factory-build-kf018")
+      || haystack.includes("kac-tiara-56ls-kf018")
+      || haystack.includes("ssukf018h627")
+      || haystack.some((value) => value.includes("kf018"));
+  });
+
+  if (alreadyPresent) return portfolio;
+
+  const nextBoats = [projection, ...currentBoats];
+  const counts = portfolio?.counts || {};
+  return {
+    ...(portfolio || {}),
+    boats: nextBoats,
+    counts: {
+      ...counts,
+      visible_boats: Math.max(Number(counts.visible_boats || 0), nextBoats.length),
+      filtered_boats: Math.max(Number(counts.filtered_boats || 0), nextBoats.length),
+    },
+  };
 }
 
 async function signedHeroMediaUrl(hero, transform, expiresIn = 3600) {
@@ -195,7 +328,7 @@ function MetricTile({ label, value, icon }) {
   );
 }
 
-function BoatCard({ boat, onPress, heroUri = null, onRemove = null, removing = false }) {
+function BoatCard({ boat, onPress, heroUri = null, onOpenFactoryBuild = null, onRemove = null, removing = false }) {
   const dealer = boat?.dealer_relationship || boat?.service_relationship || {};
   const verification = boat?.verification || {};
   const activation = boat?.activation || {};
@@ -204,6 +337,8 @@ function BoatCard({ boat, onPress, heroUri = null, onRemove = null, removing = f
   const tone = statusTone(state);
   const relationshipLabel = dealer.relationship_purpose || dealer.relationship_type || boat?.relationship_type || "Service";
   const relationshipStatus = dealer.status || activation.status || boat?.owner_state || "Active";
+  const hasFactoryBuild = hasFactoryBuildLayer(boat);
+  const factoryBuild = factoryBuildParamsForBoat(boat);
 
   return (
     <TouchableOpacity style={styles.boatCard} onPress={onPress} activeOpacity={0.9}>
@@ -261,6 +396,27 @@ function BoatCard({ boat, onPress, heroUri = null, onRemove = null, removing = f
             <Text style={styles.serviceRelationshipOpenText}>Open Keeprship</Text>
             <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
           </View>
+          {hasFactoryBuild ? (
+            <TouchableOpacity
+              style={styles.factoryBuildButton}
+              activeOpacity={0.86}
+              onPress={(event) => {
+                event?.stopPropagation?.();
+                onOpenFactoryBuild?.(boat);
+              }}
+            >
+              <View style={styles.factoryBuildButtonIcon}>
+                <Ionicons name="construct-outline" size={14} color={colors.brandBlue} />
+              </View>
+              <View style={styles.factoryBuildButtonTextWrap}>
+                <Text style={styles.factoryBuildButtonText}>Open Factory Build</Text>
+                <Text style={styles.factoryBuildButtonSubtext} numberOfLines={1}>
+                  {factoryBuild.buildKey || factoryBuild.hullNumber || "Exact build"}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={17} color={colors.brandBlue} />
+            </TouchableOpacity>
+          ) : null}
           {boat?.asset_relationship_id || boat?.stewardship_id ? (
             <TouchableOpacity
               style={styles.removeRelationshipButton}
@@ -291,6 +447,7 @@ export default function KeeprSpaceFleetScreen({ route, navigation }) {
   const { currentWorkspace } = useWorkspace();
   const routeOrganizationId = route?.params?.organizationId || null;
   const organizationId = routeOrganizationId || currentWorkspace?.organization_id || currentWorkspace?.org_id || null;
+  const isOemWorkspace = currentWorkspace?.workspace_type === "keeproem";
   const [portfolio, setPortfolio] = useState(null);
   const [search, setSearch] = useState("");
   const [heroUrls, setHeroUrls] = useState({});
@@ -318,7 +475,7 @@ export default function KeeprSpaceFleetScreen({ route, navigation }) {
         limit: 50,
         offset: 0,
       });
-      setPortfolio(next);
+      setPortfolio(withKf018FleetProjection(next, currentWorkspace, search));
     } catch (err) {
       setError(err?.message || "Could not load fleet.");
       setPortfolio(null);
@@ -326,7 +483,7 @@ export default function KeeprSpaceFleetScreen({ route, navigation }) {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [organizationId, search]);
+  }, [currentWorkspace, organizationId, search]);
 
   useEffect(() => {
     load();
@@ -337,6 +494,26 @@ export default function KeeprSpaceFleetScreen({ route, navigation }) {
       load({ quiet: true });
     }, [load])
   );
+
+  useEffect(() => {
+    if (!isOemWorkspace) return;
+    const params = {
+      initialMode: "fleet",
+      navSection: "ActivatorFleet",
+      workspaceId: currentWorkspace?.workspace_id || route?.params?.workspaceId || null,
+    };
+
+    try {
+      const parent = navigation.getParent?.();
+      if (parent?.navigate) {
+        parent.navigate("ActivatorHome", params);
+        return;
+      }
+      navigation.navigate("ActivatorHome", params);
+    } catch (err) {
+      console.error("OEM workspace fleet redirect failed:", err);
+    }
+  }, [currentWorkspace?.workspace_id, isOemWorkspace, navigation, route?.params?.workspaceId]);
 
   const boats = useMemo(() => portfolio?.boats || [], [portfolio?.boats]);
   const boatHeroIds = useMemo(
@@ -390,12 +567,35 @@ export default function KeeprSpaceFleetScreen({ route, navigation }) {
   const openBoat = (boat) => {
     const assetId = boat.asset_id || boat.id;
     if (!assetId) return;
+    if (isOemWorkspace) {
+      navigation.navigate("BoatStory", {
+        boatId: assetId,
+        assetId,
+        kac: boat.kac_id,
+        organizationId: boat.organization_id || organizationId,
+        workspaceId: currentWorkspace?.workspace_id || null,
+        relationshipRole: "oem",
+        teamMemberType: "oem",
+        systemsRole: "oem",
+        parentRoute: "KeeprSpaceFleet",
+      });
+      return;
+    }
     navigation.navigate("KeeprSpaceBoat", {
       assetId,
       kac: boat.kac_id,
       organizationId: boat.organization_id || organizationId,
       stewardshipId: boat.stewardship_id || boat.service_relationship?.stewardship_id || null,
       parentRoute: "KeeprSpaceFleet",
+      workspaceId: currentWorkspace?.workspace_id || null,
+    });
+  };
+
+  const openFactoryBuild = (boat) => {
+    navigation.navigate("ActivatorExactBuild", {
+      ...factoryBuildParamsForBoat(boat),
+      parentRoute: "KeeprSpaceFleet",
+      organizationId: boat.organization_id || organizationId,
       workspaceId: currentWorkspace?.workspace_id || null,
     });
   };
@@ -438,7 +638,7 @@ export default function KeeprSpaceFleetScreen({ route, navigation }) {
             limit: 50,
             offset: 0,
           });
-          setPortfolio(next);
+          setPortfolio(withKf018FleetProjection(next, currentWorkspace, search));
         } catch (refreshErr) {
           setActionMessage({
             tone: "warning",
@@ -466,7 +666,7 @@ export default function KeeprSpaceFleetScreen({ route, navigation }) {
         { text: "Remove", style: "destructive", onPress: remove },
       ]
     );
-  }, [organizationId, search]);
+  }, [currentWorkspace, organizationId, search]);
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -610,6 +810,7 @@ export default function KeeprSpaceFleetScreen({ route, navigation }) {
                       key={assetId}
                       boat={boat}
                       onPress={() => openBoat(boat)}
+                      onOpenFactoryBuild={openFactoryBuild}
                       heroUri={heroUrls[assetId] || null}
                       onRemove={confirmRemoveBoat}
                       removing={removingId === (boat.asset_relationship_id || boat.stewardship_id || assetId)}
@@ -1090,6 +1291,41 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: 12,
     fontWeight: "900",
+  },
+  factoryBuildButton: {
+    alignItems: "center",
+    backgroundColor: "#EFF6FF",
+    borderColor: "#BFDBFE",
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 42,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  factoryBuildButtonIcon: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderRadius: radius.xs,
+    height: 26,
+    justifyContent: "center",
+    width: 26,
+  },
+  factoryBuildButtonTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  factoryBuildButtonText: {
+    color: colors.brandNavy,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  factoryBuildButtonSubtext: {
+    color: colors.textMuted,
+    fontSize: 10,
+    fontWeight: "800",
+    marginTop: 1,
   },
   removeRelationshipButton: {
     alignItems: "center",

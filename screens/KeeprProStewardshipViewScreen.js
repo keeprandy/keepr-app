@@ -435,6 +435,20 @@ function RelationshipFileStrip({ files = [], onOpenFile, onAddFile, uploading = 
 export default function KeeprProStewardshipViewScreen({ route, navigation }) {
   const { currentWorkspace } = useWorkspace();
   const { assetId, kac } = route?.params || {};
+  const requestedSystemsRole = route?.params?.systemsRole || route?.params?.role || "oem";
+  const isOemProjection =
+    requestedSystemsRole === "oem" ||
+    currentWorkspace?.workspace_type === "keeproem";
+  const workspaceRoleLabel = isOemProjection
+    ? "OEM"
+    : currentWorkspace?.workspace_type === "keeprdealer"
+    ? "Dealer"
+    : "Service";
+  const workspaceRoleIcon = isOemProjection
+    ? "business-outline"
+    : currentWorkspace?.workspace_type === "keeprdealer"
+    ? "storefront-outline"
+    : "briefcase-outline";
   const organizationId =
     route?.params?.organizationId ||
     currentWorkspace?.organization_id ||
@@ -443,8 +457,11 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
   const isWilsonBoatRoute =
     route?.name === "KeeprSpaceBoat" ||
     route?.name === "WilsonBoat" ||
-    (Platform.OS === "web" && typeof window !== "undefined" && window.location.pathname.startsWith("/wilson/boats/"));
-  const parentRoute = route?.params?.parentRoute || (isWilsonBoatRoute ? "KeeprSpaceFleet" : "ActivatorHome");
+    (Platform.OS === "web" &&
+      typeof window !== "undefined" &&
+      (window.location.pathname.startsWith("/workspace/boats/") ||
+        window.location.pathname.startsWith("/wilson/boats/")));
+  const parentRoute = route?.params?.parentRoute || (isWilsonBoatRoute ? "ActivatorHome" : "ActivatorHome");
   const parentParams =
     parentRoute === "KeeprSpaceFleet" || parentRoute === "WilsonFleet"
       ? {
@@ -453,23 +470,27 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
         }
       : {
           initialMode: "fleet",
+          navSection: "ActivatorFleet",
           organizationId,
           workspaceId: organizationId ? `org:${organizationId}` : null,
         };
   const parentCrumbLabel =
     parentRoute === "KeeprSpaceFleet" || parentRoute === "WilsonFleet"
       ? "Active Fleet"
-      : "Service";
+      : "Active Fleet";
   const breadcrumbHomeRoute =
     parentRoute === "KeeprSpaceFleet" || parentRoute === "WilsonFleet"
-      ? "KeeprSpaceHome"
+      ? "ActivatorHome"
       : parentRoute;
   const breadcrumbHomeParams = {
-    ...(parentRoute === "KeeprSpaceFleet" || parentRoute === "WilsonFleet" ? {} : parentParams),
+    ...parentParams,
     organizationId,
     workspaceId: route?.params?.workspaceId || (organizationId ? `org:${organizationId}` : null),
   };
   const [projection, setProjection] = useState(null);
+  const [assetGraph, setAssetGraph] = useState(null);
+  const [assetSystemsExperience, setAssetSystemsExperience] = useState(null);
+  const [expandedSystemIds, setExpandedSystemIds] = useState({});
   const [portal, setPortal] = useState(null);
   const [messages, setMessages] = useState([]);
   const [relationshipPlaybooks, setRelationshipPlaybooks] = useState([]);
@@ -525,6 +546,8 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
       let playbookRows = [];
       let directAssetHero = null;
       let directRelationship = null;
+      let directAssetGraph = null;
+      let directAssetSystemsExperience = null;
       let legacyError = null;
       let canonicalError = null;
 
@@ -611,7 +634,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
       }
 
       if (resolvedAssetId) {
-        const [assetResult, relationshipResult, systemsResult, actionsResult] = await Promise.all([
+        const [assetResult, relationshipResult, systemsResult, actionsResult, graphResult, systemsExperienceResult] = await Promise.all([
           supabase
             .from("assets")
             .select(
@@ -642,6 +665,13 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
             .or("status.is.null,status.not.in.(completed,deleted,archived)")
             .order("due_at", { ascending: true, nullsFirst: false })
             .order("created_at", { ascending: false }),
+          supabase.rpc("get_asset_graph_projection", {
+            p_asset_id: resolvedAssetId,
+          }),
+          supabase.rpc("get_asset_systems_experience", {
+            p_asset_id: resolvedAssetId,
+            p_role: requestedSystemsRole,
+          }),
         ]);
 
         if (assetResult.error) {
@@ -666,6 +696,18 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
           console.warn("Could not load asset action continuity:", actionsResult.error.message);
         } else {
           directActions = actionsResult.data || [];
+        }
+
+        if (graphResult.error) {
+          console.warn("Could not load asset graph projection:", graphResult.error.message);
+        } else {
+          directAssetGraph = graphResult.data || null;
+        }
+
+        if (systemsExperienceResult.error) {
+          console.warn("Could not load canonical asset systems experience:", systemsExperienceResult.error.message);
+        } else {
+          directAssetSystemsExperience = systemsExperienceResult.data || null;
         }
       }
 
@@ -787,6 +829,8 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
           ? relationshipSharedHistory
           : [],
         actions: legacyProjection?.actions?.length ? legacyProjection.actions : directActions,
+        asset_graph: directAssetGraph,
+        asset_systems_experience: directAssetSystemsExperience,
       };
       const continuityPortal = legacyPortal
         ? {
@@ -814,6 +858,8 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
         )
       );
       setProjection(normalizeCanonicalProjection(canonical, continuityProjection));
+      setAssetGraph(directAssetGraph);
+      setAssetSystemsExperience(directAssetSystemsExperience);
       setPortal(normalizeCanonicalPortal(canonical, continuityPortal));
       setRelationshipPlaybooks(playbookRows);
       setMessages(
@@ -828,6 +874,8 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
     } catch (err) {
       console.error("Stewardship View load failed:", err);
       setProjection(null);
+      setAssetGraph(null);
+      setAssetSystemsExperience(null);
       setPortal(null);
       setMessages([]);
       setRelationshipPlaybooks([]);
@@ -836,7 +884,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [assetId, kac, organizationId]);
+  }, [assetId, kac, organizationId, requestedSystemsRole]);
 
   useEffect(() => {
     load();
@@ -1089,7 +1137,11 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
   ]);
 
   const heroUrl = heroState.assetId === (asset.id || assetId || null) ? heroState.url : null;
-  const systems = projection?.systems || [];
+  const canonicalSystemsExperience = assetSystemsExperience || projection?.asset_systems_experience || null;
+  const graphExperienceSystems = Array.isArray(canonicalSystemsExperience?.systems)
+    ? canonicalSystemsExperience.systems
+    : [];
+  const systems = graphExperienceSystems.length ? graphExperienceSystems : projection?.systems || [];
   const records = projection?.service_records || [];
   const actions = projection?.actions || [];
   const currentAction = portal?.current_action || null;
@@ -1230,6 +1282,19 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
     });
   };
 
+  const canonicalSystemId = (system) =>
+    system?.system_id || system?.systemId || system?.metadata?.system_id || system?.id || null;
+
+  const openSystemStory = (system) => {
+    const systemId = canonicalSystemId(system);
+    if (!asset.id || !systemId) return;
+    navigation.navigate("BoatSystemStory", {
+      systemId,
+      boatId: asset.id,
+      boatName: asset.name || assetName || "Boat",
+    });
+  };
+
   const conciseActionDescription = (() => {
     if (!currentAction?.id) return "";
     const explicit = currentAction?.provider_response?.note || currentAction?.provider_response?.next_step;
@@ -1285,6 +1350,249 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
     };
   });
   const visibleRelatedSystems = relatedSystems;
+  const graphNodes = Array.isArray(assetGraph?.nodes) ? assetGraph.nodes : [];
+  const graphEdges = Array.isArray(assetGraph?.edges) ? assetGraph.edges : [];
+  const graphNodeById = useMemo(() => {
+    return Object.fromEntries(graphNodes.map((node) => [String(node.id), node]));
+  }, [graphNodes]);
+  const graphDetailsBySystemId = useMemo(() => {
+    const details = {};
+    const outgoing = graphEdges.reduce((acc, edge) => {
+      const key = String(edge.from_node_id);
+      acc[key] = acc[key] || [];
+      acc[key].push(edge);
+      return acc;
+    }, {});
+
+    graphNodes
+      .filter((node) => node.node_type === "system")
+      .forEach((systemNode) => {
+        const children = (outgoing[String(systemNode.id)] || [])
+          .filter((edge) => ["contains", "attached_to", "configured_by"].includes(edge.relationship_type))
+          .map((edge) => graphNodeById[String(edge.to_node_id)])
+          .filter(Boolean)
+          .filter((node) => node.node_type !== "build_evidence");
+        const directEvidence = (outgoing[String(systemNode.id)] || [])
+          .filter((edge) => edge.relationship_type === "evidenced_by")
+          .map((edge) => graphNodeById[String(edge.to_node_id)])
+          .filter(Boolean);
+        const evidenceByNodeId = children.reduce((acc, child) => {
+          acc[String(child.id)] = (outgoing[String(child.id)] || [])
+            .filter((edge) => edge.relationship_type === "evidenced_by")
+            .map((edge) => graphNodeById[String(edge.to_node_id)])
+            .filter(Boolean);
+          return acc;
+        }, {});
+
+        if (systemNode.system_id) {
+          details[String(systemNode.system_id)] = {
+            systemNode,
+            children,
+            directEvidence,
+            evidenceByNodeId,
+          };
+        }
+      });
+    return details;
+  }, [graphEdges, graphNodeById, graphNodes]);
+
+  const renderSystemRow = (system, variant = "list") => {
+    const graphDetail = graphDetailsBySystemId[String(system.id)] || null;
+    const experienceComponents = Array.isArray(system.components) ? system.components : [];
+    const experienceOptions = Array.isArray(system.options) ? system.options : [];
+    const experienceStandaloneInstances = Array.isArray(system.standalone_instances) ? system.standalone_instances : [];
+    const hasExperienceDetail =
+      experienceComponents.length || experienceOptions.length || experienceStandaloneInstances.length;
+    const expanded = Boolean(expandedSystemIds[String(system.id)]);
+    const childCount = hasExperienceDetail
+      ? experienceComponents.reduce((sum, component) => sum + 1 + (component.instances?.length || 0), 0)
+        + experienceOptions.length
+        + experienceStandaloneInstances.length
+      : graphDetail?.children?.length || 0;
+    const experienceEvidenceCount = [
+      ...(system.evidence || []),
+      ...experienceComponents.flatMap((component) => [
+        ...(component.evidence || []),
+        ...(component.instances || []).flatMap((instance) => instance.evidence || []),
+      ]),
+      ...experienceOptions.flatMap((option) => option.evidence || []),
+      ...experienceStandaloneInstances.flatMap((instance) => instance.evidence || []),
+    ].length;
+    const evidenceCount = hasExperienceDetail ? experienceEvidenceCount : (graphDetail?.directEvidence?.length || 0)
+      + Object.values(graphDetail?.evidenceByNodeId || {}).reduce((sum, list) => sum + list.length, 0);
+    const rowStyle = variant === "visual" ? styles.visualSystemPill : styles.row;
+    const titleStyle = variant === "visual" ? styles.visualSystemText : styles.rowTitle;
+    const expandable = hasExperienceDetail || graphDetail;
+
+    return (
+      <View key={system.id} style={styles.systemGraphShell}>
+        <TouchableOpacity
+          style={rowStyle}
+          activeOpacity={0.86}
+          onPress={() => {
+            if (!expandable) {
+              openSystemStory(system);
+              return;
+            }
+            setExpandedSystemIds((current) => ({
+              ...current,
+              [String(system.id)]: !current[String(system.id)],
+            }));
+          }}
+        >
+          <Ionicons name="construct-outline" size={variant === "visual" ? 16 : 18} color="#2563EB" />
+          <View style={styles.rowBody}>
+            <Text style={titleStyle}>{system.name}</Text>
+            <Text style={styles.rowMeta}>
+              {compact([
+                childCount ? `${childCount} graph node${childCount === 1 ? "" : "s"}` : null,
+                evidenceCount ? `${evidenceCount} evidence link${evidenceCount === 1 ? "" : "s"}` : null,
+                system.system_type,
+                system.lifecycle_status || system.status,
+              ]) || "System context"}
+            </Text>
+          </View>
+          {expandable ? (
+            <Ionicons name={expanded ? "chevron-up" : "chevron-down"} size={17} color={colors.textMuted} />
+          ) : null}
+        </TouchableOpacity>
+
+        {expanded && expandable ? (
+          <View style={styles.graphExpandPanel}>
+            {hasExperienceDetail ? (
+              <>
+                {experienceComponents.map((component) => (
+                  <View key={component.graph_node_id || component.id} style={styles.graphNodeRow}>
+                    <View style={styles.graphNodeHeader}>
+                      <Text style={styles.graphNodeType}>Component model</Text>
+                      <Text style={styles.graphNodeTitle}>{component.label}</Text>
+                    </View>
+                    <Text style={styles.graphNodeMeta}>
+                      {compact([
+                        component.manufacturer,
+                        component.model,
+                        component.manual_scope ? `manuals attach to ${labelize(component.manual_scope)}` : null,
+                        component.manual_status ? `manual ${labelize(component.manual_status)}` : null,
+                      ]) || "Reusable equipment knowledge"}
+                    </Text>
+                    {(component.resources || []).length ? (
+                      <Text style={styles.graphNodeMeta}>
+                        {(component.resources || []).map((resource) => resource.title).filter(Boolean).join(" · ")}
+                      </Text>
+                    ) : null}
+                    {(component.instances || []).map((instance) => (
+                      <View key={instance.graph_node_id || instance.id} style={styles.graphInstanceRow}>
+                        <View style={styles.graphNodeHeader}>
+                          <Text style={styles.graphNodeType}>Instance</Text>
+                          <Text style={styles.graphNodeTitle}>{instance.label}</Text>
+                        </View>
+                        <Text style={styles.graphNodeMeta}>
+                          {compact([
+                            instance.state?.position,
+                            `serial ${instance.state?.serial_number || "missing"}`,
+                            `warranty ${labelize(instance.state?.warranty_state || "unknown")}`,
+                            `maintenance ${labelize(instance.state?.maintenance_schedule_state || "pending")}`,
+                          ])}
+                        </Text>
+                        {(instance.evidence || []).map((line) => (
+                          <View key={line.factory_line_item_id || line.line_number} style={styles.graphEvidenceRow}>
+                            <Text style={styles.graphEvidenceCode}>{line.factory_item_code || `Line ${line.line_number || ""}`}</Text>
+                            <Text style={styles.graphEvidenceText} numberOfLines={2}>{line.factory_description}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    ))}
+                    {(component.evidence || []).map((line) => (
+                      <View key={line.factory_line_item_id || line.line_number} style={styles.graphEvidenceRow}>
+                        <Text style={styles.graphEvidenceCode}>{line.factory_item_code || `Line ${line.line_number || ""}`}</Text>
+                        <Text style={styles.graphEvidenceText} numberOfLines={2}>{line.factory_description}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ))}
+                {experienceOptions.map((option) => (
+                  <View key={option.graph_node_id || option.id} style={styles.graphNodeRow}>
+                    <View style={styles.graphNodeHeader}>
+                      <Text style={styles.graphNodeType}>Option / accessory</Text>
+                      <Text style={styles.graphNodeTitle}>{option.label}</Text>
+                    </View>
+                    <Text style={styles.graphNodeMeta}>
+                      {compact([
+                        option.zones?.length ? `zones ${option.zones.join(", ")}` : null,
+                        option.quantity ? `qty ${option.quantity}` : null,
+                        "factory confirmed",
+                      ])}
+                    </Text>
+                    {(option.evidence || []).map((line) => (
+                      <View key={line.factory_line_item_id || line.line_number} style={styles.graphEvidenceRow}>
+                        <Text style={styles.graphEvidenceCode}>{line.factory_item_code || `Line ${line.line_number || ""}`}</Text>
+                        <Text style={styles.graphEvidenceText} numberOfLines={2}>{line.factory_description}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ))}
+                {experienceStandaloneInstances.map((instance) => (
+                  <View key={instance.graph_node_id || instance.id} style={styles.graphNodeRow}>
+                    <View style={styles.graphNodeHeader}>
+                      <Text style={styles.graphNodeType}>Instance</Text>
+                      <Text style={styles.graphNodeTitle}>{instance.label}</Text>
+                    </View>
+                    <Text style={styles.graphNodeMeta}>
+                      {compact([
+                        instance.state?.position,
+                        `serial ${instance.state?.serial_number || "missing"}`,
+                        `warranty ${labelize(instance.state?.warranty_state || "unknown")}`,
+                      ])}
+                    </Text>
+                  </View>
+                ))}
+              </>
+            ) : graphDetail?.children?.length ? (
+              graphDetail.children.map((node) => {
+                const evidence = graphDetail.evidenceByNodeId[String(node.id)] || [];
+                return (
+                  <View key={node.id} style={styles.graphNodeRow}>
+                    <View style={styles.graphNodeHeader}>
+                      <Text style={styles.graphNodeType}>{labelize(node.node_type)}</Text>
+                      <Text style={styles.graphNodeTitle}>{node.label}</Text>
+                    </View>
+                    <Text style={styles.graphNodeMeta}>
+                      {compact([
+                        node.manufacturer,
+                        node.model,
+                        node.metadata?.position,
+                        node.manual_status && node.manual_status !== "not_applicable" ? `manual ${labelize(node.manual_status)}` : null,
+                        node.metadata?.serial_number ? `serial ${node.metadata.serial_number}` : null,
+                      ]) || "Projected operational node"}
+                    </Text>
+                    {evidence.map((line) => (
+                      <View key={line.id} style={styles.graphEvidenceRow}>
+                        <Text style={styles.graphEvidenceCode}>{line.metadata?.factory_item_code || `Line ${line.metadata?.line_number || ""}`}</Text>
+                        <Text style={styles.graphEvidenceText} numberOfLines={2}>{line.metadata?.factory_description || line.label}</Text>
+                      </View>
+                    ))}
+                  </View>
+                );
+              })
+            ) : (
+              <Text style={styles.graphEmptyText}>No projected child nodes yet.</Text>
+            )}
+            {!hasExperienceDetail && graphDetail?.directEvidence?.length ? (
+              <View style={styles.graphDirectEvidence}>
+                <Text style={styles.graphNodeType}>System evidence</Text>
+                {graphDetail.directEvidence.map((line) => (
+                  <View key={line.id} style={styles.graphEvidenceRow}>
+                    <Text style={styles.graphEvidenceCode}>{line.metadata?.factory_item_code || "Factory line"}</Text>
+                    <Text style={styles.graphEvidenceText} numberOfLines={2}>{line.metadata?.factory_description || line.label}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+      </View>
+    );
+  };
 
   const contactByPhone = (phone) => {
     if (!phone) return;
@@ -2181,9 +2489,9 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
               ]}
               right={(
                 <View style={styles.breadcrumbWorkspace}>
-                  <Ionicons name="briefcase-outline" size={14} color={colors.brandNavy} />
+                  <Ionicons name={workspaceRoleIcon} size={14} color={colors.brandNavy} />
                   <Text style={styles.breadcrumbWorkspaceText} numberOfLines={1}>{providerName}</Text>
-                  <Text style={styles.breadcrumbSwitchText}>Service</Text>
+                  <Text style={styles.breadcrumbSwitchText}>{workspaceRoleLabel}</Text>
                 </View>
               )}
             />
@@ -2681,22 +2989,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
                       </View>
                       <Text style={styles.count}>{visibleRelatedSystems.length}</Text>
                     </View>
-                    {visibleRelatedSystems.map((system) => (
-                      <View key={system.id} style={styles.visualSystemPill}>
-                        <Ionicons name="construct-outline" size={16} color="#2563EB" />
-                        <View style={styles.rowBody}>
-                          <Text style={styles.visualSystemText}>{system.name}</Text>
-                          <Text style={styles.rowMeta}>
-                            {compact([
-                              system.recordCount ? `${system.recordCount} record${system.recordCount === 1 ? "" : "s"}` : null,
-                              system.actionCount ? `${system.actionCount} action${system.actionCount === 1 ? "" : "s"}` : null,
-                              system.system_type,
-                              system.lifecycle_status || system.status,
-                            ]) || "Ready for records, Actions, and Playbooks"}
-                          </Text>
-                        </View>
-                      </View>
-                    ))}
+                    {visibleRelatedSystems.map((system) => renderSystemRow(system, "visual"))}
                   </View>
                 ) : null}
 
@@ -2893,21 +3186,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
                 </View>
                 <Text style={styles.count}>{visibleRelatedSystems.length}</Text>
               </View>
-              {visibleRelatedSystems.map((system) => (
-                  <View key={system.id} style={styles.row}>
-                    <Ionicons name="construct-outline" size={18} color="#2563EB" />
-                    <View style={styles.rowBody}>
-                      <Text style={styles.rowTitle}>{system.name}</Text>
-                      <Text style={styles.rowMeta}>
-                        {compact([
-                          system.system_type,
-                          system.lifecycle_status || system.status,
-                          system.next_service_date ? `Next ${formatDate(system.next_service_date)}` : null,
-                        ]) || "System context"}
-                      </Text>
-                    </View>
-                  </View>
-                ))}
+              {visibleRelatedSystems.map((system) => renderSystemRow(system, "list"))}
             </View>
             ) : null}
 
@@ -3820,6 +4099,92 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.textPrimary,
     fontWeight: "800",
+  },
+  systemGraphShell: {
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  graphExpandPanel: {
+    marginLeft: spacing.xl,
+    marginBottom: spacing.sm,
+    paddingLeft: spacing.md,
+    paddingVertical: spacing.sm,
+    borderLeftWidth: 2,
+    borderLeftColor: "#BFDBFE",
+    gap: spacing.sm,
+  },
+  graphNodeRow: {
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: "#F8FAFC",
+    padding: spacing.sm,
+    gap: 4,
+  },
+  graphInstanceRow: {
+    marginTop: spacing.sm,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: "#DBEAFE",
+    backgroundColor: "#FFFFFF",
+    padding: spacing.sm,
+    gap: 4,
+  },
+  graphNodeHeader: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  graphNodeType: {
+    ...typography.caption,
+    color: colors.primary,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  graphNodeTitle: {
+    ...typography.body,
+    color: colors.textPrimary,
+    fontWeight: "900",
+  },
+  graphNodeMeta: {
+    ...typography.caption,
+    color: colors.textSecondary,
+  },
+  graphEvidenceRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.sm,
+    marginTop: 4,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: "#E2E8F0",
+  },
+  graphEvidenceCode: {
+    ...typography.caption,
+    width: 124,
+    color: colors.textPrimary,
+    fontWeight: "900",
+  },
+  graphEvidenceText: {
+    ...typography.caption,
+    flex: 1,
+    minWidth: 0,
+    color: colors.textSecondary,
+    fontWeight: "700",
+  },
+  graphDirectEvidence: {
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    backgroundColor: "#EFF6FF",
+    padding: spacing.sm,
+    gap: 4,
+  },
+  graphEmptyText: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    fontWeight: "700",
   },
   listViewLabel: {
     backgroundColor: "#FFFFFF",

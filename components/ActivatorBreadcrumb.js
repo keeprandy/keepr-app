@@ -1,8 +1,58 @@
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
+import { navigationRef } from "../navigationRoot";
 import { colors, radius, shadows, spacing } from "../styles/theme";
+
+function webPathForRoute(route, params = {}) {
+  if (route === "ActivatorHome") {
+    const nextParams = {
+      initialMode: params.initialMode || "fleet",
+      navSection: params.navSection || (params.initialMode === "templates" ? "ActivatorTemplates" : params.initialMode === "builds" ? "ActivatorBuilds" : "ActivatorFleet"),
+      organizationId: params.organizationId || null,
+      workspaceId: params.workspaceId || null,
+    };
+    const query = new URLSearchParams();
+    Object.entries(nextParams).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") query.set(key, String(value));
+    });
+    return `/activator?${query.toString()}`;
+  }
+
+  if (route === "KeeprSpaceFleet") {
+    const query = new URLSearchParams();
+    if (params.organizationId) query.set("organizationId", String(params.organizationId));
+    if (params.workspaceId) query.set("workspaceId", String(params.workspaceId));
+    return `/workspace/fleet${query.toString() ? `?${query.toString()}` : ""}`;
+  }
+
+  return null;
+}
+
+function navigateCrumb(navigation, route, params = {}) {
+  const webPath = Platform.OS === "web" ? webPathForRoute(route, params) : null;
+  if (webPath) {
+    try {
+      const current = `${window.location.pathname || ""}${window.location.search || ""}`;
+      if (current !== webPath) window.location.assign(webPath);
+      return;
+    } catch {}
+  }
+
+  if (navigationRef?.isReady?.()) {
+    navigationRef.navigate(route, params);
+    return;
+  }
+
+  const parent = navigation?.getParent?.();
+  if (parent?.navigate) {
+    parent.navigate(route, params);
+    return;
+  }
+
+  navigation?.navigate?.(route, params);
+}
 
 export default function ActivatorBreadcrumb({
   navigation,
@@ -12,7 +62,7 @@ export default function ActivatorBreadcrumb({
   homeParams = null,
   right = null,
 }) {
-  const goHome = () => navigation?.navigate?.(homeRoute, homeParams || {});
+  const goHome = () => navigateCrumb(navigation, homeRoute, homeParams || {});
 
   return (
     <View style={styles.shell}>
@@ -26,7 +76,7 @@ export default function ActivatorBreadcrumb({
             <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />
             {item.route ? (
               <TouchableOpacity
-                onPress={() => navigation?.navigate?.(item.route, item.params || {})}
+                onPress={() => navigateCrumb(navigation, item.route, item.params || {})}
                 activeOpacity={0.84}
                 style={styles.crumbButton}
               >

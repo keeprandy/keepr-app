@@ -60,6 +60,62 @@ function getDisplayName(system) {
   return dn || system?.name || "System";
 }
 
+function getGraphProjection(system) {
+  const meta = system?.metadata && typeof system.metadata === "object" ? system.metadata : {};
+  return meta.graph_projection && typeof meta.graph_projection === "object" ? meta.graph_projection : null;
+}
+
+function evidenceCountForGraphSystem(system) {
+  const graph = getGraphProjection(system);
+  if (!graph) return 0;
+  let count = Array.isArray(graph.evidence) ? graph.evidence.length : 0;
+  (graph.components || []).forEach((component) => {
+    count += Array.isArray(component.evidence) ? component.evidence.length : 0;
+    (component.instances || []).forEach((instance) => {
+      count += Array.isArray(instance.evidence) ? instance.evidence.length : 0;
+    });
+  });
+  (graph.options || []).forEach((option) => {
+    count += Array.isArray(option.evidence) ? option.evidence.length : 0;
+  });
+  return count;
+}
+
+function graphSystemToKeeprSystem(graphSystem) {
+  if (!graphSystem) return null;
+  const id = graphSystem.system_id || graphSystem.id || graphSystem.graph_node_id || graphSystem.node_key;
+  if (!id) return null;
+  const components = Array.isArray(graphSystem.components) ? graphSystem.components : [];
+  const options = Array.isArray(graphSystem.options) ? graphSystem.options : [];
+  const evidenceCount = evidenceCountForGraphSystem({
+    metadata: { graph_projection: graphSystem },
+  });
+  return {
+    id,
+    asset_id: graphSystem.asset_id || null,
+    name: graphSystem.name || "System",
+    status: graphSystem.lifecycle_status || "active",
+    ksc_code: graphSystem.node_key || graphSystem.system_type || "operational_graph",
+    system_type: graphSystem.system_type || "operational_graph",
+    source_type: "operational_graph",
+    metadata: {
+      graph_projection: graphSystem,
+      display_name: graphSystem.name || "System",
+      options: options.map((o) => o.label || o.name || o.normalized_name).filter(Boolean),
+      factory_confirmed: !!graphSystem.factory_confirmed,
+      manual_status: graphSystem.manual_status || null,
+      evidence_count: evidenceCount,
+      graph_node_count: components.length + options.length,
+      location_hint: [
+        components.length ? `${components.length} graph node${components.length === 1 ? "" : "s"}` : "",
+        evidenceCount ? `${evidenceCount} evidence link${evidenceCount === 1 ? "" : "s"}` : "",
+      ]
+        .filter(Boolean)
+        .join(" · "),
+    },
+  };
+}
+
 
 function withPlaybookInMetadata(system, nextPlaybook) {
   const meta = system?.metadata && typeof system.metadata === "object" ? system.metadata : {};
@@ -69,10 +125,22 @@ function withPlaybookInMetadata(system, nextPlaybook) {
 }
 
 const BoatSystemsScreen = ({ route, navigation }) => {
-  const { boatId, boatName } = route?.params || {};
+  const {
+    boatId,
+    boatName,
+    assetId,
+    kac,
+    organizationId,
+    workspaceId,
+    relationshipRole,
+    teamMemberType,
+    systemsRole,
+    parentRoute,
+  } = route?.params || {};
   const boatLabel = boatName || "Boat";
 
   const [systems, setSystems] = useState([]);
+  const [graphExperience, setGraphExperience] = useState(null);
   const [systemsLoading, setSystemsLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState(null);
@@ -169,16 +237,55 @@ const BoatSystemsScreen = ({ route, navigation }) => {
       .eq("asset_id", boatId)
       .order("name", { ascending: true });
 
+    let tableSystems = [];
     if (error) {
       console.error("BoatSystemsScreen: error loading systems", error);
       setLoadError("Could not load boat systems.");
-      setSystems([]);
     } else {
-      setSystems(data || []);
+      tableSystems = data || [];
+    }
+
+    let projectedSystems = [];
+    try {
+      const { data: graphData, error: graphErr } = await supabase.rpc("get_asset_systems_experience", {
+        p_asset_id: boatId,
+        p_role: systemsRole || "owner",
+      });
+      if (graphErr) {
+        console.warn("BoatSystemsScreen: graph projection unavailable", graphErr);
+        setGraphExperience(null);
+      } else {
+        setGraphExperience(graphData || null);
+        projectedSystems = (graphData?.systems || [])
+          .map(graphSystemToKeeprSystem)
+          .filter(Boolean)
+          .map((system) => ({ ...system, asset_id: boatId }));
+      }
+    } catch (graphCatch) {
+      console.warn("BoatSystemsScreen: graph projection exception", graphCatch);
+      setGraphExperience(null);
+    }
+
+    const tableKeys = new Set(
+      tableSystems.map((s) => safeLower(s?.id || s?.name || s?.system_type)).filter(Boolean)
+    );
+    const merged = [
+      ...tableSystems,
+      ...projectedSystems.filter((s) => {
+        const keys = [s.id, s.name, s.system_type, s.ksc_code].map(safeLower).filter(Boolean);
+        return !keys.some((key) => tableKeys.has(key));
+      }),
+    ];
+
+    if (!error) {
+      setSystems(merged);
+    } else if (projectedSystems.length) {
+      setLoadError(null);
+      setSystems(projectedSystems);
     }
 
     setSystemsLoading(false);
-  }, [boatId]);
+  }, [boatId, systemsRole]);
 
   const loadServiceMeta = useCallback(async () => {
     if (!boatId) return;
@@ -235,16 +342,37 @@ const BoatSystemsScreen = ({ route, navigation }) => {
 
   const handleViewBoatStory = () => {
     if (!boatId) return;
-    navigation.navigate("BoatStory", { boatId });
+    navigation.navigate("BoatStory", {
+      boatId,
+      assetId: assetId || boatId,
+      kac,
+      organizationId,
+      workspaceId,
+      relationshipRole,
+      teamMemberType,
+      systemsRole,
+      parentRoute,
+    });
   };
 
   const handleViewSystemStory = (system) => {
     if (!system?.id || !boatId) return;
+    const graph = getGraphProjection(system);
 
     navigation.navigate("BoatSystemStory", {
       systemId: system.id,
       boatId,
       boatName: boatLabel,
+      assetId: assetId || boatId,
+      kac,
+      organizationId,
+      workspaceId,
+      relationshipRole,
+      teamMemberType,
+      systemsRole: systemsRole || "owner",
+      parentRoute,
+      sourceType: graph ? "asset_systems_experience" : system.source_type || null,
+      graphNodeKey: graph?.node_key || null,
     });
   };
 

@@ -42,7 +42,9 @@ import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 
 // ✅ attachments helpers (for hero placement resolution)
 import { getSignedUrl, listAttachmentsForTarget } from "../lib/attachmentsApi";
+import { resolveAssetHeroUri } from "../lib/assetHeroResolver";
 import { formatContributionAttribution } from "../lib/provenance";
+import { getKeeprSpacePortfolio } from "../lib/keeprspaceApi";
 
 // Context-aware Add Event pill
 import EventPill from "../components/EventPill";
@@ -218,6 +220,7 @@ export default function BoatStoryScreen({ navigation, route }) {
   route?.params?.assetId ??
   route?.params?.boatId ??
   null;
+  const routeOrganizationId = route?.params?.organizationId || null;
   
 const loadAssetProgress = useCallback(async (assetId) => {
   if (!assetId) {
@@ -258,12 +261,17 @@ const loadAssetProgress = useCallback(async (assetId) => {
 }, []);
 
   const { assets: boats = [], loading, error } = useAssets("boat");
+  const [routeBoatSnapshot, setRouteBoatSnapshot] = useState(null);
+  const [routeBoatLoading, setRouteBoatLoading] = useState(false);
 
   const currentBoat = useMemo(() => {
-    if (!boats || boats.length === 0) return null;
-    if (!initialBoatId) return boats[0];
-    return boats.find((h) => h.id === initialBoatId) || boats[0] || null;
-  }, [boats, initialBoatId]);
+    const personalBoats = Array.isArray(boats) ? boats : [];
+    if (!initialBoatId) return personalBoats[0] || null;
+    return (
+      personalBoats.find((h) => h.id === initialBoatId) ||
+      (routeBoatSnapshot?.id === initialBoatId ? routeBoatSnapshot : null)
+    );
+  }, [boats, initialBoatId, routeBoatSnapshot]);
 
   // Local snapshot so big updates (hero photo, delete, edits) reflect immediately
   const [boatSnapshot, setBoatSnapshot] = useState(null);
@@ -272,21 +280,134 @@ const loadAssetProgress = useCallback(async (assetId) => {
   const [storyAttachments, setStoryAttachments] = useState([]);
 
   // Keep snapshot in sync when user switches boats
-    useEffect(() => {
-      setBoatSnapshot(currentBoat || null);
-    }, [currentBoat?.id]);
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadRouteBoat() {
+      if (!initialBoatId) {
+        setRouteBoatSnapshot(null);
+        setRouteBoatLoading(false);
+        return;
+      }
+
+      const personalBoats = Array.isArray(boats) ? boats : [];
+      if (personalBoats.some((h) => h.id === initialBoatId)) {
+        setRouteBoatSnapshot(null);
+        setRouteBoatLoading(false);
+        return;
+      }
+
+      setRouteBoatLoading(true);
+
+      const { data, error: fetchError } = await supabase
+        .from("assets")
+        .select("*")
+        .eq("id", initialBoatId)
+        .maybeSingle();
+
+      let resolved = data || null;
+      let resolvedError = fetchError || null;
+
+      if (!resolved) {
+        const { data: authorizedRows, error: authorizedError } =
+          await supabase.rpc("get_authorized_assets", {
+            p_asset_type: "boat",
+            p_include_deleted: false,
+          });
+
+        if (authorizedError && !resolvedError) resolvedError = authorizedError;
+
+        resolved =
+          (authorizedRows || [])
+            .map((row) => row?.asset)
+            .find((asset) => asset?.id === initialBoatId) || null;
+      }
+
+      if (!resolved && routeOrganizationId) {
+        try {
+          const portfolio = await getKeeprSpacePortfolio({
+            organizationId: routeOrganizationId,
+            search: route?.params?.kac || initialBoatId,
+            limit: 100,
+            offset: 0,
+          });
+          const match = (portfolio?.boats || []).find((item) => {
+            const assetId = item?.asset_id || item?.asset?.id || item?.id;
+            return assetId === initialBoatId;
+          });
+          const identity = match?.identity || {};
+          const asset = match?.asset || {};
+          if (match) {
+            resolved = {
+              ...asset,
+              id: match.asset_id || asset.id || match.id,
+              name: asset.name || match.asset_name || match.name || "Boat",
+              type: asset.type || "boat",
+              kac_id: asset.kac_id || match.kac_id || route?.params?.kac || null,
+              year: asset.year || identity.year || null,
+              make: asset.make || identity.make || null,
+              model: asset.model || identity.model || null,
+              serial_number:
+                asset.serial_number ||
+                identity.hin ||
+                identity.serial_number ||
+                null,
+              hin: asset.hin || identity.hin || null,
+              location:
+                asset.location ||
+                match?.dealer_relationship?.location_name ||
+                match?.service_relationship?.location_name ||
+                null,
+              hero_image_url:
+                asset.hero_image_url ||
+                match?.hero_image_url ||
+                match?.hero?.url ||
+                null,
+              metadata: {
+                ...(asset.metadata || {}),
+                keeprspace_projection: match,
+              },
+            };
+          }
+        } catch (portfolioError) {
+          if (!resolvedError) resolvedError = portfolioError;
+        }
+      }
+
+      if (!cancelled) {
+        if (resolvedError && !resolved) {
+          console.log("BoatStory route asset load error", resolvedError);
+          setRouteBoatSnapshot(null);
+        } else {
+          setRouteBoatSnapshot(resolved || null);
+        }
+        setRouteBoatLoading(false);
+      }
+    }
+
+    loadRouteBoat();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [boats, initialBoatId, route?.params?.kac, routeOrganizationId]);
+
+  useEffect(() => {
+    setBoatSnapshot(currentBoat || null);
+  }, [currentBoat?.id]);
 
 
   const refreshBoat = useCallback(async () => {
-    if (!boat?.id) return;
+    const assetId = boat?.id || initialBoatId;
+    if (!assetId) return;
     const { data, error } = await supabase
       .from("assets")
       .select("*")
-      .eq("id", boat.id)
+      .eq("id", assetId)
       .maybeSingle();
 
     if (!error && data) setBoatSnapshot(data);
-  }, [boat?.id]);
+  }, [boat?.id, initialBoatId]);
 
   const [reportsOpen, setReportsOpen] = useState(false);
  const [assetProgress, setAssetProgress] = useState(null);
@@ -337,15 +458,30 @@ useEffect(() => {
       return;
     }
 
+    setHeroResolving(true);
+    try {
+      const resolved = await resolveAssetHeroUri(boat, {
+        organizationId: routeOrganizationId,
+        expiresIn: 60 * 30,
+      });
+      if (resolved) {
+        setHeroUri(resolved);
+        setHeroResolving(false);
+        return;
+      }
+    } catch (resolverError) {
+      console.log("BoatStory shared hero resolver error", resolverError);
+    }
+
     const placementId = boat?.hero_placement_id || null;
 
     // No placement hero yet → fallback to legacy URL field
     if (!placementId) {
       setHeroUri(boat?.hero_image_url || null);
+      setHeroResolving(false);
       return;
     }
 
-    setHeroResolving(true);
     try {
       const { data, error: pErr } = await supabase
         .from("attachment_placements")
@@ -402,14 +538,7 @@ useEffect(() => {
     } finally {
       setHeroResolving(false);
     }
-  }, [boat?.id, boat?.hero_placement_id, boat?.hero_image_url]);
-
-  useFocusEffect(
-    useCallback(() => {
-      refreshBoat();
-      resolveHeroFromPlacement();
-    }, [refreshBoat, resolveHeroFromPlacement])
-  );
+  }, [boat, routeOrganizationId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -575,8 +704,20 @@ try {
   };
 
   const goToShowcase = () => {
-    if (!boat) return;
-    navigation.navigate("BoatShowcase", { boatId: boat.id });
+    if (!boat?.id) return;
+    navigation.navigate("BoatShowcase", {
+      boatId: boat.id,
+      assetId: boat.id,
+      assetName: boat.name || "Boat",
+      kac: route?.params?.kac || boat.kac_id || boat.kac || null,
+      organizationId: route?.params?.organizationId || null,
+      workspaceId: route?.params?.workspaceId || null,
+      relationshipRole: route?.params?.relationshipRole || null,
+      teamMemberType: route?.params?.teamMemberType || null,
+      systemsRole: route?.params?.systemsRole || null,
+      parentRoute: route?.params?.parentRoute || null,
+      returnRoute: "BoatStory",
+    });
   };
 
   const goToAttachments = () => {
@@ -584,6 +725,14 @@ try {
     navigation.navigate("AssetAttachments", {
       assetId: boat.id,
       assetName: boat.name || "Boat",
+      kac: route?.params?.kac || boat.kac_id || boat.kac || null,
+      organizationId: route?.params?.organizationId || null,
+      workspaceId: route?.params?.workspaceId || null,
+      relationshipRole: route?.params?.relationshipRole || null,
+      teamMemberType: route?.params?.teamMemberType || null,
+      systemsRole: route?.params?.systemsRole || null,
+      parentRoute: route?.params?.parentRoute || null,
+      returnRoute: "BoatStory",
       sourceType: "boat",
       initialTab: "file",
     });
@@ -764,7 +913,15 @@ const goToPublicStorySettings = () => {
     if (!boat) return;
     navigation.navigate("BoatSystems", {
       boatId: boat.id,
+      assetId: route?.params?.assetId || boat.id,
       boatName: boat.name || "Boat",
+      kac: route?.params?.kac || boat.kac_id || boat.kac || null,
+      organizationId: route?.params?.organizationId || null,
+      workspaceId: route?.params?.workspaceId || null,
+      relationshipRole: route?.params?.relationshipRole || null,
+      teamMemberType: route?.params?.teamMemberType || null,
+      systemsRole: route?.params?.systemsRole || route?.params?.relationshipRole || "owner",
+      parentRoute: route?.params?.parentRoute || null,
     });
   };
 
@@ -1352,7 +1509,7 @@ const meta = {
 
   /* --------------------------- GUARDS --------------------------- */
 
-  if (loading) {
+  if (loading || (initialBoatId && routeBoatLoading)) {
     return (
       <SafeAreaView style={layoutStyles.screen}>
         <View style={styles.centered}>

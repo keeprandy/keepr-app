@@ -130,6 +130,7 @@ import KeeprEffectScreen from "./screens/KeeprEffectScreen";
 import ActivatorHomeScreen from "./screens/ActivatorHomeScreen";
 import ActivatorBoatWorkspaceScreen from "./screens/ActivatorBoatWorkspaceScreen";
 import ActivatorCatalogTemplateScreen from "./screens/ActivatorCatalogTemplateScreen";
+import ActivatorTemplateDraftScreen from "./screens/ActivatorTemplateDraftScreen";
 import ActivatorExactBuildScreen from "./screens/ActivatorExactBuildScreen";
 import ActivatorTemplateCustomizeScreen from "./screens/ActivatorTemplateCustomizeScreen";
 import KeeprAdminHomeScreen from "./screens/KeeprAdminHomeScreen";
@@ -271,6 +272,37 @@ const SuperKeeprStackNav = createNativeStackNavigator();
 const KeeprProStackNav = createNativeStackNavigator();
 const HomeStackNav = createNativeStackNavigator();
 
+function isKeeprSpaceWebPath(path) {
+  return (
+    path === "/workspace" ||
+    path.startsWith("/workspace/") ||
+    path === "/wilson" ||
+    path.startsWith("/wilson/")
+  );
+}
+
+function workspaceBoatRouteFromWebLocation() {
+  if (Platform.OS !== "web") return null;
+  try {
+    const path = window.location.pathname || "";
+    const match = path.match(/^\/workspace\/boats\/([^/?#]+)/);
+    if (!match?.[1]) return null;
+
+    const params = new URLSearchParams(window.location.search || "");
+    return {
+      assetId: decodeURIComponent(match[1]),
+      kac: params.get("kac") || null,
+      organizationId: params.get("organizationId") || null,
+      stewardshipId: params.get("stewardshipId") || null,
+      parentRoute: params.get("parentRoute") || "KeeprSpaceFleet",
+      workspaceId: params.get("workspaceId") || null,
+      systemsRole: params.get("systemsRole") || "oem",
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
 function routeForWorkspace(workspace, legacyRole) {
   const type = workspace?.workspace_type || workspace?.type;
 
@@ -284,6 +316,7 @@ function routeForCurrentWebPath() {
   if (Platform.OS !== "web") return null;
   try {
     const path = window.location.pathname || "";
+    if (path.startsWith("/boat/")) return "BoatStory";
     if (path === "/dashboard" || path.startsWith("/dashboard/")) return "PersonalModule";
     if (path === "/home" || path.startsWith("/home/")) return "PersonalModule";
     if (path === "/garage" || path.startsWith("/garage/")) return "PersonalModule";
@@ -291,7 +324,12 @@ function routeForCurrentWebPath() {
     if (path === "/settings" || path.startsWith("/settings/")) return "PersonalModule";
     if (path === "/messages" || path.startsWith("/messages/")) return "PersonalModule";
     if (path === "/super" || path.startsWith("/super/")) return "SuperKeeprStack";
-    if (path === "/wilson" || path.startsWith("/wilson/")) return "KeeprSpaceModule";
+    if (path === "/workspace" || path.startsWith("/workspace/")) return "KeeprSpaceModule";
+    if (path === "/wilson" || path.startsWith("/wilson/")) return "KeeprSpaceLegacyModule";
+    if (path.startsWith("/activator/build/")) return "ActivatorExactBuild";
+    if (path.startsWith("/activator/catalog/") && path.endsWith("/customize")) return "ActivatorTemplateCustomize";
+    if (path.startsWith("/activator/catalog/")) return "ActivatorCatalogTemplate";
+    if (path === "/activator" || path.startsWith("/activator/")) return "ActivatorHome";
     if (path.startsWith("/keepr-admin/org/")) return "KeeprAdminOrgDetail";
     if (path === "/keepr-admin" || path.startsWith("/keepr-admin/")) return "KeeprAdminHome";
   } catch (_) {}
@@ -385,7 +423,8 @@ function isOrgModuleRouteName(routeName) {
     String(routeName || "").startsWith("KeeprSpace") ||
     String(routeName || "").startsWith("Wilson") ||
     String(routeName || "").startsWith("Activator") ||
-    routeName === "KeeprProStack"
+    routeName === "KeeprProStack" ||
+    routeName === "KeeprSpaceLegacyModule"
   );
 }
 
@@ -402,7 +441,9 @@ function shouldRestoreWebNavStateForWorkspace(state, workspace) {
 const linking = {
   prefixes: [
     "keepr://",
-    ...(Platform.OS === "web" ? ["http://localhost:8081"] : []),
+    ...(Platform.OS === "web"
+      ? ["http://localhost:8096", "http://127.0.0.1:8096", "http://localhost:8081"]
+      : []),
     "https://app.keeprhome.com",
     "https://keeprhome.com",
     "https://keeprmarine.com",
@@ -441,6 +482,20 @@ const linking = {
       },
     },
     KeeprSpaceModule: {
+      path: "workspace",
+      screens: {
+        KeeprSpaceHome: "",
+        KeeprSpaceFleet: "fleet",
+        KeeprSpaceActivator: "activator",
+        KeeprSpaceAddBoat: "add-boat",
+        KeeprSpaceMessages: "messages",
+        KeeprSpacePlaybooks: "playbooks",
+        KeeprSpaceAdmin: "admin",
+        KeeprSpaceSettings: "settings",
+        KeeprSpaceBoat: "boats/:assetId",
+      },
+    },
+    KeeprSpaceLegacyModule: {
       path: "wilson",
       screens: {
         KeeprSpaceHome: "",
@@ -464,6 +519,7 @@ const linking = {
     KeeprAdminOrgDetail: "keepr-admin/org/:organizationId",
     ActivatorHome: "activator",
     ActivatorCatalogTemplate: "activator/catalog/:templateKey",
+    ActivatorTemplateDraft: "activator/catalog-drafts/:draftKey",
     ActivatorTemplateCustomize: "activator/catalog/:templateKey/customize",
     ActivatorExactBuild: "activator/build/:templateKey",
     ActivatorBoatWorkspace: "activator/boats/:assetId",
@@ -512,6 +568,9 @@ const linking = {
     },
     TimelineRecord: "TimelineRecord",
     CreateReminder: "CreateReminder",
+    BoatStory: "boat/:boatId/story",
+    BoatShowcase: "boat/:boatId/showcase",
+    BoatSystemStory: "boat/:boatId/system/:systemId",
     SystemStoryPrint: "SystemStoryPrint",
     UploadLab: "upload-lab",
     AssetAttachments: "asset/:assetId/attachments",
@@ -2348,20 +2407,46 @@ React.useEffect(() => {
 
   if (Platform.OS === "web") {
     const path = window.location.pathname || "";
+    const workspaceBoatParams = workspaceBoatRouteFromWebLocation();
+
+    if (workspaceBoatParams) {
+      navigationRef.reset({
+        index: 0,
+        routes: [
+          {
+            name: "KeeprSpaceModule",
+            state: {
+              index: 0,
+              routes: [
+                {
+                  name: "KeeprSpaceBoat",
+                  params: workspaceBoatParams,
+                },
+              ],
+            },
+          },
+        ],
+      });
+      didInitialNavResolve.current = true;
+      lastResetRouteRef.current = "KeeprSpaceModule:KeeprSpaceBoat";
+      return;
+    }
 
 if (
   path.startsWith("/k/") ||
   path.startsWith("/h/") ||
   path.startsWith("/hub/") ||
   path.startsWith("/story/") ||
+  path.startsWith("/boat/") ||
   path.startsWith("/invite/") ||
   path.startsWith("/resolve/") ||
   path.startsWith("/inbox") ||
   path.startsWith("/super") ||
   path.startsWith("/CreateReminder") ||
   path.startsWith("/Notifications") ||
-  (isOrgWorkspaceActive && path.startsWith("/wilson")) ||
-  path.startsWith("/activator") ||
+  (isOrgWorkspaceActive && isKeeprSpaceWebPath(path)) ||
+  path === "/activator" ||
+  path.startsWith("/activator/") ||
   path.startsWith("/KeeprHubInternal") ||
   path.startsWith("/KeeprStoryInternal")
 ) {
@@ -2371,7 +2456,7 @@ if (
   }
 
   const current = topRouteNameFromRootRef() || navigationRef.getCurrentRoute()?.name;
-  if (isOrgWorkspaceActive && current === "KeeprSpaceModule") {
+  if (isOrgWorkspaceActive && current === "KeeprSpaceModule" && targetRoute === "KeeprSpaceModule") {
     didInitialNavResolve.current = true;
     lastResetRouteRef.current = current;
     return;
@@ -2569,13 +2654,14 @@ const initialRouteName = isBootLoading
           !window.location.pathname.startsWith("/h/") &&
           !window.location.pathname.startsWith("/hub/") &&
           !window.location.pathname.startsWith("/story/") &&
+          !window.location.pathname.startsWith("/boat/") &&
           !window.location.pathname.startsWith("/invite/") &&
           !window.location.pathname.startsWith("/auth") &&
           !window.location.pathname.startsWith("/m/") &&
           !window.location.pathname.startsWith("/pro/") &&
           !window.location.pathname.startsWith("/pro-mode") &&
           !window.location.pathname.startsWith("/super") &&
-          !window.location.pathname.startsWith("/wilson") &&
+          !isKeeprSpaceWebPath(window.location.pathname) &&
           !window.location.pathname.startsWith("/keepr-admin") &&
           !window.location.pathname.startsWith("/inbox") &&
           !window.location.pathname.startsWith("/messages") &&
@@ -2608,6 +2694,7 @@ const initialRouteName = isBootLoading
 
           <RootStack.Screen name="PersonalModule" component={PersonalNavigator} />
           <RootStack.Screen name="KeeprSpaceModule" component={KeeprSpaceNavigator} />
+          <RootStack.Screen name="KeeprSpaceLegacyModule" component={KeeprSpaceNavigator} />
           <RootStack.Screen name="RootTabs" component={MainTabs} />
           <RootStack.Screen
             name="SuperKeeprStack"
@@ -2632,6 +2719,7 @@ const initialRouteName = isBootLoading
           <RootStack.Screen name="KeeprAdminOrgDetail" component={KeeprAdminOrgDetailScreen} />
           <RootStack.Screen name="ActivatorHome" component={ActivatorHomeScreen} />
           <RootStack.Screen name="ActivatorCatalogTemplate" component={ActivatorCatalogTemplateScreen} />
+          <RootStack.Screen name="ActivatorTemplateDraft" component={ActivatorTemplateDraftScreen} />
           <RootStack.Screen name="ActivatorTemplateCustomize" component={ActivatorTemplateCustomizeScreen} />
           <RootStack.Screen name="ActivatorExactBuild" component={ActivatorExactBuildScreen} />
           <RootStack.Screen name="ActivatorBoatWorkspace" component={ActivatorBoatWorkspaceScreen} />

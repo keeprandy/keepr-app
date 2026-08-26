@@ -133,6 +133,69 @@ function asText(v) {
   if (typeof v === "object") return v.content || "";
   return "";
 }
+
+function findGraphSystem(experience, systemId, nodeKey) {
+  const systems = Array.isArray(experience?.systems) ? experience.systems : [];
+  const wanted = String(systemId || "");
+  const wantedKey = String(nodeKey || "");
+  return systems.find((s) => {
+    const ids = [s?.id, s?.system_id, s?.graph_node_id, s?.node_key].map((v) => String(v || ""));
+    return ids.includes(wanted) || (wantedKey && ids.includes(wantedKey));
+  }) || null;
+}
+
+function buildSystemFromGraph(graphSystem, assetId) {
+  if (!graphSystem) return null;
+  const firstComponent = Array.isArray(graphSystem.components) ? graphSystem.components[0] : null;
+  const firstInstance = firstComponent?.instances?.[0] || null;
+  const firstEvidence = graphSystem.evidence?.[0] || firstComponent?.evidence?.[0] || firstInstance?.evidence?.[0] || null;
+  const systemId = graphSystem.system_id || graphSystem.id || graphSystem.graph_node_id || graphSystem.node_key;
+
+  return {
+    id: systemId,
+    asset_id: assetId || null,
+    name: graphSystem.name || "System",
+    status: graphSystem.lifecycle_status || "active",
+    system_type: graphSystem.system_type || "operational_graph",
+    ksc_code: graphSystem.node_key || "operational_graph",
+    metadata: {
+      graph_projection: graphSystem,
+      factory_confirmed: !!graphSystem.factory_confirmed,
+      manual_status: graphSystem.manual_status || firstComponent?.manual_status || null,
+      standard: {
+        identity: {
+          manufacturer: firstComponent?.manufacturer || firstInstance?.manufacturer || "",
+          model: firstComponent?.model || firstInstance?.model || "",
+          serial_number: firstInstance?.state?.serial_number || "",
+          installed_on: firstInstance?.state?.install_date || "",
+          location: firstInstance?.state?.position || "",
+        },
+        warranty: {
+          provider: "",
+          policy_number: "",
+          starts_on: "",
+          expires_on: firstInstance?.state?.warranty_expires_at || "",
+        },
+        value: {},
+        risk: {},
+        story: {
+          summary: firstEvidence
+            ? `Factory confirmed by ${firstEvidence.source_document || firstEvidence.source_type || "source evidence"}.`
+            : "",
+        },
+        relationships: {},
+      },
+    },
+  };
+}
+
+function graphEvidenceLabel(evidence) {
+  if (!evidence) return "Factory evidence";
+  const code = evidence.factory_item_code || evidence.factory_code || "Factory line";
+  const desc = evidence.factory_description || evidence.raw_source_text || "";
+  const line = evidence.line_number ? `Line ${evidence.line_number}` : null;
+  return [line, code, desc].filter(Boolean).join(" · ");
+}
 // ---- screen ----
 
 export default function BoatSystemStoryScreen(props) {
@@ -144,6 +207,8 @@ export default function BoatSystemStoryScreen(props) {
   const { currentBoat } = useBoats();
 
   const systemId = route?.params?.systemId ?? route?.params?.system_id ?? null;
+  const graphNodeKey = route?.params?.graphNodeKey ?? null;
+  const systemsRole = route?.params?.systemsRole || route?.params?.relationshipRole || "owner";
 
   const assetIdFromRoute =
     route?.params?.assetId ?? route?.params?.boatId ?? currentBoat?.id ?? null;
@@ -231,14 +296,26 @@ export default function BoatSystemStoryScreen(props) {
         .maybeSingle();
 
       if (sysErr) throw sysErr;
-      if (!sys) throw new Error("System not found.");
-      setSystem(sys);
+      let resolvedSystem = sys || null;
 
-      if (!assetKacFromRoute && sys.asset_id) {
+      if (!resolvedSystem && assetId) {
+        const { data: graphData, error: graphErr } = await supabase.rpc("get_asset_systems_experience", {
+          p_asset_id: assetId,
+          p_role: systemsRole,
+        });
+        if (graphErr) throw graphErr;
+        const graphSystem = findGraphSystem(graphData, systemId, graphNodeKey);
+        resolvedSystem = buildSystemFromGraph(graphSystem, assetId);
+      }
+
+      if (!resolvedSystem) throw new Error("System not found.");
+      setSystem(resolvedSystem);
+
+      if (!assetKacFromRoute && resolvedSystem.asset_id) {
         const { data: assetRow } = await supabase
           .from("assets")
           .select("kac_id")
-          .eq("id", sys.asset_id)
+          .eq("id", resolvedSystem.asset_id)
           .maybeSingle();
         setPublicAssetKac(assetRow?.kac_id || null);
       }
@@ -256,7 +333,7 @@ export default function BoatSystemStoryScreen(props) {
             )
           `
         )
-        .eq("system_id", sys.id)
+        .eq("system_id", resolvedSystem.id)
         .order("performed_at", { ascending: false });
 
       if (recErr) throw recErr;
@@ -280,7 +357,7 @@ export default function BoatSystemStoryScreen(props) {
       setError(e?.message || "Failed to load system.");
       setLoading(false);
     }
-  }, [assetKacFromRoute, systemId]);
+  }, [assetId, assetKacFromRoute, graphNodeKey, systemId, systemsRole]);
 
   // Initial load
   useEffect(() => {
@@ -793,6 +870,11 @@ const handleRequestServiceFromKeeprPro = useCallback(async (pro) => {
   ? `${lastDate || "Recent"} · ${asText(lastRecord.title) || "Service event"}`
     : "No service history yet.";
 
+  const graphProjection =
+    system?.metadata?.graph_projection && typeof system.metadata.graph_projection === "object"
+      ? system.metadata.graph_projection
+      : null;
+
   // ---- loading / error ----
   if (loading) {
     return (
@@ -1274,6 +1356,80 @@ const handleRequestServiceFromKeeprPro = useCallback(async (pro) => {
 
                 {!!prosError && <Text style={styles.warnText}>{prosError}</Text>}
               </View>
+            </View>
+          ) : null}
+
+          {graphProjection ? (
+            <View style={styles.sectionCard}>
+              <Text style={styles.sectionTitle}>Installed Equipment</Text>
+              <Text style={styles.sectionSubtitle}>
+                Factory-projected from build evidence. Manuals attach to reusable component models;
+                serials, warranty, service, and actions belong to installed instances.
+              </Text>
+
+              {(graphProjection.components || []).map((component) => (
+                <View key={component.id || component.node_key || component.label} style={styles.recordCard}>
+                  <View style={styles.recordTopRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.recordTitle} numberOfLines={2}>
+                        {component.label || component.name || "Component model"}
+                      </Text>
+                      <Text style={styles.recordMeta}>
+                        {[
+                          component.manufacturer,
+                          component.model,
+                          component.product_family,
+                          component.manual_status ? `manual ${component.manual_status}` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </Text>
+                    </View>
+                    {!!component.factory_confirmed && (
+                      <View style={[styles.statusPill, styles.status_healthy]}>
+                        <Text style={styles.statusText}>Factory confirmed</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  {(component.instances || []).length > 0 && (
+                    <View style={{ marginTop: spacing.sm }}>
+                      {(component.instances || []).map((instance) => (
+                        <View key={instance.id || instance.node_key || instance.label} style={styles.kvRow}>
+                          <Text style={styles.kvLabel}>{instance.label || "Installed instance"}</Text>
+                          <Text style={styles.kvValue} numberOfLines={1}>
+                            {[
+                              instance.state?.position || "position unknown",
+                              instance.state?.serial_number ? `serial ${instance.state.serial_number}` : "serial missing",
+                              instance.state?.warranty_state ? `warranty ${instance.state.warranty_state}` : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {(component.evidence || []).slice(0, 3).map((evidence, idx) => (
+                    <Text key={`${component.id || component.node_key || component.label}-evidence-${idx}`} style={styles.recordNotes}>
+                      {graphEvidenceLabel(evidence)}
+                    </Text>
+                  ))}
+                </View>
+              ))}
+
+              {(graphProjection.options || []).map((option) => (
+                <View key={option.id || option.node_key || option.label} style={styles.recordCard}>
+                  <Text style={styles.recordTitle}>{option.label || option.name || "Option / accessory"}</Text>
+                  <Text style={styles.recordMeta}>Option / accessory · factory confirmed</Text>
+                  {(option.evidence || []).slice(0, 2).map((evidence, idx) => (
+                    <Text key={`${option.id || option.node_key || option.label}-evidence-${idx}`} style={styles.recordNotes}>
+                      {graphEvidenceLabel(evidence)}
+                    </Text>
+                  ))}
+                </View>
+              ))}
             </View>
           ) : null}
 

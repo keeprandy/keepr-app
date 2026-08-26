@@ -18,7 +18,7 @@ import { getActivatorBoatWorkspace } from "../lib/activatorApi";
 import { layoutStyles } from "../styles/layout";
 import { colors, radius, shadows, spacing } from "../styles/theme";
 
-const BOAT_HERO = require("../assets/boats/boat_bennington_hero.jpg");
+const BOAT_HERO = require("../assets/boats/tiara/tiara_oem_banner.png");
 
 const SHOWCASE_ASSETS = {
   tiara_39le_aft_module: require("../assets/boats/tiara/tiara_39le_aft_module.jpg"),
@@ -59,7 +59,13 @@ function valueText(value) {
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (Array.isArray(value)) return value.join(", ");
   if (value.value !== undefined) return compact([value.value, value.unit]);
-  return JSON.stringify(value);
+  return compact([
+    value.manufacturer,
+    value.model,
+    value.product_family,
+    value.system_category,
+    value.template_status ? labelize(value.template_status) : null,
+  ]) || null;
 }
 
 function currentFactValue(facts, key) {

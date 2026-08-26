@@ -488,7 +488,7 @@ function capabilityItems(workspace) {
   ];
 }
 
-function CapabilityRail({ items, onOpenFleet }) {
+function CapabilityRail({ items, onSelect }) {
   return (
     <View style={styles.capabilityRail}>
       {items.map((item) => {
@@ -503,17 +503,15 @@ function CapabilityRail({ items, onOpenFleet }) {
             </View>
           </>
         );
-        if (item.key === "inventory") {
-          return (
-            <TouchableOpacity key={item.key} style={styles.capabilityCard} activeOpacity={0.86} onPress={onOpenFleet}>
-              {content}
-            </TouchableOpacity>
-          );
-        }
         return (
-          <View key={item.key} style={[styles.capabilityCard, item.active && styles.capabilityCardActive]}>
+          <TouchableOpacity
+            key={item.key}
+            style={[styles.capabilityCard, item.active && styles.capabilityCardActive]}
+            activeOpacity={0.86}
+            onPress={() => onSelect?.(item)}
+          >
             {content}
-          </View>
+          </TouchableOpacity>
         );
       })}
     </View>
@@ -708,8 +706,9 @@ export default function KeeprSpaceAddBoatScreen({ navigation }) {
       kac: result?.kac_id,
       organizationId,
       stewardshipId: result?.stewardship_id || null,
-      parentRoute: "KeeprSpaceFleet",
+      parentRoute: currentWorkspace?.workspace_type === "keeproem" ? "ActivatorHome" : "KeeprSpaceFleet",
       workspaceId,
+      systemsRole: currentWorkspace?.workspace_type === "keeproem" ? "oem" : null,
     });
   };
 
@@ -847,6 +846,32 @@ export default function KeeprSpaceAddBoatScreen({ navigation }) {
   const oemContactLabel = compact([boat.oemContactName, boat.oemDepartment]) || "Not assigned yet";
   const factoryResourceLabel = boat.factoryResourceTitle || boat.warrantyReference || boat.factoryResourceUrl || "No factory resource added yet";
   const selectedKacLabel = selectedMatch?.kac_id || boat.kac || "Resolves after create";
+  const workspaceRouteParams = useMemo(() => ({
+    workspaceId: currentWorkspace?.workspace_id || null,
+  }), [currentWorkspace?.workspace_id]);
+  const openCapability = useCallback((item) => {
+    const key = item?.key;
+    if (key === "inventory") {
+      if (isOemWorkspace) {
+        navigation.navigate("ActivatorHome", { ...workspaceRouteParams, initialMode: "fleet", navSection: "ActivatorFind" });
+        return;
+      }
+      navigation.navigate("KeeprSpaceFleet", workspaceRouteParams);
+      return;
+    }
+    if (key === "configure") {
+      navigation.navigate("ActivatorHome", { ...workspaceRouteParams, initialMode: "builds", navSection: "ActivatorWork" });
+      return;
+    }
+    if (key === "catalog") {
+      navigation.navigate("ActivatorHome", { ...workspaceRouteParams, initialMode: "templates", navSection: "ActivatorTemplates" });
+      return;
+    }
+    if (key === "customer" || key === "delivery" || key === "add") {
+      navigation.navigate("KeeprSpaceActivator", workspaceRouteParams);
+      return;
+    }
+  }, [isOemWorkspace, navigation, workspaceRouteParams]);
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -875,7 +900,7 @@ export default function KeeprSpaceAddBoatScreen({ navigation }) {
               <Text style={styles.headerBadgeText}>{copy.badge}</Text>
             </View>
           </View>
-          <CapabilityRail items={capabilities} onOpenFleet={() => navigation.navigate("KeeprSpaceFleet")} />
+          <CapabilityRail items={capabilities} onSelect={openCapability} />
         </View>
 
         {noSupportedPurpose ? (

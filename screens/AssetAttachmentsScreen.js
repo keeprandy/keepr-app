@@ -935,6 +935,13 @@ export default function AssetAttachmentsScreen({ route, navigation }) {
     route?.params?.returnParams && typeof route.params.returnParams === "object"
       ? route.params.returnParams
       : {};
+  const kac = route?.params?.kac || returnParams?.kac || null;
+  const workspaceId = route?.params?.workspaceId || returnParams?.workspaceId || null;
+  const relationshipRole = route?.params?.relationshipRole || returnParams?.relationshipRole || null;
+  const teamMemberType = route?.params?.teamMemberType || returnParams?.teamMemberType || null;
+  const systemsRole = route?.params?.systemsRole || returnParams?.systemsRole || null;
+  const parentRoute = route?.params?.parentRoute || returnParams?.parentRoute || null;
+  const returnRoute = route?.params?.returnRoute || null;
   const organizationId =
     route?.params?.organizationId ||
     route?.params?.orgId ||
@@ -987,7 +994,18 @@ const isWide = IS_WEB && width >= 980;
 
   // Tabs are now *filters* over canonical attachments
   // "all" | "photo" | "file" | "link"
-  const [tab, setTab] = useState("all");
+  const initialTab = useMemo(() => {
+    const requested = route?.params?.initialTab;
+    return ["all", "photo", "file", "link"].includes(requested)
+      ? requested
+      : "all";
+  }, [route?.params?.initialTab]);
+
+  const wantsPreview =
+    route?.params?.showPreview === true ||
+    route?.params?.showPreview === "true";
+
+  const [tab, setTab] = useState(initialTab);
 
   const [busy, setBusy] = useState(false); // reserved if we need global busy
   const [selected, setSelected] = useState(null);
@@ -1000,13 +1018,21 @@ const isWide = IS_WEB && width >= 980;
   const [linkCoverLoading, setLinkCoverLoading] = useState({});
   const [linkCoverOverrides, setLinkCoverOverrides] = useState({});
   // Web: default to preview OFF to prioritize list + editor; user can toggle on.
-  const [showPreview, setShowPreview] = useState(!IS_WEB);
+  const [showPreview, setShowPreview] = useState(wantsPreview || !IS_WEB);
 
   // Attachment viewer modal (web + mobile)
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
   const [viewerAttachment, setViewerAttachment] = useState(null);
   const signedUrlCacheRef = useRef(new Map());
+
+  useEffect(() => {
+    setTab(initialTab);
+  }, [initialTab]);
+
+  useEffect(() => {
+    if (wantsPreview) setShowPreview(true);
+  }, [wantsPreview]);
 
 
   // “no-code” controls
@@ -1692,6 +1718,20 @@ const isWide = IS_WEB && width >= 980;
   }, [fromTargetId, fromTargetType, hasContextRoute, normalized, selected]);
 
   const handleBack = () => {
+    if (returnRoute === "BoatStory" && assetId) {
+      navigation.navigate("BoatStory", {
+        assetId,
+        boatId: assetId,
+        kac,
+        organizationId,
+        workspaceId,
+        relationshipRole,
+        teamMemberType,
+        systemsRole,
+        parentRoute,
+      });
+      return;
+    }
     if (navigation?.canGoBack?.()) navigation.goBack();
     else navigation.navigate("Boats");
   };

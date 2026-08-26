@@ -2,22 +2,28 @@ import { Ionicons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   ImageBackground,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import * as ImagePicker from "expo-image-picker";
 
 import ActivatorBreadcrumb from "../components/ActivatorBreadcrumb";
 import { getCatalogTemplateDetail } from "../lib/activatorApi";
+import { getSignedUrl } from "../lib/attachmentsApi";
+import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
+import { supabase } from "../lib/supabaseClient";
 import { layoutStyles } from "../styles/layout";
 import { colors, radius, shadows, spacing } from "../styles/theme";
 
-const BOAT_HERO = require("../assets/boats/boat_bennington_hero.jpg");
+const DEFAULT_TEMPLATE_HERO = require("../assets/boats/tiara/tiara_oem_banner.png");
 
 const SHOWCASE_ASSETS = {
   tiara_39le_aft_module: require("../assets/boats/tiara/tiara_39le_aft_module.jpg"),
@@ -33,6 +39,7 @@ const SHOWCASE_ASSETS = {
 
 const TABS = [
   { key: "overview", label: "Overview", icon: "boat-outline" },
+  { key: "media", label: "Media", icon: "images-outline" },
   { key: "exterior", label: "Exterior", icon: "sunny-outline" },
   { key: "interior", label: "Interior", icon: "bed-outline" },
   { key: "electronics", label: "Helm & Electronics", icon: "speedometer-outline" },
@@ -44,6 +51,7 @@ const TABS = [
 
 const SECTION_TABS = {
   "Specifications": ["overview"],
+  "Systems": ["systems"],
   "Hull and Deck": ["overview", "exterior"],
   "Hardtop": ["exterior"],
   "Foredeck": ["exterior"],
@@ -118,6 +126,7 @@ function groupItems(items = []) {
 }
 
 function tabSections(groups, tab) {
+  if (tab === "media") return [];
   if (tab === "overview") {
     return groups.filter(({ section }) => (SECTION_TABS[section.label] || []).includes("overview"));
   }
@@ -129,12 +138,204 @@ function specValue(items, key, fallback) {
   return valueText(found?.expected_value) || fallback;
 }
 
-function mediaAsset(media) {
-  return SHOWCASE_ASSETS[media?.local_asset_key] || SHOWCASE_ASSETS[media?.metadata?.local_asset_key] || BOAT_HERO;
+function modelFallbackSpecs(template = {}) {
+  const model = String(template.model || "").toLowerCase();
+  if (model.includes("56 ls")) {
+    return {
+      loa: "56'2\"",
+      beam: "16'0\"",
+      hp: "2,400 HP",
+      fuel: "1,000 gal",
+      water: "150 gal",
+    };
+  }
+  if (model.includes("43 ls")) {
+    return {
+      loa: "43'6\"",
+      beam: "13'0\"",
+      hp: "1,200 HP",
+      fuel: "400 gal",
+      water: "60 gal",
+    };
+  }
+  return {
+    loa: "39'6\"",
+    beam: "12'6\"",
+    hp: "1,200 HP",
+    fuel: "500 gal",
+    water: "50 gal",
+  };
+}
+
+function mediaAsset(media, template = {}) {
+  const localKey = media?.local_asset_key || media?.metadata?.local_asset_key;
+  if (SHOWCASE_ASSETS[localKey]) return SHOWCASE_ASSETS[localKey];
+  const uri =
+    media?.attachment_signed_url ||
+    media?.attachment_url ||
+    media?.attachment_storage_signed_url ||
+    media?.url ||
+    media?.signed_url ||
+    media?.public_url ||
+    media?.publicUrl ||
+    media?.uri ||
+    media?.metadata?.attachment_signed_url ||
+    media?.metadata?.attachment_url ||
+    media?.metadata?.attachment_storage_signed_url ||
+    media?.metadata?.url ||
+    media?.metadata?.uri ||
+    null;
+  if (uri && !String(uri).startsWith("app://")) return { uri };
+
+  const model = String(template.model || "").toLowerCase();
+  if (model.includes("39 le")) return SHOWCASE_ASSETS.tiara_39le_hero;
+  if (model.includes("39 ls")) return SHOWCASE_ASSETS.tiara_39ls_hero;
+  return DEFAULT_TEMPLATE_HERO;
 }
 
 function mediaByRole(media = [], role) {
   return media.find((item) => item.role === role || item.metadata?.role === role);
+}
+
+function titleFromUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname.replace(/^www\./, "") || url;
+  } catch {
+    return url;
+  }
+}
+
+function mediaFromResource(resource) {
+  const metadata = resource?.metadata || {};
+  if (resource?.resource_type !== "photo") return null;
+  if (metadata.media_scope && metadata.media_scope !== "model_template") return null;
+
+  return {
+    id: resource.id,
+    resource_id: resource.id,
+    attachment_id: resource.attachment_id || null,
+    role: metadata.role || metadata.showcase_role || "gallery",
+    title: resource.title,
+    url: resource.url,
+    attachment_url: metadata.attachment_url || null,
+    attachment_signed_url: metadata.attachment_signed_url || null,
+    local_asset_key: metadata.local_asset_key,
+    source_name: resource.source_name,
+    source_platform: resource.source_platform,
+    source_url: resource.source_url,
+    authority_state: resource.authority_state,
+    rights_status: resource.rights_status,
+    metadata: {
+      ...metadata,
+      attachment_id: resource.attachment_id || metadata.attachment_id || null,
+      source_resource_id: resource.id,
+      media_source: "asset_resources",
+    },
+  };
+}
+
+function normalizeTemplateMedia(detail = {}) {
+  const safeDetail = detail || {};
+  const byId = new Map();
+
+  (safeDetail.resources || [])
+    .map(mediaFromResource)
+    .filter(Boolean)
+    .forEach((item) => byId.set(item.resource_id || item.id, item));
+
+  (safeDetail.showcase_media || []).forEach((item) => {
+    const key = item.resource_id || item.id || item.local_asset_key || item.title;
+    if (!key || byId.has(key)) return;
+    byId.set(key, { ...item, metadata: { ...(item.metadata || {}), media_source: "showcase_media" } });
+  });
+
+  return Array.from(byId.values()).sort((a, b) => {
+    const aSort = Number(a.metadata?.sort_order ?? 999);
+    const bSort = Number(b.metadata?.sort_order ?? 999);
+    if (aSort !== bSort) return aSort - bSort;
+    return String(a.title || "").localeCompare(String(b.title || ""));
+  });
+}
+
+async function hydrateTemplatePhotoResources(detail) {
+  const resources = detail?.resources || [];
+  const resourcesWithSignedStorage = await Promise.all(
+    resources.map(async (resource) => {
+      const metadata = resource?.metadata || {};
+      const bucket = metadata.attachment_bucket || metadata.storage_bucket || null;
+      const path = metadata.attachment_storage_path || metadata.storage_path || null;
+      if (resource?.resource_type !== "photo" || !bucket || !path) return resource;
+      try {
+        const signedUrl = await getSignedUrl({
+          bucket,
+          path,
+          expiresIn: 3600,
+          transform: { width: 1200, height: 800, resize: "cover", quality: 84 },
+        });
+        return {
+          ...resource,
+          metadata: {
+            ...metadata,
+            attachment_signed_url: signedUrl,
+            attachment_storage_signed_url: signedUrl,
+          },
+        };
+      } catch (err) {
+        console.log("Template resource storage signing failed", err);
+        return resource;
+      }
+    })
+  );
+  const attachmentIds = resources
+    .filter((resource) => resource?.resource_type === "photo" && resource?.attachment_id)
+    .map((resource) => resource.attachment_id);
+
+  if (!attachmentIds.length) return { ...detail, resources: resourcesWithSignedStorage };
+
+  const { data, error } = await supabase
+    .from("attachments")
+    .select("id,bucket,storage_path,url,kind,mime_type,title")
+    .in("id", attachmentIds);
+
+  if (error) throw error;
+
+  const byId = new Map();
+  for (const attachment of data || []) {
+    let signedUrl = attachment.url || null;
+    if (attachment.bucket && attachment.storage_path) {
+      try {
+        signedUrl = await getSignedUrl({
+          bucket: attachment.bucket,
+          path: attachment.storage_path,
+          expiresIn: 3600,
+          transform: attachment.kind === "photo" || String(attachment.mime_type || "").startsWith("image/")
+            ? { width: 1200, height: 800, resize: "cover", quality: 84 }
+            : null,
+        });
+      } catch (err) {
+        console.log("Template media signing failed", err);
+      }
+    }
+    byId.set(attachment.id, { ...attachment, signedUrl });
+  }
+
+  return {
+    ...detail,
+    resources: resourcesWithSignedStorage.map((resource) => {
+      const attachment = byId.get(resource.attachment_id);
+      if (!attachment) return resource;
+      return {
+        ...resource,
+        metadata: {
+          ...(resource.metadata || {}),
+          attachment_title: attachment.title,
+          attachment_signed_url: attachment.signedUrl,
+          attachment_url: attachment.url,
+        },
+      };
+    }),
+  };
 }
 
 function TabButton({ tab, active, onPress }) {
@@ -254,35 +455,84 @@ function Inspector({ item, resources }) {
   );
 }
 
-function ShowcaseGallery({ media, onSelect }) {
-  const gallery = media.filter((item) => item.role !== "hero");
-  if (!gallery.length) return null;
+function ShowcaseGallery({
+  media,
+  onSelect,
+  template,
+  includeHero = false,
+  title = "Showcase Gallery",
+  mediaUrl = "",
+  onMediaUrlChange,
+  onAddMediaUrl,
+  onUploadMedia,
+  addingMedia = false,
+}) {
+  const gallery = includeHero ? media : media.filter((item) => item.role !== "hero");
+  const canManage = !!(onAddMediaUrl || onUploadMedia);
 
   return (
     <View style={styles.galleryPanel}>
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Showcase Gallery</Text>
+        <Text style={styles.sectionTitle}>{title}</Text>
         <Text style={styles.sectionCount}>{gallery.length}</Text>
       </View>
       <Text style={styles.galleryText}>
         OEM model-level imagery inherited by vessels until an exact hull has delivery, owner, or evidence photos.
       </Text>
-      <View style={styles.galleryGrid}>
-        {gallery.map((item) => (
+      {canManage ? (
+        <View style={styles.mediaManager}>
+          <TextInput
+            value={mediaUrl}
+            onChangeText={onMediaUrlChange}
+            placeholder="Paste OEM media URL"
+            style={styles.mediaInput}
+          />
           <TouchableOpacity
-            key={item.id || item.local_asset_key}
-            style={styles.galleryCard}
-            onPress={() => onSelect(item)}
-            activeOpacity={0.88}
+            style={styles.mediaButton}
+            onPress={onAddMediaUrl}
+            disabled={addingMedia}
+            activeOpacity={0.86}
           >
-            <ImageBackground source={mediaAsset(item)} resizeMode="cover" style={styles.galleryImage} imageStyle={styles.galleryImageAsset}>
-              <View style={styles.galleryShade}>
-                <Text style={styles.galleryRole}>{labelize(item.role)}</Text>
-              </View>
-            </ImageBackground>
+            <Ionicons name="link-outline" size={15} color={colors.brandNavy} />
+            <Text style={styles.mediaButtonText}>Add Link</Text>
           </TouchableOpacity>
-        ))}
-      </View>
+          <TouchableOpacity
+            style={styles.mediaPrimaryButton}
+            onPress={onUploadMedia}
+            disabled={addingMedia}
+            activeOpacity={0.86}
+          >
+            {addingMedia ? <ActivityIndicator color={colors.onPrimary} /> : <Ionicons name="cloud-upload-outline" size={15} color={colors.onPrimary} />}
+            <Text style={styles.mediaPrimaryButtonText}>Upload Photo</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+      {gallery.length ? (
+        <View style={styles.galleryGrid}>
+          {gallery.map((item) => (
+            <TouchableOpacity
+              key={item.id || item.local_asset_key}
+              style={styles.galleryCard}
+              onPress={() => onSelect(item)}
+              activeOpacity={0.88}
+            >
+              <ImageBackground source={mediaAsset(item, template)} resizeMode="cover" style={styles.galleryImage} imageStyle={styles.galleryImageAsset}>
+                <View style={styles.galleryShade}>
+                  <Text style={styles.galleryRole}>{labelize(item.role)}</Text>
+                </View>
+              </ImageBackground>
+            </TouchableOpacity>
+          ))}
+        </View>
+      ) : (
+        <View style={styles.galleryEmpty}>
+          <Ionicons name="images-outline" size={22} color={colors.textMuted} />
+          <Text style={styles.galleryEmptyTitle}>No template media configured</Text>
+          <Text style={styles.galleryEmptyText}>
+            Add model-level photos to this template so catalog, builder, and exact-hull views can inherit the right imagery.
+          </Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -295,12 +545,14 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
+  const [mediaUrl, setMediaUrl] = useState("");
+  const [addingMedia, setAddingMedia] = useState(false);
 
   const load = useCallback(async ({ quiet = false } = {}) => {
     if (!quiet) setLoading(true);
     setError(null);
     try {
-      const next = await getCatalogTemplateDetail({ templateKey });
+      const next = await hydrateTemplatePhotoResources(await getCatalogTemplateDetail({ templateKey }));
       setDetail(next);
       const items = next?.items || [];
       setSelectedItem((current) => current || items.find((item) => item.canonical_key === "standard.instrumentation.garmin_9617") || items.find((item) => item.item_type !== "section") || null);
@@ -321,16 +573,17 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
   const items = detail?.items || [];
   const resources = detail?.resources || [];
   const template = detail?.template || {};
-  const showcaseMedia = detail?.showcase_media || [];
+  const showcaseMedia = normalizeTemplateMedia(detail);
   const heroMedia = mediaByRole(showcaseMedia, "hero");
+  const fallbackSpecs = modelFallbackSpecs(template);
   const groups = useMemo(() => groupItems(items), [items]);
   const visibleGroups = useMemo(() => tabSections(groups, tab), [groups, tab]);
   const specs = {
-    loa: specValue(items, "spec.loa", "39'6\""),
-    beam: specValue(items, "spec.beam", "12'6\""),
-    hp: specValue(items, "spec.max_horsepower", "1,200 HP"),
-    fuel: specValue(items, "spec.fuel_capacity", "500 gal"),
-    water: specValue(items, "spec.water_capacity", "50 gal"),
+    loa: specValue(items, "spec.loa", fallbackSpecs.loa),
+    beam: specValue(items, "spec.beam", fallbackSpecs.beam),
+    hp: specValue(items, "spec.max_horsepower", fallbackSpecs.hp),
+    fuel: specValue(items, "spec.fuel_capacity", fallbackSpecs.fuel),
+    water: specValue(items, "spec.water_capacity", fallbackSpecs.water),
   };
 
   const refresh = () => {
@@ -341,13 +594,133 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
   const startExactBuild = () => {
     navigation.navigate("ActivatorExactBuild", {
       templateKey: template.template_key || templateKey,
+      organizationId: route?.params?.organizationId || null,
+      workspaceId: route?.params?.workspaceId || null,
     });
   };
 
   const customizeTemplate = () => {
     navigation.navigate("ActivatorTemplateCustomize", {
       templateKey: template.template_key || templateKey,
+      organizationId: route?.params?.organizationId || null,
+      workspaceId: route?.params?.workspaceId || null,
     });
+  };
+
+  const insertTemplatePhotoResource = async ({
+    title,
+    url = null,
+    attachmentId = null,
+    attachment = null,
+    role = "gallery",
+    source = "manual_template_media_add",
+  }) => {
+    if (!template?.id) throw new Error("Template is not loaded yet.");
+
+    const existingMedia = normalizeTemplateMedia(detail);
+    const nextSort = existingMedia.length + 1;
+    const { error: insertError } = await supabase
+      .from("asset_resources")
+      .insert({
+        resource_type: "photo",
+        title,
+        url,
+        attachment_id: attachmentId,
+        source_name: template.manufacturer || "Tiara Yachts",
+        source_platform: "Keepr OEM template media",
+        source_url: url,
+        authority_state: "oem_published",
+        rights_status: "review_permission",
+        applies_to_type: "template",
+        applies_to_id: template.id,
+        metadata: {
+          media_scope: "model_template",
+          role,
+          sort_order: nextSort,
+          attachment_id: attachmentId || attachment?.id || null,
+          attachment_bucket: attachment?.bucket || null,
+          attachment_storage_path: attachment?.storage_path || null,
+          source_document_title: `${template.manufacturer || "Tiara Yachts"} ${template.model || "model"} media`,
+          not_exact_hull_media: true,
+          contribution_context: source,
+          visibility_intent: "template_inherited_until_hull_media",
+        },
+      });
+
+    if (insertError) throw insertError;
+  };
+
+  const addTemplateMediaUrl = async () => {
+    const raw = mediaUrl.trim();
+    if (!raw) return;
+    const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    setAddingMedia(true);
+    try {
+      await insertTemplatePhotoResource({
+        title: titleFromUrl(url),
+        url,
+        source: "manual_template_media_link",
+      });
+      setMediaUrl("");
+      await load({ quiet: true });
+    } catch (err) {
+      Alert.alert("Could not add media", err?.message || "The template media link could not be saved.");
+    } finally {
+      setAddingMedia(false);
+    }
+  };
+
+  const uploadTemplatePhoto = async () => {
+    setAddingMedia(true);
+    try {
+      const pickerMediaTypes = ImagePicker.MediaType?.Images ?? ImagePicker.MediaTypeOptions?.Images;
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: pickerMediaTypes,
+        allowsMultipleSelection: false,
+        quality: 0.9,
+      });
+
+      if (result.canceled) return;
+      const picked = result.assets?.[0];
+      if (!picked?.uri) return;
+
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+      const userId = userData?.user?.id;
+      if (!userId) throw new Error("Sign in is required to upload template media.");
+
+      const title = picked.fileName || `${template.model || "Template"} media photo`;
+      const uploaded = await uploadAttachmentFromUri({
+        userId,
+        assetId: null,
+        kind: "photo",
+        fileUri: picked.uri,
+        fileName: picked.fileName || `template-media-${Date.now()}.jpg`,
+        mimeType: picked.mimeType || "image/jpeg",
+        sizeBytes: picked.fileSize || null,
+        title,
+        sourceContext: {
+          contribution_context: "oem_template_media_upload",
+          authority_state: "oem_published",
+          organization_id: route?.params?.organizationId || template.organization_id || null,
+          template_id: template.id,
+          template_key: template.template_key || templateKey,
+        },
+        placements: [],
+      });
+
+      await insertTemplatePhotoResource({
+        title,
+        attachmentId: uploaded?.attachment?.id,
+        attachment: uploaded?.attachment,
+        source: "oem_template_media_upload",
+      });
+      await load({ quiet: true });
+    } catch (err) {
+      Alert.alert("Could not upload media", err?.message || "The template photo could not be uploaded.");
+    } finally {
+      setAddingMedia(false);
+    }
   };
 
   return (
@@ -359,11 +732,20 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
         <ActivatorBreadcrumb
           navigation={navigation}
           items={[
-            { label: "Customize Catalog", route: "ActivatorHome", params: { initialMode: "templates" } },
+            {
+              label: "Model Catalog",
+              route: "ActivatorHome",
+              params: {
+                initialMode: "templates",
+                navSection: "ActivatorTemplates",
+                organizationId: route?.params?.organizationId || null,
+                workspaceId: route?.params?.workspaceId || null,
+              },
+            },
           ]}
           current={`${template.model || "39 LS"} Template`}
         />
-        <ImageBackground source={mediaAsset(heroMedia)} resizeMode="cover" style={styles.hero} imageStyle={styles.heroImage}>
+        <ImageBackground source={mediaAsset(heroMedia, template)} resizeMode="cover" style={styles.hero} imageStyle={styles.heroImage}>
           <View style={styles.heroOverlay}>
             <View style={styles.heroCopy}>
               <Text style={styles.eyebrow}>Tiara Yachts Catalog</Text>
@@ -423,18 +805,31 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
         ) : (
           <View style={styles.detailLayout}>
             <View style={styles.groupsColumn}>
-              <ShowcaseGallery media={showcaseMedia} onSelect={(media) => setSelectedItem({
-                id: `media-${media.id}`,
-                item_type: "photo",
-                label: media.title,
-                expected_value: { value: labelize(media.role) },
-                applicability: { standard_state: "model showcase" },
-                source_resource_id: media.id,
-                metadata: {
-                  description: media.metadata?.usage_note,
-                  source_context: media.metadata?.source_document_title,
-                },
-              })} />
+              {(tab === "overview" || tab === "media") ? (
+                <ShowcaseGallery
+                  media={showcaseMedia}
+                  template={template}
+                  includeHero={tab === "media"}
+                  title={tab === "media" ? "Template Media" : "Showcase Gallery"}
+                  mediaUrl={mediaUrl}
+                  onMediaUrlChange={setMediaUrl}
+                  onAddMediaUrl={addTemplateMediaUrl}
+                  onUploadMedia={uploadTemplatePhoto}
+                  addingMedia={addingMedia}
+                  onSelect={(media) => setSelectedItem({
+                    id: `media-${media.id}`,
+                    item_type: "photo",
+                    label: media.title,
+                    expected_value: { value: labelize(media.role) },
+                    applicability: { standard_state: "model showcase" },
+                    source_resource_id: media.id,
+                    metadata: {
+                      description: media.metadata?.usage_note,
+                      source_context: media.metadata?.source_document_title,
+                    },
+                  })}
+                />
+              ) : null}
               {visibleGroups.map((group) => (
                 <SectionGroup
                   key={group.section.id}
@@ -697,11 +1092,84 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     marginTop: spacing.sm,
   },
+  mediaManager: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  mediaInput: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    color: colors.text,
+    flex: 1,
+    fontSize: 14,
+    minHeight: 42,
+    minWidth: 240,
+    paddingHorizontal: spacing.md,
+  },
+  mediaButton: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 6,
+    justifyContent: "center",
+    minHeight: 42,
+    paddingHorizontal: spacing.md,
+  },
+  mediaButtonText: {
+    color: colors.brandNavy,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  mediaPrimaryButton: {
+    alignItems: "center",
+    backgroundColor: colors.brandBlue,
+    borderRadius: radius.sm,
+    flexDirection: "row",
+    gap: 6,
+    justifyContent: "center",
+    minHeight: 42,
+    paddingHorizontal: spacing.md,
+  },
+  mediaPrimaryButtonText: {
+    color: colors.onPrimary,
+    fontSize: 13,
+    fontWeight: "800",
+  },
   galleryGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: spacing.md,
     marginTop: spacing.md,
+  },
+  galleryEmpty: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    gap: spacing.xs,
+    marginTop: spacing.md,
+    padding: spacing.xl,
+  },
+  galleryEmptyTitle: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  galleryEmptyText: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
+    maxWidth: 420,
+    textAlign: "center",
   },
   galleryCard: {
     borderColor: colors.border,

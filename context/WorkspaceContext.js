@@ -113,6 +113,57 @@ function fallbackWorkspacesForRole(role) {
 
 const STORAGE_KEY = "keepr.activeWorkspaceId.v1";
 
+function organizationIdFromWorkspaceId(workspaceId) {
+  const id = String(workspaceId || "");
+  return id.startsWith("org:") ? id.slice(4) : null;
+}
+
+function webLocationWorkspaceRequest() {
+  if (Platform.OS !== "web") return { workspaceId: null, organizationId: null, wantsOrgWorkspace: false };
+
+  try {
+    const path = window?.location?.pathname || "";
+    const params = new URLSearchParams(window?.location?.search || "");
+    const workspaceId = params.get("workspaceId") || null;
+    return {
+      workspaceId,
+      organizationId: params.get("organizationId") || organizationIdFromWorkspaceId(workspaceId),
+      wantsOrgWorkspace:
+        path === "/workspace" ||
+        path.startsWith("/workspace/") ||
+        path === "/wilson" ||
+        path.startsWith("/wilson/") ||
+        path === "/activator" ||
+        path.startsWith("/activator/"),
+    };
+  } catch {
+    return { workspaceId: null, organizationId: null, wantsOrgWorkspace: false };
+  }
+}
+
+function isOrgWorkspace(workspace) {
+  return workspace?.workspace_type && workspace.workspace_type !== "keepr";
+}
+
+function workspaceMatchesOrganization(workspace, organizationId) {
+  const orgId = String(organizationId || "");
+  if (!workspace || !orgId) return false;
+
+  return (
+    workspace.organization_id === orgId ||
+    workspace.org_id === orgId ||
+    workspace.authority?.organization_id === orgId ||
+    workspace.authority?.org_id === orgId ||
+    workspace.authority?.subject_id === orgId ||
+    workspace.workspace_id === `org:${orgId}` ||
+    workspace.id === `org:${orgId}`
+  );
+}
+
+function isPersonalFallbackWorkspaceId(value) {
+  return value === "keepr:fallback";
+}
+
 const DEFAULT_WORKSPACES = [
   {
     id: "keepr:fallback",
@@ -170,10 +221,28 @@ export function WorkspaceProvider({ children }) {
           : await AsyncStorage.getItem(STORAGE_KEY);
       } catch {}
 
+      const requested = webLocationWorkspaceRequest();
+      const requestedWorkspace = requested.workspaceId
+        ? safeWorkspaces.find((w) => w.workspace_id === requested.workspaceId || w.id === requested.workspaceId)
+        : null;
+      const requestedOrgWorkspace = requested.organizationId
+        ? safeWorkspaces.find((workspace) => isOrgWorkspace(workspace) && workspaceMatchesOrganization(workspace, requested.organizationId))
+        : null;
+      const defaultOrgWorkspace = requested.wantsOrgWorkspace
+        ? requestedOrgWorkspace || safeWorkspaces.find(isOrgWorkspace)
+        : null;
       const resolvedActiveId = resolved?.active_workspace_id || safeWorkspaces[0]?.workspace_id;
-      const nextActiveId = safeWorkspaces.some((w) => w.workspace_id === storedId)
+      const nextActiveId = (
+          requested.wantsOrgWorkspace &&
+          isPersonalFallbackWorkspaceId(requested.workspaceId) &&
+          defaultOrgWorkspace?.workspace_id
+        )
+        ? defaultOrgWorkspace.workspace_id
+        : requestedWorkspace?.workspace_id
+        || defaultOrgWorkspace?.workspace_id
+        || (safeWorkspaces.some((w) => w.workspace_id === storedId)
         ? storedId
-        : resolvedActiveId;
+        : resolvedActiveId);
 
       setWorkspaces(safeWorkspaces);
       setCurrentWorkspaceId(nextActiveId || safeWorkspaces[0]?.workspace_id || "keepr:fallback");
