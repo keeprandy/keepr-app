@@ -89,6 +89,10 @@ function safeStr(v) {
   return typeof v === "string" ? v : v == null ? "" : String(v);
 }
 
+function safeLower(v) {
+  return safeStr(v).trim().toLowerCase();
+}
+
 
 
 function toNumberOrNull(s) {
@@ -200,7 +204,11 @@ export default function EditSystemEnrichmentScreen({ route, navigation }) {
   const [saving, setSaving] = useState(false);
   const { runMutation, showError } = useOperationFeedback();
   const [systemRow, setSystemRow] = useState(null);
+  const [canonicalMissing, setCanonicalMissing] = useState(false);
 
+  const [systemTitle, setSystemTitle] = useState(systemName || "");
+  const [systemGroups, setSystemGroups] = useState([]);
+  const [systemGroupDraft, setSystemGroupDraft] = useState("");
   const [manufacturer, setManufacturer] = useState("");
   const [model, setModel] = useState("");
   const [serial, setSerial] = useState("");
@@ -251,13 +259,15 @@ export default function EditSystemEnrichmentScreen({ route, navigation }) {
   }, [assetType]);
 
   const title = useMemo(() => {
-    if (systemName) return systemName;
+    const editedTitle = systemTitle.trim();
+    if (editedTitle) return editedTitle;
     if (systemRow?.name) return systemRow.name;
+    if (systemName) return systemName;
     if (systemRow?.system_type && systemRow?.name) {
       return `${systemRow.system_type} • ${systemRow.name}`;
     }
     return systemRow?.system_type || "System";
-  }, [systemName, systemRow]);
+  }, [systemName, systemRow, systemTitle]);
 
 
   const selectedPros = useMemo(() => {
@@ -290,12 +300,21 @@ export default function EditSystemEnrichmentScreen({ route, navigation }) {
           .from(SYSTEMS_TABLE)
           .select("*")
           .eq("id", systemId)
-          .single();
+          .maybeSingle();
 
         if (error) throw error;
         if (cancelled) return;
+        if (!data) {
+          setCanonicalMissing(true);
+          setSystemRow(null);
+          setSystemTitle(systemName || "");
+          return;
+        }
 
+        setCanonicalMissing(false);
         setSystemRow(data);
+        setSystemTitle(data.name || systemName || "");
+        setSystemGroupDraft("");
 
         const meta = ensureMetadataV1(data.metadata);
         const standard = meta.standard || {};
@@ -359,10 +378,8 @@ export default function EditSystemEnrichmentScreen({ route, navigation }) {
       } catch (e) {
         if (!cancelled) {
           console.error("EditSystemEnrichmentScreen load failed", e);
-          Alert.alert(
-            "Could not load system",
-            e?.message || "Please try again."
-          );
+          setCanonicalMissing(true);
+          setSystemTitle(systemName || "");
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -374,6 +391,49 @@ export default function EditSystemEnrichmentScreen({ route, navigation }) {
       cancelled = true;
     };
   }, [systemId, effectiveAssetType, systemKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadGroups = async () => {
+      if (!assetId) {
+        setSystemGroups([]);
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from("system_groups")
+          .select("id, asset_id, name, sort_order")
+          .eq("asset_id", assetId)
+          .order("sort_order", { ascending: true })
+          .order("name", { ascending: true });
+
+        if (error) {
+          const msg = safeStr(error?.message);
+          const missingSchema =
+            msg.includes("system_groups") || msg.includes("schema cache") || error.code === "42P01";
+          if (!missingSchema) console.warn("EditSystemEnrichmentScreen loadGroups failed", error);
+          if (!cancelled) setSystemGroups([]);
+          return;
+        }
+
+        if (!cancelled) {
+          setSystemGroups(data || []);
+          const currentGroup = (data || []).find((group) => group.id === systemRow?.system_group_id);
+          if (currentGroup?.name) setSystemGroupDraft(currentGroup.name);
+        }
+      } catch (e) {
+        console.warn("EditSystemEnrichmentScreen loadGroups exception", e);
+        if (!cancelled) setSystemGroups([]);
+      }
+    };
+
+    loadGroups();
+    return () => {
+      cancelled = true;
+    };
+  }, [assetId, systemRow?.system_group_id]);
 
 
   // Load Keepr Pros for this user (for pickers / quick actions)
@@ -461,6 +521,42 @@ export default function EditSystemEnrichmentScreen({ route, navigation }) {
     navigation.navigate("KeeprProDetail", { pro });
   };
 
+  const resolveSystemGroupId = async (groupName) => {
+    const trimmed = safeStr(groupName).trim();
+    if (!trimmed || !assetId) return null;
+
+    const localMatch = systemGroups.find((group) => safeLower(group.name) === safeLower(trimmed));
+    if (localMatch?.id) return localMatch.id;
+
+    const { data: existing, error: readError } = await supabase
+      .from("system_groups")
+      .select("id")
+      .eq("asset_id", assetId)
+      .ilike("name", trimmed)
+      .limit(1)
+      .maybeSingle();
+
+    if (readError) throw readError;
+    if (existing?.id) return existing.id;
+
+    const nextSortOrder = systemGroups.length
+      ? Math.max(...systemGroups.map((group) => Number(group?.sort_order) || 0)) + 10
+      : 10;
+    const { data: created, error: createError } = await supabase
+      .from("system_groups")
+      .insert({
+        asset_id: assetId,
+        name: trimmed,
+        sort_order: nextSortOrder,
+        metadata: { source_type: "manual" },
+      })
+      .select("id")
+      .single();
+
+    if (createError) throw createError;
+    return created?.id || null;
+  };
+
 
   const save = async () => {
     if (!systemId || saving) return;
@@ -525,33 +621,47 @@ export default function EditSystemEnrichmentScreen({ route, navigation }) {
       bucket[systemKey] = extObj || {};
       next.extended[effectiveAssetType] = bucket;
 
+      const nextTitle = systemTitle.trim() || systemRow?.name || systemName || "System";
+      next.display_name = nextTitle;
+      const groupName = systemGroupDraft.trim();
+      const nextGroupId = groupName ? await resolveSystemGroupId(groupName) : null;
+
       if (IS_WEB) {
         console.log("[EditSystemEnrichment] saving", {
           systemId,
           assetId,
           assetType: effectiveAssetType,
           systemKey,
+          systemTitle: nextTitle,
+          systemGroupId: nextGroupId,
         });
       }
 
       const { data, error } = await supabase
         .from(SYSTEMS_TABLE)
-        .update({ metadata: next })
+        .update({ name: nextTitle, system_group_id: nextGroupId, metadata: next })
         .eq("id", systemId)
         .select("*")
-        .single();
-
-      if (IS_WEB) {
-        console.log("[EditSystemEnrichment] save result", { data, error });
-      }
+        .maybeSingle();
 
       if (error) throw error;
+      if (!data?.id) {
+        throw new Error("No editable canonical system row was updated.");
+      }
+
+      if (IS_WEB) {
+        console.log("[EditSystemEnrichment] save result", { data });
+      }
+
           return data;
         },
       });
 
       if (saved) {
         setSystemRow(saved);
+        setSystemTitle(saved.name || title);
+        const savedGroup = systemGroups.find((group) => group.id === saved.system_group_id);
+        setSystemGroupDraft(savedGroup?.name || systemGroupDraft.trim());
         Keyboard.dismiss();
       }
     } finally {
@@ -587,6 +697,40 @@ export default function EditSystemEnrichmentScreen({ route, navigation }) {
     });
   };
 
+  if (canonicalMissing) {
+    return (
+      <SafeAreaView style={layoutStyles.screen}>
+        <View style={styles.screen}>
+          <View style={styles.headerRow}>
+            <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+              <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
+            </TouchableOpacity>
+
+            <View style={{ flex: 1 }}>
+              <Text style={styles.screenTitle}>Projected System</Text>
+              <Text style={styles.screenSubtitle}>
+                {assetName ? `${assetName} • ` : ""}{title}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Not editable here yet</Text>
+            <Text style={styles.extendedHint}>
+              This system is projected from build evidence and does not have a canonical system row to update.
+              Review it from Systems or create/bind a canonical system before editing title, group, serials,
+              warranty, records, or attachments.
+            </Text>
+            <TouchableOpacity style={[styles.saveButton, { marginTop: spacing.md }]} onPress={() => navigation.goBack()}>
+              <Ionicons name="arrow-back-outline" size={18} color="#fff" />
+              <Text style={styles.saveButtonText}>Back to Systems</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={layoutStyles.screen}>
       <View style={styles.screen}>
@@ -613,6 +757,40 @@ export default function EditSystemEnrichmentScreen({ route, navigation }) {
           showsVerticalScrollIndicator={false}
         >
           <Card title="Identity">
+            <Field
+              label="System title"
+              value={systemTitle}
+              onChange={setSystemTitle}
+              placeholder="e.g., Mercury 600 Port"
+            />
+            <Field
+              label="System group"
+              value={systemGroupDraft}
+              onChange={setSystemGroupDraft}
+              placeholder="Optional group (e.g., Propulsion)"
+            />
+            {systemGroups.length ? (
+              <View style={styles.groupChipRow}>
+                {systemGroups.map((group) => {
+                  const groupName = safeStr(group.name).trim();
+                  if (!groupName) return null;
+                  const active = safeLower(systemGroupDraft) === safeLower(groupName);
+                  return (
+                    <Pill
+                      key={group.id}
+                      active={active}
+                      label={groupName}
+                      onPress={() => setSystemGroupDraft(groupName)}
+                    />
+                  );
+                })}
+                <Pill
+                  active={!systemGroupDraft.trim()}
+                  label="No group"
+                  onPress={() => setSystemGroupDraft("")}
+                />
+              </View>
+            ) : null}
             <Field label="Manufacturer" value={manufacturer} onChange={setManufacturer} placeholder="e.g., Garmin" />
             <Field label="Model" value={model} onChange={setModel} placeholder="e.g., GPSMAP 8616" />
             <Field label="Serial number" value={serial} onChange={setSerial} placeholder="e.g., ABC123" />
@@ -1102,6 +1280,12 @@ const styles = StyleSheet.create({
   },
   pillRow: {
     flexDirection: "row",
+    marginTop: spacing.sm,
+  },
+  groupChipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
     marginTop: spacing.sm,
   },
   pill: {

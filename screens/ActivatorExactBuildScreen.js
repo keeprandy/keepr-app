@@ -16,8 +16,11 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import ActivatorBreadcrumb from "../components/ActivatorBreadcrumb";
 import {
+  getExactBuildDraft,
   getCatalogTemplateDetail,
   getTiaraFactoryBuildWorkspace,
+  publishExactBuildDraft,
+  upsertExactBuildDraft,
 } from "../lib/activatorApi";
 import {
   TIARA_56_LS_TEMPLATE_KEY,
@@ -197,6 +200,48 @@ function groupTemplateItems(items = []) {
     }));
 }
 
+function activeTemplateItems(items = []) {
+  return (items || []).filter((item) => item?.applicability?.active !== false);
+}
+
+function itemList(item, key) {
+  const metadata = item?.metadata || {};
+  const downstream = metadata.downstream_elements || {};
+  const expectedValue = item?.expected_value?.value || {};
+  const value = metadata[key] || downstream[key] || expectedValue[key] || [];
+  return Array.isArray(value) ? value.filter(Boolean) : [];
+}
+
+function templateConfiguredOptions(items = []) {
+  const activeItems = activeTemplateItems(items);
+  const groups = activeItems.filter((item) => item.item_type === "configuration_group");
+  const groupById = new Map(groups.map((group) => [group.id, group]));
+  return activeItems
+    .filter((item) => item.parent_item_id && groupById.has(item.parent_item_id))
+    .filter((item) => item.item_type !== "configuration_group" && item.item_type !== "section")
+    .map((item) => {
+      const group = groupById.get(item.parent_item_id);
+      const state = item.expected_value?.selection_state || item.applicability?.standard_state || "optional";
+      const metadata = item.metadata || {};
+      return {
+        templateItemId: item.id,
+        key: item.canonical_key || item.id,
+        group: group?.metadata?.oem_group_name || group?.label || "Configuration",
+        label: item.label,
+        description: metadata.oem_description || metadata.description || item.expected_value?.description || null,
+        mode: metadata.selection_mode || (item.item_type === "choice" ? "single" : "multi"),
+        selected: state === "selected" || state === "standard" || metadata.default_selected === true,
+        locked: state === "standard" || metadata.locked === true,
+        quantity: item.expected_value?.quantity || 1,
+        value: item.expected_value?.value || {},
+        systems: itemList(item, "systems"),
+        resources: itemList(item, "resources"),
+        playbooks: itemList(item, "playbooks"),
+        requirements: itemList(item, "requirements"),
+      };
+    });
+}
+
 function groupedOptions(options) {
   return options.reduce((acc, option) => {
     acc[option.group] = [...(acc[option.group] || []), option];
@@ -206,6 +251,58 @@ function groupedOptions(options) {
 
 function unique(values) {
   return [...new Set(values.filter(Boolean))];
+}
+
+function normalizeDraftKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function optionDraftState(option) {
+  return option.selected ? "selected" : "unselected";
+}
+
+function applyDraftToOptions(nextOptions = [], draftItems = []) {
+  const itemByTemplateId = new Map();
+  const itemByKey = new Map();
+  (draftItems || []).forEach((item) => {
+    if (item.template_item_id) itemByTemplateId.set(item.template_item_id, item);
+    if (item.item_key) itemByKey.set(item.item_key, item);
+  });
+
+  return nextOptions.map((option) => {
+    const draftItem = itemByTemplateId.get(option.templateItemId) || itemByKey.get(option.key);
+    if (!draftItem) return option;
+    return {
+      ...option,
+      selected: draftItem.state === "selected" || draftItem.state === "overridden",
+      quantity: draftItem.quantity || option.quantity || 1,
+      value: draftItem.value || option.value || {},
+      draftItemId: draftItem.id,
+    };
+  });
+}
+
+function draftItemPayload(option) {
+  return {
+    templateItemId: option.templateItemId || null,
+    itemKey: option.key,
+    state: optionDraftState(option),
+    selected: Boolean(option.selected),
+    quantity: option.quantity || 1,
+    value: option.value || {},
+    provenance: {
+      source: "manual_exact_build_draft",
+    },
+    metadata: {
+      label: option.label,
+      group: option.group,
+      mode: option.mode,
+    },
+  };
 }
 
 function statusLabel(status) {
@@ -252,8 +349,9 @@ function webSearchParam(...keys) {
   return null;
 }
 
-function ToggleRow({ option, onToggle }) {
+function ToggleRow({ option, onToggle, onQuantityChange }) {
   const selected = option.selected;
+  const quantity = Number(option.quantity || 1);
   const icon = option.mode === "single"
     ? selected ? "radio-button-on" : "radio-button-off"
     : selected ? "checkbox" : "square-outline";
@@ -279,6 +377,7 @@ function ToggleRow({ option, onToggle }) {
             {selected ? "Selected for this hull" : "Not on this hull"}
           </Text>
         </View>
+        {option.description ? <Text style={styles.optionDescription}>{option.description}</Text> : null}
         <Text style={styles.optionMeta}>Adds:</Text>
         <View style={styles.addsRow}>
           {adds.map((item, index) => (
@@ -288,6 +387,31 @@ function ToggleRow({ option, onToggle }) {
           ))}
         </View>
       </View>
+      {selected ? (
+        <View style={styles.quantityStepper}>
+          <TouchableOpacity
+            activeOpacity={0.82}
+            style={styles.quantityButton}
+            onPress={(event) => {
+              event?.stopPropagation?.();
+              onQuantityChange(Math.max(1, quantity - 1));
+            }}
+          >
+            <Ionicons name="remove" size={14} color={colors.brandBlue} />
+          </TouchableOpacity>
+          <Text style={styles.quantityValue}>Qty {quantity}</Text>
+          <TouchableOpacity
+            activeOpacity={0.82}
+            style={styles.quantityButton}
+            onPress={(event) => {
+              event?.stopPropagation?.();
+              onQuantityChange(quantity + 1);
+            }}
+          >
+            <Ionicons name="add" size={14} color={colors.brandBlue} />
+          </TouchableOpacity>
+        </View>
+      ) : null}
       {option.locked ? <Text style={styles.lockedText}>Standard</Text> : null}
     </TouchableOpacity>
   );
@@ -462,10 +586,18 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
   const templateKey = route?.params?.templateKey || TIARA_56_LS_TEMPLATE_KEY;
   const exactBuildKey = route?.params?.buildKey || route?.params?.exactBuildKey || webSearchParam("build", "buildKey", "exactBuildKey") || null;
   const hullNumber = route?.params?.hullNumber || route?.params?.hin || webSearchParam("hull", "hullNumber", "hin") || null;
+  const organizationId = route?.params?.organizationId || webSearchParam("organizationId") || null;
+  const workspaceId = route?.params?.workspaceId || webSearchParam("workspaceId") || null;
+  const routeDraftId = route?.params?.draftId || webSearchParam("draftId") || null;
+  const routeDraftKey = route?.params?.draftKey || webSearchParam("draftKey") || null;
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
+  const [draftWorkspace, setDraftWorkspace] = useState(null);
+  const [draftNotice, setDraftNotice] = useState("");
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [publishingDraft, setPublishingDraft] = useState(false);
   const [factoryBuild, setFactoryBuild] = useState(() => (
     getTiaraExactFactoryBuild({ templateKey, buildKey: exactBuildKey, hullNumber })
     || getDefaultTiaraExactFactoryBuildForTemplate(templateKey)
@@ -499,13 +631,19 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
       const localTemplateFallback = templateKey === TIARA_56_LS_TEMPLATE_KEY
         ? { template: tiara56LsCatalogTemplate, resources: [], showcase_media: [], items: [] }
         : null;
-      const [next, buildWorkspace] = await Promise.allSettled([
+      const [next, buildWorkspace, exactDraft] = await Promise.allSettled([
         getCatalogTemplateDetail({ templateKey }),
         getTiaraFactoryBuildWorkspace({
           hullNumber: hullNumber || localBuild?.work_order?.hull_number || null,
           templateKey,
           buildKey: exactBuildKey || localBuild?.build_key || null,
         }),
+        organizationId ? getExactBuildDraft({
+          draftId: routeDraftId,
+          draftKey: routeDraftKey,
+          templateKey,
+          organizationId,
+        }) : Promise.resolve(null),
       ]);
       if (next.status === "fulfilled" && next.value) setDetail(next.value);
       else if (localTemplateFallback) setDetail(localTemplateFallback);
@@ -527,6 +665,12 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
         setFactoryBuildSource("none");
         setSelectedFactoryLineId(null);
       }
+
+      if (exactDraft.status === "fulfilled" && exactDraft.value?.draft) {
+        setDraftWorkspace(exactDraft.value);
+      } else {
+        setDraftWorkspace(null);
+      }
     } catch (err) {
       console.error("Activator exact build failed:", err);
       setError(err?.message || "Could not open this build workspace.");
@@ -539,7 +683,7 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [exactBuildKey, hullNumber, templateKey]);
+  }, [exactBuildKey, hullNumber, organizationId, routeDraftId, routeDraftKey, templateKey]);
 
   useEffect(() => {
     load();
@@ -548,12 +692,14 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
   const template = detail?.template || {};
   const resources = detail?.resources || [];
   const workOrder = factoryBuild?.work_order || null;
+  const exactDraft = draftWorkspace?.draft || null;
+  const exactDraftItems = useMemo(() => draftWorkspace?.items || [], [draftWorkspace?.items]);
   const catalogTemplate = factoryBuild?.catalog_template || template || {};
   const publicModelContext = factoryBuild?.public_model_context || null;
   const factoryLines = factoryBuild?.line_items || [];
   const manualQueue = factoryBuild?.manual_queue || [];
   const selectedFactoryLine = factoryLines.find((item) => item.id === selectedFactoryLineId) || factoryLines[0];
-  const exactBuildLabel = workOrder?.build_code || exactBuildKey || "Exact build";
+  const exactBuildLabel = workOrder?.build_code || exactDraft?.draft_key || exactBuildKey || "Exact build";
   const modelLabel = catalogTemplate?.model || template?.model || "model";
   const modelYearLabel = catalogTemplate?.model_year || template?.model_year || "2027";
   const hasFactoryBuild = Boolean(factoryBuild && factoryLines.length);
@@ -565,6 +711,7 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
   const standardItems = templateItems.filter((item) => item.applicability?.standard_state === "standard");
   const operationalTemplateItems = standardItems.filter((item) => ["system", "equipment", "resource"].includes(item.item_type));
   const freshwaterItems = standardItems.filter((item) => item.canonical_key?.startsWith("system.freshwater") || item.canonical_key?.startsWith("knowledge.freshwater") || item.canonical_key?.startsWith("playbook.freshwater"));
+  const configuredTemplateOptions = useMemo(() => templateConfiguredOptions(detail?.items || []), [detail?.items]);
   const optionGroups = useMemo(() => groupedOptions(options), [options]);
   const selectedOptions = options.filter((option) => option.selected);
   const compiled = useMemo(() => {
@@ -603,6 +750,19 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
   const readyToFreeze = Boolean(identity.hin && identity.buildNumber && identity.buildDate && identity.dealer && selectedOptions.length);
 
   useEffect(() => {
+    if (!workOrder && exactDraft) {
+      const draftIdentity = exactDraft.identity || {};
+      setIdentity({
+        hin: exactDraft.hin || draftIdentity.hin || "",
+        buildNumber: exactDraft.work_order_number || draftIdentity.buildNumber || exactDraft.draft_key || "",
+        buildDate: exactDraft.build_date || draftIdentity.buildDate || "",
+        dealer: exactDraft.dealer_name || draftIdentity.dealer || "",
+        location: draftIdentity.location || "",
+      });
+      setFinish(Array.isArray(exactDraft.finish_selections) && exactDraft.finish_selections.length ? exactDraft.finish_selections : FINISH_FIELDS);
+      return;
+    }
+
     if (!workOrder) {
       setIdentity({
         hin: "",
@@ -621,7 +781,12 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
       dealer: workOrder.dealer || "",
       location: workOrder.dealer_location || "Stuart, FL",
     });
-  }, [workOrder]);
+  }, [exactDraft, workOrder]);
+
+  useEffect(() => {
+    if (hasFactoryBuild || !configuredTemplateOptions.length) return;
+    setOptions(applyDraftToOptions(configuredTemplateOptions, exactDraftItems));
+  }, [configuredTemplateOptions, exactDraftItems, hasFactoryBuild]);
 
   const toggleOption = (option) => {
     if (option.locked) return;
@@ -633,22 +798,54 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
       return item;
     }));
   };
+  const updateOptionQuantity = (option, quantity) => {
+    setOptions((current) => current.map((item) => (
+      item.key === option.key ? { ...item, quantity } : item
+    )));
+  };
 
   const updateIdentity = (key, value) => setIdentity((current) => ({ ...current, [key]: value }));
   const updateFinish = (key, value) => setFinish((current) => current.map((item) => item.key === key ? { ...item, value } : item));
   const pressFactoryLine = (item) => {
     setSelectedFactoryLineId(item.id);
+    const metadata = item.mapping_metadata && typeof item.mapping_metadata === "object" ? item.mapping_metadata : {};
+    const canonicalIds = Array.isArray(metadata.canonical_system_ids) ? metadata.canonical_system_ids.filter(Boolean) : [];
+    const canonicalId = metadata.canonical_system_id || (canonicalIds.length === 1 ? canonicalIds[0] : null);
+    const canOpenSystem = ["system", "component"].includes(item.relationship_type);
     setAssignmentDraft({
       system_category: item.system_category || TIARA_SYSTEM_CATEGORIES[0],
-      target: item.relationship_type === "build_only" ? "build_only" : item.system_id ? "existing_system" : "new_system",
+      target: item.relationship_type === "build_only" ? "build_only" : canonicalId || item.system_id ? "existing_system" : "new_system",
       relationship_type: item.relationship_type || "system",
     });
 
-    if (item.system_id && item.asset_id) {
+    if (canOpenSystem && canonicalIds.length > 1 && item.asset_id) {
+      navigation.navigate("BoatSystems", {
+        boatId: item.asset_id,
+        assetId: item.asset_id,
+        boatName: workOrder?.asset?.name || workOrder?.boat?.name || identity.hin || "Boat",
+        kac: workOrder?.asset?.kac_id || workOrder?.kac || null,
+        organizationId,
+        workspaceId,
+        relationshipRole: "oem",
+        teamMemberType: "oem",
+        systemsRole: "oem",
+        parentRoute: route?.params?.parentRoute || "ActivatorHome",
+      });
+      return;
+    }
+
+    if (canOpenSystem && canonicalId && item.asset_id) {
       navigation.navigate("BoatSystemStory", {
         boatId: item.asset_id,
-        systemId: item.system_id,
+        assetId: item.asset_id,
+        systemId: canonicalId,
         systemName: item.normalized_name || item.system_category,
+        organizationId,
+        workspaceId,
+        relationshipRole: "oem",
+        teamMemberType: "oem",
+        systemsRole: "oem",
+        parentRoute: route?.params?.parentRoute || "ActivatorHome",
       });
     }
   };
@@ -667,6 +864,91 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
       workspaceId: route?.params?.workspaceId || null,
       systemsRole: "oem",
     });
+  };
+  const replaceDraftRoute = (savedDraft) => {
+    const savedDraftId = savedDraft?.id;
+    if (!savedDraftId || typeof window === "undefined" || !window.location) return;
+    const params = new URLSearchParams(window.location.search || "");
+    params.set("draftId", savedDraftId);
+    params.set("draftKey", savedDraft.draft_key);
+    if (organizationId) params.set("organizationId", organizationId);
+    if (workspaceId) params.set("workspaceId", workspaceId);
+    window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
+  };
+  const buildDraftPayload = () => ({
+    organizationId,
+    templateKey,
+    draftId: exactDraft?.id || routeDraftId,
+    draftKey: routeDraftKey || exactDraft?.draft_key || normalizeDraftKey(identity.buildNumber || identity.hin || ""),
+    displayName: compact([identity.buildNumber || identity.hin || null, modelLabel, "Draft"]),
+    identity: {
+      ...identity,
+      buildYear: modelYearLabel,
+      workOrderNumber: identity.buildNumber,
+      sourceType: "manual",
+    },
+    finishSelections: finish,
+    items: options.map(draftItemPayload),
+    status: "draft",
+    sourceResourceId: resources[0]?.id || null,
+    metadata: {
+      source: "exact_build_screen",
+      selected_count: selectedOptions.length,
+    },
+  });
+  const saveDraft = async () => {
+    if (!organizationId) {
+      setDraftNotice("Missing organization context. Return through Models or Work and try again.");
+      return;
+    }
+    setSavingDraft(true);
+    setDraftNotice("");
+    try {
+      const saved = await upsertExactBuildDraft(buildDraftPayload());
+      setDraftWorkspace(saved);
+      replaceDraftRoute(saved?.draft);
+      setDraftNotice(`Draft saved: ${saved?.draft?.display_name || saved?.draft?.draft_key || "exact build"}.`);
+    } catch (err) {
+      console.error("Exact build draft save failed:", err);
+      setDraftNotice(err?.message || "Could not save this exact build draft.");
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+  const publishDraft = async () => {
+    const draftId = exactDraft?.id || routeDraftId;
+    if (!draftId) {
+      setDraftNotice("Save the draft before publishing.");
+      return;
+    }
+    setPublishingDraft(true);
+    setDraftNotice("");
+    try {
+      const published = await publishExactBuildDraft(draftId);
+      setDraftWorkspace(published);
+      const assetId = published?.asset_id || published?.draft?.asset_id;
+      const kac = published?.kac_id;
+      if (assetId || kac) {
+        navigation.navigate("BoatStory", {
+          boatId: assetId,
+          assetId,
+          kac,
+          organizationId,
+          workspaceId,
+          relationshipRole: "oem",
+          teamMemberType: "oem",
+          systemsRole: "oem",
+          parentRoute: "ActivatorHome",
+        });
+      } else {
+        setDraftNotice("Draft published, but no canonical boat id was returned.");
+      }
+    } catch (err) {
+      console.error("Exact build draft publish failed:", err);
+      setDraftNotice(err?.message || "Could not publish this exact build draft.");
+    } finally {
+      setPublishingDraft(false);
+    }
   };
 
   return (
@@ -878,7 +1160,12 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
                     <View key={group} style={styles.optionGroup}>
                       <Text style={styles.optionGroupTitle}>{group}</Text>
                       {groupOptions.map((option) => (
-                        <ToggleRow key={option.key} option={option} onToggle={() => toggleOption(option)} />
+                        <ToggleRow
+                          key={option.key}
+                          option={option}
+                          onToggle={() => toggleOption(option)}
+                          onQuantityChange={(quantity) => updateOptionQuantity(option, quantity)}
+                        />
                       ))}
                     </View>
                   ))}
@@ -992,10 +1279,46 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
                     </View>
                   </View>
                 </View>
-                <TouchableOpacity activeOpacity={0.86} style={[styles.freezeButton, !readyToFreeze && styles.freezeButtonDisabled]}>
-                  <Ionicons name="cloud-upload-outline" size={18} color={colors.onPrimary} />
-                  <Text style={styles.freezeButtonText}>{hasFactoryBuild ? `Stage ${exactBuildLabel} Ingestion` : "Freeze & Hand Off"}</Text>
-                </TouchableOpacity>
+                {!hasFactoryBuild ? (
+                  <View style={styles.draftActionStack}>
+                    <TouchableOpacity
+                      activeOpacity={0.86}
+                      style={[styles.freezeButton, savingDraft && styles.freezeButtonDisabled]}
+                      onPress={saveDraft}
+                      disabled={savingDraft}
+                    >
+                      {savingDraft ? <ActivityIndicator size="small" color={colors.onPrimary} /> : <Ionicons name="save-outline" size={18} color={colors.onPrimary} />}
+                      <Text style={styles.freezeButtonText}>{savingDraft ? "Saving Draft..." : "Save Draft"}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      activeOpacity={0.86}
+                      style={[styles.digitalTwinButton, (!exactDraft?.id || publishingDraft) && styles.freezeButtonDisabled]}
+                      onPress={publishDraft}
+                      disabled={!exactDraft?.id || publishingDraft}
+                    >
+                      {publishingDraft ? <ActivityIndicator size="small" color={colors.brandBlue} /> : <Ionicons name="cloud-upload-outline" size={18} color={colors.brandBlue} />}
+                      <Text style={styles.digitalTwinButtonText}>{publishingDraft ? "Publishing..." : "Factory Freeze / Publish KAC"}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      activeOpacity={0.86}
+                      style={styles.workQueueButton}
+                      onPress={() => navigation.navigate("ActivatorHome", {
+                        initialMode: "builds",
+                        navSection: "ActivatorWork",
+                        organizationId,
+                        workspaceId,
+                      })}
+                    >
+                      <Ionicons name="list-outline" size={17} color={colors.brandBlue} />
+                      <Text style={styles.workQueueButtonText}>Return to Work</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <TouchableOpacity activeOpacity={0.86} style={[styles.freezeButton, !readyToFreeze && styles.freezeButtonDisabled]}>
+                    <Ionicons name="cloud-upload-outline" size={18} color={colors.onPrimary} />
+                    <Text style={styles.freezeButtonText}>Stage {exactBuildLabel} Ingestion</Text>
+                  </TouchableOpacity>
+                )}
                 {hasFactoryBuild ? (
                   <TouchableOpacity
                     activeOpacity={0.86}
@@ -1007,8 +1330,9 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
                     <Text style={styles.digitalTwinButtonText}>View Digital Twin</Text>
                   </TouchableOpacity>
                 ) : null}
+                {draftNotice ? <Text style={styles.draftNotice}>{draftNotice}</Text> : null}
                 <Text style={styles.stopNote}>
-                  {hasFactoryBuild ? "No production changes: this action is intentionally staged before Dealer Handoff." : "Review checkpoint: this action is intentionally not wired to Dealer Handoff yet."}
+                  {hasFactoryBuild ? "No production changes: this action is intentionally staged before Dealer Handoff." : "Save preserves this hull's selected template items and identity fields. Publish creates or binds the canonical Keepr boat."}
                 </Text>
               </View>
 
@@ -1373,12 +1697,41 @@ const styles = StyleSheet.create({
   optionStateSelected: {
     color: colors.brandBlue,
   },
+  optionDescription: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: spacing.xs,
+  },
   optionMeta: {
     color: colors.textMuted,
     fontSize: 11,
     fontWeight: "900",
     marginTop: spacing.sm,
     textTransform: "uppercase",
+  },
+  quantityStepper: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.xs,
+    marginLeft: spacing.sm,
+  },
+  quantityButton: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    height: 28,
+    justifyContent: "center",
+    width: 28,
+  },
+  quantityValue: {
+    color: colors.textPrimary,
+    fontSize: 12,
+    fontWeight: "900",
+    minWidth: 48,
+    textAlign: "center",
   },
   addsRow: {
     flexDirection: "row",
@@ -1612,6 +1965,35 @@ const styles = StyleSheet.create({
     color: colors.brandBlue,
     fontSize: 13,
     fontWeight: "900",
+  },
+  draftActionStack: {
+    gap: spacing.sm,
+    marginTop: spacing.lg,
+  },
+  workQueueButton: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.sm,
+    justifyContent: "center",
+    minHeight: 42,
+    paddingHorizontal: spacing.md,
+  },
+  workQueueButtonText: {
+    color: colors.brandBlue,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  draftNotice: {
+    color: colors.brandNavy,
+    fontSize: 12,
+    fontWeight: "800",
+    lineHeight: 17,
+    marginTop: spacing.sm,
+    textAlign: "center",
   },
   inheritedPill: {
     backgroundColor: "#DCFCE7",

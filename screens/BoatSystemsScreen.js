@@ -5,7 +5,6 @@ import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   Keyboard,
   Modal,
   Platform,
@@ -60,9 +59,106 @@ function getDisplayName(system) {
   return dn || system?.name || "System";
 }
 
+function getSystemGroup(system) {
+  const joinedGroup = system?.system_group;
+  if (joinedGroup && typeof joinedGroup === "object") {
+    const name = String(joinedGroup.name || "").trim();
+    if (name) {
+      return {
+        id: joinedGroup.id || name,
+        name,
+        sortOrder: Number.isFinite(Number(joinedGroup.sort_order))
+          ? Number(joinedGroup.sort_order)
+          : 0,
+      };
+    }
+  }
+
+  const meta = system?.metadata && typeof system.metadata === "object" ? system.metadata : {};
+  const metaGroup = meta.system_group || meta.systemGroup;
+  if (typeof metaGroup === "string" && metaGroup.trim()) {
+    return { id: metaGroup.trim(), name: metaGroup.trim(), sortOrder: 0 };
+  }
+  if (metaGroup && typeof metaGroup === "object") {
+    const name = String(metaGroup.name || metaGroup.label || "").trim();
+    if (name) {
+      return {
+        id: metaGroup.id || name,
+        name,
+        sortOrder: Number.isFinite(Number(metaGroup.sort_order))
+          ? Number(metaGroup.sort_order)
+          : 0,
+      };
+    }
+  }
+
+  return null;
+}
+
+function groupSystemsForDisplay(systems = [], systemGroups = []) {
+  const hasGroups =
+    (systemGroups || []).length > 0 || (systems || []).some((system) => !!getSystemGroup(system));
+  const sortedSystems = [...(systems || [])].sort((a, b) =>
+    String(getDisplayName(a)).localeCompare(String(getDisplayName(b)))
+  );
+  if (!hasGroups) return [{ key: "flat", title: null, systems: sortedSystems, sortOrder: 0 }];
+
+  const grouped = new Map();
+  (systemGroups || []).forEach((group) => {
+    const name = String(group?.name || "").trim();
+    if (!name) return;
+    const key = String(group.id || name);
+    grouped.set(key, {
+      key,
+      title: name,
+      sortOrder: Number.isFinite(Number(group.sort_order)) ? Number(group.sort_order) : 0,
+      systems: [],
+    });
+  });
+
+  sortedSystems.forEach((system) => {
+    const group = getSystemGroup(system) || {
+      id: "ungrouped",
+      name: "Other Systems",
+      sortOrder: 9999,
+    };
+    const key = String(group.id || group.name);
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        key,
+        title: group.name,
+        sortOrder: group.sortOrder,
+        systems: [],
+      });
+    }
+    grouped.get(key).systems.push(system);
+  });
+
+  return Array.from(grouped.values())
+    .sort((a, b) => {
+      if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+      return String(a.title || "").localeCompare(String(b.title || ""));
+    })
+    .map((group) => ({
+      ...group,
+      systems: group.systems.sort((a, b) =>
+        String(getDisplayName(a)).localeCompare(String(getDisplayName(b)))
+      ),
+    }));
+}
+
 function getGraphProjection(system) {
   const meta = system?.metadata && typeof system.metadata === "object" ? system.metadata : {};
   return meta.graph_projection && typeof meta.graph_projection === "object" ? meta.graph_projection : null;
+}
+
+function isProjectedSystem(system) {
+  return system?.source_type === "operational_graph" || !!getGraphProjection(system);
+}
+
+function isSystemGroupRollup(system) {
+  const meta = system?.metadata && typeof system.metadata === "object" ? system.metadata : {};
+  return meta.projection_role === "system_group_rollup" || meta.system_group_rollup === true;
 }
 
 function evidenceCountForGraphSystem(system) {
@@ -83,7 +179,7 @@ function evidenceCountForGraphSystem(system) {
 
 function graphSystemToKeeprSystem(graphSystem) {
   if (!graphSystem) return null;
-  const id = graphSystem.system_id || graphSystem.id || graphSystem.graph_node_id || graphSystem.node_key;
+  const id = graphSystem.system_id;
   if (!id) return null;
   const components = Array.isArray(graphSystem.components) ? graphSystem.components : [];
   const options = Array.isArray(graphSystem.options) ? graphSystem.options : [];
@@ -140,6 +236,7 @@ const BoatSystemsScreen = ({ route, navigation }) => {
   const boatLabel = boatName || "Boat";
 
   const [systems, setSystems] = useState([]);
+  const [systemGroups, setSystemGroups] = useState([]);
   const [graphExperience, setGraphExperience] = useState(null);
   const [systemsLoading, setSystemsLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -158,6 +255,10 @@ const BoatSystemsScreen = ({ route, navigation }) => {
   // add system modal (separate from search)
   const [addSystemModalVisible, setAddSystemModalVisible] = useState(false);
   const [addSystemDraft, setAddSystemDraft] = useState("");
+  const [addSystemGroupDraft, setAddSystemGroupDraft] = useState("");
+  const [addGroupModalVisible, setAddGroupModalVisible] = useState(false);
+  const [addGroupDraft, setAddGroupDraft] = useState("");
+  const [savingGroup, setSavingGroup] = useState(false);
 
   // web-safe error/plan modal (handles modal-within-modal on web)
   const [planModalVisible, setPlanModalVisible] = useState(false);
@@ -178,6 +279,7 @@ const BoatSystemsScreen = ({ route, navigation }) => {
   const [renameModalVisible, setRenameModalVisible] = useState(false);
   const [renameSystem, setRenameSystem] = useState(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const [renameGroupDraft, setRenameGroupDraft] = useState("");
   const [savingRename, setSavingRename] = useState(false);
 
   // Starter Pack templates (derived from marine_ksc.json systems map)
@@ -203,9 +305,15 @@ const BoatSystemsScreen = ({ route, navigation }) => {
       const type = String(s?.system_type || "").toLowerCase();
       const ksc = String(s?.ksc_code || "").toLowerCase();
       const loc = String(getLocationHint(s) || "").toLowerCase();
-      return name.includes(q) || type.includes(q) || ksc.includes(q) || loc.includes(q);
+      const group = String(getSystemGroup(s)?.name || "").toLowerCase();
+      return name.includes(q) || type.includes(q) || ksc.includes(q) || loc.includes(q) || group.includes(q);
     });
   }, [systems, systemSearch]);
+
+  const groupedFilteredSystems = useMemo(
+    () => groupSystemsForDisplay(filteredSystems, systemGroups),
+    [filteredSystems, systemGroups]
+  );
 
   const handleBack = () => navigation.goBack();
 
@@ -231,18 +339,45 @@ const BoatSystemsScreen = ({ route, navigation }) => {
     setSystemsLoading(true);
     setLoadError(null);
 
-    const { data, error } = await supabase
+    const systemSelectWithGroup =
+      "*, system_group:system_groups(id, name, description, sort_order, icon, category, metadata)";
+    let { data, error } = await supabase
       .from(SYSTEMS_TABLE)
-      .select("*")
+      .select(systemSelectWithGroup)
       .eq("asset_id", boatId)
       .order("name", { ascending: true });
 
+    if (error) {
+      const msg = String(error?.message || "");
+      const canFallback =
+        msg.includes("system_groups") ||
+        msg.includes("system_group_id") ||
+        msg.includes("relationship") ||
+        msg.includes("schema cache");
+
+      if (canFallback) {
+        const fallback = await supabase
+          .from(SYSTEMS_TABLE)
+          .select("*")
+          .eq("asset_id", boatId)
+          .order("name", { ascending: true });
+        data = fallback.data;
+        error = fallback.error;
+      }
+    }
+
     let tableSystems = [];
+    const rollupSystemIds = new Set();
     if (error) {
       console.error("BoatSystemsScreen: error loading systems", error);
       setLoadError("Could not load boat systems.");
     } else {
-      tableSystems = data || [];
+      (data || []).forEach((system) => {
+        if (isSystemGroupRollup(system) && system?.id) {
+          rollupSystemIds.add(safeLower(system.id));
+        }
+      });
+      tableSystems = (data || []).filter((system) => !isSystemGroupRollup(system));
     }
 
     let projectedSystems = [];
@@ -259,6 +394,7 @@ const BoatSystemsScreen = ({ route, navigation }) => {
         projectedSystems = (graphData?.systems || [])
           .map(graphSystemToKeeprSystem)
           .filter(Boolean)
+          .filter((system) => !rollupSystemIds.has(safeLower(system.id)))
           .map((system) => ({ ...system, asset_id: boatId }));
       }
     } catch (graphCatch) {
@@ -286,6 +422,35 @@ const BoatSystemsScreen = ({ route, navigation }) => {
 
     setSystemsLoading(false);
   }, [boatId, systemsRole]);
+
+  const loadSystemGroups = useCallback(async () => {
+    if (!boatId) return;
+
+    try {
+      const { data, error } = await supabase
+        .from("system_groups")
+        .select("id, asset_id, name, description, sort_order, icon, category, metadata")
+        .eq("asset_id", boatId)
+        .order("sort_order", { ascending: true })
+        .order("name", { ascending: true });
+
+      if (error) {
+        const msg = String(error?.message || "");
+        const isMissingSchema =
+          msg.includes("system_groups") || msg.includes("schema cache") || error.code === "42P01";
+        if (!isMissingSchema) {
+          console.warn("BoatSystemsScreen: error loading system groups", error);
+        }
+        setSystemGroups([]);
+        return;
+      }
+
+      setSystemGroups(data || []);
+    } catch (err) {
+      console.warn("BoatSystemsScreen: unexpected system group load error", err);
+      setSystemGroups([]);
+    }
+  }, [boatId]);
 
   const loadServiceMeta = useCallback(async () => {
     if (!boatId) return;
@@ -319,8 +484,8 @@ const BoatSystemsScreen = ({ route, navigation }) => {
   }, [boatId]);
 
   const loadAll = useCallback(async () => {
-    await Promise.all([loadSystems(), loadServiceMeta()]);
-  }, [loadSystems, loadServiceMeta]);
+    await Promise.all([loadSystems(), loadSystemGroups(), loadServiceMeta()]);
+  }, [loadSystems, loadServiceMeta, loadSystemGroups]);
 
   useFocusEffect(
     useCallback(() => {
@@ -536,6 +701,80 @@ const BoatSystemsScreen = ({ route, navigation }) => {
     if (creatingSystem) return;
     setAddSystemModalVisible(false);
     setAddSystemDraft("");
+    setAddSystemGroupDraft("");
+  };
+
+  const closeAddGroupModal = () => {
+    if (savingGroup) return;
+    setAddGroupModalVisible(false);
+    setAddGroupDraft("");
+  };
+
+  const handleCreateSystemGroup = async () => {
+    const trimmed = String(addGroupDraft || "").trim();
+    if (!trimmed || !boatId || savingGroup) return;
+
+    const exists = systemGroups.some((group) => safeLower(group?.name) === safeLower(trimmed));
+    if (exists) {
+      Alert.alert("Already added", "That system group is already on this boat.");
+      return;
+    }
+
+    setSavingGroup(true);
+    try {
+      const nextSortOrder = systemGroups.length
+        ? Math.max(...systemGroups.map((group) => Number(group?.sort_order) || 0)) + 10
+        : 10;
+      const { error } = await supabase.from("system_groups").insert({
+        asset_id: boatId,
+        name: trimmed,
+        sort_order: nextSortOrder,
+        metadata: { source_type: "manual" },
+      });
+
+      if (error) throw error;
+
+      setAddGroupModalVisible(false);
+      setAddGroupDraft("");
+      await loadSystemGroups();
+    } catch (err) {
+      console.error("BoatSystemsScreen: error creating system group", err);
+      showWebSafeAlert(
+        "Could not add group",
+        "System groups are not available until the additive migration is applied."
+      );
+    } finally {
+      setSavingGroup(false);
+    }
+  };
+
+  const resolveSystemGroupId = async (groupName) => {
+    const trimmed = String(groupName || "").trim();
+    if (!trimmed || !boatId) return null;
+
+    const { data: existing, error: readError } = await supabase
+      .from("system_groups")
+      .select("id")
+      .eq("asset_id", boatId)
+      .ilike("name", trimmed)
+      .limit(1)
+      .maybeSingle();
+
+    if (readError) throw readError;
+    if (existing?.id) return existing.id;
+
+    const { data: created, error: createError } = await supabase
+      .from("system_groups")
+      .insert({
+        asset_id: boatId,
+        name: trimmed,
+        metadata: { source_type: "manual" },
+      })
+      .select("id")
+      .single();
+
+    if (createError) throw createError;
+    return created?.id || null;
   };
 
   const handleCreateSystemFromModal = async () => {
@@ -552,6 +791,7 @@ const BoatSystemsScreen = ({ route, navigation }) => {
     let foundation = null;
 
     try {
+      const systemGroupId = await resolveSystemGroupId(addSystemGroupDraft);
       const foundationPayload = {
         asset_id: boatId,
         ksc_code: "general",
@@ -562,6 +802,7 @@ const BoatSystemsScreen = ({ route, navigation }) => {
         source_type: "manual",
         metadata: {},
       };
+      if (systemGroupId) foundationPayload.system_group_id = systemGroupId;
 
       const { data: sysRow, error: sysErr } = await supabase
         .from(SYSTEMS_TABLE)
@@ -607,14 +848,9 @@ const BoatSystemsScreen = ({ route, navigation }) => {
         console.warn("BoatSystemsScreen: extension insert exception", e);
       }
 
-      setSystems((prev) =>
-        [...(prev || []), foundation].sort((a, b) =>
-          String(a?.name || "").localeCompare(String(b?.name || ""))
-        )
-      );
-
       closeAddSystemModal();
       Keyboard.dismiss();
+      await loadSystems();
       await loadServiceMeta();
     } catch (err) {
       console.error("BoatSystemsScreen: unexpected create error (modal)", err);
@@ -796,8 +1032,16 @@ const BoatSystemsScreen = ({ route, navigation }) => {
   };
 
   const openRename = (system) => {
+    if (isProjectedSystem(system)) {
+      showWebSafeAlert(
+        "Projection-only system",
+        "This row is projected from build evidence. Open the System Story to work with it, or create a canonical system before renaming/grouping it."
+      );
+      return;
+    }
     setRenameSystem(system);
     setRenameDraft(getDisplayName(system));
+    setRenameGroupDraft(getSystemGroup(system)?.name || "");
     setRenameModalVisible(true);
   };
 
@@ -806,6 +1050,7 @@ const BoatSystemsScreen = ({ route, navigation }) => {
     setRenameModalVisible(false);
     setRenameSystem(null);
     setRenameDraft("");
+    setRenameGroupDraft("");
   };
 
   const saveRename = async () => {
@@ -819,20 +1064,38 @@ const BoatSystemsScreen = ({ route, navigation }) => {
       if (trimmed) nextMeta.display_name = trimmed;
       else delete nextMeta.display_name;
 
+      const groupName = String(renameGroupDraft || "").trim();
+      const currentGroupName = getSystemGroup(sys)?.name || "";
+      const updatePayload = {
+        name: trimmed || sys.name,
+        metadata: nextMeta,
+      };
+      if (safeLower(groupName) !== safeLower(currentGroupName)) {
+        if (groupName) {
+          updatePayload.system_group_id = await resolveSystemGroupId(groupName);
+        } else {
+          updatePayload.system_group_id = null;
+        }
+      }
+
       const { data, error } = await supabase
         .from(SYSTEMS_TABLE)
-        .update({ metadata: nextMeta })
+        .update(updatePayload)
         .eq("id", sys.id)
         .select("*")
-        .single();
+        .maybeSingle();
 
       if (error) throw error;
+      if (!data?.id) {
+        throw new Error("No editable canonical system row was updated.");
+      }
 
-      setSystems((prev) => prev.map((s) => (s.id === sys.id ? data : s)));
+      await loadSystems();
+      await loadSystemGroups();
       closeRename();
     } catch (e) {
-      console.error("BoatSystemsScreen: error renaming system", e);
-      Alert.alert("Could not update title", e?.message || "Please try again.");
+      console.error("BoatSystemsScreen: error updating system", e);
+      showWebSafeAlert("Could not update system", e?.message || "Please try again.");
     } finally {
       setSavingRename(false);
     }
@@ -984,12 +1247,14 @@ const BoatSystemsScreen = ({ route, navigation }) => {
             >
               <Ionicons name="pencil-outline" size={16} color={colors.textSecondary} />
             </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.iconButton}
-              onPress={() => openRename(system)}
-            >
-              <Ionicons name="text-outline" size={16} color={colors.textSecondary} />
-            </TouchableOpacity>
+            {!isProjectedSystem(system) ? (
+              <TouchableOpacity
+                style={styles.iconButton}
+                onPress={() => openRename(system)}
+              >
+                <Ionicons name="create-outline" size={16} color={colors.textSecondary} />
+              </TouchableOpacity>
+            ) : null}
 
             <TouchableOpacity
               style={styles.iconButton}
@@ -1135,15 +1400,33 @@ const BoatSystemsScreen = ({ route, navigation }) => {
           <Text style={styles.addSystemCtaText}>Add system</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.starterPackButton} onPress={openStarterPack}>
-          <Ionicons
-            name="sparkles-outline"
-            size={16}
-            color={colors.accentBlue}
-            style={{ marginRight: 6 }}
-          />
-          <Text style={styles.starterPackText}>Starter pack</Text>
-        </TouchableOpacity>
+        <View style={styles.addSystemSecondaryActions}>
+          <TouchableOpacity
+            style={styles.starterPackButton}
+            onPress={() => {
+              setAddGroupDraft("");
+              setAddGroupModalVisible(true);
+            }}
+          >
+            <Ionicons
+              name="folder-outline"
+              size={16}
+              color={colors.accentBlue}
+              style={{ marginRight: 6 }}
+            />
+            <Text style={styles.starterPackText}>Add group</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.starterPackButton} onPress={openStarterPack}>
+            <Ionicons
+              name="sparkles-outline"
+              size={16}
+              color={colors.accentBlue}
+              style={{ marginRight: 6 }}
+            />
+            <Text style={styles.starterPackText}>Starter pack</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
 
@@ -1151,6 +1434,36 @@ const BoatSystemsScreen = ({ route, navigation }) => {
       <View style={{ height: spacing.sm }} />
     </View>
   );
+
+  const renderSystemGroupSection = (group) => {
+    const systemsInGroup = group?.systems || [];
+    if (!group?.title) {
+      return systemsInGroup.map((system) => (
+        <View key={system.id} style={{ marginBottom: spacing.sm }}>
+          {renderSystemItem({ item: system })}
+        </View>
+      ));
+    }
+
+    return (
+      <View key={group.key} style={styles.systemGroupSection}>
+        <View style={styles.systemGroupHeader}>
+          <Text style={styles.systemGroupTitle}>{group.title}</Text>
+          <Text style={styles.systemGroupCount}>
+            {systemsInGroup.length} system{systemsInGroup.length === 1 ? "" : "s"}
+          </Text>
+        </View>
+        {systemsInGroup.map((system) => (
+          <View key={system.id} style={styles.systemGroupItem}>
+            {renderSystemItem({ item: system })}
+          </View>
+        ))}
+        {!systemsInGroup.length ? (
+          <Text style={styles.systemGroupEmptyText}>No systems in this group yet.</Text>
+        ) : null}
+      </View>
+    );
+  };
 
   const listEmpty = () => {
     if (systemsLoading && !filteredSystems.length) {
@@ -1203,11 +1516,7 @@ const BoatSystemsScreen = ({ route, navigation }) => {
         ) : !filteredSystems.length ? (
           listEmpty()
         ) : (
-          filteredSystems.map((system) => (
-            <View key={system.id} style={{ marginBottom: spacing.sm }}>
-              {renderSystemItem({ item: system })}
-            </View>
-          ))
+          groupedFilteredSystems.map(renderSystemGroupSection)
         )}
       </ScrollView>
     ) : (
@@ -1233,19 +1542,70 @@ const BoatSystemsScreen = ({ route, navigation }) => {
         ) : !filteredSystems.length ? (
           listEmpty()
         ) : (
-          <FlatList
-            data={filteredSystems}
-            keyExtractor={(item) => item.id}
-            renderItem={renderSystemItem}
-            scrollEnabled={false}
-            ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
-            contentContainerStyle={{ paddingTop: spacing.sm }}
-          />
+          groupedFilteredSystems.map(renderSystemGroupSection)
         )}
       </ScrollView>
     )}
 
-        
+        {/* Add group modal */}
+        <Modal
+          visible={addGroupModalVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={closeAddGroupModal}
+        >
+          <Pressable style={styles.modalBackdrop} onPress={closeAddGroupModal}>
+            <Pressable style={[styles.modalCard, { maxWidth: 460 }]} onPress={() => {}}>
+              <View style={styles.modalHeaderRow}>
+                <Text style={styles.modalTitle}>Add a system group</Text>
+                <TouchableOpacity onPress={closeAddGroupModal} disabled={savingGroup}>
+                  <Ionicons name="close-outline" size={22} color={colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.modalSubtitle}>
+                Groups organize systems on this boat. The systems still keep their own story,
+                records, attachments, and service history.
+              </Text>
+
+              <TextInput
+                value={addGroupDraft}
+                onChangeText={setAddGroupDraft}
+                placeholder="Group name (e.g., Propulsion)"
+                style={styles.modalInput}
+                placeholderTextColor={colors.textMuted}
+                autoFocus
+                returnKeyType="done"
+                onSubmitEditing={handleCreateSystemGroup}
+              />
+
+              <View style={styles.modalActionsRow}>
+                <TouchableOpacity
+                  style={[styles.modalActionBtn, styles.modalActionBtnGhost]}
+                  onPress={closeAddGroupModal}
+                  disabled={savingGroup}
+                >
+                  <Text style={styles.modalActionTextGhost}>Cancel</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.modalActionBtn,
+                    styles.modalActionBtnPrimary,
+                    (!addGroupDraft.trim() || savingGroup) && { opacity: 0.6 },
+                  ]}
+                  onPress={handleCreateSystemGroup}
+                  disabled={!addGroupDraft.trim() || savingGroup}
+                >
+                  <Text style={styles.modalActionTextPrimary}>
+                    {savingGroup ? "Saving..." : "Save group"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+
         {/* Add system modal */}
         <Modal
           visible={addSystemModalVisible}
@@ -1276,6 +1636,45 @@ const BoatSystemsScreen = ({ route, navigation }) => {
                 returnKeyType="done"
                 onSubmitEditing={handleCreateSystemFromModal}
               />
+
+              <TextInput
+                value={addSystemGroupDraft}
+                onChangeText={setAddSystemGroupDraft}
+                placeholder="System group optional (e.g., Propulsion)"
+                style={styles.modalInput}
+                placeholderTextColor={colors.textMuted}
+                returnKeyType="done"
+                onSubmitEditing={handleCreateSystemFromModal}
+              />
+
+              {systemGroups.length ? (
+                <View style={styles.systemGroupChipRow}>
+                  {systemGroups.map((group) => {
+                    const groupName = String(group?.name || "").trim();
+                    if (!groupName) return null;
+                    const selected = safeLower(addSystemGroupDraft) === safeLower(groupName);
+                    return (
+                      <TouchableOpacity
+                        key={group.id || groupName}
+                        style={[
+                          styles.systemGroupChip,
+                          selected && styles.systemGroupChipSelected,
+                        ]}
+                        onPress={() => setAddSystemGroupDraft(groupName)}
+                      >
+                        <Text
+                          style={[
+                            styles.systemGroupChipText,
+                            selected && styles.systemGroupChipTextSelected,
+                          ]}
+                        >
+                          {groupName}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              ) : null}
 
               <View style={styles.modalActionsRow}>
                 <TouchableOpacity
@@ -1366,8 +1765,10 @@ const BoatSystemsScreen = ({ route, navigation }) => {
       <Modal visible={renameModalVisible} transparent animationType="fade" onRequestClose={closeRename}>
         <Pressable style={styles.modalBackdrop} onPress={closeRename}>
           <Pressable style={styles.modalCard} onPress={() => {}}>
-            <Text style={styles.modalTitle}>Edit title</Text>
-            <Text style={styles.modalSubtitle}>This updates how the system is shown in Keepr.</Text>
+            <Text style={styles.modalTitle}>Edit system</Text>
+            <Text style={styles.modalSubtitle}>
+              Update the system title or place this system under a group.
+            </Text>
 
             <TextInput
               value={renameDraft}
@@ -1378,6 +1779,61 @@ const BoatSystemsScreen = ({ route, navigation }) => {
               returnKeyType="done"
               onSubmitEditing={saveRename}
             />
+
+            <TextInput
+              value={renameGroupDraft}
+              onChangeText={setRenameGroupDraft}
+              placeholder="System group optional (e.g., Propulsion)"
+              style={styles.modalInput}
+              returnKeyType="done"
+              onSubmitEditing={saveRename}
+            />
+
+            {systemGroups.length ? (
+              <View style={styles.systemGroupChipRow}>
+                {systemGroups.map((group) => {
+                  const groupName = String(group?.name || "").trim();
+                  if (!groupName) return null;
+                  const selected = safeLower(renameGroupDraft) === safeLower(groupName);
+                  return (
+                    <TouchableOpacity
+                      key={group.id || groupName}
+                      style={[
+                        styles.systemGroupChip,
+                        selected && styles.systemGroupChipSelected,
+                      ]}
+                      onPress={() => setRenameGroupDraft(groupName)}
+                    >
+                      <Text
+                        style={[
+                          styles.systemGroupChipText,
+                          selected && styles.systemGroupChipTextSelected,
+                        ]}
+                      >
+                        {groupName}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+                <TouchableOpacity
+                  style={[
+                    styles.systemGroupChip,
+                    !String(renameGroupDraft || "").trim() && styles.systemGroupChipSelected,
+                  ]}
+                  onPress={() => setRenameGroupDraft("")}
+                >
+                  <Text
+                    style={[
+                      styles.systemGroupChipText,
+                      !String(renameGroupDraft || "").trim() &&
+                        styles.systemGroupChipTextSelected,
+                    ]}
+                  >
+                    No group
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
 
             <View style={styles.modalActionsRow}>
               <TouchableOpacity style={[styles.modalActionBtn, styles.modalActionBtnGhost]} onPress={closeRename}>
@@ -1707,6 +2163,11 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: spacing.md,
   },
+  addSystemSecondaryActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
   addSystemCta: {
     flexDirection: "row",
     alignItems: "center",
@@ -1785,6 +2246,41 @@ const styles = StyleSheet.create({
     scrollContent: {
       paddingBottom: spacing.xl,
     },
+  systemGroupSection: {
+    marginBottom: spacing.md,
+    borderLeftWidth: 2,
+    borderLeftColor: colors.accentBlue,
+    paddingLeft: spacing.sm,
+  },
+  systemGroupHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.md,
+    backgroundColor: "#EFF6FF",
+    marginBottom: spacing.xs,
+  },
+  systemGroupTitle: {
+    ...typography.sectionLabel,
+    color: colors.textPrimary,
+  },
+  systemGroupCount: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: colors.textSecondary,
+  },
+  systemGroupItem: {
+    marginBottom: spacing.sm,
+    marginLeft: spacing.sm,
+  },
+  systemGroupEmptyText: {
+    paddingHorizontal: spacing.xs,
+    paddingVertical: spacing.xs,
+    fontSize: 12,
+    color: colors.textSecondary,
+  },
   systemCard: {
     borderRadius: radius.lg,
     backgroundColor: colors.surface,
@@ -2069,6 +2565,32 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 15,
     color: colors.text,
+  },
+  systemGroupChipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 10,
+  },
+  systemGroupChip: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSubtle,
+    borderRadius: radius.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  systemGroupChipSelected: {
+    borderColor: colors.accentBlue,
+    backgroundColor: "#EFF6FF",
+  },
+  systemGroupChipText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: colors.textSecondary,
+  },
+  systemGroupChipTextSelected: {
+    color: colors.accentBlue,
   },
   modalActionsRow: {
     marginTop: 14,

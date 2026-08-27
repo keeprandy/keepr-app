@@ -164,11 +164,11 @@ function buildSystemFromGraph(graphSystem, assetId) {
       manual_status: graphSystem.manual_status || firstComponent?.manual_status || null,
       standard: {
         identity: {
-          manufacturer: firstComponent?.manufacturer || firstInstance?.manufacturer || "",
-          model: firstComponent?.model || firstInstance?.model || "",
-          serial_number: firstInstance?.state?.serial_number || "",
+          manufacturer: graphSystem.manufacturer || "",
+          model: graphSystem.model || "",
+          serial_number: "",
           installed_on: firstInstance?.state?.install_date || "",
-          location: firstInstance?.state?.position || "",
+          location: "",
         },
         warranty: {
           provider: "",

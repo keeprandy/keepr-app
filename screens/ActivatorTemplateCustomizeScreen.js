@@ -26,6 +26,49 @@ const CONFIG_SECTION_KEY = "section.configuration";
 const ITEM_KINDS = ["configuration_item", "choice", "option", "component", "system"];
 const ITEM_STATES = ["standard", "optional", "selected", "unselected", "model_expected"];
 const MAPPING_STATES = ["unmapped", "partially_mapped", "mapped", "needs_review"];
+const SELECTION_MODES = ["single", "multi"];
+const TYPE_FILTERS = [
+  { key: "all", label: "All" },
+  { key: "standard", label: "Standard" },
+  { key: "choice", label: "Choices" },
+  { key: "option", label: "Options" },
+  { key: "component", label: "Components" },
+  { key: "system", label: "Systems" },
+  { key: "unmapped", label: "Unmapped" },
+];
+const TYPE_LABELS = {
+  section: "Section",
+  configuration_group: "Group",
+  configuration_item: "Item",
+  choice: "Choice",
+  option: "Option",
+  component: "Component",
+  system: "System",
+};
+
+function itemTypeLabel(item) {
+  return TYPE_LABELS[item?.item_type] || String(item?.item_type || "item").replace(/_/g, " ");
+}
+
+function itemStateValue(item) {
+  return item?.expected_value?.selection_state || item?.applicability?.standard_state || "model_expected";
+}
+
+function itemMappingValue(item) {
+  return item?.applicability?.mapping_status || item?.metadata?.mapping_status || "unmapped";
+}
+
+function humanizeMeta(value) {
+  return String(value || "").replace(/_/g, " ");
+}
+
+function matchesTypeFilter(item, filterKey) {
+  if (!item) return false;
+  if (filterKey === "all") return true;
+  if (filterKey === "standard") return itemStateValue(item) === "standard";
+  if (filterKey === "unmapped") return itemMappingValue(item) === "unmapped";
+  return item.item_type === filterKey;
+}
 
 function slugify(value) {
   return String(value || "")
@@ -43,6 +86,11 @@ function jsonText(value, fallback = "{}") {
   }
 }
 
+function jsonTextOrEmpty(value) {
+  if (!value || (typeof value === "object" && Object.keys(value).length === 0)) return "";
+  return jsonText(value, "{}");
+}
+
 function parseJsonField(text, fieldName) {
   const trimmed = String(text || "").trim();
   if (!trimmed) return {};
@@ -51,6 +99,24 @@ function parseJsonField(text, fieldName) {
   } catch (error) {
     throw new Error(`${fieldName} must be valid JSON.`);
   }
+}
+
+function linesToArray(text) {
+  return String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function arrayToLines(value) {
+  return Array.isArray(value) ? value.join("\n") : "";
+}
+
+function itemElementList(item, key) {
+  const metadata = item?.metadata || {};
+  const expected = item?.expected_value?.value || {};
+  const downstream = metadata.downstream_elements || {};
+  return metadata[key] || downstream[key] || expected[key] || [];
 }
 
 function activeItems(items) {
@@ -79,6 +145,7 @@ function Field({ label, value, onChangeText, placeholder, multiline = false }) {
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
+        placeholderTextColor="#A8B1C1"
         multiline={multiline}
         textAlignVertical={multiline ? "top" : "center"}
         style={[styles.input, multiline && styles.textarea]}
@@ -87,40 +154,75 @@ function Field({ label, value, onChangeText, placeholder, multiline = false }) {
   );
 }
 
-function TemplateItemRow({ item, childrenCount, selected, onPress, onRetire }) {
-  const mappingStatus = item?.applicability?.mapping_status || item?.metadata?.mapping_status || "unmapped";
+function TemplateItemRow({
+  item,
+  childrenCount,
+  selected,
+  indented = false,
+  expanded = true,
+  onPress,
+  onRetire,
+  onToggleExpand = null,
+}) {
+  const mappingStatus = itemMappingValue(item);
+  const state = itemStateValue(item);
   const sourceCode = item?.metadata?.oem_item_code || item?.metadata?.source_oem_code;
+  const isGroup = item.item_type === "configuration_group";
   return (
-    <TouchableOpacity
-      accessibilityRole="button"
-      activeOpacity={0.86}
-      onPress={onPress}
-      style={[styles.itemRow, selected && styles.itemRowSelected]}
-    >
-      <View style={styles.itemIcon}>
-        <Ionicons
-          name={item.item_type === "configuration_group" ? "folder-open-outline" : "list-outline"}
-          size={17}
-          color={colors.brandBlue}
-        />
-      </View>
-      <View style={styles.itemText}>
-        <Text style={styles.itemTitle}>{item.label}</Text>
-        <Text style={styles.itemMeta}>
-          {item.item_type} · {item.applicability?.standard_state || "model_expected"} · {mappingStatus}
-          {sourceCode ? ` · ${sourceCode}` : ""}
-        </Text>
-        {childrenCount ? <Text style={styles.itemSubtle}>{childrenCount} child items</Text> : null}
-      </View>
+    <View style={[indented && styles.indentedRowWrap]}>
       <TouchableOpacity
-        accessibilityLabel={`Retire ${item.label}`}
+        accessibilityRole="button"
         activeOpacity={0.86}
-        onPress={onRetire}
-        style={styles.iconButton}
+        onPress={onPress}
+        style={[styles.itemRow, indented && styles.itemRowIndented, selected && styles.itemRowSelected]}
       >
-        <Ionicons name="archive-outline" size={16} color={colors.textMuted} />
+        {isGroup && onToggleExpand ? (
+          <TouchableOpacity
+            accessibilityLabel={`${expanded ? "Collapse" : "Expand"} ${item.label}`}
+            activeOpacity={0.82}
+            onPress={onToggleExpand}
+            style={styles.expandButton}
+          >
+            <Ionicons name={expanded ? "chevron-down" : "chevron-forward"} size={16} color={colors.textMuted} />
+          </TouchableOpacity>
+        ) : null}
+        <View style={styles.itemIcon}>
+          <Ionicons
+            name={isGroup ? (expanded ? "folder-open-outline" : "folder-outline") : "list-outline"}
+            size={17}
+            color={colors.brandBlue}
+          />
+        </View>
+        <View style={styles.itemText}>
+          <Text style={styles.itemTitle}>{item.label}</Text>
+          <View style={styles.metaBadgeRow}>
+            <View style={[styles.typeBadge, isGroup && styles.typeBadgeGroup]}>
+              <Text style={[styles.typeBadgeText, isGroup && styles.typeBadgeTextGroup]}>
+                {itemTypeLabel(item)}
+              </Text>
+            </View>
+            <View style={styles.stateBadge}>
+              <Text style={styles.stateBadgeText}>{humanizeMeta(state)}</Text>
+            </View>
+            <View style={[styles.mappingBadge, mappingStatus === "mapped" && styles.mappingBadgeMapped]}>
+              <Text style={[styles.mappingBadgeText, mappingStatus === "mapped" && styles.mappingBadgeTextMapped]}>
+                {humanizeMeta(mappingStatus)}
+              </Text>
+            </View>
+          </View>
+          {sourceCode ? <Text style={styles.itemMeta}>{sourceCode}</Text> : null}
+          {childrenCount ? <Text style={styles.itemSubtle}>{childrenCount} child items</Text> : null}
+        </View>
+        <TouchableOpacity
+          accessibilityLabel={`Retire ${item.label}`}
+          activeOpacity={0.86}
+          onPress={onRetire}
+          style={styles.iconButton}
+        >
+          <Ionicons name="archive-outline" size={16} color={colors.textMuted} />
+        </TouchableOpacity>
       </TouchableOpacity>
-    </TouchableOpacity>
+    </View>
   );
 }
 
@@ -138,10 +240,13 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
   const [selectedGroupId, setSelectedGroupId] = useState(null);
   const [editingGroup, setEditingGroup] = useState(null);
   const [editingItem, setEditingItem] = useState(null);
+  const [collapsedGroupIds, setCollapsedGroupIds] = useState([]);
+  const [typeFilter, setTypeFilter] = useState("all");
   const [groupLabel, setGroupLabel] = useState("");
   const [groupCode, setGroupCode] = useState("");
   const [itemLabel, setItemLabel] = useState("");
   const [itemCode, setItemCode] = useState("");
+  const [itemDescription, setItemDescription] = useState("");
   const [itemKind, setItemKind] = useState("configuration_item");
   const [itemState, setItemState] = useState("standard");
   const [mappingStatus, setMappingStatus] = useState("unmapped");
@@ -149,6 +254,11 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
   const [valueText, setValueText] = useState("{}");
   const [provenanceNote, setProvenanceNote] = useState("");
   const [selectedResourceId, setSelectedResourceId] = useState(null);
+  const [selectionMode, setSelectionMode] = useState("multi");
+  const [systemsText, setSystemsText] = useState("");
+  const [resourcesText, setResourcesText] = useState("");
+  const [playbooksText, setPlaybooksText] = useState("");
+  const [requirementsText, setRequirementsText] = useState("");
 
   const load = useCallback(async ({ quiet = false } = {}) => {
     if (!templateKey) {
@@ -192,6 +302,30 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
     }, {});
   }, [items]);
   const selectedGroup = groups.find((group) => group.id === selectedGroupId) || groups[0] || null;
+  const collapsedGroupSet = useMemo(() => new Set(collapsedGroupIds), [collapsedGroupIds]);
+  const filterCounts = useMemo(() => {
+    const nonGroupItems = items.filter((item) => item.item_type !== "configuration_group" && item.item_type !== "section");
+    return TYPE_FILTERS.reduce((acc, filter) => {
+      acc[filter.key] = filter.key === "all"
+        ? nonGroupItems.length
+        : nonGroupItems.filter((item) => matchesTypeFilter(item, filter.key)).length;
+      return acc;
+    }, {});
+  }, [items]);
+  const visibleGroups = useMemo(() => {
+    if (typeFilter === "all") {
+      return groups.map((group) => ({
+        group,
+        children: childrenByParent[group.id] || [],
+      }));
+    }
+    return groups
+      .map((group) => ({
+        group,
+        children: (childrenByParent[group.id] || []).filter((child) => matchesTypeFilter(child, typeFilter)),
+      }))
+      .filter(({ group, children }) => matchesTypeFilter(group, typeFilter) || children.length);
+  }, [childrenByParent, groups, typeFilter]);
 
   const refresh = () => {
     setRefreshing(true);
@@ -204,17 +338,31 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
     setGroupCode("");
   };
 
+  const toggleGroupCollapsed = (groupId) => {
+    setCollapsedGroupIds((current) => (
+      current.includes(groupId)
+        ? current.filter((id) => id !== groupId)
+        : [...current, groupId]
+    ));
+  };
+
   const resetItemForm = () => {
     setEditingItem(null);
     setItemLabel("");
     setItemCode("");
+    setItemDescription("");
     setItemKind("configuration_item");
     setItemState("standard");
     setMappingStatus("unmapped");
     setQuantity("1");
-    setValueText("{}");
+    setValueText("");
     setProvenanceNote("");
     setSelectedResourceId(null);
+    setSelectionMode("multi");
+    setSystemsText("");
+    setResourcesText("");
+    setPlaybooksText("");
+    setRequirementsText("");
   };
 
   const editItem = (item) => {
@@ -222,13 +370,19 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
     setSelectedGroupId(item.parent_item_id || selectedGroupId);
     setItemLabel(item.label || "");
     setItemCode(item.metadata?.oem_item_code || item.metadata?.source_oem_code || "");
+    setItemDescription(item.metadata?.oem_description || item.metadata?.description || item.expected_value?.description || "");
     setItemKind(item.item_type || "configuration_item");
     setItemState(item.expected_value?.selection_state || item.applicability?.standard_state || "standard");
     setMappingStatus(item.applicability?.mapping_status || item.metadata?.mapping_status || "unmapped");
     setQuantity(String(item.expected_value?.quantity ?? ""));
-    setValueText(jsonText(item.expected_value?.value || {}, "{}"));
+    setValueText(jsonTextOrEmpty(item.expected_value?.value));
     setProvenanceNote(item.metadata?.provenance_note || item.metadata?.evidence || "");
     setSelectedResourceId(item.source_resource_id || null);
+    setSelectionMode(item.metadata?.selection_mode || (item.item_type === "choice" ? "single" : "multi"));
+    setSystemsText(arrayToLines(itemElementList(item, "systems")));
+    setResourcesText(arrayToLines(itemElementList(item, "resources")));
+    setPlaybooksText(arrayToLines(itemElementList(item, "playbooks")));
+    setRequirementsText(arrayToLines(itemElementList(item, "requirements")));
   };
 
   const editGroup = (group) => {
@@ -321,13 +475,20 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
     try {
       const parsedValue = parseJsonField(valueText, "Value");
       const itemKey = editingItem?.canonical_key || `${parent.canonical_key}.${slugify(itemCode || label)}`;
-      await upsertCatalogTemplateItem({
+      const downstreamElements = {
+        systems: linesToArray(systemsText),
+        resources: linesToArray(resourcesText),
+        playbooks: linesToArray(playbooksText),
+        requirements: linesToArray(requirementsText),
+      };
+      const result = await upsertCatalogTemplateItem({
         templateId: template.id,
         itemType: itemKind,
         canonicalKey: itemKey,
         label,
         parentItemId: parent.id,
         expectedValue: {
+          description: itemDescription.trim() || null,
           value: parsedValue,
           quantity: quantity.trim() || null,
           selection_state: itemState,
@@ -343,7 +504,15 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
           oem_group_name: parent.metadata?.oem_group_name || parent.label,
           oem_item_name: label,
           oem_item_code: itemCode.trim() || null,
+          oem_description: itemDescription.trim() || null,
+          description: itemDescription.trim() || null,
           source_oem_code: itemCode.trim() || null,
+          selection_mode: selectionMode,
+          systems: downstreamElements.systems,
+          resources: downstreamElements.resources,
+          playbooks: downstreamElements.playbooks,
+          requirements: downstreamElements.requirements,
+          downstream_elements: downstreamElements,
           mapping_status: mappingStatus,
           provenance_note: provenanceNote.trim() || null,
           can_remain_unmapped: true,
@@ -351,8 +520,11 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
         },
         sortOrder: editingItem?.sort_order || 40 + (childrenByParent[parent.id]?.length || 0),
       });
-      resetItemForm();
       await load({ quiet: true });
+      if (result?.item) {
+        setEditingItem(result.item);
+        setSelectedGroupId(result.item.parent_item_id || parent.id);
+      }
       setNotice(`${label} saved under ${parent.label}.`);
     } catch (err) {
       setNotice({ type: "error", message: err?.message || "The configuration item could not be saved." });
@@ -476,33 +648,54 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
                     <Text style={styles.kicker}>Level-1 Groups</Text>
                     <Text style={styles.panelTitle}>OEM configuration</Text>
                   </View>
-                  <Text style={styles.countText}>{groups.length}</Text>
+                  <Text style={styles.countText}>{typeFilter === "all" ? groups.length : visibleGroups.length}</Text>
+                </View>
+                <View style={styles.filterRow}>
+                  {TYPE_FILTERS.map((filter) => (
+                    <BadgeButton
+                      key={filter.key}
+                      label={`${filter.label} ${filterCounts[filter.key] || 0}`}
+                      active={typeFilter === filter.key}
+                      onPress={() => setTypeFilter(filter.key)}
+                    />
+                  ))}
                 </View>
                 <View style={styles.list}>
-                  {groups.length ? groups.map((group) => (
-                    <View key={group.id}>
+                  {visibleGroups.length ? visibleGroups.map(({ group, children }) => (
+                    <View key={group.id} style={styles.groupBlock}>
                       <TemplateItemRow
                         item={group}
-                        childrenCount={childrenByParent[group.id]?.length || 0}
+                        childrenCount={typeFilter === "all" ? children.length : children.length}
                         selected={selectedGroup?.id === group.id && !editingItem}
+                        expanded={!collapsedGroupSet.has(group.id)}
                         onPress={() => {
                           editGroup(group);
                           resetItemForm();
                         }}
+                        onToggleExpand={() => toggleGroupCollapsed(group.id)}
                         onRetire={() => retireItem(group)}
                       />
-                      {(childrenByParent[group.id] || []).map((child) => (
-                        <TemplateItemRow
-                          key={child.id}
-                          item={child}
-                          selected={editingItem?.id === child.id}
-                          onPress={() => editItem(child)}
-                          onRetire={() => retireItem(child)}
-                        />
-                      ))}
+                      {!collapsedGroupSet.has(group.id) ? (
+                        <View style={styles.childList}>
+                          {children.map((child) => (
+                            <TemplateItemRow
+                              key={child.id}
+                              item={child}
+                              indented
+                              selected={editingItem?.id === child.id}
+                              onPress={() => editItem(child)}
+                              onRetire={() => retireItem(child)}
+                            />
+                          ))}
+                        </View>
+                      ) : null}
                     </View>
                   )) : (
-                    <Text style={styles.panelText}>No configuration groups yet. Add the first group, save, and reopen this model to prove persistence.</Text>
+                    <Text style={styles.panelText}>
+                      {groups.length
+                        ? "No items match this filter yet."
+                        : "No configuration groups yet. Add the first group, save, and reopen this model to prove persistence."}
+                    </Text>
                   )}
                 </View>
               </View>
@@ -536,13 +729,26 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
                     <Text style={styles.panelTitle}>{selectedGroup?.label || "Select a group first"}</Text>
                   </View>
                   {editingItem ? (
-                    <TouchableOpacity activeOpacity={0.86} onPress={resetItemForm} style={styles.secondaryButton}>
-                      <Text style={styles.secondaryButtonText}>New Item</Text>
-                    </TouchableOpacity>
+                    <View style={styles.headerActions}>
+                      <TouchableOpacity activeOpacity={0.86} onPress={resetItemForm} style={styles.secondaryButton}>
+                        <Text style={styles.secondaryButtonText}>New Item</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity disabled={saving} activeOpacity={0.86} style={styles.headerSaveButton} onPress={saveItem}>
+                        <Ionicons name="save-outline" size={14} color={colors.onPrimary} />
+                        <Text style={styles.headerSaveButtonText}>Save</Text>
+                      </TouchableOpacity>
+                    </View>
                   ) : null}
                 </View>
-                <Field label="OEM item label" value={itemLabel} onChangeText={setItemLabel} placeholder="Mercury Verado V12 600" />
-                <Field label="OEM/source code" value={itemCode} onChangeText={setItemCode} placeholder="Factory or source code" />
+                <Field label="OEM item label" value={itemLabel} onChangeText={setItemLabel} placeholder="" />
+                <Field label="OEM/source code" value={itemCode} onChangeText={setItemCode} placeholder="" />
+                <Field
+                  label="OEM description / included text"
+                  value={itemDescription}
+                  onChangeText={setItemDescription}
+                  multiline
+                  placeholder=""
+                />
                 <Text style={styles.fieldLabel}>Item kind</Text>
                 <View style={styles.buttonWrap}>
                   {ITEM_KINDS.map((kind) => (
@@ -561,9 +767,52 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
                     <BadgeButton key={state} label={state.replace(/_/g, " ")} active={mappingStatus === state} onPress={() => setMappingStatus(state)} />
                   ))}
                 </View>
-                <Field label="Quantity" value={quantity} onChangeText={setQuantity} placeholder="1" />
-                <Field label="Value JSON" value={valueText} onChangeText={setValueText} multiline placeholder='{"manufacturer":"Mercury"}' />
-                <Field label="Provenance note" value={provenanceNote} onChangeText={setProvenanceNote} multiline placeholder="Where did this come from, and what should a human know?" />
+                <Field label="Quantity" value={quantity} onChangeText={setQuantity} placeholder="" />
+                <Field label="Value JSON" value={valueText} onChangeText={setValueText} multiline placeholder="" />
+                <Field label="Provenance note" value={provenanceNote} onChangeText={setProvenanceNote} multiline placeholder="" />
+
+                <View style={styles.elementsPanel}>
+                  <View>
+                    <Text style={styles.kicker}>Downstream elements</Text>
+                    <Text style={styles.panelText}>
+                      Optional hints for what this OEM item creates when selected for an exact boat. These stay editable template data.
+                    </Text>
+                  </View>
+                  <Text style={styles.fieldLabel}>Selection mode</Text>
+                  <View style={styles.buttonWrap}>
+                    {SELECTION_MODES.map((mode) => (
+                      <BadgeButton key={mode} label={mode} active={selectionMode === mode} onPress={() => setSelectionMode(mode)} />
+                    ))}
+                  </View>
+                  <Field
+                    label="Systems/components created"
+                    value={systemsText}
+                    onChangeText={setSystemsText}
+                    multiline
+                    placeholder=""
+                  />
+                  <Field
+                    label="Resources/manuals needed"
+                    value={resourcesText}
+                    onChangeText={setResourcesText}
+                    multiline
+                    placeholder=""
+                  />
+                  <Field
+                    label="Playbooks/actions"
+                    value={playbooksText}
+                    onChangeText={setPlaybooksText}
+                    multiline
+                    placeholder=""
+                  />
+                  <Field
+                    label="Verification fields"
+                    value={requirementsText}
+                    onChangeText={setRequirementsText}
+                    multiline
+                    placeholder=""
+                  />
+                </View>
 
                 <Text style={styles.fieldLabel}>Source/resource reference</Text>
                 <View style={styles.buttonWrap}>
@@ -719,8 +968,37 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
+  elementsPanel: {
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    gap: spacing.md,
+    padding: spacing.md,
+  },
   list: {
     gap: spacing.sm,
+  },
+  filterRow: {
+    borderBottomColor: colors.border,
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    paddingBottom: spacing.md,
+  },
+  groupBlock: {
+    gap: spacing.xs,
+  },
+  childList: {
+    borderLeftColor: "#BFDBFE",
+    borderLeftWidth: 2,
+    gap: spacing.xs,
+    marginLeft: 18,
+    paddingLeft: spacing.sm,
+  },
+  indentedRowWrap: {
+    marginTop: spacing.xs,
   },
   itemRow: {
     alignItems: "center",
@@ -733,9 +1011,20 @@ const styles = StyleSheet.create({
     minHeight: 64,
     padding: spacing.md,
   },
+  itemRowIndented: {
+    backgroundColor: colors.surface,
+    minHeight: 58,
+  },
   itemRowSelected: {
     backgroundColor: "#EFF6FF",
     borderColor: colors.brandBlue,
+  },
+  expandButton: {
+    alignItems: "center",
+    borderRadius: radius.sm,
+    height: 30,
+    justifyContent: "center",
+    width: 24,
   },
   itemIcon: {
     alignItems: "center",
@@ -763,6 +1052,68 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 12,
     marginTop: 3,
+  },
+  metaBadgeRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    marginTop: 5,
+  },
+  typeBadge: {
+    backgroundColor: "#EEF2FF",
+    borderColor: "#C7D2FE",
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  typeBadgeGroup: {
+    backgroundColor: "#EAF2FF",
+    borderColor: "#BFDBFE",
+  },
+  typeBadgeText: {
+    color: "#3730A3",
+    fontSize: 10,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  typeBadgeTextGroup: {
+    color: colors.brandBlue,
+  },
+  stateBadge: {
+    backgroundColor: "#F8FAFC",
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  stateBadgeText: {
+    color: colors.textSecondary,
+    fontSize: 10,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  mappingBadge: {
+    backgroundColor: "#FEF3C7",
+    borderColor: "#FDE68A",
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  mappingBadgeMapped: {
+    backgroundColor: "#DCFCE7",
+    borderColor: "#BBF7D0",
+  },
+  mappingBadgeText: {
+    color: "#92400E",
+    fontSize: 10,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  mappingBadgeTextMapped: {
+    color: "#166534",
   },
   iconButton: {
     alignItems: "center",
@@ -849,6 +1200,27 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: {
     color: colors.brandNavy,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  headerActions: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    justifyContent: "flex-end",
+  },
+  headerSaveButton: {
+    alignItems: "center",
+    backgroundColor: colors.brandNavy,
+    borderRadius: radius.sm,
+    flexDirection: "row",
+    gap: spacing.xs,
+    minHeight: 34,
+    paddingHorizontal: spacing.md,
+  },
+  headerSaveButtonText: {
+    color: colors.onPrimary,
     fontSize: 12,
     fontWeight: "900",
   },

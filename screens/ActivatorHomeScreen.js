@@ -23,6 +23,7 @@ import {
   getActivatorBoatBrowser,
   getActivatorSeedOrgs,
   getCatalogTemplates,
+  getExactBuildWorkQueue,
 } from "../lib/activatorApi";
 import {
   connectKeeprSpaceBoat,
@@ -1811,7 +1812,27 @@ function CatalogPanel({ templates, loading, onOpen, onOpenDraft, onOpenSourceRev
   );
 }
 
-function ProductionBuildsPanel({ templates, loading, onBuild, onOpenDraft, workspaceKindValue, onOpenAsset, onAddBoat }) {
+function exactDraftQueueRow(draft) {
+  const identifierParts = compact([
+    draft?.draft_key ? `Draft ${draft.draft_key}` : null,
+    draft?.identifier || null,
+    draft?.selected_count !== undefined && draft?.selected_count !== null ? `${draft.selected_count} selected` : null,
+  ]);
+
+  return {
+    key: `exact-draft-${draft.id || draft.draft_key}`,
+    model: draft.model || draft.display_name || "Exact build draft",
+    identifier: identifierParts || "Saved exact-build draft",
+    state: draft.status === "factory_frozen" ? "Factory Frozen" : draft.status === "in_review" ? "In Review" : "Draft",
+    action: draft.status === "factory_frozen" ? "Open" : "Continue Draft",
+    templateKey: draft.template_key,
+    draftId: draft.id,
+    draftKey: draft.draft_key,
+    source: "exact_build_draft",
+  };
+}
+
+function ProductionBuildsPanel({ templates, loading, drafts = [], onBuild, onOpenDraft, workspaceKindValue, onOpenAsset, onAddBoat }) {
   const isDealerLike = workspaceKindValue === "dealer" || workspaceKindValue === "pro";
   if (isDealerLike) {
     const primaryBrands = WILSON_REPRESENTED_BRANDS.slice(0, 8);
@@ -1917,6 +1938,12 @@ function ProductionBuildsPanel({ templates, loading, onBuild, onOpenDraft, works
   const configuredCount = TIARA_MODEL_CATALOG.reduce((count, series) => {
     return count + series.models.filter((model) => templateForCatalogModel(templates, model)).length;
   }, 0);
+  const draftRows = (Array.isArray(drafts) ? drafts : []).map(exactDraftQueueRow);
+  const demoRows = DEMO_BUILDS_IN_PROGRESS.filter((build) => {
+    if (!draftRows.length) return true;
+    return !draftRows.some((draft) => draft.templateKey === build.templateKey && draft.draftKey === build.buildKey);
+  });
+  const buildRows = [...draftRows, ...demoRows];
 
   return (
     <View style={styles.productionPanel}>
@@ -1926,7 +1953,7 @@ function ProductionBuildsPanel({ templates, loading, onBuild, onOpenDraft, works
           <Text style={styles.sectionTitle}>Start and continue exact builds</Text>
         </View>
         <View style={styles.networkCount}>
-          <Text style={styles.networkCountValue}>{DEMO_BUILDS_IN_PROGRESS.length}</Text>
+          <Text style={styles.networkCountValue}>{buildRows.length}</Text>
           <Text style={styles.networkCountLabel}>in progress</Text>
         </View>
       </View>
@@ -2013,7 +2040,7 @@ function ProductionBuildsPanel({ templates, loading, onBuild, onOpenDraft, works
             <Text style={styles.sectionKicker}>Current Builds</Text>
             <Text style={styles.sectionTitle}>Builds in progress</Text>
           </View>
-          <Text style={styles.currentBuildsCount}>{DEMO_BUILDS_IN_PROGRESS.length}</Text>
+          <Text style={styles.currentBuildsCount}>{buildRows.length}</Text>
         </View>
         {loading ? (
           <View style={styles.centeredSmall}>
@@ -2021,7 +2048,7 @@ function ProductionBuildsPanel({ templates, loading, onBuild, onOpenDraft, works
           </View>
         ) : (
           <View style={styles.buildQueue}>
-            {DEMO_BUILDS_IN_PROGRESS.map((build) => {
+            {buildRows.map((build) => {
               const template = templates.find((item) => item.template_key === build.templateKey) || { template_key: build.templateKey };
               const tone = statusTone(build.state);
               return (
@@ -2045,6 +2072,8 @@ function ProductionBuildsPanel({ templates, loading, onBuild, onOpenDraft, works
                       template_key: template.template_key,
                       buildKey: build.buildKey || null,
                       hullNumber: build.hullNumber || null,
+                      draftId: build.draftId || null,
+                      draftKey: build.draftKey || null,
                     })}
                     activeOpacity={0.86}
                   >
@@ -3244,6 +3273,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   const [data, setData] = useState(null);
   const [assetHeroUrls, setAssetHeroUrls] = useState({});
   const [catalogTemplates, setCatalogTemplates] = useState([]);
+  const [exactBuildDrafts, setExactBuildDrafts] = useState([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [orgConfig, setOrgConfig] = useState(null);
   const [orgConfigLoading, setOrgConfigLoading] = useState(false);
@@ -3516,6 +3546,18 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
         console.warn("Activator catalog templates unavailable:", catalogErr?.message || catalogErr);
         setCatalogTemplates([]);
       }
+
+      if (kind === "oem" && orgId) {
+        try {
+          const nextDrafts = await getExactBuildWorkQueue(orgId);
+          setExactBuildDrafts(nextDrafts);
+        } catch (draftErr) {
+          console.warn("Exact build draft queue unavailable:", draftErr?.message || draftErr);
+          setExactBuildDrafts([]);
+        }
+      } else {
+        setExactBuildDrafts([]);
+      }
     } catch (err) {
       console.error("Activator browser load failed:", err);
       setError(err?.message || "Could not load this workspace.");
@@ -3685,6 +3727,8 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
     if (openActivatorWebPath(`/activator/build/${encodeURIComponent(template.template_key)}`, {
       buildKey: template.buildKey || null,
       hullNumber: template.hullNumber || null,
+      draftId: template.draftId || null,
+      draftKey: template.draftKey || null,
       parentRoute: fixedMode ? "KeeprSpaceFleet" : "ActivatorHome",
       organizationId: workspaceOrganizationId(currentWorkspace),
       workspaceId: currentWorkspace?.workspace_id || null,
@@ -3694,6 +3738,8 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
       templateKey: template.template_key,
       buildKey: template.buildKey || null,
       hullNumber: template.hullNumber || null,
+      draftId: template.draftId || null,
+      draftKey: template.draftKey || null,
       parentRoute: fixedMode ? "KeeprSpaceFleet" : "ActivatorHome",
       organizationId: workspaceOrganizationId(currentWorkspace),
       workspaceId: currentWorkspace?.workspace_id || null,
@@ -4231,6 +4277,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
               <ProductionBuildsPanel
                 templates={catalogTemplates}
                 loading={catalogLoading}
+                drafts={exactBuildDrafts}
                 onBuild={openExactBuild}
                 onOpenDraft={openTemplateDraft}
                 workspaceKindValue={currentKind}
