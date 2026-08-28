@@ -21,10 +21,10 @@ import ActivatorBreadcrumb from "../components/ActivatorBreadcrumb";
 import { useWorkspace } from "../context/WorkspaceContext";
 import {
   getActivatorBoatBrowser,
-  getActivatorSeedOrgs,
   getCatalogTemplates,
   getExactBuildWorkQueue,
 } from "../lib/activatorApi";
+import { createOrgModelTemplate } from "../lib/keeprAdminApi";
 import {
   connectKeeprSpaceBoat,
   createKeeprSpaceBoat,
@@ -49,16 +49,10 @@ import {
   TIARA_KF018_BUILD_KEY,
   tiaraKf018FactoryBuild,
 } from "../data/tiaraKf018FactoryBuild";
-import {
-  TIARA_43_LS_DRAFT_KEY,
-  TIARA_43_LS_TEMPLATE_KEY,
-} from "../data/tiara43LsTemplateDraft";
 import { layoutStyles } from "../styles/layout";
 import { colors, radius, shadows, spacing } from "../styles/theme";
 
 const BOAT_HERO = require("../assets/boats/tiara/tiara_39ls_hero.jpg");
-const TIARA_OEM_BANNER = require("../assets/boats/tiara/tiara_oem_banner.png");
-const TIARA_OEM_LOGO = require("../assets/boats/tiara/tiara_oem_logo.png");
 
 const SHOWCASE_ASSETS = {
   tiara_39le_hero: require("../assets/boats/tiara/tiara_39le_hero.jpg"),
@@ -172,59 +166,6 @@ const OEM_WORK_AREAS = [
     icon: "settings-outline",
     description: "Organization profile and operating setup.",
     hidden: true,
-  },
-];
-
-const TIARA_MODEL_CATALOG = [
-  { series: "EX Series", models: ["EX54", "EX60"] },
-  { series: "LE Series", models: ["39 LE", "43 LE", "48 LE"] },
-  { series: "LS Series", models: ["35 LS", "39 LS", "43 LS", "46 LS", "56 LS"] },
-  { series: "LX Series", models: ["34 LX"] },
-];
-
-const DEMO_PRODUCTION_STATUS = [
-  { label: "In Build", value: "14" },
-  { label: "Factory Frozen", value: "6" },
-  { label: "Awaiting Dealer", value: "3" },
-  { label: "Delivery Prep", value: "5" },
-];
-
-const DEMO_BUILDS_IN_PROGRESS = [
-  {
-    key: "kf018",
-    model: "MY2027 Tiara Yachts 56 LS",
-    identifier: "KF018 · HIN SSUKF018H627 · Work order 68398",
-    state: "OEM Build",
-    action: "Open Factory Build",
-    templateKey: "tiara-2027-56-ls",
-    buildKey: "kf018",
-    hullNumber: "SSUKF018H627",
-    assetId: "a5b0d793-0aa2-4c3b-842e-5d2375aba8ed",
-    kac: "KAC-TIARA-56LS-KF018",
-  },
-  {
-    key: "ls-2027-014",
-    model: "MY2027 Tiara Yachts 39 LS",
-    identifier: "HIN SSUXA039L627",
-    state: "OEM Build",
-    action: "Continue Build",
-    templateKey: "tiara-2027-39-ls",
-  },
-  {
-    key: "le-2027-009",
-    model: "MY2027 Tiara Yachts 39 LE",
-    identifier: "HIN SSUXA039L727",
-    state: "Factory Frozen",
-    action: "Open",
-    templateKey: "tiara-2027-39-le",
-  },
-  {
-    key: "ls-2027-015",
-    model: "Tiara Yachts 39 LS",
-    identifier: "Build #LS-2027-015 · Awaiting HIN",
-    state: "Awaiting HIN",
-    action: "Continue Build",
-    templateKey: "tiara-2027-39-ls",
   },
 ];
 
@@ -514,7 +455,7 @@ function mediaAsset(media) {
     null;
   if (uri && !String(uri).startsWith("app://")) return { uri };
 
-  return TIARA_OEM_BANNER;
+  return null;
 }
 
 function heroMediaFromTemplate(template) {
@@ -588,9 +529,8 @@ function heroSourceForBoat(boat, heroUri = null) {
 
   if (model.includes("tiara39le")) return SHOWCASE_ASSETS.tiara_39le_hero;
   if (model.includes("tiara39ls")) return SHOWCASE_ASSETS.tiara_39ls_hero;
-  if (model.includes("tiara56ls")) return TIARA_OEM_BANNER;
 
-  return BOAT_HERO;
+  return null;
 }
 
 function normalizeModelName(value) {
@@ -630,20 +570,14 @@ function workspaceMatchesOrganization(workspace, organizationId) {
   );
 }
 
-function templateForCatalogModel(templates, modelName) {
-  const normalized = normalizeModelName(modelName);
-  return templates.find((template) => normalizeModelName(template.model) === normalized);
-}
-
-function draftForCatalogModel(modelName) {
-  if (normalizeModelName(modelName) !== normalizeModelName("43 LS")) return null;
-  return {
-    draft_key: TIARA_43_LS_DRAFT_KEY,
-    template_key: TIARA_43_LS_TEMPLATE_KEY,
-    manufacturer: "Tiara Yachts",
-    model: "43 LS",
-    model_year: 2027,
-  };
+function workspaceHasCapability(workspace, capability) {
+  const capabilities =
+    workspace?.capabilities ||
+    workspace?.workspace_capabilities ||
+    workspace?.organization?.workspace_capabilities ||
+    workspace?.metadata?.capabilities ||
+    [];
+  return listFromValue(capabilities).includes(capability);
 }
 
 function fallbackTemplateStats(template = {}) {
@@ -788,7 +722,7 @@ function copyForWorkspace(workspace, projection = null) {
   };
 }
 
-function normalizeFilters({ workspace, search, orgs }) {
+function normalizeFilters({ workspace, search }) {
   const kind = workspaceKind(workspace);
   const filters = { limit: 50 };
   const trimmed = search.trim();
@@ -797,9 +731,6 @@ function normalizeFilters({ workspace, search, orgs }) {
   const orgId = workspace?.organization_id || workspace?.org_id;
   if (kind === "oem" && orgId) filters.oem_org_id = orgId;
   if (kind === "dealer" && orgId) filters.dealer_org_id = orgId;
-
-  if (kind === "oem" && !orgId && orgs?.tiaraYachts?.id) filters.oem_org_id = orgs.tiaraYachts.id;
-  if (kind === "dealer" && !orgId && orgs?.skipperBuds?.id) filters.dealer_org_id = orgs.skipperBuds.id;
   return filters;
 }
 
@@ -987,13 +918,13 @@ export function defaultBrandProfile(workspace) {
   }
 
   return {
-    displayName: workspaceName || "Tiara Yachts",
-    location: "Holland, Michigan",
-    profileStatus: "Published",
-    shortDescription: "Luxury yachts crafted by hand, driven by innovation, and built for life on the water.",
+    displayName: workspaceName || "OEM Organization",
+    location: "",
+    profileStatus: "Draft",
+    shortDescription: "OEM catalog, activation, dealer network, and ownership continuity workspace.",
     publicDescription:
-      "Tiara Yachts builds premium model templates, exact hull activations, dealer-network continuity, and ownership-ready digital passports in Keepr.",
-    website: "tiarayachts.com",
+      "This organization builds reusable model templates, exact-build activations, dealer-network continuity, and ownership-ready digital records in Keepr.",
+    website: "",
     phone: "",
     email: "",
     serviceOfferings: "Catalog, Activation, Dealer network",
@@ -1236,7 +1167,11 @@ function statusItemsForRail({ copy, projectionMode }) {
   }
   return {
     title: "Production / Activation Status",
-    items: DEMO_PRODUCTION_STATUS,
+    items: [
+      { label: "Catalog Models", value: "0" },
+      { label: "Exact Builds", value: "0" },
+      { label: "Dealer Links", value: "0" },
+    ],
   };
 }
 
@@ -1686,12 +1621,14 @@ function CatalogCard({ template, templateMedia, onPress, draft, sourceReview, on
   const stats = template?.metadata?.hero_specs || {};
   const fallbackStats = fallbackTemplateStats(template);
   const heroMedia = templateMedia?.hero || heroMediaFromTemplate(template);
+  const imageSource = mediaAsset(heroMedia);
   const imageLabel = heroMedia ? "Model media" : "Needs model hero";
   const lifecycle = modelLifecycleStatus(template);
   const definitionStatus = modelDefinitionStatus(template);
   return (
     <TouchableOpacity style={styles.catalogCard} onPress={onPress} activeOpacity={0.9}>
-      <ImageBackground source={mediaAsset(heroMedia)} resizeMode="cover" style={styles.catalogImage} imageStyle={styles.catalogImageAsset}>
+      {imageSource ? (
+      <ImageBackground source={imageSource} resizeMode="cover" style={styles.catalogImage} imageStyle={styles.catalogImageAsset}>
         <View style={styles.catalogShade}>
           <View style={styles.catalogBadge}>
             <Ionicons name="library-outline" size={13} color={colors.onPrimary} />
@@ -1699,6 +1636,14 @@ function CatalogCard({ template, templateMedia, onPress, draft, sourceReview, on
           </View>
         </View>
       </ImageBackground>
+      ) : (
+        <View style={[styles.catalogImage, styles.catalogImageEmpty]}>
+          <View style={styles.catalogBadge}>
+            <Ionicons name="image-outline" size={13} color={colors.onPrimary} />
+            <Text style={styles.catalogBadgeText}>{imageLabel}</Text>
+          </View>
+        </View>
+      )}
       <View style={styles.catalogBody}>
         <Text style={styles.catalogKicker}>{template.organization_name || template.manufacturer}</Text>
         <Text style={styles.catalogTitle} numberOfLines={1}>
@@ -1759,7 +1704,19 @@ function CatalogCard({ template, templateMedia, onPress, draft, sourceReview, on
   );
 }
 
-function CatalogPanel({ templates, templateMediaById = {}, loading, onOpen, onOpenDraft, onOpenSourceReview, adminView = false, query = "" }) {
+function CatalogPanel({
+  templates,
+  templateMediaById = {},
+  loading,
+  onOpen,
+  onOpenSourceReview,
+  query = "",
+  canAuthor = false,
+  modelDraft,
+  onModelDraftChange,
+  onCreateModel,
+  creatingModel = false,
+}) {
   const normalizedQuery = String(query || "").trim().toLowerCase();
   const matchesModelQuery = (template) => {
     if (!normalizedQuery) return true;
@@ -1783,28 +1740,7 @@ function CatalogPanel({ templates, templateMediaById = {}, loading, onOpen, onOp
       .toLowerCase();
     return searchableText.includes(normalizedQuery);
   };
-  const matchesDraftQuery = (draft) => {
-    if (!normalizedQuery) return true;
-    return [
-      draft?.template_key,
-      draft?.manufacturer,
-      draft?.model,
-      draft?.model_year,
-      "draft",
-      "review",
-    ]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase()
-      .includes(normalizedQuery);
-  };
   const visibleTemplates = templates.filter(matchesModelQuery);
-  const draftModels = [draftForCatalogModel("43 LS")].filter(Boolean);
-  const visibleDraftModels = draftModels.filter(matchesDraftQuery);
-  const sourceReviewTemplates = visibleTemplates.filter((template) => template.template_key === TIARA_43_LS_TEMPLATE_KEY);
-  const draftByTemplateKey = new Map(draftModels.map((draft) => [draft.template_key, draft]));
-  const sourceReviewKeys = new Set(sourceReviewTemplates.map((template) => template.template_key));
-  const draftOnlyModels = visibleDraftModels.filter((draft) => !visibleTemplates.some((template) => template.template_key === draft.template_key));
   const lifecycleCounts = visibleTemplates.reduce((counts, template) => {
     const lifecycle = modelLifecycleStatus(template);
     counts[lifecycle] = (counts[lifecycle] || 0) + 1;
@@ -1812,8 +1748,8 @@ function CatalogPanel({ templates, templateMediaById = {}, loading, onOpen, onOp
   }, {});
   const reviewCount = visibleTemplates.filter((template) => {
     const status = modelDefinitionStatus(template);
-    return status === "draft" || status === "review" || sourceReviewKeys.has(template.template_key);
-  }).length + draftOnlyModels.length;
+    return status === "draft" || status === "review";
+  }).length;
   const publishedCount = visibleTemplates.filter((template) => modelDefinitionStatus(template) === "published").length;
 
   return (
@@ -1831,6 +1767,47 @@ function CatalogPanel({ templates, templateMediaById = {}, loading, onOpen, onOp
       <Text style={styles.networkText}>
         Current, previous, and retired model years live here as reusable OEM model pages. Open a model to review it, edit its Keepr definition, or build an exact boat from it.
       </Text>
+      {canAuthor ? (
+        <View style={styles.createModelPanel}>
+          <View>
+            <Text style={styles.newBuildKicker}>Create Model</Text>
+            <Text style={styles.newBuildTitle}>Add a reusable model template</Text>
+          </View>
+          <View style={styles.createModelGrid}>
+            <TextInput
+              value={modelDraft?.manufacturer || ""}
+              onChangeText={(value) => onModelDraftChange?.({ ...modelDraft, manufacturer: value })}
+              placeholder="Manufacturer"
+              placeholderTextColor={colors.textMuted}
+              style={styles.createModelInput}
+            />
+            <TextInput
+              value={modelDraft?.model || ""}
+              onChangeText={(value) => onModelDraftChange?.({ ...modelDraft, model: value })}
+              placeholder="Model"
+              placeholderTextColor={colors.textMuted}
+              style={styles.createModelInput}
+            />
+            <TextInput
+              value={modelDraft?.modelYear || ""}
+              onChangeText={(value) => onModelDraftChange?.({ ...modelDraft, modelYear: value.replace(/[^0-9]/g, "").slice(0, 4) })}
+              placeholder="Model year"
+              placeholderTextColor={colors.textMuted}
+              keyboardType="number-pad"
+              style={styles.createModelInput}
+            />
+            <TouchableOpacity
+              style={[styles.createModelButton, creatingModel && styles.profileSaveButtonDisabled]}
+              onPress={onCreateModel}
+              disabled={creatingModel}
+              activeOpacity={0.86}
+            >
+              {creatingModel ? <ActivityIndicator size="small" color={colors.onPrimary} /> : <Ionicons name="add-circle-outline" size={16} color={colors.onPrimary} />}
+              <Text style={styles.createModelButtonText}>{creatingModel ? "Creating" : "Create"}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
       <View style={styles.catalogFilterGroups}>
         <View style={styles.catalogFilterGroup}>
           <Text style={styles.catalogFilterLabel}>Lifecycle</Text>
@@ -1867,7 +1844,7 @@ function CatalogPanel({ templates, templateMediaById = {}, loading, onOpen, onOp
         <View style={styles.centeredSmall}>
           <ActivityIndicator color={colors.brandBlue} />
         </View>
-      ) : visibleTemplates.length || visibleDraftModels.length ? (
+      ) : visibleTemplates.length ? (
         <>
           {visibleTemplates.length ? (
             <View style={styles.catalogGrid}>
@@ -1877,40 +1854,16 @@ function CatalogPanel({ templates, templateMediaById = {}, loading, onOpen, onOp
                   template={template}
                   templateMedia={templateMediaById[template.id]}
                   onPress={() => onOpen(template)}
-                  draft={draftByTemplateKey.get(template.template_key)}
-                  sourceReview={sourceReviewKeys.has(template.template_key)}
-                  onOpenDraft={onOpenDraft}
+                  sourceReview={modelDefinitionStatus(template) === "draft"}
                   onOpenSourceReview={onOpenSourceReview}
                 />
-              ))}
-              {draftOnlyModels.map((draft) => (
-                <TouchableOpacity
-                  key={draft.draft_key}
-                  activeOpacity={0.86}
-                  style={[styles.catalogCard, styles.catalogDraftCard]}
-                  onPress={() => onOpenDraft?.(draft)}
-                >
-                  <View style={styles.catalogDraftIcon}>
-                    <Ionicons name="document-text-outline" size={22} color={colors.brandBlue} />
-                  </View>
-                  <View style={styles.catalogBody}>
-                    <Text style={styles.catalogKicker}>Draft model</Text>
-                    <Text style={styles.catalogTitle}>MY{draft.model_year} {draft.manufacturer} {draft.model}</Text>
-                    <Text style={styles.catalogText}>Source facts are waiting for review before this model joins the lineage.</Text>
-                    <View style={styles.catalogStatusRow}>
-                      <View style={[styles.catalogStatusPill, styles.catalogStatus_review]}>
-                        <Text style={styles.catalogStatusText}>review</Text>
-                      </View>
-                    </View>
-                  </View>
-                </TouchableOpacity>
               ))}
             </View>
           ) : null}
         </>
       ) : (
         <Text style={styles.mutedTextLeft}>
-          {normalizedQuery ? "No models match that search." : "No published model guides are visible for this workspace yet."}
+          {normalizedQuery ? "No models match that search." : "No models are in this organization's catalog yet."}
         </Text>
       )}
     </View>
@@ -2040,15 +1993,8 @@ function ProductionBuildsPanel({ templates, loading, drafts = [], onBuild, onOpe
     );
   }
 
-  const configuredCount = TIARA_MODEL_CATALOG.reduce((count, series) => {
-    return count + series.models.filter((model) => templateForCatalogModel(templates, model)).length;
-  }, 0);
   const draftRows = (Array.isArray(drafts) ? drafts : []).map(exactDraftQueueRow);
-  const demoRows = DEMO_BUILDS_IN_PROGRESS.filter((build) => {
-    if (!draftRows.length) return true;
-    return !draftRows.some((draft) => draft.templateKey === build.templateKey && draft.draftKey === build.buildKey);
-  });
-  const buildRows = [...draftRows, ...demoRows];
+  const buildRows = draftRows;
 
   return (
     <View style={styles.productionPanel}>
@@ -2067,9 +2013,9 @@ function ProductionBuildsPanel({ templates, loading, drafts = [], onBuild, onOpe
       </Text>
       <View style={styles.layerMap}>
         {[
-          ["Model Catalog", "Tiara 56 LS template"],
-          ["Factory Build", "KF018 work order"],
-          ["Digital Twin", "Operational asset"],
+          ["Model Catalog", `${templates.length} templates`],
+          ["Exact Builds", `${buildRows.length} drafts`],
+          ["Digital Twin", "Operational assets"],
         ].map(([label, value]) => (
           <View key={label} style={styles.layerMapItem}>
             <Text style={styles.layerMapLabel}>{label}</Text>
@@ -2081,55 +2027,34 @@ function ProductionBuildsPanel({ templates, loading, drafts = [], onBuild, onOpe
         <View style={styles.newBuildHeader}>
           <View>
             <Text style={styles.newBuildKicker}>Start New Build</Text>
-            <Text style={styles.newBuildTitle}>Configure hull from Tiara catalog</Text>
+            <Text style={styles.newBuildTitle}>Configure from this catalog</Text>
           </View>
           <View style={styles.newBuildCount}>
-            <Text style={styles.newBuildCountValue}>{configuredCount}</Text>
-            <Text style={styles.newBuildCountLabel}>configured</Text>
+            <Text style={styles.newBuildCountValue}>{templates.length}</Text>
+            <Text style={styles.newBuildCountLabel}>models</Text>
           </View>
         </View>
-        <View style={styles.seriesGrid}>
-          {TIARA_MODEL_CATALOG.map((series) => (
-            <View key={series.series} style={styles.seriesColumn}>
-              <Text style={styles.seriesTitle}>{series.series}</Text>
-              <View style={styles.modelList}>
-                {series.models.map((model) => {
-                  const template = templateForCatalogModel(templates, model);
-                  const draft = template ? null : draftForCatalogModel(model);
-                  const enabled = Boolean(template || draft);
-                  return (
-                    <TouchableOpacity
-                      key={model}
-                      activeOpacity={enabled ? 0.86 : 1}
-                      disabled={!enabled}
-                      onPress={() => template ? onBuild(template) : onOpenDraft?.(draft)}
-                      style={[
-                        styles.modelOption,
-                        template && styles.modelOptionReady,
-                        draft && styles.modelOptionDraft,
-                      ]}
-                    >
-                      <Text style={[
-                        styles.modelOptionText,
-                        template && styles.modelOptionTextReady,
-                        draft && styles.modelOptionTextDraft,
-                      ]}>
-                        {model}
-                      </Text>
-                      <Text style={[
-                        styles.modelOptionState,
-                        template && styles.modelOptionStateReady,
-                        draft && styles.modelOptionStateDraft,
-                      ]}>
-                        {template ? "Start" : draft ? "Draft" : "Not configured"}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </View>
-          ))}
-        </View>
+        {templates.length ? (
+          <View style={styles.modelList}>
+            {templates.map((template) => (
+              <TouchableOpacity
+                key={template.id || template.template_key}
+                activeOpacity={0.86}
+                onPress={() => onBuild(template)}
+                style={[styles.modelOption, styles.modelOptionReady]}
+              >
+                <Text style={[styles.modelOptionText, styles.modelOptionTextReady]}>
+                  MY{template.model_year} {template.manufacturer} {template.model}
+                </Text>
+                <Text style={[styles.modelOptionState, styles.modelOptionStateReady]}>
+                  Start build
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        ) : (
+          <Text style={styles.mutedTextLeft}>Create a model before starting exact builds.</Text>
+        )}
       </View>
       <View style={styles.stageStrip}>
         {["Template", "OEM Build", "Factory Frozen", "Dealer Assigned", "Dealer Prep", "Owner Ready", "Activated"].map((stage, index) => (
@@ -2153,7 +2078,7 @@ function ProductionBuildsPanel({ templates, loading, drafts = [], onBuild, onOpe
           </View>
         ) : (
           <View style={styles.buildQueue}>
-            {buildRows.map((build) => {
+            {buildRows.length ? buildRows.map((build) => {
               const template = templates.find((item) => item.template_key === build.templateKey) || { template_key: build.templateKey };
               const tone = statusTone(build.state);
               return (
@@ -2197,7 +2122,9 @@ function ProductionBuildsPanel({ templates, loading, drafts = [], onBuild, onOpe
                   ) : null}
                 </View>
               );
-            })}
+            }) : (
+              <Text style={styles.mutedTextLeft}>No exact builds are in progress for this organization yet.</Text>
+            )}
           </View>
         )}
       </View>
@@ -2218,15 +2145,12 @@ function BrandProfilePanel({
 }) {
   const isDealer = kind === "dealer";
   const isPro = kind === "pro";
-  const canUseTiaraFallback = kind === "oem" && !profile.headerImageUri;
   const canUseMarineFallback = (isDealer || isPro) && !profile.headerImageUri;
   const previewChildren = (
     <View style={styles.oemPreviewShade}>
       <View style={styles.oemPreviewLogo}>
         {profile.logoUri ? (
           <Image source={{ uri: profile.logoUri }} resizeMode="contain" style={styles.oemPreviewLogoImage} />
-        ) : kind === "oem" ? (
-          <Image source={TIARA_OEM_LOGO} resizeMode="contain" style={styles.oemPreviewLogoImage} />
         ) : (
           <Text style={styles.dealerLogoFallback}>{initialsForName(profile.displayName)}</Text>
         )}
@@ -2267,13 +2191,13 @@ function BrandProfilePanel({
           ? "This is the dealer equivalent of Pro Mode: SkipperBud's configures the sales, delivery, location, and service identity owners will see after activation."
           : isPro
           ? "This is the production KeeprPro identity inside the new KeeprSpace shell: claimed profile, public service presence, locations, offerings, and owner-facing service context."
-          : "This is the OEM equivalent of Pro Mode: Tiara configures the customer-facing brand presence that flows into dealer and owner projections."}
+          : "This is the OEM equivalent of Pro Mode: the organization configures the customer-facing brand presence that flows into dealer and owner projections."}
       </Text>
 
       <View style={styles.oemPreviewHero}>
-        {profile.headerImageUri || canUseTiaraFallback || canUseMarineFallback ? (
+        {profile.headerImageUri || canUseMarineFallback ? (
           <ImageBackground
-            source={profile.headerImageUri ? { uri: profile.headerImageUri } : canUseTiaraFallback ? TIARA_OEM_BANNER : BOAT_HERO}
+            source={profile.headerImageUri ? { uri: profile.headerImageUri } : BOAT_HERO}
             resizeMode="cover"
             style={styles.oemPreviewCover}
             imageStyle={styles.oemPreviewCoverImage}
@@ -3373,7 +3297,6 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   const [projectionMode, setProjectionMode] = useState(defaultWorkspaceProjection(currentWorkspace) || "service");
   const [search, setSearch] = useState("");
   const [fleetFilter, setFleetFilter] = useState("all");
-  const [orgs, setOrgs] = useState({});
   const [brandProfile, setBrandProfile] = useState(defaultBrandProfile(currentWorkspace));
   const [data, setData] = useState(null);
   const [assetHeroUrls, setAssetHeroUrls] = useState({});
@@ -3381,6 +3304,8 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   const [catalogTemplateMediaById, setCatalogTemplateMediaById] = useState({});
   const [exactBuildDrafts, setExactBuildDrafts] = useState([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
+  const [modelDraft, setModelDraft] = useState({ manufacturer: "", model: "", modelYear: "2027" });
+  const [creatingModel, setCreatingModel] = useState(false);
   const [orgConfig, setOrgConfig] = useState(null);
   const [orgConfigLoading, setOrgConfigLoading] = useState(false);
   const [adminTab, setAdminTab] = useState("profile");
@@ -3401,6 +3326,10 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   const [error, setError] = useState(null);
 
   const currentKind = workspaceKind(currentWorkspace);
+  const memberRole = currentWorkspace?.authority?.member_role || currentWorkspace?.authority?.role || null;
+  const canAuthorCatalog =
+    ["owner", "admin", "manager"].includes(String(memberRole || "").toLowerCase()) &&
+    (currentKind === "oem" || workspaceHasCapability(currentWorkspace, "model_catalog"));
   const projectionSwitchable = canSwitchProjection(currentWorkspace);
   const activeProjection = projectionSwitchable ? projectionMode : defaultWorkspaceProjection(currentWorkspace);
   const copy = useMemo(() => copyForWorkspace(currentWorkspace, activeProjection), [currentWorkspace, activeProjection]);
@@ -3540,6 +3469,15 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
 
   useEffect(() => {
     setBrandProfile(defaultBrandProfile(currentWorkspace));
+    setModelDraft({
+      manufacturer:
+        currentWorkspace?.display_name ||
+        currentWorkspace?.name ||
+        currentWorkspace?.organization_name ||
+        "",
+      model: "",
+      modelYear: "2027",
+    });
     setProjectionMode(defaultWorkspaceProjection(currentWorkspace) || "service");
   }, [currentWorkspace]);
 
@@ -3618,9 +3556,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
         });
         setBrandProfile(brandProfileFromKeeprSpaceContext(nextData?.context, currentWorkspace));
       } else {
-        const nextOrgs = Object.keys(orgs || {}).length ? orgs : await getActivatorSeedOrgs();
-        if (!Object.keys(orgs || {}).length) setOrgs(nextOrgs);
-        const nextFilters = normalizeFilters({ workspace: currentWorkspace, search, orgs: nextOrgs });
+        const nextFilters = normalizeFilters({ workspace: currentWorkspace, search });
         nextData = await getActivatorBoatBrowser(nextFilters);
         nextData = withKf018FleetProjection(nextData, currentWorkspace, search);
       }
@@ -3680,7 +3616,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
       setCatalogLoading(false);
       setRefreshing(false);
     }
-  }, [currentWorkspace, isPersonalKeepr, orgs, search]);
+  }, [currentWorkspace, isPersonalKeepr, search]);
 
   useEffect(() => {
     load();
@@ -3857,6 +3793,41 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
       organizationId: workspaceOrganizationId(currentWorkspace),
       workspaceId: currentWorkspace?.workspace_id || null,
     });
+  };
+
+  const createCatalogModel = async () => {
+    const organizationId = workspaceOrganizationId(currentWorkspace);
+    const modelYear = Number(modelDraft.modelYear);
+    if (!organizationId) {
+      Alert.alert("Missing organization", "Open an organization workspace before creating a model.");
+      return;
+    }
+    if (!canAuthorCatalog) {
+      Alert.alert("Not authorized", "Only org owners, admins, and managers can author reusable catalog models.");
+      return;
+    }
+    if (!modelDraft.manufacturer.trim() || !modelDraft.model.trim() || !Number.isFinite(modelYear)) {
+      Alert.alert("Model details required", "Add manufacturer, model, and model year.");
+      return;
+    }
+
+    setCreatingModel(true);
+    try {
+      const created = await createOrgModelTemplate({
+        organizationId,
+        manufacturer: modelDraft.manufacturer,
+        model: modelDraft.model,
+        modelYear,
+      });
+      await load({ quiet: true });
+      setModelDraft((current) => ({ ...current, model: "" }));
+      const template = created?.template || null;
+      if (template?.template_key) openCatalogTemplate(template);
+    } catch (err) {
+      Alert.alert("Could not create model", err?.message || "Please try again.");
+    } finally {
+      setCreatingModel(false);
+    }
   };
 
   const openCoreAddBoat = useCallback((intent = "add_boat") => {
@@ -4165,7 +4136,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   const buildsKicker = isDealerSalesMode ? "Delivery" : "Work";
   const buildsTitle = isDealerSalesMode ? "Delivery Prep" : "Work Queue";
   const buildsMetricLabel = isDealerSalesMode ? "Brand paths" : "Work items";
-  const buildsMetricValue = isDealerSalesMode ? String(WILSON_REPRESENTED_BRANDS.length) : String(catalogTemplates.length + DEMO_BUILDS_IN_PROGRESS.length);
+  const buildsMetricValue = isDealerSalesMode ? String(WILSON_REPRESENTED_BRANDS.length) : String(catalogTemplates.length + exactBuildDrafts.length);
   const breadcrumbCurrent =
     mode === "fleet" ? "Find" :
     mode === "builds" ? buildsTitle :
@@ -4178,17 +4149,11 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   const heroSource =
     brandProfile.headerImageUri
       ? { uri: brandProfile.headerImageUri }
-      : currentKind === "oem"
-      ? TIARA_OEM_BANNER
       : ["dealer", "pro"].includes(currentKind)
       ? BOAT_HERO
       : null;
   const shouldShowHeroLogo = ["oem", "dealer", "pro"].includes(currentKind);
-  const heroLogo = brandProfile.logoUri
-    ? { uri: brandProfile.logoUri }
-    : currentKind === "oem"
-    ? TIARA_OEM_LOGO
-    : null;
+  const heroLogo = brandProfile.logoUri ? { uri: brandProfile.logoUri } : null;
   const modeHeroCopy = mode === "templates"
     ? {
         eyebrow: "OEM Catalog",
@@ -4396,10 +4361,13 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
                 templateMediaById={catalogTemplateMediaById}
                 loading={catalogLoading}
                 onOpen={openCatalogTemplate}
-                onOpenDraft={openTemplateDraft}
                 onOpenSourceReview={openTemplateSourceReview}
-                adminView
                 query={search}
+                canAuthor={canAuthorCatalog}
+                modelDraft={modelDraft}
+                onModelDraftChange={setModelDraft}
+                onCreateModel={createCatalogModel}
+                creatingModel={creatingModel}
               />
             ) : mode === "builds" ? (
               <ProductionBuildsPanel
@@ -5275,6 +5243,47 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     marginTop: spacing.lg,
   },
+  createModelPanel: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    gap: spacing.md,
+    marginTop: spacing.lg,
+    padding: spacing.md,
+  },
+  createModelGrid: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  createModelInput: {
+    backgroundColor: "#fff",
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    color: colors.textPrimary,
+    flexGrow: 1,
+    flexBasis: 180,
+    fontWeight: "700",
+    minHeight: 42,
+    paddingHorizontal: spacing.md,
+  },
+  createModelButton: {
+    alignItems: "center",
+    backgroundColor: colors.primary,
+    borderRadius: radius.sm,
+    flexDirection: "row",
+    gap: spacing.xs,
+    minHeight: 42,
+    paddingHorizontal: spacing.lg,
+  },
+  createModelButtonText: {
+    color: colors.onPrimary,
+    fontSize: 13,
+    fontWeight: "900",
+  },
   catalogStageRow: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -5347,6 +5356,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#0B1220",
     height: 178,
     width: "100%",
+  },
+  catalogImageEmpty: {
+    alignItems: "flex-start",
+    backgroundColor: colors.brandNavy,
+    justifyContent: "flex-end",
+    padding: spacing.md,
   },
   catalogImageAsset: {
     borderTopLeftRadius: radius.sm,

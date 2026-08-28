@@ -941,6 +941,15 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
   const [mediaUrl, setMediaUrl] = useState("");
   const [addingMedia, setAddingMedia] = useState(false);
   const [templateAttachmentMedia, setTemplateAttachmentMedia] = useState([]);
+  const [identityModalVisible, setIdentityModalVisible] = useState(false);
+  const [identityDraft, setIdentityDraft] = useState({
+    manufacturer: "",
+    model: "",
+    modelYear: "",
+    category: "",
+    className: "",
+  });
+  const [savingIdentity, setSavingIdentity] = useState(false);
 
   const load = useCallback(async ({ quiet = false } = {}) => {
     if (!quiet) setLoading(true);
@@ -1004,6 +1013,17 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
     load({ quiet: true });
   };
 
+  useEffect(() => {
+    if (!template?.id) return;
+    setIdentityDraft({
+      manufacturer: template.manufacturer || "",
+      model: template.model || "",
+      modelYear: template.model_year ? String(template.model_year) : "",
+      category: template.category || "marine",
+      className: template.class || "",
+    });
+  }, [template?.id, template?.manufacturer, template?.model, template?.model_year, template?.category, template?.class]);
+
   const startExactBuild = () => {
     navigation.navigate("ActivatorExactBuild", {
       templateKey: template.template_key || templateKey,
@@ -1025,6 +1045,57 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
     const params = itemEditParams(item, template.template_key || templateKey, route?.params || {});
     if (!params) return;
     navigation.navigate("ActivatorTemplateItemEditor", params);
+  };
+
+  const saveTemplateIdentity = async () => {
+    const nextModelYear = Number(identityDraft.modelYear);
+    const nextManufacturer = identityDraft.manufacturer.trim();
+    const nextModel = identityDraft.model.trim();
+    if (!template?.id) {
+      Alert.alert("Template unavailable", "The model template is not loaded yet.");
+      return;
+    }
+    if (!nextManufacturer || !nextModel || !Number.isFinite(nextModelYear)) {
+      Alert.alert("Model details required", "Add manufacturer, model, and model year.");
+      return;
+    }
+
+    setSavingIdentity(true);
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+      const userId = userData?.user?.id;
+      if (!userId) throw new Error("Sign in is required to edit this model.");
+
+      const { data: canManage, error: manageError } = await supabase.rpc("activator_user_can_manage_template", {
+        p_user_id: userId,
+        p_template_id: template.id,
+      });
+      if (manageError) throw manageError;
+      if (!canManage) throw new Error("This account can view the model, but cannot edit OEM catalog truth.");
+
+      const { error: updateError } = await supabase
+        .from("asset_model_templates")
+        .update({
+          manufacturer: nextManufacturer,
+          model: nextModel,
+          model_year: nextModelYear,
+          model_year_start: nextModelYear,
+          model_year_end: nextModelYear,
+          category: identityDraft.category.trim() || "marine",
+          class: identityDraft.className.trim() || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", template.id);
+      if (updateError) throw updateError;
+
+      setIdentityModalVisible(false);
+      await load({ quiet: true });
+    } catch (err) {
+      Alert.alert("Could not edit model", err?.message || "The model identity could not be saved.");
+    } finally {
+      setSavingIdentity(false);
+    }
   };
 
   const getTemplateMediaUserId = async () => {
@@ -1324,13 +1395,13 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
               },
             },
           ]}
-          current={`${template.model || "39 LS"} Template`}
+          current={`${template.model || "Model"} Template`}
         />
         <ImageBackground source={mediaAsset(heroMedia, template)} resizeMode="cover" style={styles.hero} imageStyle={styles.heroImage}>
           <View style={styles.heroOverlay}>
             <View style={styles.heroCopy}>
               <Text style={styles.eyebrow}>{template.manufacturer || "OEM"} Catalog</Text>
-              <Text style={styles.title}>MY{template.model_year || "2027"} {template.manufacturer || "Tiara Yachts"} {template.model || "39 LE"}</Text>
+              <Text style={styles.title}>MY{template.model_year || "Year"} {template.manufacturer || "Manufacturer"} {template.model || "Model"}</Text>
               <Text style={styles.subtitle}>
                 The OEM model guide as a navigable ownership template, preserving brochure sections, standards, available options, care, and source provenance.
               </Text>
@@ -1345,6 +1416,12 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
                   <Ionicons name="create-outline" size={16} color={colors.brandNavy} />
                   <Text style={styles.customizeButtonText}>
                     Edit Model
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity activeOpacity={0.86} style={styles.customizeButton} onPress={() => setIdentityModalVisible(true)}>
+                  <Ionicons name="pencil-outline" size={16} color={colors.brandNavy} />
+                  <Text style={styles.customizeButtonText}>
+                    Edit Details
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity activeOpacity={0.86} style={styles.buildButton} onPress={startExactBuild}>
@@ -1435,7 +1512,68 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
             ) : null}
           </View>
         )}
-      </ScrollView>
+    </ScrollView>
+      <Modal visible={identityModalVisible} animationType="fade" transparent onRequestClose={() => setIdentityModalVisible(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.identityModal}>
+            <View style={styles.identityHeader}>
+              <View>
+                <Text style={styles.identityEyebrow}>Catalog Identity</Text>
+                <Text style={styles.identityTitle}>Edit Model</Text>
+              </View>
+              <TouchableOpacity style={styles.iconButton} onPress={() => setIdentityModalVisible(false)}>
+                <Ionicons name="close" size={18} color={colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.identityGrid}>
+              <TextInput
+                value={identityDraft.manufacturer}
+                onChangeText={(value) => setIdentityDraft((current) => ({ ...current, manufacturer: value }))}
+                placeholder="Manufacturer"
+                placeholderTextColor={colors.textMuted}
+                style={styles.identityInput}
+              />
+              <TextInput
+                value={identityDraft.model}
+                onChangeText={(value) => setIdentityDraft((current) => ({ ...current, model: value }))}
+                placeholder="Model"
+                placeholderTextColor={colors.textMuted}
+                style={styles.identityInput}
+              />
+              <TextInput
+                value={identityDraft.modelYear}
+                onChangeText={(value) => setIdentityDraft((current) => ({ ...current, modelYear: value }))}
+                placeholder="Model year"
+                placeholderTextColor={colors.textMuted}
+                keyboardType="number-pad"
+                style={styles.identityInput}
+              />
+              <TextInput
+                value={identityDraft.category}
+                onChangeText={(value) => setIdentityDraft((current) => ({ ...current, category: value }))}
+                placeholder="Category"
+                placeholderTextColor={colors.textMuted}
+                style={styles.identityInput}
+              />
+              <TextInput
+                value={identityDraft.className}
+                onChangeText={(value) => setIdentityDraft((current) => ({ ...current, className: value }))}
+                placeholder="Class"
+                placeholderTextColor={colors.textMuted}
+                style={styles.identityInput}
+              />
+            </View>
+            <View style={styles.identityActions}>
+              <TouchableOpacity style={styles.cancelButton} onPress={() => setIdentityModalVisible(false)} disabled={savingIdentity}>
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.saveButton} onPress={saveTemplateIdentity} disabled={savingIdentity}>
+                {savingIdentity ? <ActivityIndicator size="small" color={colors.onPrimary} /> : <Text style={styles.saveButtonText}>Save Model</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1543,6 +1681,98 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
   buildButtonText: {
+    color: colors.onPrimary,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  modalBackdrop: {
+    alignItems: "center",
+    backgroundColor: "rgba(15,23,42,0.54)",
+    flex: 1,
+    justifyContent: "center",
+    padding: spacing.lg,
+  },
+  identityModal: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    gap: spacing.md,
+    maxWidth: 560,
+    padding: spacing.lg,
+    width: "100%",
+    ...shadows.card,
+  },
+  identityHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  identityEyebrow: {
+    color: colors.brandBlue,
+    fontSize: 11,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  identityTitle: {
+    color: colors.textPrimary,
+    fontSize: 22,
+    fontWeight: "900",
+  },
+  iconButton: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    height: 38,
+    justifyContent: "center",
+    width: 38,
+  },
+  identityGrid: {
+    gap: spacing.sm,
+  },
+  identityInput: {
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: "700",
+    minHeight: 44,
+    paddingHorizontal: spacing.md,
+  },
+  identityActions: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    justifyContent: "flex-end",
+  },
+  cancelButton: {
+    alignItems: "center",
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    justifyContent: "center",
+    minHeight: 42,
+    paddingHorizontal: spacing.lg,
+  },
+  cancelButtonText: {
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  saveButton: {
+    alignItems: "center",
+    backgroundColor: colors.brandBlue,
+    borderRadius: radius.sm,
+    justifyContent: "center",
+    minHeight: 42,
+    minWidth: 120,
+    paddingHorizontal: spacing.lg,
+  },
+  saveButtonText: {
     color: colors.onPrimary,
     fontSize: 13,
     fontWeight: "900",

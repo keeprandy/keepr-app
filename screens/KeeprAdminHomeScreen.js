@@ -10,14 +10,27 @@ import {
   View,
 } from "react-native";
 
-import { searchKeeprAdminOrgs } from "../lib/keeprAdminApi";
+import { createKeeprOrganization, searchKeeprAdminOrgs } from "../lib/keeprAdminApi";
 import { colors, radius, shadows, spacing } from "../styles/theme";
+
+const ORG_PRESETS = [
+  { key: "oem", label: "OEM" },
+  { key: "dealer", label: "Dealer" },
+  { key: "member_team", label: "Member Team" },
+];
 
 export default function KeeprAdminHomeScreen({ navigation }) {
   const [query, setQuery] = useState("Wilson Marine");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [createPreset, setCreatePreset] = useState("oem");
+  const [createOrgName, setCreateOrgName] = useState("");
+  const [createAdminEmail, setCreateAdminEmail] = useState("");
+  const [createPassword, setCreatePassword] = useState("");
+  const [createWebsite, setCreateWebsite] = useState("");
+  const [creatingOrg, setCreatingOrg] = useState(false);
+  const [createError, setCreateError] = useState(null);
 
   const runSearch = useCallback(async () => {
     setLoading(true);
@@ -37,17 +50,130 @@ export default function KeeprAdminHomeScreen({ navigation }) {
     runSearch();
   }, [runSearch]);
 
+  const runCreateOrganization = useCallback(async () => {
+    setCreatingOrg(true);
+    setCreateError(null);
+    try {
+      const created = await createKeeprOrganization({
+        organizationName: createOrgName,
+        preset: createPreset,
+        adminEmail: createAdminEmail,
+        password: createPassword,
+        brand: {
+          display_name: createOrgName,
+          website: createWebsite,
+        },
+      });
+      const orgId = created?.organization_id || created?.organization?.id;
+      setQuery(createOrgName);
+      await runSearch();
+      setCreateOrgName("");
+      setCreateAdminEmail("");
+      setCreatePassword("");
+      setCreateWebsite("");
+      if (orgId) {
+        navigation.navigate("KeeprAdminOrgDetail", { organizationId: orgId });
+      }
+    } catch (err) {
+      setCreateError(err?.message || "Could not create organization.");
+    } finally {
+      setCreatingOrg(false);
+    }
+  }, [
+    createAdminEmail,
+    createOrgName,
+    createPassword,
+    createPreset,
+    createWebsite,
+    navigation,
+    runSearch,
+  ]);
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <View style={styles.header}>
         <View>
           <Text style={styles.eyebrow}>Keepr Admin</Text>
-          <Text style={styles.title}>Org Activation</Text>
+          <Text style={styles.title}>Organizations</Text>
         </View>
         <View style={styles.badge}>
           <Ionicons name="shield-checkmark-outline" size={16} color={colors.primary} />
           <Text style={styles.badgeText}>Internal</Text>
         </View>
+      </View>
+
+      <View style={styles.createPanel}>
+        <View style={styles.sectionHeader}>
+          <View>
+            <Text style={styles.sectionEyebrow}>Provision</Text>
+            <Text style={styles.sectionTitle}>Create Organization</Text>
+          </View>
+        </View>
+        <View style={styles.presetRow}>
+          {ORG_PRESETS.map((preset) => {
+            const selected = preset.key === createPreset;
+            return (
+              <TouchableOpacity
+                key={preset.key}
+                style={[styles.presetButton, selected && styles.presetButtonActive]}
+                onPress={() => setCreatePreset(preset.key)}
+                disabled={creatingOrg}
+              >
+                <Text style={[styles.presetButtonText, selected && styles.presetButtonTextActive]}>{preset.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <View style={styles.createGrid}>
+          <TextInput
+            value={createOrgName}
+            onChangeText={setCreateOrgName}
+            placeholder="Organization name"
+            placeholderTextColor={colors.textMuted}
+            style={styles.input}
+          />
+          <TextInput
+            value={createAdminEmail}
+            onChangeText={setCreateAdminEmail}
+            placeholder="Primary admin email"
+            placeholderTextColor={colors.textMuted}
+            autoCapitalize="none"
+            keyboardType="email-address"
+            style={styles.input}
+          />
+          <TextInput
+            value={createPassword}
+            onChangeText={setCreatePassword}
+            placeholder="Temporary password or blank to invite"
+            placeholderTextColor={colors.textMuted}
+            secureTextEntry
+            style={styles.input}
+          />
+          <TextInput
+            value={createWebsite}
+            onChangeText={setCreateWebsite}
+            placeholder="Website"
+            placeholderTextColor={colors.textMuted}
+            autoCapitalize="none"
+            keyboardType="url"
+            style={styles.input}
+          />
+        </View>
+        {createError ? <Text style={styles.errorText}>{createError}</Text> : null}
+        <TouchableOpacity
+          style={[styles.createButton, creatingOrg && styles.disabledButton]}
+          onPress={runCreateOrganization}
+          disabled={creatingOrg || !createOrgName.trim() || !createAdminEmail.trim()}
+        >
+          {creatingOrg ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <>
+              <Ionicons name="add-circle-outline" size={18} color="#fff" />
+              <Text style={styles.createButtonText}>Create Organization</Text>
+            </>
+          )}
+        </TouchableOpacity>
       </View>
 
       <View style={styles.searchRow}>
@@ -92,7 +218,7 @@ export default function KeeprAdminHomeScreen({ navigation }) {
         {!loading && !results.length ? (
           <View style={styles.empty}>
             <Text style={styles.emptyTitle}>No organizations found</Text>
-            <Text style={styles.emptyText}>Search an existing canonical org. Admin V1 does not create orgs.</Text>
+            <Text style={styles.emptyText}>Search an existing canonical org or create one above.</Text>
           </View>
         ) : null}
       </View>
@@ -139,6 +265,77 @@ const styles = StyleSheet.create({
   badgeText: {
     color: colors.textPrimary,
     fontWeight: "800",
+  },
+  createPanel: {
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    backgroundColor: "#fff",
+    ...shadows.card,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  sectionEyebrow: {
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  sectionTitle: {
+    color: colors.textPrimary,
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  presetRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+  },
+  presetButton: {
+    minHeight: 38,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#f8fafc",
+  },
+  presetButtonActive: {
+    borderColor: colors.primary,
+    backgroundColor: "#eef5ff",
+  },
+  presetButtonText: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  presetButtonTextActive: {
+    color: colors.primary,
+  },
+  createGrid: {
+    gap: spacing.sm,
+  },
+  createButton: {
+    minHeight: 46,
+    borderRadius: radius.sm,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: spacing.xs,
+    backgroundColor: colors.primary,
+  },
+  disabledButton: {
+    opacity: 0.62,
+  },
+  createButtonText: {
+    color: "#fff",
+    fontWeight: "900",
   },
   searchRow: {
     flexDirection: "row",
