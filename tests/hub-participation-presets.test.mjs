@@ -71,6 +71,40 @@ test("membership club eligibility can be configured by make model and year", () 
   );
 });
 
+test("Rally Sport Region keeps moderated Porsche submissions on quick activation", () => {
+  const { getHubParticipationConfig } = loadHubConfig();
+  const config = getHubParticipationConfig({
+    name: "Rally Sport Region",
+    slug: "rally-sport-region",
+    visibility: "public",
+    hub_type: "community",
+    settings: {
+      cta_label: "Add Your Porsche",
+      asset_label: "Porsche",
+      eligible_make: "Porsche",
+      primary_asset_type: "vehicle",
+      participation_model: "moderated",
+      submission_status: "pending",
+      can_quick_activate: false,
+      participation_preset: "membership_club",
+    },
+  });
+
+  assert.equal(config.ctaLabel, "Add Your Porsche");
+  assert.equal(config.primaryAssetType, "vehicle");
+  assert.equal(config.eligibleMake, "Porsche");
+  assert.equal(config.submissionStatus, "pending");
+  assert.equal(config.canQuickActivate, true);
+});
+
+test("public Hub activation stores intent instead of serializing it into navigation params", () => {
+  const source = fs.readFileSync(path.join(repoRoot, "screens/KeeprHubScreen.js"), "utf8");
+  const authNavigateMatch = source.match(/navigation\.navigate\("Auth",\s*\{[\s\S]*?preferredAssetType:[\s\S]*?\}\);/);
+
+  assert.ok(authNavigateMatch, "Expected the Hub CTA to navigate to Auth with scalar resume params");
+  assert.doesNotMatch(authNavigateMatch[0], /activationIntent\s*,/);
+});
+
 test("open event preset creates public approved submissions with event CTA", () => {
   const { getHubParticipationConfig } = loadHubConfig();
   const config = getHubParticipationConfig({
