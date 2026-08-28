@@ -1,5 +1,5 @@
 // screens/KeeprHubScreen.js
-import React, { useCallback, useMemo, useState, useEffect } from "react";
+import React, { useCallback, useMemo, useRef, useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -103,6 +103,18 @@ const SORT_OPTIONS = [
   { key: "created_desc", label: "Newest" },
   { key: "name_asc", label: "Name" },
 ];
+
+const HUB_REQUEST_TIMEOUT_MS = 10000;
+const HUB_STORIES_TIMEOUT_MS = 12000;
+
+function withTimeout(promise, label, timeoutMs) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(`${label} timed out.`)), timeoutMs);
+    }),
+  ]);
+}
 
 function extractHashtags(text) {
   return Array.from(
@@ -313,9 +325,12 @@ const isInternal =
   const [shareHubVisible, setShareHubVisible] = useState(false);
   const [hubLinkCopied, setHubLinkCopied] = useState(false);
   const [inviteModalVisible, setInviteModalVisible] = useState(false);
+  const [hubLoadError, setHubLoadError] = useState(null);
+  const [storyLoadError, setStoryLoadError] = useState(null);
   
   const [inviteRecord, setInviteRecord] = useState(null);
   const [inviteLoading, setInviteLoading] = useState(false);
+  const loadRunRef = useRef(0);
 
   const effectiveWidth = containerWidth || windowWidth;
   const cardGap = 14;
@@ -422,58 +437,103 @@ setStories((prev) =>
 }
 
 const loadHub = useCallback(async () => {
+  const runId = loadRunRef.current + 1;
+  loadRunRef.current = runId;
+  const isActiveRun = () => loadRunRef.current === runId;
+
   setLoading(true);
+  setHubLoadError(null);
+  setStoryLoadError(null);
 
-  const { data: authData } = await supabase.auth.getUser();
-  setCurrentUserId(authData?.user?.id || null);
-
-
+  let userId = null;
   try {
-    const hubRecord = hubId
-      ? await fetchHub(hubId)
-      : await fetchPublicHubBySlug(hubSlug || "rally-sport-region");
+    const { data: authData } = await withTimeout(
+      supabase.auth.getUser(),
+      "Hub auth",
+      HUB_REQUEST_TIMEOUT_MS
+    );
+    userId = authData?.user?.id || null;
+  } catch (e) {
+    console.log("Hub auth hydration failed:", e?.message || e);
+  }
 
-    const { data: memberRow, error: memberError } = await supabase
-      .from("hub_members")
-      .select("id, role, user_id")
-      .eq("hub_id", hubRecord.id)
-      .eq("user_id", authData?.user?.id)
-      .maybeSingle();
+  if (!isActiveRun()) return;
+  setCurrentUserId(userId);
 
-    if (memberError) {
-      console.log("Hub member lookup failed:", memberError);
-    }
-
-    setHub({
-      ...hubRecord,
-      currentMember: memberRow || null,
-    });
-
-    const linkRows = await fetchHubStoryLinks(hubRecord.id);
-    const assetStories = normalizeLinks(linkRows);
-
-    console.log("HUB STORIES NORMALIZED", assetStories.map((s) => ({
-  id: s.id,
-  name: s.name,
-  kac: s.kac_id,
-  public_hero_url: s.public_hero_url,
-  primary_attachment_url: s.primary_attachment_url,
-  hero_image_url: s.hero_image_url,
-})));
-
-  setStories(assetStories);
-  setLoading(false);
-
-  enrichHeroImages(assetStories).catch((e) => {
-    console.log("Hub hero enrichment failed:", e?.message || e);
-  });
-
+  let hubRecord = null;
+  try {
+    hubRecord = await withTimeout(
+      hubId
+        ? fetchHub(hubId)
+        : fetchPublicHubBySlug(hubSlug || "rally-sport-region"),
+      "Hub lookup",
+      HUB_REQUEST_TIMEOUT_MS
+    );
   } catch (e) {
     console.error(e);
-    Alert.alert("Hub unavailable", e?.message || "Failed to load hub.");
+    if (!isActiveRun()) return;
+    setHub(null);
+    setHubLoadError(e?.message || "Failed to load hub.");
     setStories([]);
     setLoading(false);
+    return;
   }
+
+  if (!isActiveRun()) return;
+  setHub({
+    ...hubRecord,
+    currentMember: null,
+  });
+
+  const [memberResult, storyResult] = await Promise.allSettled([
+    userId
+      ? withTimeout(
+          supabase
+            .from("hub_members")
+            .select("id, role, user_id")
+            .eq("hub_id", hubRecord.id)
+            .eq("user_id", userId)
+            .maybeSingle(),
+          "Hub membership",
+          HUB_REQUEST_TIMEOUT_MS
+        )
+      : Promise.resolve({ data: null, error: null }),
+    withTimeout(fetchHubStoryLinks(hubRecord.id), "Hub stories", HUB_STORIES_TIMEOUT_MS),
+  ]);
+
+  if (!isActiveRun()) return;
+
+  let memberRow = null;
+  if (memberResult.status === "fulfilled") {
+    if (memberResult.value?.error) {
+      console.log("Hub member lookup failed:", memberResult.value.error);
+    } else {
+      memberRow = memberResult.value?.data || null;
+    }
+  } else {
+    console.log("Hub member lookup failed:", memberResult.reason?.message || memberResult.reason);
+  }
+
+  setHub({
+    ...hubRecord,
+    currentMember: memberRow,
+  });
+
+  if (storyResult.status === "fulfilled") {
+    const assetStories = normalizeLinks(storyResult.value || []);
+
+    setStories(assetStories);
+    setStoryLoadError(null);
+    enrichHeroImages(assetStories).catch((e) => {
+      console.log("Hub hero enrichment failed:", e?.message || e);
+    });
+  } else {
+    console.log("Hub stories load failed:", storyResult.reason?.message || storyResult.reason);
+    setStories([]);
+    setStoryLoadError(storyResult.reason?.message || "Stories could not be loaded.");
+  }
+
+  setLoading(false);
 }, [hubId, hubSlug, enrichHeroImages]);
 
   useFocusEffect(
@@ -1076,9 +1136,10 @@ const hubActions = isInternal ? (
 const addAssetLabel = capabilities.addAssetLabel || "Add your asset";
 
 const handleAddToHubPress = async () => {
+  const targetHubSlug = hub?.slug || hubSlug;
   const activationIntent = buildHubQuickAddIntent({
     hubId: hub?.id,
-    hubSlug: hub?.slug || slug,
+    hubSlug: targetHubSlug,
     hubName: hub?.name,
     returnRoute: "HubQuickAddCar",
   });
@@ -1113,17 +1174,17 @@ const handleAddToHubPress = async () => {
       mode: "signup",
       source: "hub_activation",
       hubId: hub?.id,
-      hubSlug: hub?.slug || slug,
+      hubSlug: targetHubSlug,
       hubName: hub?.name,
-      activationIntent,
-      returnTo: "HubQuickAddCar",
+      returnTo: activationIntent.returnRoute,
+      preferredAssetType: activationIntent.preferredAssetType,
     });
     return;
   }
 
   navigation.navigate("HubQuickAddCar", {
     hubId: hub?.id,
-    hubSlug: hub?.slug || slug,
+    hubSlug: targetHubSlug,
     hubName: hub?.name,
     hub,
   });
@@ -1209,6 +1270,30 @@ const hubContent = (
       <View style={styles.center}>
         <ActivityIndicator />
         <Text style={styles.loadingText}>Loading hub…</Text>
+      </View>
+    ) : hubLoadError ? (
+      <View style={styles.empty}>
+        <Ionicons name="warning-outline" size={34} color={colors.textMuted} />
+        <Text style={styles.emptyTitle}>Hub did not load</Text>
+        <Text style={styles.emptyText}>
+          Check the link or refresh to try again.
+        </Text>
+        <TouchableOpacity onPress={loadHub} style={styles.emptyRetryButton} activeOpacity={0.85}>
+          <Ionicons name="refresh" size={16} color="#fff" />
+          <Text style={styles.emptyRetryButtonText}>Retry</Text>
+        </TouchableOpacity>
+      </View>
+    ) : storyLoadError ? (
+      <View style={styles.empty}>
+        <Ionicons name="warning-outline" size={34} color={colors.textMuted} />
+        <Text style={styles.emptyTitle}>Stories did not load</Text>
+        <Text style={styles.emptyText}>
+          You can still add your Porsche to this Hub. Refresh to try the gallery again.
+        </Text>
+        <TouchableOpacity onPress={loadHub} style={styles.emptyRetryButton} activeOpacity={0.85}>
+          <Ionicons name="refresh" size={16} color="#fff" />
+          <Text style={styles.emptyRetryButtonText}>Retry Gallery</Text>
+        </TouchableOpacity>
       </View>
     ) : filtered.length === 0 ? (
       <View style={styles.empty}>
@@ -1912,6 +1997,22 @@ filterLabel: {
     fontSize: 13,
     textAlign: "center",
     lineHeight: 18,
+  },
+  emptyRetryButton: {
+    marginTop: 10,
+    minHeight: 42,
+    borderRadius: 999,
+    backgroundColor: "#111827",
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 8,
+    paddingHorizontal: 18,
+  },
+  emptyRetryButtonText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "900",
   },
 
   card: {
