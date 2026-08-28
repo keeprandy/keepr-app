@@ -692,6 +692,7 @@ const continueActivationJourney = async () => {
         ? "AddHubStory"
         : "HubQuickAddCar";
     navigation.replace(returnRoute, {
+      ...(returnRoute === "HubQuickAddCar" ? { slug: activationIntent.hubSlug } : null),
       hubId: activationIntent.hubId,
       hubSlug: activationIntent.hubSlug,
       hubName: activationIntent.hubName,

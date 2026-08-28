@@ -133,6 +133,7 @@ import ActivatorCatalogTemplateScreen from "./screens/ActivatorCatalogTemplateSc
 import ActivatorTemplateDraftScreen from "./screens/ActivatorTemplateDraftScreen";
 import ActivatorExactBuildScreen from "./screens/ActivatorExactBuildScreen";
 import ActivatorTemplateCustomizeScreen from "./screens/ActivatorTemplateCustomizeScreen";
+import ActivatorTemplateItemEditorScreen from "./screens/ActivatorTemplateItemEditorScreen";
 import KeeprAdminHomeScreen from "./screens/KeeprAdminHomeScreen";
 import KeeprAdminOrgDetailScreen from "./screens/KeeprAdminOrgDetailScreen";
 import KeeprSpaceHomeScreen from "./screens/KeeprSpaceHomeScreen";
@@ -521,6 +522,7 @@ const linking = {
     ActivatorCatalogTemplate: "activator/catalog/:templateKey",
     ActivatorTemplateDraft: "activator/catalog-drafts/:draftKey",
     ActivatorTemplateCustomize: "activator/catalog/:templateKey/customize",
+    ActivatorTemplateItemEditor: "activator/catalog/:templateKey/items/:itemId",
     ActivatorExactBuild: "activator/build/:templateKey",
     ActivatorBoatWorkspace: "activator/boats/:assetId",
     ShareAction: "s/:token",
@@ -2721,6 +2723,7 @@ const initialRouteName = isBootLoading
           <RootStack.Screen name="ActivatorCatalogTemplate" component={ActivatorCatalogTemplateScreen} />
           <RootStack.Screen name="ActivatorTemplateDraft" component={ActivatorTemplateDraftScreen} />
           <RootStack.Screen name="ActivatorTemplateCustomize" component={ActivatorTemplateCustomizeScreen} />
+          <RootStack.Screen name="ActivatorTemplateItemEditor" component={ActivatorTemplateItemEditorScreen} />
           <RootStack.Screen name="ActivatorExactBuild" component={ActivatorExactBuildScreen} />
           <RootStack.Screen name="ActivatorBoatWorkspace" component={ActivatorBoatWorkspaceScreen} />
 

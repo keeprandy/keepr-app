@@ -497,7 +497,7 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
             storage_path: row.storage_path,
             bucket: row.bucket,
             created_at: row.created_at,
-            attribution: row.attribution || null,
+            attribution: row.provenance_label || row.attribution || null,
             // ✅ hero by placement id (persistent)
             isHero: effectiveHero ? effectiveHero === row.placement_id : false,
             fromTable: true,

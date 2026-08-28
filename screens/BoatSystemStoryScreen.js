@@ -28,7 +28,11 @@ import { buildPrivateKeeprProActionPrefill } from "../lib/keeprProEngagement";
 import { buildMessagesNavigationParams } from "../lib/messagesService";
 
 import { useAttachments } from "../hooks/useAttachments";
-import { ATTACHMENT_BUCKET, getSignedUrl } from "../lib/attachmentsApi";
+import {
+  ATTACHMENT_BUCKET,
+  getSignedUrl,
+  listInheritedTemplateResourcesForSystem,
+} from "../lib/attachmentsApi";
 import AttachmentViewerModal from "../components/AttachmentViewerModal";
 import KeeprProCommunicationCard from "../components/KeeprProCommunicationCard";
 import ServiceReadyLinkModal from "../components/ServiceReadyLinkModal";
@@ -248,6 +252,7 @@ export default function BoatSystemStoryScreen(props) {
   );
 
   const [attachmentPreview, setAttachmentPreview] = useState([]);
+  const [inheritedSystemResources, setInheritedSystemResources] = useState([]);
 
   // viewer state
   const [viewerVisible, setViewerVisible] = useState(false);
@@ -281,6 +286,7 @@ export default function BoatSystemStoryScreen(props) {
       setError("No system specified.");
       setSystem(null);
       setRecords([]);
+      setInheritedSystemResources([]);
       setLoading(false);
       return;
     }
@@ -310,6 +316,14 @@ export default function BoatSystemStoryScreen(props) {
 
       if (!resolvedSystem) throw new Error("System not found.");
       setSystem(resolvedSystem);
+
+      try {
+        const inheritedResources = await listInheritedTemplateResourcesForSystem(assetId, resolvedSystem);
+        setInheritedSystemResources(inheritedResources || []);
+      } catch (resourceErr) {
+        console.log("BoatSystemStoryScreen inherited resources unavailable:", resourceErr?.message || resourceErr);
+        setInheritedSystemResources([]);
+      }
 
       if (!assetKacFromRoute && resolvedSystem.asset_id) {
         const { data: assetRow } = await supabase
@@ -471,6 +485,7 @@ export default function BoatSystemStoryScreen(props) {
 
   const { photos, files, links } = attachmentCounts;
   const hasAnyAttachments = photos + files + links > 0;
+  const hasInheritedSystemResources = inheritedSystemResources.length > 0;
   const assetKac = assetKacFromRoute || publicAssetKac || null;
 
   const publicSystemStoryUrl = useMemo(() => {
@@ -1441,7 +1456,7 @@ const handleRequestServiceFromKeeprPro = useCallback(async (pro) => {
               {links} link{links === 1 ? "" : "s"}
             </Text>
 
-            {!hasAnyAttachments ? (
+            {!hasAnyAttachments && !hasInheritedSystemResources ? (
               <View style={styles.emptyState}>
                 <Ionicons name="images-outline" size={18} color={colors.textSecondary} />
                 <Text style={styles.emptyStateText}>
@@ -1543,6 +1558,43 @@ const handleRequestServiceFromKeeprPro = useCallback(async (pro) => {
                 })}
               </ScrollView>
             )}
+
+            {hasInheritedSystemResources ? (
+              <View style={styles.inheritedResourceList}>
+                <Text style={styles.inheritedResourceHeading}>Inherited model resources</Text>
+                {inheritedSystemResources.map((resource) => {
+                  const url = resource.url || resource.source_url || null;
+                  const subtitle = [
+                    resource.template_item_label,
+                    resource.template_label,
+                    resource.provenance_label,
+                  ].filter(Boolean).join(" · ");
+                  return (
+                    <TouchableOpacity
+                      key={resource.id}
+                      style={styles.inheritedResourceRow}
+                      onPress={() => {
+                        if (IS_WEB && url) window.open(url, "_blank", "noopener,noreferrer");
+                      }}
+                      activeOpacity={url ? 0.85 : 1}
+                    >
+                      <View style={styles.inheritedResourceIcon}>
+                        <Ionicons name="document-text-outline" size={18} color={colors.brandBlue} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.recordTitle} numberOfLines={1}>
+                          {resource.title || "Reusable resource"}
+                        </Text>
+                        <Text style={styles.recordNotes} numberOfLines={2}>
+                          {subtitle || "Inherited model knowledge"}
+                        </Text>
+                      </View>
+                      {url ? <Ionicons name="open-outline" size={16} color={colors.textSecondary} /> : null}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ) : null}
           </View>
 
           {/* TIMELINE */}
@@ -1922,6 +1974,39 @@ const styles = StyleSheet.create({
   heroSetButtonLabel: { marginLeft: 6, fontSize: 11, fontWeight: "700", color: colors.textSecondary },
   attachmentThumbImage: { width: "100%", height: "100%" },
   attachmentLabel: { marginTop: 4, fontSize: 11, color: colors.textSecondary },
+  inheritedResourceList: {
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderSubtle,
+  },
+  inheritedResourceHeading: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: colors.textSecondary,
+    textTransform: "uppercase",
+    letterSpacing: 0,
+    marginBottom: spacing.sm,
+  },
+  inheritedResourceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.lg,
+    padding: spacing.sm,
+    backgroundColor: colors.surfaceSubtle,
+    marginBottom: spacing.sm,
+  },
+  inheritedResourceIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: radius.md,
+    backgroundColor: "#EFF6FF",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: spacing.sm,
+  },
 
   recordCard: {
     marginTop: spacing.sm,

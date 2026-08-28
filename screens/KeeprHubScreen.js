@@ -1199,10 +1199,10 @@ const handleAddToHubPress = async () => {
 
   if (capabilities.canOpenQuickActivation) {
     navigation.navigate("HubQuickAddCar", {
+      slug: targetHubSlug,
       hubId: hub?.id,
       hubSlug: targetHubSlug,
       hubName: hub?.name,
-      hub,
     });
     return;
   }

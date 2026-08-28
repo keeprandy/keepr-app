@@ -43,7 +43,7 @@ import {
 } from "../lib/attachmentsUploader";
 import { clearKeeprSpaceAssetHero, setKeeprSpaceAssetHero } from "../lib/keeprspaceApi";
 
-import { getSignedUrl } from "../lib/attachmentsApi";
+import { ensureAssetMediaPlacement, getSignedUrl } from "../lib/attachmentsApi";
 import LinkCoverCard from "../components/LinkCoverCard";
 import { enrichLinkAttachment, linkCoverErrorMessage, shouldEnrichLinkAttachment } from "../lib/linkCover";
 
@@ -65,6 +65,18 @@ const SHADOW = Platform.select({
     elevation: 3,
   },
 });
+
+function attachmentRowKey(row) {
+  return (
+    row?.asset_placement_id ||
+    row?.placement_id ||
+    row?.attachment_id ||
+    row?.resource_id ||
+    row?.id ||
+    row?.url ||
+    ""
+  );
+}
 
 // ✅ V1 QC: direct DB writes for save + associations (avoids any mismatch inside attachmentsApi)
 async function apiUpdateAttachment(attachmentId, patch) {
@@ -715,7 +727,7 @@ function AttachmentDetailsPanel({
         </View>
       )}
 
-      {selected?._isPhoto && selected?.asset_placement_id ? (
+      {selected?._isPhoto ? (
         <View style={styles.showcaseRow}>
           <Text style={styles.label}>Hero</Text>
           <TouchableOpacity
@@ -993,10 +1005,10 @@ const isWide = IS_WEB && width >= 980;
   // ✅ Enhance Engine (global)
 
   // Tabs are now *filters* over canonical attachments
-  // "all" | "photo" | "file" | "link"
+  // "all" | "photo" | "file" | "link" | "showcase"
   const initialTab = useMemo(() => {
     const requested = route?.params?.initialTab;
-    return ["all", "photo", "file", "link"].includes(requested)
+    return ["all", "photo", "file", "link", "showcase"].includes(requested)
       ? requested
       : "all";
   }, [route?.params?.initialTab]);
@@ -1447,7 +1459,9 @@ const isWide = IS_WEB && width >= 980;
           : isPdfMime(x.mime_type) || ext === "pdf"
           ? "PDF"
           : isPhoto
-          ? "IMG"
+          ? x.is_inherited_model_media
+            ? "MODEL"
+            : "IMG"
           : (ext || "FILE").toUpperCase();
 
       // Prefer the placement that represents this attachment on the current asset
@@ -1474,6 +1488,16 @@ const isWide = IS_WEB && width >= 980;
         target_type: x.target_type || assetPl?.target_type || "asset",
         target_id: x.target_id || assetPl?.target_id || assetId,
         is_showcase: effectiveIsShowcase,
+        provenance_label:
+          x.provenance_label ||
+          x.source_context?.provenance_label ||
+          (x.is_inherited_model_media ? "Model media" : null),
+        provenance_detail:
+          x.provenance_detail ||
+          x.source_context?.provenance_detail ||
+          (x.is_inherited_model_media ? "Inherited model media; not exact-hull evidence." : null),
+        is_inherited_model_media: !!x.is_inherited_model_media,
+        is_exact_asset_media: x.is_exact_asset_media ?? !x.is_inherited_model_media,
         file_name: fileName,
         _isPhoto: isPhoto,
         badge,
@@ -1552,6 +1576,7 @@ const isWide = IS_WEB && width >= 980;
       if (tab === "link") return x.kind === "link";
       if (tab === "photo") return x.kind === "photo" || x._isPhoto;
       if (tab === "file") return x.kind !== "link" && !(x.kind === "photo" || x._isPhoto);
+      if (tab === "showcase") return !!x.is_showcase;
       return true;
     };
 
@@ -1671,7 +1696,19 @@ const isWide = IS_WEB && width >= 980;
       setHeroIsPdf(isPdf);
 
       // Only render the big preview on web. Mobile uses the modal viewer.
-      if (!IS_WEB || !active.storage_path) {
+      if (!IS_WEB) {
+        setHeroUrl(null);
+        setHeroLoading(false);
+        return;
+      }
+
+      if (!active.storage_path && active.is_inherited_model_media && active._isPhoto && active.url) {
+        setHeroUrl(active.url);
+        setHeroLoading(false);
+        return;
+      }
+
+      if (!active.storage_path) {
         setHeroUrl(null);
         setHeroLoading(false);
         return;
@@ -1769,7 +1806,13 @@ const isWide = IS_WEB && width >= 980;
       }
     }
 
-    // No safe fallback for files/photos. If we don't have storage_path,
+    if (row.is_inherited_model_media && row._isPhoto && row.url) {
+      const u = safeStr(row.url) || null;
+      signedUrlCacheRef.current.set(key, u);
+      return u;
+    }
+
+    // No safe fallback for exact files/photos. If we don't have storage_path,
     // treat it as unavailable rather than trusting a persisted URL.
     signedUrlCacheRef.current.set(key, null);
     return null;
@@ -1800,7 +1843,8 @@ const isWide = IS_WEB && width >= 980;
 
   const openViewerForRow = useCallback(async (row) => {
     if (!row) return;
-    const idx = Math.max(0, (filtered || []).findIndex((x) => x.attachment_id === row.attachment_id));
+    const rowKey = attachmentRowKey(row);
+    const idx = Math.max(0, (filtered || []).findIndex((x) => attachmentRowKey(x) === rowKey));
     const signed = await ensureSignedUrlForRow(row);
     setSelected(row);
     setViewerIndex(idx >= 0 ? idx : 0);
@@ -2414,9 +2458,44 @@ const openAdd = () => {
 
   const selectedRoleText = selected?.role ? roleLabel(selected.role) : "Pick One Here";
 
+  const ensureAssetPlacementForRow = useCallback(
+    async (row, options = {}) => {
+      const existingPlacementId = assetPlacementIdForRow(row, assetId);
+      if (existingPlacementId && row?.attachment_id) {
+        return {
+          attachment_id: row.attachment_id,
+          placement: {
+            id: existingPlacementId,
+            target_type: "asset",
+            target_id: assetId,
+            is_showcase: !!row.is_showcase,
+          },
+        };
+      }
+
+      if (!assetId || !row?.is_inherited_model_media || (!row?.attachment_id && !row?.source_resource_id)) {
+        return null;
+      }
+
+      const result = await ensureAssetMediaPlacement({
+        assetId,
+        attachmentId: row.attachment_id || null,
+        resourceId: row.source_resource_id || null,
+        role: options.role || row.role || "showcase",
+        isShowcase: options.isShowcase ?? row.is_showcase ?? false,
+        label: row.title || row.asset_label || null,
+      });
+
+      signedUrlCacheRef.current.delete(row.attachment_id || row.id || row.url || "");
+      return result;
+    },
+    [assetId]
+  );
+
   const canToggleShowcase =
   !!selected &&
-  (selected.target_type === "asset" || selected.target_type === "system");
+  ((selected.target_type === "asset" || selected.target_type === "system") ||
+    selected.is_inherited_model_media);
 
   const showcaseNoun =
   selected?.kind === "link"
@@ -2427,15 +2506,20 @@ const openAdd = () => {
 
   const handleToggleShowcase = useCallback(async () => {
     if (!selected || !canToggleShowcase) return;
-    if (!selected.attachment_id || !selected.target_type || !selected.target_id) return;
 
     const nextValue = !selected.is_showcase;
 
     try {
       setShowcaseBusy(true);
+      const placementResult = await ensureAssetPlacementForRow(selected, {
+        role: nextValue ? "showcase" : selected.role || "model_media",
+        isShowcase: nextValue,
+      });
+      const attachmentId = placementResult?.attachment_id || selected.attachment_id;
+      if (!attachmentId) return;
 
       await apiSetPlacementShowcase({
-        attachment_id: selected.attachment_id,
+        attachment_id: attachmentId,
         target_type: "asset",
         target_id: assetId,
         is_showcase: nextValue,
@@ -2444,15 +2528,20 @@ const openAdd = () => {
 
       // Update local selected so UI responds immediately
       setSelected((prev) =>
-        prev && (prev.attachment_id === selected.attachment_id)
-          ? { ...prev, is_showcase: nextValue }
+        prev && ((prev.attachment_id || prev.id) === (selected.attachment_id || selected.id))
+          ? {
+              ...prev,
+              attachment_id: attachmentId,
+              asset_placement_id: placementResult?.placement?.id || prev.asset_placement_id,
+              is_showcase: nextValue,
+            }
           : prev
       );
 
       try {
         DeviceEventEmitter.emit("keepr:attachment:updated", {
           assetId,
-          attachmentId: selected.attachment_id,
+          attachmentId,
         });
       } catch {}
 
@@ -2462,13 +2551,19 @@ const openAdd = () => {
     } finally {
       setShowcaseBusy(false);
     }
-  }, [assetId, canToggleShowcase, refresh, selected]);
+  }, [assetId, canToggleShowcase, ensureAssetPlacementForRow, refresh, selected]);
 
   const handleSetAssetHeroForRow = useCallback(async (row = selected) => {
-    const placementId = assetPlacementIdForRow(row, assetId);
-    if (!assetId || !placementId || !row?._isPhoto) return;
+    if (!assetId || !row?._isPhoto) return;
     try {
       setShowcaseBusy(true);
+      const placementResult = await ensureAssetPlacementForRow(row, {
+        role: "hero",
+        isShowcase: row.is_showcase ?? false,
+      });
+      const placementId = placementResult?.placement?.id || assetPlacementIdForRow(row, assetId);
+      const attachmentId = placementResult?.attachment_id || row.attachment_id;
+      if (!placementId) return;
       if (hasWorkspaceHeroContext) {
         await setKeeprSpaceAssetHero({
           assetId,
@@ -2485,14 +2580,14 @@ const openAdd = () => {
         setAssetHeroPlacementId(placementId);
       }
       setSelected((prev) =>
-        prev && (prev.attachment_id === row.attachment_id)
-          ? { ...prev, asset_placement_id: placementId }
+        prev && ((prev.attachment_id || prev.id) === (row.attachment_id || row.id))
+          ? { ...prev, attachment_id: attachmentId || prev.attachment_id, asset_placement_id: placementId }
           : prev
       );
       try {
         DeviceEventEmitter.emit("keepr:attachment:updated", {
           assetId,
-          attachmentId: row.attachment_id,
+          attachmentId,
         });
       } catch {}
       await refresh();
@@ -2501,7 +2596,7 @@ const openAdd = () => {
     } finally {
       setShowcaseBusy(false);
     }
-  }, [assetId, hasWorkspaceHeroContext, organizationId, refresh, selected]);
+  }, [assetId, ensureAssetPlacementForRow, hasWorkspaceHeroContext, organizationId, refresh, selected]);
 
   const handleSetAssetHero = useCallback(() => {
     handleSetAssetHeroForRow(selected);
@@ -2543,30 +2638,46 @@ const openAdd = () => {
   }, [assetId, assetName, navigation]);
 
   const toggleShowcaseForRow = useCallback(async (row) => {
-    if (!row?.attachment_id || !assetId) return;
+    if (!row || !assetId) return;
     const nextValue = !row.is_showcase;
     try {
       setShowcaseBusy(true);
+      const placementResult = await ensureAssetPlacementForRow(row, {
+        role: nextValue ? "showcase" : row.role || "model_media",
+        isShowcase: nextValue,
+      });
+      const attachmentId = placementResult?.attachment_id || row.attachment_id;
+      if (!attachmentId) return;
       await apiSetPlacementShowcase({
-        attachment_id: row.attachment_id,
+        attachment_id: attachmentId,
         target_type: "asset",
         target_id: assetId,
         is_showcase: nextValue,
       });
       setViewerAttachment((prev) =>
-        prev && prev.attachment_id === row.attachment_id
-          ? { ...prev, is_showcase: nextValue }
+        prev && ((prev.attachment_id || prev.id) === (row.attachment_id || row.id))
+          ? {
+              ...prev,
+              attachment_id: attachmentId,
+              asset_placement_id: placementResult?.placement?.id || prev.asset_placement_id,
+              is_showcase: nextValue,
+            }
           : prev
       );
       setSelected((prev) =>
-        prev && prev.attachment_id === row.attachment_id
-          ? { ...prev, is_showcase: nextValue }
+        prev && ((prev.attachment_id || prev.id) === (row.attachment_id || row.id))
+          ? {
+              ...prev,
+              attachment_id: attachmentId,
+              asset_placement_id: placementResult?.placement?.id || prev.asset_placement_id,
+              is_showcase: nextValue,
+            }
           : prev
       );
       try {
         DeviceEventEmitter.emit("keepr:attachment:updated", {
           assetId,
-          attachmentId: row.attachment_id,
+          attachmentId,
         });
       } catch {}
       await refresh();
@@ -2575,7 +2686,7 @@ const openAdd = () => {
     } finally {
       setShowcaseBusy(false);
     }
-  }, [assetId, refresh]);
+  }, [assetId, ensureAssetPlacementForRow, refresh]);
 
   const renderShowcaseStar = useCallback((row, styleOverride) => (
     <TouchableOpacity
@@ -2603,7 +2714,7 @@ const openAdd = () => {
 
   const renderHeroButton = useCallback((row, styleOverride) => {
     const placementId = assetPlacementIdForRow(row, assetId);
-    if (!row?._isPhoto || !placementId) return null;
+    if (!row?._isPhoto) return null;
     const isHero = effectiveHeroPlacementId && placementId === effectiveHeroPlacementId;
     const isWorkspaceOverride =
       hasWorkspaceHeroContext &&
@@ -3025,6 +3136,7 @@ return (
             ["photo", "Photos"],
             ["file", "Files"],
             ["link", "Links"],
+            ["showcase", "Showcase"],
           ].map(([k, label]) => (
             <TouchableOpacity
               key={k}
@@ -3213,13 +3325,13 @@ return (
                     showsVerticalScrollIndicator
                   >
                     {filtered.map((row) => {
-                      const isSel = selected?.attachment_id === row.attachment_id;
+                      const isSel = attachmentRowKey(selected) === attachmentRowKey(row);
                       // OR: selected?.asset_placement_id === row.asset_placement_id
 
                       if (row.kind === "link") {
                         return (
                           <LinkCoverCard
-                            key={row.asset_placement_id || row.placement_id || row.attachment_id}
+                            key={attachmentRowKey(row)}
                             attachment={row}
                             selected={isSel}
                             loading={!!linkCoverLoading[row.attachment_id || row.id]}
@@ -3267,7 +3379,7 @@ return (
 
                       return (
                         <TouchableOpacity
-                          key={row.asset_placement_id || row.placement_id || row.attachment_id}
+                          key={attachmentRowKey(row)}
                           style={[styles.row, isSel && styles.rowSelected]}
                           onPress={() => openViewerForRow(row)}
                         >
@@ -3286,6 +3398,11 @@ return (
                               {!!row.attribution && (
                                 <Text style={styles.rowSubSmall} numberOfLines={1}>
                                   {row.attribution}
+                                </Text>
+                              )}
+                              {!!row.provenance_label && row.provenance_label !== row.attribution && (
+                                <Text style={styles.rowSubSmall} numberOfLines={1}>
+                                  {row.provenance_label}
                                 </Text>
                               )}
 
@@ -3515,7 +3632,7 @@ return (
                         </TouchableOpacity>
                       </View>
                     )}
-                    {selected?._isPhoto && selected?.asset_placement_id ? (
+                    {selected?._isPhoto ? (
                       <View style={styles.showcaseRow}>
                         <Text style={styles.label}>Hero</Text>
                         <TouchableOpacity
@@ -3821,12 +3938,12 @@ return (
                     showsVerticalScrollIndicator
                   >
                     {filtered.map((row) => {
-                      const isSel = selected?.attachment_id === row.attachment_id;
+                      const isSel = attachmentRowKey(selected) === attachmentRowKey(row);
                       // OR: selected?.asset_placement_id === row.asset_placement_id
                       if (row.kind === "link") {
                         return (
                           <LinkCoverCard
-                            key={row.asset_placement_id || row.placement_id || row.attachment_id}
+                            key={attachmentRowKey(row)}
                             attachment={row}
                             selected={isSel}
                             loading={!!linkCoverLoading[row.attachment_id || row.id]}
@@ -3858,7 +3975,7 @@ return (
                       }
                       return (
                         <TouchableOpacity
-                          key={row.asset_placement_id || row.placement_id || row.attachment_id}
+                          key={attachmentRowKey(row)}
                           style={[styles.row, isSel && styles.rowSelected]}
                           onPress={() => openViewerForRow(row)}
                         >
@@ -3877,6 +3994,11 @@ return (
                               {!!row.attribution && (
                                 <Text style={styles.rowSubSmall} numberOfLines={1}>
                                   {row.attribution}
+                                </Text>
+                              )}
+                              {!!row.provenance_label && row.provenance_label !== row.attribution && (
+                                <Text style={styles.rowSubSmall} numberOfLines={1}>
+                                  {row.provenance_label}
                                 </Text>
                               )}
 

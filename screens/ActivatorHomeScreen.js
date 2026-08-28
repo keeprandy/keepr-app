@@ -40,6 +40,7 @@ import {
   upsertKeeprSpaceOrgTeam,
 } from "../lib/keeprspaceApi";
 import { fetchAssetHeroUris } from "../lib/assetHeroResolver";
+import { listModelTemplateMediaForTemplates } from "../lib/attachmentsApi";
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import { getActionScheduledDueAt, isPlaybookDueDatePending } from "../lib/playbookSchedule";
 import { supabase } from "../lib/supabaseClient";
@@ -1664,11 +1665,30 @@ function NetworkPanel({ data, copy, workspace }) {
   );
 }
 
-function CatalogCard({ template, onPress }) {
+function modelLifecycleStatus(template) {
+  const raw = template?.metadata?.lifecycle_status || template?.metadata?.lifecycle || template?.lifecycle_status;
+  if (raw) return String(raw).toLowerCase();
+  const year = Number(template?.model_year);
+  if (Number.isFinite(year) && year < 2027) return "previous";
+  return "active";
+}
+
+function modelDefinitionStatus(template) {
+  const raw =
+    template?.metadata?.definition_status ||
+    template?.definition_status ||
+    template?.publish_status ||
+    template?.status;
+  return raw ? String(raw).toLowerCase() : "published";
+}
+
+function CatalogCard({ template, templateMedia, onPress, draft, sourceReview, onOpenDraft, onOpenSourceReview }) {
   const stats = template?.metadata?.hero_specs || {};
   const fallbackStats = fallbackTemplateStats(template);
-  const heroMedia = heroMediaFromTemplate(template);
+  const heroMedia = templateMedia?.hero || heroMediaFromTemplate(template);
   const imageLabel = heroMedia ? "Model media" : "Needs model hero";
+  const lifecycle = modelLifecycleStatus(template);
+  const definitionStatus = modelDefinitionStatus(template);
   return (
     <TouchableOpacity style={styles.catalogCard} onPress={onPress} activeOpacity={0.9}>
       <ImageBackground source={mediaAsset(heroMedia)} resizeMode="cover" style={styles.catalogImage} imageStyle={styles.catalogImageAsset}>
@@ -1684,129 +1704,214 @@ function CatalogCard({ template, onPress }) {
         <Text style={styles.catalogTitle} numberOfLines={1}>
           MY{template.model_year} {template.manufacturer} {template.model}
         </Text>
+        <View style={styles.catalogStatusRow}>
+          <View style={[styles.catalogStatusPill, styles[`catalogStatus_${lifecycle}`] || null]}>
+            <Text style={styles.catalogStatusText}>{labelize(lifecycle)}</Text>
+          </View>
+          <View style={styles.catalogStatusPill}>
+            <Text style={styles.catalogStatusText}>{labelize(definitionStatus)}</Text>
+          </View>
+          {draft ? (
+            <View style={[styles.catalogStatusPill, styles.catalogStatus_review]}>
+              <Text style={styles.catalogStatusText}>source draft</Text>
+            </View>
+          ) : null}
+        </View>
         <Text style={styles.catalogText} numberOfLines={2}>
-          Published model guide with standards, options, resources, care, and exact-hull activation context.
+          Reusable model page with media, specs, options, systems, care, resources, and exact-build entry.
         </Text>
         <View style={styles.catalogSpecs}>
           <Text style={styles.catalogSpec}>{stats.loa || fallbackStats.loa} LOA</Text>
           <Text style={styles.catalogSpec}>{stats.beam || fallbackStats.beam} Beam</Text>
           <Text style={styles.catalogSpec}>{stats.max_hp || fallbackStats.max_hp}</Text>
         </View>
+        <View style={styles.catalogFooter}>
+          <Text style={styles.catalogFooterText}>Open model</Text>
+          <View style={styles.catalogFooterActions}>
+            {draft ? (
+              <TouchableOpacity
+                activeOpacity={0.86}
+                style={styles.catalogActionButton}
+                onPress={(event) => {
+                  event?.stopPropagation?.();
+                  onOpenDraft?.(draft);
+                }}
+              >
+                <Text style={styles.catalogActionText}>Review draft</Text>
+              </TouchableOpacity>
+            ) : null}
+            {sourceReview ? (
+              <TouchableOpacity
+                activeOpacity={0.86}
+                style={styles.catalogActionButton}
+                onPress={(event) => {
+                  event?.stopPropagation?.();
+                  onOpenSourceReview?.(template);
+                }}
+              >
+                <Text style={styles.catalogActionText}>Source review</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        </View>
       </View>
     </TouchableOpacity>
   );
 }
 
-function CatalogPanel({ templates, loading, onOpen, onOpenDraft, onOpenSourceReview, adminView = false }) {
+function CatalogPanel({ templates, templateMediaById = {}, loading, onOpen, onOpenDraft, onOpenSourceReview, adminView = false, query = "" }) {
+  const normalizedQuery = String(query || "").trim().toLowerCase();
+  const matchesModelQuery = (template) => {
+    if (!normalizedQuery) return true;
+    const stats = template?.metadata?.hero_specs || {};
+    const fallbackStats = fallbackTemplateStats(template);
+    const searchableText = [
+      template?.template_key,
+      template?.manufacturer,
+      template?.organization_name,
+      template?.model,
+      template?.model_year,
+      template?.series,
+      modelLifecycleStatus(template),
+      modelDefinitionStatus(template),
+      stats.loa || fallbackStats.loa,
+      stats.beam || fallbackStats.beam,
+      stats.max_hp || fallbackStats.max_hp,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return searchableText.includes(normalizedQuery);
+  };
+  const matchesDraftQuery = (draft) => {
+    if (!normalizedQuery) return true;
+    return [
+      draft?.template_key,
+      draft?.manufacturer,
+      draft?.model,
+      draft?.model_year,
+      "draft",
+      "review",
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(normalizedQuery);
+  };
+  const visibleTemplates = templates.filter(matchesModelQuery);
   const draftModels = [draftForCatalogModel("43 LS")].filter(Boolean);
-  const sourceReviewTemplates = templates.filter((template) => template.template_key === TIARA_43_LS_TEMPLATE_KEY);
+  const visibleDraftModels = draftModels.filter(matchesDraftQuery);
+  const sourceReviewTemplates = visibleTemplates.filter((template) => template.template_key === TIARA_43_LS_TEMPLATE_KEY);
+  const draftByTemplateKey = new Map(draftModels.map((draft) => [draft.template_key, draft]));
+  const sourceReviewKeys = new Set(sourceReviewTemplates.map((template) => template.template_key));
+  const draftOnlyModels = visibleDraftModels.filter((draft) => !visibleTemplates.some((template) => template.template_key === draft.template_key));
+  const lifecycleCounts = visibleTemplates.reduce((counts, template) => {
+    const lifecycle = modelLifecycleStatus(template);
+    counts[lifecycle] = (counts[lifecycle] || 0) + 1;
+    return counts;
+  }, {});
+  const reviewCount = visibleTemplates.filter((template) => {
+    const status = modelDefinitionStatus(template);
+    return status === "draft" || status === "review" || sourceReviewKeys.has(template.template_key);
+  }).length + draftOnlyModels.length;
+  const publishedCount = visibleTemplates.filter((template) => modelDefinitionStatus(template) === "published").length;
 
   return (
     <View style={styles.catalogPanel}>
       <View style={styles.networkHeader}>
         <View>
-          <Text style={styles.sectionKicker}>{adminView ? "Template Administration" : "Model Catalog"}</Text>
-          <Text style={styles.sectionTitle}>{adminView ? "Configured templates" : "Published boats"}</Text>
+          <Text style={styles.sectionKicker}>OEM Catalog</Text>
+          <Text style={styles.sectionTitle}>Product lineage</Text>
         </View>
         <View style={styles.networkCount}>
-          <Text style={styles.networkCountValue}>{templates.length}</Text>
+          <Text style={styles.networkCountValue}>{visibleTemplates.length}</Text>
           <Text style={styles.networkCountLabel}>models</Text>
         </View>
       </View>
       <Text style={styles.networkText}>
-        {adminView
-          ? "Admins maintain reusable model truth: sources, system hierarchy, media, manuals, playbooks, and publishing state. Builders use the published template to activate exact hulls."
-          : "Browse model-year templates the way a buyer's guide should become an ownership passport: standards, options, care, and source evidence stay connected."}
+        Current, previous, and retired model years live here as reusable OEM model pages. Open a model to review it, edit its Keepr definition, or build an exact boat from it.
       </Text>
+      <View style={styles.catalogFilterGroups}>
+        <View style={styles.catalogFilterGroup}>
+          <Text style={styles.catalogFilterLabel}>Lifecycle</Text>
+          <View style={styles.catalogStageRow}>
+            <View style={styles.catalogStageChip}>
+              <Text style={styles.catalogStageValue}>{lifecycleCounts.active || 0}</Text>
+              <Text style={styles.catalogStageLabel}>Active</Text>
+            </View>
+            <View style={styles.catalogStageChip}>
+              <Text style={styles.catalogStageValue}>{lifecycleCounts.previous || 0}</Text>
+              <Text style={styles.catalogStageLabel}>Previous</Text>
+            </View>
+            <View style={styles.catalogStageChip}>
+              <Text style={styles.catalogStageValue}>{lifecycleCounts.retired || 0}</Text>
+              <Text style={styles.catalogStageLabel}>Retired</Text>
+            </View>
+          </View>
+        </View>
+        <View style={styles.catalogFilterGroup}>
+          <Text style={styles.catalogFilterLabel}>Keepr definition</Text>
+          <View style={styles.catalogStageRow}>
+            <View style={styles.catalogStageChip}>
+              <Text style={styles.catalogStageValue}>{publishedCount}</Text>
+              <Text style={styles.catalogStageLabel}>Published</Text>
+            </View>
+            <View style={styles.catalogStageChip}>
+              <Text style={styles.catalogStageValue}>{reviewCount}</Text>
+              <Text style={styles.catalogStageLabel}>Draft/review</Text>
+            </View>
+          </View>
+        </View>
+      </View>
       {loading ? (
         <View style={styles.centeredSmall}>
           <ActivityIndicator color={colors.brandBlue} />
         </View>
-      ) : templates.length || draftModels.length ? (
+      ) : visibleTemplates.length || visibleDraftModels.length ? (
         <>
-          {draftModels.length ? (
-            <View style={styles.draftNotice}>
-              <View style={styles.draftNoticeIcon}>
-                <Ionicons name="sparkles-outline" size={17} color={colors.brandBlue} />
-              </View>
-              <View style={styles.draftNoticeText}>
-                <Text style={styles.draftNoticeTitle}>43 LS source draft ready for review</Text>
-                <Text style={styles.draftNoticeBody}>
-                  Review extracted source facts before publishing them into the reusable Model Catalog.
-                </Text>
-              </View>
-              <TouchableOpacity
-                style={styles.draftNoticeButton}
-                onPress={() => onOpenDraft?.(draftModels[0])}
-                activeOpacity={0.86}
-              >
-                <Text style={styles.draftNoticeButtonText}>Review Draft</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
-          {templates.length ? (
+          {visibleTemplates.length ? (
             <View style={styles.catalogGrid}>
-              {templates.map((template) => (
+              {visibleTemplates.map((template) => (
                 <CatalogCard
                   key={template.id}
                   template={template}
+                  templateMedia={templateMediaById[template.id]}
                   onPress={() => onOpen(template)}
+                  draft={draftByTemplateKey.get(template.template_key)}
+                  sourceReview={sourceReviewKeys.has(template.template_key)}
+                  onOpenDraft={onOpenDraft}
+                  onOpenSourceReview={onOpenSourceReview}
                 />
               ))}
-            </View>
-          ) : null}
-          {(draftModels.length || sourceReviewTemplates.length) ? (
-            <View style={styles.templateWorkPanel}>
-              <View style={styles.templateWorkHeader}>
-                <View>
-                  <Text style={styles.sectionKicker}>Template Work</Text>
-                  <Text style={styles.sectionTitle}>Drafts and source reviews</Text>
-                </View>
-                <Text style={styles.mutedText}>
-                  {draftModels.length + sourceReviewTemplates.length} visible
-                </Text>
-              </View>
-              <View style={styles.templateWorkGrid}>
-                {draftModels.map((draft) => (
-                  <TouchableOpacity
-                    key={draft.draft_key}
-                    activeOpacity={0.86}
-                    style={styles.templateWorkCard}
-                    onPress={() => onOpenDraft?.(draft)}
-                  >
-                    <View style={styles.templateWorkIcon}>
-                      <Ionicons name="document-text-outline" size={17} color={colors.brandBlue} />
+              {draftOnlyModels.map((draft) => (
+                <TouchableOpacity
+                  key={draft.draft_key}
+                  activeOpacity={0.86}
+                  style={[styles.catalogCard, styles.catalogDraftCard]}
+                  onPress={() => onOpenDraft?.(draft)}
+                >
+                  <View style={styles.catalogDraftIcon}>
+                    <Ionicons name="document-text-outline" size={22} color={colors.brandBlue} />
+                  </View>
+                  <View style={styles.catalogBody}>
+                    <Text style={styles.catalogKicker}>Draft model</Text>
+                    <Text style={styles.catalogTitle}>MY{draft.model_year} {draft.manufacturer} {draft.model}</Text>
+                    <Text style={styles.catalogText}>Source facts are waiting for review before this model joins the lineage.</Text>
+                    <View style={styles.catalogStatusRow}>
+                      <View style={[styles.catalogStatusPill, styles.catalogStatus_review]}>
+                        <Text style={styles.catalogStatusText}>review</Text>
+                      </View>
                     </View>
-                    <View style={styles.templateWorkText}>
-                      <Text style={styles.templateWorkTitle}>43 LS template draft</Text>
-                      <Text style={styles.templateWorkMeta}>Review source facts before publishing to Models.</Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-                  </TouchableOpacity>
-                ))}
-                {sourceReviewTemplates.map((template) => (
-                  <TouchableOpacity
-                    key={`${template.template_key}-source-review`}
-                    activeOpacity={0.86}
-                    style={styles.templateWorkCard}
-                    onPress={() => onOpenSourceReview?.(template)}
-                  >
-                    <View style={styles.templateWorkIcon}>
-                      <Ionicons name="git-branch-outline" size={17} color={colors.brandBlue} />
-                    </View>
-                    <View style={styles.templateWorkText}>
-                      <Text style={styles.templateWorkTitle}>43 LS source review</Text>
-                      <Text style={styles.templateWorkMeta}>Review extracted model-source knowledge for the published template.</Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-                  </TouchableOpacity>
-                ))}
-              </View>
+                  </View>
+                </TouchableOpacity>
+              ))}
             </View>
           ) : null}
         </>
       ) : (
-        <Text style={styles.mutedTextLeft}>No published model guides are visible for this workspace yet.</Text>
+        <Text style={styles.mutedTextLeft}>
+          {normalizedQuery ? "No models match that search." : "No published model guides are visible for this workspace yet."}
+        </Text>
       )}
     </View>
   );
@@ -3273,6 +3378,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   const [data, setData] = useState(null);
   const [assetHeroUrls, setAssetHeroUrls] = useState({});
   const [catalogTemplates, setCatalogTemplates] = useState([]);
+  const [catalogTemplateMediaById, setCatalogTemplateMediaById] = useState({});
   const [exactBuildDrafts, setExactBuildDrafts] = useState([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [orgConfig, setOrgConfig] = useState(null);
@@ -3542,9 +3648,16 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
       try {
         const nextTemplates = await getCatalogTemplates(kind === "oem" ? orgId : null);
         setCatalogTemplates(nextTemplates);
+        try {
+          setCatalogTemplateMediaById(await listModelTemplateMediaForTemplates(nextTemplates));
+        } catch (mediaErr) {
+          console.warn("Activator catalog template media unavailable:", mediaErr?.message || mediaErr);
+          setCatalogTemplateMediaById({});
+        }
       } catch (catalogErr) {
         console.warn("Activator catalog templates unavailable:", catalogErr?.message || catalogErr);
         setCatalogTemplates([]);
+        setCatalogTemplateMediaById({});
       }
 
       if (kind === "oem" && orgId) {
@@ -4076,6 +4189,17 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
     : currentKind === "oem"
     ? TIARA_OEM_LOGO
     : null;
+  const modeHeroCopy = mode === "templates"
+    ? {
+        eyebrow: "OEM Catalog",
+        title: `${copy.name} product lineage`,
+        subtitle: "Current, previous, and retired model years. Open a model, edit its reusable definition, or build an exact boat from it.",
+      }
+    : {
+        eyebrow: copy.eyebrow,
+        title: copy.title,
+        subtitle: copy.subtitle,
+      };
   const heroInner = (
     <View style={styles.heroOverlay}>
       {shouldShowHeroLogo ? (
@@ -4092,9 +4216,9 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
         )
       ) : null}
       <View style={styles.heroCopy}>
-        <Text style={styles.eyebrow}>{copy.eyebrow}</Text>
-        <Text style={styles.title}>{copy.title}</Text>
-        <Text style={styles.subtitle}>{copy.subtitle}</Text>
+        <Text style={styles.eyebrow}>{modeHeroCopy.eyebrow}</Text>
+        <Text style={styles.title}>{modeHeroCopy.title}</Text>
+        <Text style={styles.subtitle}>{modeHeroCopy.subtitle}</Text>
         <View style={styles.heroActions}>
           <View style={styles.workspaceBadge}>
             <Ionicons name="briefcase-outline" size={15} color={colors.brandNavy} />
@@ -4195,7 +4319,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
                 <TextInput
                   value={search}
                   onChangeText={setSearch}
-                  placeholder={copy.search}
+                  placeholder={mode === "templates" ? "Search models, years, series..." : copy.search}
                   placeholderTextColor={colors.textMuted}
                   style={styles.searchInput}
                   returnKeyType="search"
@@ -4206,11 +4330,13 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
               ) : null}
             </View>
 
-            <View style={styles.metricsRow}>
-              <MetricTile label={copy.primaryMetric} value={counts.visible_boats ?? "0"} icon="boat-outline" />
-              <MetricTile label={copy.filteredMetric} value={counts.filtered_boats ?? "0"} icon="filter-outline" />
-              <MetricTile label={mode === "builds" ? buildsMetricLabel : "Workspace"} value={mode === "builds" ? buildsMetricValue : copy.modeMetric} icon="compass-outline" />
-            </View>
+            {mode !== "templates" ? (
+              <View style={styles.metricsRow}>
+                <MetricTile label={copy.primaryMetric} value={counts.visible_boats ?? "0"} icon="boat-outline" />
+                <MetricTile label={copy.filteredMetric} value={counts.filtered_boats ?? "0"} icon="filter-outline" />
+                <MetricTile label={mode === "builds" ? buildsMetricLabel : "Workspace"} value={mode === "builds" ? buildsMetricValue : copy.modeMetric} icon="compass-outline" />
+              </View>
+            ) : null}
 
             {mode === "profile" ? (
               <KeeprSpaceAdminPanel
@@ -4267,11 +4393,13 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
             ) : mode === "templates" ? (
               <CatalogPanel
                 templates={catalogTemplates}
+                templateMediaById={catalogTemplateMediaById}
                 loading={catalogLoading}
                 onOpen={openCatalogTemplate}
                 onOpenDraft={openTemplateDraft}
                 onOpenSourceReview={openTemplateSourceReview}
                 adminView
+                query={search}
               />
             ) : mode === "builds" ? (
               <ProductionBuildsPanel
@@ -5147,6 +5275,47 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     marginTop: spacing.lg,
   },
+  catalogStageRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  catalogFilterGroups: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.lg,
+    marginTop: spacing.lg,
+  },
+  catalogFilterGroup: {
+    gap: spacing.xs,
+  },
+  catalogFilterLabel: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  catalogStageChip: {
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    minWidth: 112,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  catalogStageValue: {
+    color: colors.textPrimary,
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  catalogStageLabel: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: "900",
+    marginTop: 2,
+    textTransform: "uppercase",
+  },
   catalogCard: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
@@ -5158,6 +5327,21 @@ const styles = StyleSheet.create({
     minWidth: 310,
     overflow: "hidden",
     ...shadows.sm,
+  },
+  catalogDraftCard: {
+    justifyContent: "center",
+    minHeight: 286,
+    paddingTop: spacing.lg,
+  },
+  catalogDraftIcon: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: "#EFF6FF",
+    borderRadius: radius.sm,
+    height: 44,
+    justifyContent: "center",
+    marginHorizontal: spacing.lg,
+    width: 44,
   },
   catalogImage: {
     backgroundColor: "#0B1220",
@@ -5207,6 +5391,42 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     marginTop: spacing.xs,
   },
+  catalogStatusRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+  },
+  catalogStatusPill: {
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+  },
+  catalogStatus_active: {
+    backgroundColor: "#ECFDF5",
+    borderColor: "#BBF7D0",
+  },
+  catalogStatus_previous: {
+    backgroundColor: "#EFF6FF",
+    borderColor: "#BFDBFE",
+  },
+  catalogStatus_retired: {
+    backgroundColor: "#F8FAFC",
+    borderColor: "#CBD5E1",
+  },
+  catalogStatus_review: {
+    backgroundColor: "#FFFBEB",
+    borderColor: "#FDE68A",
+  },
+  catalogStatusText: {
+    color: colors.textSecondary,
+    fontSize: 10,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
   catalogText: {
     color: colors.textMuted,
     fontSize: 12,
@@ -5229,6 +5449,37 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
+  },
+  catalogFooter: {
+    alignItems: "center",
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+  },
+  catalogFooterText: {
+    color: colors.brandBlue,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  catalogFooterActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    justifyContent: "flex-end",
+  },
+  catalogActionButton: {
+    backgroundColor: colors.primary,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  catalogActionText: {
+    color: colors.onPrimary,
+    fontSize: 11,
+    fontWeight: "900",
   },
   centeredSmall: {
     alignItems: "center",

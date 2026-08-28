@@ -22,6 +22,7 @@ import {
   publishExactBuildDraft,
   upsertExactBuildDraft,
 } from "../lib/activatorApi";
+import { getSignedUrl, listAttachmentsForTarget } from "../lib/attachmentsApi";
 import {
   TIARA_56_LS_TEMPLATE_KEY,
   TIARA_SYSTEM_CATEGORIES,
@@ -30,6 +31,7 @@ import {
   tiara56LsCatalogTemplate,
   tiaraKf018FactoryBuild,
 } from "../data/tiaraKf018FactoryBuild";
+import { projectModelTemplateDetail } from "../lib/modelTemplateProjection";
 import { layoutStyles } from "../styles/layout";
 import { colors, radius, shadows, spacing } from "../styles/theme";
 
@@ -182,12 +184,95 @@ function valueText(value) {
   return null;
 }
 
+function templateHeroPlacementId(template = {}) {
+  const metadata = template?.metadata && typeof template.metadata === "object" ? template.metadata : {};
+  return (
+    metadata.presentation?.hero_placement_id ||
+    metadata.presentation?.heroPlacementId ||
+    metadata.model_media?.hero_placement_id ||
+    metadata.hero_placement_id ||
+    null
+  );
+}
+
 function mediaAsset(media) {
-  return SHOWCASE_ASSETS[media?.local_asset_key] || SHOWCASE_ASSETS[media?.metadata?.local_asset_key] || BOAT_HERO;
+  const localAsset = SHOWCASE_ASSETS[media?.local_asset_key] || SHOWCASE_ASSETS[media?.metadata?.local_asset_key];
+  if (localAsset) return localAsset;
+
+  const uri =
+    media?.attachment_signed_url ||
+    media?.attachment_storage_signed_url ||
+    media?.signed_url ||
+    media?.attachment_url ||
+    media?.url ||
+    media?.public_url ||
+    media?.publicUrl ||
+    media?.uri ||
+    media?.metadata?.attachment_signed_url ||
+    media?.metadata?.attachment_storage_signed_url ||
+    media?.metadata?.attachment_url ||
+    media?.metadata?.url ||
+    media?.metadata?.uri ||
+    null;
+
+  if (uri && !String(uri).startsWith("app://")) return { uri };
+  return BOAT_HERO;
 }
 
 function mediaByRole(media = [], role) {
+  if (role === "hero") return media.find((item) => item.is_hero || item.role === role || item.metadata?.role === role);
+  if (role === "showcase") return media.find((item) => item.is_showcase || item.role === role || item.metadata?.role === role);
   return media.find((item) => item.role === role || item.metadata?.role === role);
+}
+
+async function hydrateTemplateAttachmentMedia(template) {
+  if (!template?.id) return [];
+  const rows = await listAttachmentsForTarget("model_template", template.id);
+  const heroPlacementId = templateHeroPlacementId(template);
+  const mediaRows = (rows || []).filter((row) => {
+    const mime = String(row.mime_type || "").toLowerCase();
+    return row.kind === "photo" || mime.startsWith("image/");
+  });
+
+  return Promise.all(
+    mediaRows.map(async (row) => {
+      let signedUrl = row.attachment_signed_url || row.signed_url || null;
+      if (!signedUrl && !row.url && row.bucket && row.storage_path) {
+        try {
+          signedUrl = await getSignedUrl({
+            bucket: row.bucket,
+            path: row.storage_path,
+            expiresIn: 3600,
+            transform: { width: 1600, height: 900, resize: "cover", quality: 86 },
+          });
+        } catch (err) {
+          console.log("Exact build template hero signing failed", err);
+        }
+      }
+      const isHero = !!row.placement_id && row.placement_id === heroPlacementId;
+      return {
+        ...row,
+        id: row.placement_id || row.attachment_id || row.id,
+        role: isHero ? "hero" : row.role || "gallery",
+        is_hero: isHero,
+        attachment_signed_url: signedUrl || row.attachment_signed_url || null,
+        attachment_storage_signed_url: signedUrl || row.attachment_storage_signed_url || null,
+        signed_url: signedUrl || row.signed_url || null,
+        metadata: {
+          ...(row.metadata || {}),
+          ...(row.ai_metadata || {}),
+          attachment_id: row.attachment_id || null,
+          placement_id: row.placement_id || null,
+          media_source: "attachment_placements",
+          placements: {
+            hero: isHero,
+            showcase: !!row.is_showcase,
+          },
+          not_exact_hull_media: true,
+        },
+      };
+    })
+  );
 }
 
 function groupTemplateItems(items = []) {
@@ -301,6 +386,7 @@ function draftItemPayload(option) {
       label: option.label,
       group: option.group,
       mode: option.mode,
+      projection: option.projection || { kind: "none", reason: "missing_projection" },
     },
   };
 }
@@ -591,6 +677,7 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
   const routeDraftId = route?.params?.draftId || webSearchParam("draftId") || null;
   const routeDraftKey = route?.params?.draftKey || webSearchParam("draftKey") || null;
   const [detail, setDetail] = useState(null);
+  const [templateAttachmentMedia, setTemplateAttachmentMedia] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
@@ -645,11 +732,18 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
           organizationId,
         }) : Promise.resolve(null),
       ]);
-      if (next.status === "fulfilled" && next.value) setDetail(next.value);
-      else if (localTemplateFallback) setDetail(localTemplateFallback);
+      if (next.status === "fulfilled" && next.value) {
+        setDetail(next.value);
+        setTemplateAttachmentMedia(await hydrateTemplateAttachmentMedia(next.value?.template));
+      }
+      else if (localTemplateFallback) {
+        setDetail(localTemplateFallback);
+        setTemplateAttachmentMedia([]);
+      }
       else {
         console.warn("Activator catalog detail unavailable for exact-build route.", next.reason);
         setDetail(null);
+        setTemplateAttachmentMedia([]);
       }
 
       if (buildWorkspace.status === "fulfilled" && buildWorkspace.value?.line_items?.length) {
@@ -675,6 +769,7 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
       console.error("Activator exact build failed:", err);
       setError(err?.message || "Could not open this build workspace.");
       setDetail(null);
+      setTemplateAttachmentMedia([]);
       const localBuild = getTiaraExactFactoryBuild({ templateKey, buildKey: exactBuildKey, hullNumber })
         || (!exactBuildKey && !hullNumber ? getDefaultTiaraExactFactoryBuildForTemplate(templateKey) : null);
       setFactoryBuild(localBuild);
@@ -689,8 +784,9 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
     load();
   }, [load]);
 
-  const template = detail?.template || {};
-  const resources = detail?.resources || [];
+  const modelProjection = useMemo(() => projectModelTemplateDetail(detail), [detail]);
+  const template = modelProjection.template || {};
+  const resources = modelProjection.resources || [];
   const workOrder = factoryBuild?.work_order || null;
   const exactDraft = draftWorkspace?.draft || null;
   const exactDraftItems = useMemo(() => draftWorkspace?.items || [], [draftWorkspace?.items]);
@@ -705,13 +801,20 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
   const hasFactoryBuild = Boolean(factoryBuild && factoryLines.length);
   const digitalTwinAssetId = workOrder?.asset_id || factoryBuild?.asset_id || null;
   const digitalTwinKac = workOrder?.kac_id || factoryBuild?.kac_id || (workOrder?.build_code ? `KAC-TIARA-56LS-${String(workOrder.build_code).toUpperCase()}` : null);
-  const showcaseMedia = detail?.showcase_media || [];
-  const heroMedia = mediaByRole(showcaseMedia, "hero");
+  const projectedMedia = modelProjection.media?.items?.length ? modelProjection.media.items : detail?.showcase_media || [];
+  const showcaseMedia = templateAttachmentMedia.length ? templateAttachmentMedia : projectedMedia;
+  const heroMedia =
+    mediaByRole(templateAttachmentMedia, "hero") ||
+    modelProjection.media?.hero ||
+    mediaByRole(showcaseMedia, "hero");
   const templateItems = useMemo(() => groupTemplateItems(detail?.items || []), [detail?.items]);
   const standardItems = templateItems.filter((item) => item.applicability?.standard_state === "standard");
   const operationalTemplateItems = standardItems.filter((item) => ["system", "equipment", "resource"].includes(item.item_type));
   const freshwaterItems = standardItems.filter((item) => item.canonical_key?.startsWith("system.freshwater") || item.canonical_key?.startsWith("knowledge.freshwater") || item.canonical_key?.startsWith("playbook.freshwater"));
-  const configuredTemplateOptions = useMemo(() => templateConfiguredOptions(detail?.items || []), [detail?.items]);
+  const configuredTemplateOptions = useMemo(() => {
+    const projectedOptions = modelProjection.configuration?.buildEligibleItems || [];
+    return projectedOptions.length ? projectedOptions : templateConfiguredOptions(detail?.items || []);
+  }, [detail?.items, modelProjection]);
   const optionGroups = useMemo(() => groupedOptions(options), [options]);
   const selectedOptions = options.filter((option) => option.selected);
   const compiled = useMemo(() => {

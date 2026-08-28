@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -19,10 +20,19 @@ import {
   retireCatalogTemplateItem,
   upsertCatalogTemplateItem,
 } from "../lib/activatorApi";
+import { projectModelTemplateDetail } from "../lib/modelTemplateProjection";
 import { layoutStyles } from "../styles/layout";
 import { colors, radius, shadows, spacing } from "../styles/theme";
 
 const CONFIG_SECTION_KEY = "section.configuration";
+const SPEC_SECTION_KEY = "section.specifications";
+const PRIME_FACTS = [
+  { key: "spec.loa", label: "LOA", placeholder: "43'6\"", unitPlaceholder: "ft" },
+  { key: "spec.beam", label: "Beam", placeholder: "13'0\"", unitPlaceholder: "ft" },
+  { key: "spec.max_horsepower", label: "Max HP", placeholder: "1,200", unitPlaceholder: "HP" },
+  { key: "spec.fuel_capacity", label: "Fuel", placeholder: "400", unitPlaceholder: "gal" },
+  { key: "spec.water_capacity", label: "Water", placeholder: "60", unitPlaceholder: "gal" },
+];
 const ITEM_KINDS = ["configuration_item", "choice", "option", "component", "system"];
 const ITEM_STATES = ["standard", "optional", "selected", "unselected", "model_expected"];
 const MAPPING_STATES = ["unmapped", "partially_mapped", "mapped", "needs_review"];
@@ -91,6 +101,27 @@ function jsonTextOrEmpty(value) {
   return jsonText(value, "{}");
 }
 
+function valueText(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string" || typeof value === "number") return String(value);
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (Array.isArray(value)) return value.join(", ");
+  if (typeof value === "object" && Object.keys(value).length === 0) return "";
+  if (value.value !== undefined) return [value.value, value.unit].filter(Boolean).join(" · ");
+  return JSON.stringify(value);
+}
+
+function splitExpectedValue(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { value: value ? String(value) : "", unit: "", metric: "" };
+  }
+  return {
+    value: value.value !== undefined ? String(value.value) : "",
+    unit: value.unit !== undefined ? String(value.unit) : "",
+    metric: value.metric !== undefined ? String(value.metric) : "",
+  };
+}
+
 function parseJsonField(text, fieldName) {
   const trimmed = String(text || "").trim();
   if (!trimmed) return {};
@@ -151,6 +182,26 @@ function Field({ label, value, onChangeText, placeholder, multiline = false }) {
         style={[styles.input, multiline && styles.textarea]}
       />
     </View>
+  );
+}
+
+function PrimeFactTile({ definition, item, selected, onPress }) {
+  return (
+    <TouchableOpacity
+      accessibilityRole="button"
+      accessibilityState={{ selected: !!selected }}
+      activeOpacity={0.86}
+      onPress={onPress}
+      style={[styles.factTile, selected && styles.factTileSelected]}
+    >
+      <Text style={styles.factValue} numberOfLines={1}>
+        {valueText(item?.expected_value) || "Not set"}
+      </Text>
+      <Text style={styles.factLabel}>{definition.label}</Text>
+      <Text style={styles.factSource} numberOfLines={1}>
+        {item?.source_resource_id ? "Source-backed" : "Needs source"}
+      </Text>
+    </TouchableOpacity>
   );
 }
 
@@ -240,6 +291,8 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
   const [selectedGroupId, setSelectedGroupId] = useState(null);
   const [editingGroup, setEditingGroup] = useState(null);
   const [editingItem, setEditingItem] = useState(null);
+  const [showGroupModal, setShowGroupModal] = useState(false);
+  const [showItemModal, setShowItemModal] = useState(false);
   const [collapsedGroupIds, setCollapsedGroupIds] = useState([]);
   const [typeFilter, setTypeFilter] = useState("all");
   const [groupLabel, setGroupLabel] = useState("");
@@ -259,6 +312,12 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
   const [resourcesText, setResourcesText] = useState("");
   const [playbooksText, setPlaybooksText] = useState("");
   const [requirementsText, setRequirementsText] = useState("");
+  const [editingFactKey, setEditingFactKey] = useState(route?.params?.focusCanonicalKey || PRIME_FACTS[0].key);
+  const [factValue, setFactValue] = useState("");
+  const [factUnit, setFactUnit] = useState("");
+  const [factMetric, setFactMetric] = useState("");
+  const [factSourceResourceId, setFactSourceResourceId] = useState(null);
+  const [factProvenanceNote, setFactProvenanceNote] = useState("");
 
   const load = useCallback(async ({ quiet = false } = {}) => {
     if (!templateKey) {
@@ -272,7 +331,8 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
     try {
       const next = await getCatalogTemplateDetail({ templateKey });
       setDetail(next);
-      const groups = activeItems(next?.items).filter((item) => item.item_type === "configuration_group");
+      const projected = projectModelTemplateDetail(next);
+      const groups = projected.configuration.groups.map(({ group }) => group);
       setSelectedGroupId((current) => current || groups[0]?.id || null);
     } catch (err) {
       console.error("Template configuration workbench failed:", err);
@@ -288,11 +348,19 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
     load();
   }, [load]);
 
-  const template = detail?.template || {};
-  const resources = detail?.resources || [];
-  const items = activeItems(detail?.items || []);
+  const modelProjection = useMemo(() => projectModelTemplateDetail(detail), [detail]);
+  const template = modelProjection.template || {};
+  const resources = modelProjection.resources || [];
+  const items = modelProjection.items || [];
   const configurationSection = items.find((item) => item.canonical_key === CONFIG_SECTION_KEY);
-  const groups = items.filter((item) => item.item_type === "configuration_group");
+  const configurationGroups = modelProjection.configuration.groups || [];
+  const groups = configurationGroups.map(({ group }) => group);
+  const specItems = PRIME_FACTS.map((definition) => ({
+    definition,
+    item: items.find((item) => item.canonical_key === definition.key) || null,
+  }));
+  const editingFactDefinition = PRIME_FACTS.find((definition) => definition.key === editingFactKey) || PRIME_FACTS[0];
+  const editingFactItem = items.find((item) => item.canonical_key === editingFactDefinition.key) || null;
   const childrenByParent = useMemo(() => {
     return items.reduce((acc, item) => {
       if (!item.parent_item_id) return acc;
@@ -304,28 +372,25 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
   const selectedGroup = groups.find((group) => group.id === selectedGroupId) || groups[0] || null;
   const collapsedGroupSet = useMemo(() => new Set(collapsedGroupIds), [collapsedGroupIds]);
   const filterCounts = useMemo(() => {
-    const nonGroupItems = items.filter((item) => item.item_type !== "configuration_group" && item.item_type !== "section");
+    const nonGroupItems = configurationGroups.flatMap(({ children }) => children);
     return TYPE_FILTERS.reduce((acc, filter) => {
       acc[filter.key] = filter.key === "all"
         ? nonGroupItems.length
         : nonGroupItems.filter((item) => matchesTypeFilter(item, filter.key)).length;
       return acc;
     }, {});
-  }, [items]);
+  }, [configurationGroups]);
   const visibleGroups = useMemo(() => {
     if (typeFilter === "all") {
-      return groups.map((group) => ({
-        group,
-        children: childrenByParent[group.id] || [],
-      }));
+      return configurationGroups;
     }
-    return groups
-      .map((group) => ({
+    return configurationGroups
+      .map(({ group, children }) => ({
         group,
-        children: (childrenByParent[group.id] || []).filter((child) => matchesTypeFilter(child, typeFilter)),
+        children: children.filter((child) => matchesTypeFilter(child, typeFilter)),
       }))
       .filter(({ group, children }) => matchesTypeFilter(group, typeFilter) || children.length);
-  }, [childrenByParent, groups, typeFilter]);
+  }, [configurationGroups, typeFilter]);
 
   const refresh = () => {
     setRefreshing(true);
@@ -337,6 +402,23 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
     setGroupLabel("");
     setGroupCode("");
   };
+
+  const editFact = (definition) => {
+    const item = items.find((candidate) => candidate.canonical_key === definition.key) || null;
+    const parsed = splitExpectedValue(item?.expected_value);
+    setEditingFactKey(definition.key);
+    setFactValue(parsed.value);
+    setFactUnit(parsed.unit);
+    setFactMetric(parsed.metric);
+    setFactSourceResourceId(item?.source_resource_id || resources[0]?.id || null);
+    setFactProvenanceNote(item?.metadata?.provenance_note || item?.metadata?.source_note || "");
+  };
+
+  useEffect(() => {
+    if (!detail || !editingFactKey) return;
+    const definition = PRIME_FACTS.find((candidate) => candidate.key === editingFactKey);
+    if (definition) editFact(definition);
+  }, [detail, editingFactKey]);
 
   const toggleGroupCollapsed = (groupId) => {
     setCollapsedGroupIds((current) => (
@@ -411,6 +493,72 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
     return result?.item;
   };
 
+  const ensureSpecSection = async () => {
+    const existing = items.find((item) => item.canonical_key === SPEC_SECTION_KEY || item.canonical_key === "brochure.specifications");
+    if (existing?.id) return existing;
+    const result = await upsertCatalogTemplateItem({
+      templateId: template.id,
+      itemType: "section",
+      canonicalKey: SPEC_SECTION_KEY,
+      label: "Specifications",
+      expectedValue: {},
+      applicability: { standard_state: "model_expected" },
+      metadata: {
+        source: "template_configuration_workbench",
+        purpose: "model_prime_facts",
+      },
+      sortOrder: 10,
+    });
+    return result?.item;
+  };
+
+  const saveFact = async () => {
+    if (!template?.id || !editingFactDefinition) return;
+    const value = factValue.trim();
+    if (!value) {
+      Alert.alert("Value required", `Enter a value for ${editingFactDefinition.label} before saving.`);
+      return;
+    }
+
+    setSaving(true);
+    setNotice(null);
+    try {
+      const section = await ensureSpecSection();
+      const expectedValue = {
+        value,
+        unit: factUnit.trim() || null,
+        metric: factMetric.trim() || null,
+      };
+      await upsertCatalogTemplateItem({
+        templateId: template.id,
+        itemType: "spec",
+        canonicalKey: editingFactDefinition.key,
+        label: editingFactDefinition.label,
+        parentItemId: section?.id || null,
+        expectedValue,
+        applicability: {
+          standard_state: "standard",
+          source_backed: !!factSourceResourceId,
+        },
+        sourceResourceId: factSourceResourceId,
+        metadata: {
+          source: "template_configuration_workbench",
+          provenance_note: factProvenanceNote.trim() || null,
+          display_priority: "prime",
+          editable_as: "model_fact",
+        },
+        sortOrder: 11 + PRIME_FACTS.findIndex((definition) => definition.key === editingFactDefinition.key),
+      });
+      await load({ quiet: true });
+      setNotice(`${editingFactDefinition.label} saved to this model template.`);
+    } catch (err) {
+      setNotice({ type: "error", message: err?.message || "The model fact could not be saved." });
+      Alert.alert("Could not save fact", err?.message || "The model fact could not be saved.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const saveGroup = async () => {
     if (!template?.id) return;
     const label = groupLabel.trim();
@@ -446,6 +594,7 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
         sortOrder: editingGroup?.sort_order || 31 + groups.length,
       });
       resetGroupForm();
+      setShowGroupModal(false);
       await load({ quiet: true });
       setSelectedGroupId(result?.item?.id || selectedGroupId);
       setNotice(`${label} saved to this model template.`);
@@ -525,6 +674,7 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
         setEditingItem(result.item);
         setSelectedGroupId(result.item.parent_item_id || parent.id);
       }
+      setShowItemModal(false);
       setNotice(`${label} saved under ${parent.label}.`);
     } catch (err) {
       setNotice({ type: "error", message: err?.message || "The configuration item could not be saved." });
@@ -617,6 +767,40 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
           </View>
         </View>
 
+        {!loading && !error ? (
+          <View style={styles.primeFactsPanel}>
+            <View style={styles.panelHeader}>
+              <View>
+                <Text style={styles.kicker}>Prime Model Facts</Text>
+                <Text style={styles.panelTitle}>Specs shown on the catalog page</Text>
+              </View>
+              <Text style={styles.countText}>{specItems.filter(({ item }) => item).length} set</Text>
+            </View>
+            <View style={styles.factRow}>
+              {specItems.map(({ definition, item }) => (
+                <PrimeFactTile
+                  key={definition.key}
+                  definition={definition}
+                  item={item}
+                  selected={editingFactKey === definition.key}
+                  onPress={() => {
+                    if (item?.id) {
+                      navigation.navigate("ActivatorTemplateItemEditor", {
+                        templateKey,
+                        itemId: item.id,
+                        organizationId,
+                        workspaceId,
+                      });
+                    } else {
+                      editFact(definition);
+                    }
+                  }}
+                />
+              ))}
+            </View>
+          </View>
+        ) : null}
+
         {notice ? (
           <View style={[styles.notice, notice?.type === "error" && styles.noticeError]}>
             <Ionicons
@@ -648,7 +832,30 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
                     <Text style={styles.kicker}>Level-1 Groups</Text>
                     <Text style={styles.panelTitle}>OEM configuration</Text>
                   </View>
-                  <Text style={styles.countText}>{typeFilter === "all" ? groups.length : visibleGroups.length}</Text>
+                  <View style={styles.headerActions}>
+                    <Text style={styles.countText}>{typeFilter === "all" ? groups.length : visibleGroups.length}</Text>
+                    <TouchableOpacity
+                      activeOpacity={0.86}
+                      onPress={() => {
+                        resetGroupForm();
+                        setShowGroupModal(true);
+                      }}
+                      style={styles.secondaryButton}
+                    >
+                      <Text style={styles.secondaryButtonText}>Add Group</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      activeOpacity={0.86}
+                      onPress={() => {
+                        resetItemForm();
+                        setSelectedGroupId(selectedGroup?.id || groups[0]?.id || null);
+                        setShowItemModal(true);
+                      }}
+                      style={styles.secondaryButton}
+                    >
+                      <Text style={styles.secondaryButtonText}>Add Item</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
                 <View style={styles.filterRow}>
                   {TYPE_FILTERS.map((filter) => (
@@ -669,8 +876,12 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
                         selected={selectedGroup?.id === group.id && !editingItem}
                         expanded={!collapsedGroupSet.has(group.id)}
                         onPress={() => {
-                          editGroup(group);
-                          resetItemForm();
+                          navigation.navigate("ActivatorTemplateItemEditor", {
+                            templateKey,
+                            itemId: group.id,
+                            organizationId,
+                            workspaceId,
+                          });
                         }}
                         onToggleExpand={() => toggleGroupCollapsed(group.id)}
                         onRetire={() => retireItem(group)}
@@ -683,7 +894,14 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
                               item={child}
                               indented
                               selected={editingItem?.id === child.id}
-                              onPress={() => editItem(child)}
+                              onPress={() => {
+                                navigation.navigate("ActivatorTemplateItemEditor", {
+                                  templateKey,
+                                  itemId: child.id,
+                                  organizationId,
+                                  workspaceId,
+                                });
+                              }}
                               onRetire={() => retireItem(child)}
                             />
                           ))}
@@ -700,55 +918,56 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
                 </View>
               </View>
             </View>
+          </View>
+        )}
 
-            <View style={styles.rightColumn}>
-              <View style={styles.panel}>
-                <View style={styles.panelHeader}>
-                  <View>
-                    <Text style={styles.kicker}>Add Group</Text>
-                    <Text style={styles.panelTitle}>{editingGroup ? "Edit OEM group" : "OEM group label"}</Text>
-                  </View>
-                  {editingGroup ? (
-                    <TouchableOpacity activeOpacity={0.86} onPress={resetGroupForm} style={styles.secondaryButton}>
-                      <Text style={styles.secondaryButtonText}>New Group</Text>
-                    </TouchableOpacity>
-                  ) : null}
+        <Modal visible={showGroupModal} transparent animationType="fade" onRequestClose={() => setShowGroupModal(false)}>
+          <View style={styles.modalBackdrop}>
+            <View style={styles.modalPanel}>
+              <View style={styles.panelHeader}>
+                <View>
+                  <Text style={styles.kicker}>Add Group</Text>
+                  <Text style={styles.panelTitle}>OEM group label</Text>
                 </View>
-                <Field label="OEM group label" value={groupLabel} onChangeText={setGroupLabel} placeholder="Propulsion" />
-                <Field label="OEM group/source code" value={groupCode} onChangeText={setGroupCode} placeholder="Optional code" />
-                <TouchableOpacity disabled={saving} activeOpacity={0.86} style={styles.primaryButton} onPress={saveGroup}>
-                  {saving ? <ActivityIndicator color={colors.onPrimary} /> : <Ionicons name="save-outline" size={16} color={colors.onPrimary} />}
-                  <Text style={styles.primaryButtonText}>{editingGroup ? "Save Group Changes" : "Save Group"}</Text>
+                <TouchableOpacity accessibilityLabel="Close" onPress={() => setShowGroupModal(false)} style={styles.iconButton}>
+                  <Ionicons name="close" size={18} color={colors.textMuted} />
                 </TouchableOpacity>
               </View>
+              <View style={styles.modalBodyContent}>
+                <Field label="OEM group label" value={groupLabel} onChangeText={setGroupLabel} placeholder="Propulsion" />
+                <Field label="OEM group/source code" value={groupCode} onChangeText={setGroupCode} placeholder="Optional code" />
+              </View>
+              <View style={styles.modalFooter}>
+                <TouchableOpacity disabled={saving} activeOpacity={0.86} style={styles.primaryButton} onPress={saveGroup}>
+                  {saving ? <ActivityIndicator color={colors.onPrimary} /> : <Ionicons name="save-outline" size={16} color={colors.onPrimary} />}
+                  <Text style={styles.primaryButtonText}>Save Group</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
 
-              <View style={styles.panel}>
-                <View style={styles.panelHeader}>
-                  <View>
-                    <Text style={styles.kicker}>{editingItem ? "Edit Item" : "Add Item"}</Text>
-                    <Text style={styles.panelTitle}>{selectedGroup?.label || "Select a group first"}</Text>
-                  </View>
-                  {editingItem ? (
-                    <View style={styles.headerActions}>
-                      <TouchableOpacity activeOpacity={0.86} onPress={resetItemForm} style={styles.secondaryButton}>
-                        <Text style={styles.secondaryButtonText}>New Item</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity disabled={saving} activeOpacity={0.86} style={styles.headerSaveButton} onPress={saveItem}>
-                        <Ionicons name="save-outline" size={14} color={colors.onPrimary} />
-                        <Text style={styles.headerSaveButtonText}>Save</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ) : null}
+        <Modal visible={showItemModal} transparent animationType="fade" onRequestClose={() => setShowItemModal(false)}>
+          <View style={styles.modalBackdrop}>
+            <View style={styles.modalPanel}>
+              <View style={styles.panelHeader}>
+                <View>
+                  <Text style={styles.kicker}>Add Item</Text>
+                  <Text style={styles.panelTitle}>{selectedGroup?.label || "Select a group first"}</Text>
                 </View>
-                <Field label="OEM item label" value={itemLabel} onChangeText={setItemLabel} placeholder="" />
-                <Field label="OEM/source code" value={itemCode} onChangeText={setItemCode} placeholder="" />
-                <Field
-                  label="OEM description / included text"
-                  value={itemDescription}
-                  onChangeText={setItemDescription}
-                  multiline
-                  placeholder=""
-                />
+                <TouchableOpacity accessibilityLabel="Close" onPress={() => setShowItemModal(false)} style={styles.iconButton}>
+                  <Ionicons name="close" size={18} color={colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+              <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent}>
+                <Text style={styles.fieldLabel}>Parent group</Text>
+                <View style={styles.buttonWrap}>
+                  {groups.map((group) => (
+                    <BadgeButton key={group.id} label={group.label} active={selectedGroupId === group.id} onPress={() => setSelectedGroupId(group.id)} />
+                  ))}
+                </View>
+                <Field label="OEM item label" value={itemLabel} onChangeText={setItemLabel} placeholder="Mercury Verado V12 600" />
+                <Field label="OEM/source code" value={itemCode} onChangeText={setItemCode} placeholder="Factory or source code" />
                 <Text style={styles.fieldLabel}>Item kind</Text>
                 <View style={styles.buttonWrap}>
                   {ITEM_KINDS.map((kind) => (
@@ -761,80 +980,16 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
                     <BadgeButton key={state} label={state.replace(/_/g, " ")} active={itemState === state} onPress={() => setItemState(state)} />
                   ))}
                 </View>
-                <Text style={styles.fieldLabel}>Mapping status</Text>
-                <View style={styles.buttonWrap}>
-                  {MAPPING_STATES.map((state) => (
-                    <BadgeButton key={state} label={state.replace(/_/g, " ")} active={mappingStatus === state} onPress={() => setMappingStatus(state)} />
-                  ))}
-                </View>
-                <Field label="Quantity" value={quantity} onChangeText={setQuantity} placeholder="" />
-                <Field label="Value JSON" value={valueText} onChangeText={setValueText} multiline placeholder="" />
-                <Field label="Provenance note" value={provenanceNote} onChangeText={setProvenanceNote} multiline placeholder="" />
-
-                <View style={styles.elementsPanel}>
-                  <View>
-                    <Text style={styles.kicker}>Downstream elements</Text>
-                    <Text style={styles.panelText}>
-                      Optional hints for what this OEM item creates when selected for an exact boat. These stay editable template data.
-                    </Text>
-                  </View>
-                  <Text style={styles.fieldLabel}>Selection mode</Text>
-                  <View style={styles.buttonWrap}>
-                    {SELECTION_MODES.map((mode) => (
-                      <BadgeButton key={mode} label={mode} active={selectionMode === mode} onPress={() => setSelectionMode(mode)} />
-                    ))}
-                  </View>
-                  <Field
-                    label="Systems/components created"
-                    value={systemsText}
-                    onChangeText={setSystemsText}
-                    multiline
-                    placeholder=""
-                  />
-                  <Field
-                    label="Resources/manuals needed"
-                    value={resourcesText}
-                    onChangeText={setResourcesText}
-                    multiline
-                    placeholder=""
-                  />
-                  <Field
-                    label="Playbooks/actions"
-                    value={playbooksText}
-                    onChangeText={setPlaybooksText}
-                    multiline
-                    placeholder=""
-                  />
-                  <Field
-                    label="Verification fields"
-                    value={requirementsText}
-                    onChangeText={setRequirementsText}
-                    multiline
-                    placeholder=""
-                  />
-                </View>
-
-                <Text style={styles.fieldLabel}>Source/resource reference</Text>
-                <View style={styles.buttonWrap}>
-                  <BadgeButton label="No source" active={!selectedResourceId} onPress={() => setSelectedResourceId(null)} />
-                  {resources.map((resource) => (
-                    <BadgeButton
-                      key={resource.id}
-                      label={resource.title || resource.resource_type}
-                      active={selectedResourceId === resource.id}
-                      onPress={() => setSelectedResourceId(resource.id)}
-                    />
-                  ))}
-                </View>
-
+              </ScrollView>
+              <View style={styles.modalFooter}>
                 <TouchableOpacity disabled={saving} activeOpacity={0.86} style={styles.primaryButton} onPress={saveItem}>
                   {saving ? <ActivityIndicator color={colors.onPrimary} /> : <Ionicons name="save-outline" size={16} color={colors.onPrimary} />}
-                  <Text style={styles.primaryButtonText}>{editingItem ? "Save Item Changes" : "Save Item"}</Text>
+                  <Text style={styles.primaryButtonText}>Save Item</Text>
                 </TouchableOpacity>
               </View>
             </View>
           </View>
-        )}
+        </Modal>
       </ScrollView>
     </SafeAreaView>
   );
@@ -967,6 +1122,50 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: 14,
     lineHeight: 20,
+  },
+  primeFactsPanel: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    gap: spacing.md,
+    padding: spacing.lg,
+    ...shadows.sm,
+  },
+  factRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.md,
+  },
+  factTile: {
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    minHeight: 86,
+    minWidth: 150,
+    padding: spacing.md,
+  },
+  factTileSelected: {
+    backgroundColor: "#EFF6FF",
+    borderColor: colors.brandBlue,
+  },
+  factValue: {
+    color: colors.textPrimary,
+    fontSize: 23,
+    fontWeight: "900",
+  },
+  factLabel: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: "900",
+    marginTop: 4,
+    textTransform: "uppercase",
+  },
+  factSource: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    marginTop: 6,
   },
   elementsPanel: {
     backgroundColor: colors.surfaceSubtle,
@@ -1223,6 +1422,40 @@ const styles = StyleSheet.create({
     color: colors.onPrimary,
     fontSize: 12,
     fontWeight: "900",
+  },
+  modalBackdrop: {
+    alignItems: "center",
+    backgroundColor: "rgba(15, 23, 42, 0.46)",
+    bottom: 0,
+    justifyContent: "center",
+    left: 0,
+    padding: spacing.lg,
+    position: "absolute",
+    right: 0,
+    top: 0,
+  },
+  modalPanel: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    gap: spacing.md,
+    maxHeight: "86%",
+    maxWidth: 560,
+    padding: spacing.lg,
+    width: "100%",
+    ...shadows.lg,
+  },
+  modalBody: {
+    maxHeight: 420,
+  },
+  modalBodyContent: {
+    gap: spacing.md,
+  },
+  modalFooter: {
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
+    paddingTop: spacing.md,
   },
   centered: {
     alignItems: "center",

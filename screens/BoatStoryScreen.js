@@ -720,7 +720,7 @@ try {
     });
   };
 
-  const goToAttachments = () => {
+  const goToAttachments = (initialTab = "all") => {
     if (!boat?.id) return;
     navigation.navigate("AssetAttachments", {
       assetId: boat.id,
@@ -734,9 +734,11 @@ try {
       parentRoute: route?.params?.parentRoute || null,
       returnRoute: "BoatStory",
       sourceType: "boat",
-      initialTab: "file",
+      initialTab,
     });
   };
+
+  const goToAttachmentFiles = () => goToAttachments("file");
 
   const goToMessages = () => {
     if (!boat?.id) return;
@@ -944,11 +946,11 @@ const goToPublicStorySettings = () => {
     }
 
     if (step === "proof") {
-      goToAttachments();
+      goToAttachmentFiles();
       return;
     }
   },
-  [boat?.id, goToBoatSystems, goToAddTimelineRecord, goToAttachments]
+  [boat?.id, goToBoatSystems, goToAddTimelineRecord, goToAttachmentFiles]
 );
 
 const handleAddBoat = () => {
@@ -1691,7 +1693,7 @@ const meta = {
             <QuickActionChip
               label="Attachments"
               icon="attach-outline"
-              onPress={goToAttachments}
+              onPress={() => goToAttachments("all")}
             />
             <QuickActionChip
               label="Message"
@@ -1857,7 +1859,7 @@ const meta = {
                 onStepPress={(step) => {
                   if (step === "system") goToBoatSystems();
                   if (step === "record") goToAddTimelineRecord();
-                  if (step === "proof") goToAttachments();
+                  if (step === "proof") goToAttachmentFiles();
                 }}
               />
             </View>
@@ -1878,7 +1880,7 @@ const meta = {
             ) : null}
             <TouchableOpacity
             style={styles.primaryAddBtn}
-            onPress={goToAttachments}
+            onPress={goToAttachmentFiles}
           >
             <Ionicons name="attach-outline" size={18} color="#fff" />
             <Text style={styles.primaryAddBtnText}>
