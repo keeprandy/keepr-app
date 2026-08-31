@@ -41,7 +41,7 @@ import { buildMessagesNavigationParams, startOwnerKeeprProRelationshipThread } f
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 
 // ✅ attachments helpers (for hero placement resolution)
-import { getSignedUrl, listAttachmentsForTarget } from "../lib/attachmentsApi";
+import { getSignedUrl, listAttachmentsForAsset } from "../lib/attachmentsApi";
 import { resolveAssetHeroUri } from "../lib/assetHeroResolver";
 import { formatContributionAttribution } from "../lib/provenance";
 import { getKeeprSpacePortfolio } from "../lib/keeprspaceApi";
@@ -422,6 +422,12 @@ useEffect(() => {
   // ✅ Persistent hero resolved from hero_placement_id
   const [heroUri, setHeroUri] = useState(null);
   const [heroResolving, setHeroResolving] = useState(false);
+  const heroRequestRef = useRef(0);
+  const heroUriRef = useRef(null);
+
+  useEffect(() => {
+    heroUriRef.current = heroUri;
+  }, [heroUri]);
 
   // Service records + attachments
   const [serviceRecords, setServiceRecords] = useState([]);
@@ -453,105 +459,41 @@ useEffect(() => {
   /* --------------------------- HERO RESOLUTION --------------------------- */
 
   const resolveHeroFromPlacement = useCallback(async () => {
+    const requestId = heroRequestRef.current + 1;
+    heroRequestRef.current = requestId;
+
     if (!boat?.id) {
       setHeroUri(null);
       return;
     }
 
-    setHeroResolving(true);
+    setHeroResolving((prev) => (heroUriRef.current ? false : prev || true));
     try {
       const resolved = await resolveAssetHeroUri(boat, {
-        organizationId: routeOrganizationId,
         expiresIn: 60 * 30,
       });
-      if (resolved) {
-        setHeroUri(resolved);
-        setHeroResolving(false);
-        return;
-      }
+      if (heroRequestRef.current !== requestId) return;
+      setHeroUri((prev) => resolved || prev || boat?.hero_image_url || null);
     } catch (resolverError) {
       console.log("BoatStory shared hero resolver error", resolverError);
-    }
-
-    const placementId = boat?.hero_placement_id || null;
-
-    // No placement hero yet → fallback to legacy URL field
-    if (!placementId) {
-      setHeroUri(boat?.hero_image_url || null);
-      setHeroResolving(false);
-      return;
-    }
-
-    try {
-      const { data, error: pErr } = await supabase
-        .from("attachment_placements")
-        .select(
-          `
-          id,
-          attachment:attachments (
-            bucket,
-            storage_path,
-            url,
-            mime_type,
-            kind,
-            deleted_at
-          )
-        `
-        )
-        .eq("id", placementId)
-        .maybeSingle();
-
-      if (pErr) {
-        console.log("BoatStory hero placement lookup error", pErr);
-        // fallback so we never show blank due to lookup problems
-        setHeroUri(boat?.hero_image_url || null);
-        return;
+      if (heroRequestRef.current === requestId) {
+        setHeroUri((prev) => prev || boat?.hero_image_url || null);
       }
-
-      const a = data?.attachment || null;
-      if (!a || a.deleted_at) {
-        // placement points to missing/deleted attachment
-        setHeroUri(boat?.hero_image_url || null);
-        return;
-      }
-
-      // Prefer direct url (for external links or already public)
-      if (a.url) {
-        setHeroUri(a.url);
-        return;
-      }
-
-      // Otherwise signed URL for storage file
-      if (a.bucket && a.storage_path) {
-        const signed = await getSignedUrl({
-          bucket: a.bucket,
-          path: a.storage_path,
-        });
-        setHeroUri(signed || boat?.hero_image_url || null);
-        return;
-      }
-
-      setHeroUri(boat?.hero_image_url || null);
-    } catch (e) {
-      console.log("BoatStory resolveHeroFromPlacement error", e);
-      setHeroUri(boat?.hero_image_url || null);
     } finally {
-      setHeroResolving(false);
+      if (heroRequestRef.current === requestId) setHeroResolving(false);
     }
-  }, [boat, routeOrganizationId]);
+  }, [boat?.hero_image_url, boat?.hero_placement_id, boat?.id]);
 
   useFocusEffect(
     useCallback(() => {
       refreshBoat();
-      resolveHeroFromPlacement();
-    }, [refreshBoat, resolveHeroFromPlacement])
+    }, [refreshBoat])
   );
 
   // Also re-resolve if asset changes in-place
   useEffect(() => {
-    refreshBoat();
     resolveHeroFromPlacement();
-  }, [refreshBoat, resolveHeroFromPlacement]);
+  }, [resolveHeroFromPlacement]);
 
   /* --------------------------- LOAD DATA ON FOCUS --------------------------- */
 
@@ -643,7 +585,7 @@ useEffect(() => {
 
     // 4) Story attachments / showcase photos
 try {
-  const rows = await listAttachmentsForTarget("asset", boatId);
+  const rows = await listAttachmentsForAsset(boatId);
   const photos = [];
 
   for (const row of rows || []) {

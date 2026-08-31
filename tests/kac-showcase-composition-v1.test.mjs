@@ -104,3 +104,15 @@ test("KAC media writes allow operational asset relationship scopes only", () => 
   assert.match(migration, /'oem_context'/);
   assert.doesNotMatch(migration, /organization_brand_relationships/);
 });
+
+test("Boat Story resolves one canonical KAC hero without projection-local overrides", () => {
+  const source = read("screens/BoatStoryScreen.js");
+
+  assert.match(source, /resolveAssetHeroUri\(boat,\s*\{\s*expiresIn: 60 \* 30/);
+  assert.doesNotMatch(source, /resolveAssetHeroUri\(boat,\s*\{[\s\S]{0,120}organizationId/);
+  assert.match(source, /heroRequestRef/);
+  assert.match(source, /heroUriRef/);
+  assert.doesNotMatch(source, /\[boat\?\.hero_image_url, boat\?\.hero_placement_id, boat\?\.id, heroUri\]/);
+  assert.match(source, /listAttachmentsForAsset\(boatId\)/);
+  assert.doesNotMatch(source, /listAttachmentsForTarget\("asset", boatId\)/);
+});
