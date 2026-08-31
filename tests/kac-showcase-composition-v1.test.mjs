@@ -141,3 +141,16 @@ test("Exact build shell uses organization branding instead of Tiara fallback cop
   assert.doesNotMatch(source, /Opening Tiara starter pack/);
   assert.doesNotMatch(source, /Selected for this hull/);
 });
+
+test("Exact build draft UI can add systems that are not template choices", () => {
+  const source = read("screens/ActivatorExactBuildScreen.js");
+
+  assert.match(source, /Exact-Unit Additions/);
+  assert.match(source, /Add systems on this boat/);
+  assert.match(source, /addExactUnitSystem/);
+  assert.match(source, /exactSystemDraftItemPayload/);
+  assert.match(source, /source: "manual_exact_unit_addition"/);
+  assert.match(source, /kind: "system"/);
+  assert.match(source, /mapping_status: "mapped"/);
+  assert.match(source, /\.\.\.exactUnitSystems\.map\(exactSystemDraftItemPayload\)/);
+});

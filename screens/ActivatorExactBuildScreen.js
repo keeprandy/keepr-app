@@ -167,6 +167,17 @@ const FINISH_FIELDS = [
   { key: "interior_package", label: "Interior package", value: "Modern teak" },
 ];
 
+const EXACT_SYSTEM_GROUPS = [
+  "Propulsion",
+  "Steering",
+  "Helm & Electronics",
+  "Audio",
+  "Electrical",
+  "Deck Equipment",
+  "Interior",
+  "Other Systems",
+];
+
 const LIFECYCLE = ["Template", "OEM Build", "Factory Frozen", "Dealer", "Delivery Ready", "Owner Activated", "Operational"];
 
 function compact(parts) {
@@ -428,6 +439,68 @@ function draftItemPayload(option) {
       mode: option.mode,
       projection: option.projection || { kind: "none", reason: "missing_projection" },
     },
+  };
+}
+
+function exactSystemFromDraftItem(item = {}) {
+  const metadata = item.metadata || {};
+  const projection = metadata.projection || {};
+  if (metadata.source !== "manual_exact_unit_addition" || projection.kind !== "system") return null;
+  const label = projection.name || metadata.label || item.value?.label || "";
+  if (!label) return null;
+  return {
+    key: item.item_key,
+    label,
+    group: projection.group || metadata.group || "Other Systems",
+    notes: item.notes || metadata.notes || "",
+    quantity: item.quantity || projection.quantity || 1,
+    source: item.provenance?.source_url || metadata.source_url || "",
+  };
+}
+
+function exactSystemDraftItemPayload(item = {}) {
+  const label = String(item.label || "").trim();
+  const group = String(item.group || "Other Systems").trim() || "Other Systems";
+  const quantity = Math.max(1, Number(item.quantity || 1));
+  return {
+    templateItemId: null,
+    itemKey: item.key || `exact-system-${normalizeDraftKey(`${group}-${label}`)}`,
+    state: "selected",
+    selected: true,
+    quantity,
+    value: {
+      label,
+      group,
+      source_url: item.source || null,
+    },
+    provenance: {
+      source: "manual_exact_build_draft",
+      source_url: item.source || null,
+    },
+    notes: item.notes || null,
+    metadata: {
+      source: "manual_exact_unit_addition",
+      label,
+      group,
+      notes: item.notes || null,
+      source_url: item.source || null,
+      projection: {
+        kind: "system",
+        mapping_status: "mapped",
+        name: label,
+        group,
+        quantity: String(quantity),
+      },
+    },
+  };
+}
+
+function unselectedExactSystemDraftItemPayload(item = {}) {
+  const payload = exactSystemDraftItemPayload(item);
+  return {
+    ...payload,
+    state: "unselected",
+    selected: false,
   };
 }
 
@@ -742,6 +815,14 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
     target: "existing_system",
     relationship_type: "system",
   });
+  const [exactUnitSystems, setExactUnitSystems] = useState([]);
+  const [systemDraft, setSystemDraft] = useState({
+    label: "",
+    group: EXACT_SYSTEM_GROUPS[0],
+    quantity: "1",
+    source: "",
+    notes: "",
+  });
   const [identity, setIdentity] = useState({
     hin: "",
     buildNumber: "",
@@ -849,7 +930,6 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
   const modelYearLabel = catalogTemplate?.model_year || template?.model_year || "2027";
   const orgBrandContext = orgBrandContextFromConfig(orgConfig, catalogTemplate || template || {});
   const orgLogoSource = imageSourceFromUri(orgBrandContext.logoUri);
-  const heroSource = heroMedia ? mediaAsset(heroMedia) : imageSourceFromUri(orgBrandContext.headerImageUri, BOAT_HERO);
   const orgLocationMeta = compact([orgBrandContext.location, "OEM factory build"]) || "OEM factory build";
   const modelBrandLabel = catalogTemplate?.manufacturer || template?.manufacturer || orgBrandContext.name;
   const hasFactoryBuild = Boolean(factoryBuild && factoryLines.length);
@@ -861,6 +941,7 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
     mediaByRole(templateAttachmentMedia, "hero") ||
     modelProjection.media?.hero ||
     mediaByRole(showcaseMedia, "hero");
+  const heroSource = heroMedia ? mediaAsset(heroMedia) : imageSourceFromUri(orgBrandContext.headerImageUri, BOAT_HERO);
   const templateItems = useMemo(() => groupTemplateItems(detail?.items || []), [detail?.items]);
   const standardItems = templateItems.filter((item) => item.applicability?.standard_state === "standard");
   const operationalTemplateItems = standardItems.filter((item) => ["system", "equipment", "resource"].includes(item.item_type));
@@ -871,6 +952,7 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
   }, [detail?.items, modelProjection]);
   const optionGroups = useMemo(() => groupedOptions(options), [options]);
   const selectedOptions = options.filter((option) => option.selected);
+  const selectedExactUnitSystems = exactUnitSystems.filter((item) => item.label);
   const compiled = useMemo(() => {
     const baselineSystems = operationalTemplateItems
       .filter((item) => item.item_type === "system" || item.item_type === "equipment")
@@ -883,7 +965,7 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
     const optionPlaybooks = hasFactoryBuild ? [] : selectedOptions.flatMap((option) => option.playbooks);
     const optionRequirements = hasFactoryBuild ? [] : selectedOptions.flatMap((option) => option.requirements);
     return {
-      systems: unique([...baselineSystems, ...optionSystems, ...(factoryBuild?.systems || []).map((system) => system.name)]),
+      systems: unique([...baselineSystems, ...optionSystems, ...selectedExactUnitSystems.map((system) => system.label), ...(factoryBuild?.systems || []).map((system) => system.name)]),
       resources: unique([...resources.map((resource) => resource.title), ...optionResources]),
       playbooks: unique([
         "Factory configuration review",
@@ -902,7 +984,7 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
         ...optionRequirements,
       ]),
     };
-  }, [exactBuildLabel, factoryBuild?.systems, hasFactoryBuild, operationalTemplateItems, resources, selectedOptions, standardItems]);
+  }, [exactBuildLabel, factoryBuild?.systems, hasFactoryBuild, operationalTemplateItems, resources, selectedExactUnitSystems, selectedOptions, standardItems]);
 
   const readyToFreeze = Boolean(identity.hin && identity.buildNumber && identity.buildDate && identity.dealer && selectedOptions.length);
 
@@ -945,6 +1027,14 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
     setOptions(applyDraftToOptions(configuredTemplateOptions, exactDraftItems));
   }, [configuredTemplateOptions, exactDraftItems, hasFactoryBuild]);
 
+  useEffect(() => {
+    if (hasFactoryBuild) return;
+    const nextSystems = (exactDraftItems || [])
+      .map(exactSystemFromDraftItem)
+      .filter(Boolean);
+    setExactUnitSystems(nextSystems);
+  }, [exactDraftItems, hasFactoryBuild]);
+
   const toggleOption = (option) => {
     if (option.locked) return;
     setOptions((current) => current.map((item) => {
@@ -963,6 +1053,38 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
 
   const updateIdentity = (key, value) => setIdentity((current) => ({ ...current, [key]: value }));
   const updateFinish = (key, value) => setFinish((current) => current.map((item) => item.key === key ? { ...item, value } : item));
+  const updateSystemDraft = (key, value) => setSystemDraft((current) => ({ ...current, [key]: value }));
+  const addExactUnitSystem = () => {
+    const label = String(systemDraft.label || "").trim();
+    if (!label) {
+      setDraftNotice("Add a system name first, like Suzuki Stealth 200.");
+      return;
+    }
+    const next = {
+      key: `exact-system-${normalizeDraftKey(`${systemDraft.group}-${label}`)}`,
+      label,
+      group: systemDraft.group || "Other Systems",
+      quantity: Math.max(1, Number(systemDraft.quantity || 1)),
+      source: systemDraft.source || "",
+      notes: systemDraft.notes || "",
+    };
+    setExactUnitSystems((current) => {
+      const withoutDuplicate = current.filter((item) => item.key !== next.key);
+      return [...withoutDuplicate, next];
+    });
+    setSystemDraft({
+      label: "",
+      group: EXACT_SYSTEM_GROUPS[0],
+      quantity: "1",
+      source: systemDraft.source || "",
+      notes: "",
+    });
+    setDraftNotice(`${label} added to this exact boat. Save Draft to persist it.`);
+  };
+  const removeExactUnitSystem = (key) => {
+    setExactUnitSystems((current) => current.filter((item) => item.key !== key));
+    setDraftNotice("Exact-unit system removed. Save Draft to persist the change.");
+  };
   const pressFactoryLine = (item) => {
     setSelectedFactoryLineId(item.id);
     const metadata = item.mapping_metadata && typeof item.mapping_metadata === "object" ? item.mapping_metadata : {};
@@ -1032,27 +1154,40 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
     if (workspaceId) params.set("workspaceId", workspaceId);
     window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
   };
-  const buildDraftPayload = () => ({
-    organizationId,
-    templateKey,
-    draftId: exactDraft?.id || routeDraftId,
-    draftKey: routeDraftKey || exactDraft?.draft_key || normalizeDraftKey(identity.buildNumber || identity.hin || ""),
-    displayName: compact([identity.buildNumber || identity.hin || null, modelLabel, "Draft"]),
-    identity: {
-      ...identity,
-      buildYear: modelYearLabel,
-      workOrderNumber: identity.buildNumber,
-      sourceType: "manual",
-    },
-    finishSelections: finish,
-    items: options.map(draftItemPayload),
-    status: "draft",
-    sourceResourceId: resources[0]?.id || null,
-    metadata: {
-      source: "exact_build_screen",
-      selected_count: selectedOptions.length,
-    },
-  });
+  const buildDraftPayload = () => {
+    const activeSystemKeys = new Set(exactUnitSystems.map((item) => item.key).filter(Boolean));
+    const removedSystemPayloads = (exactDraftItems || [])
+      .map(exactSystemFromDraftItem)
+      .filter((item) => item?.key && !activeSystemKeys.has(item.key))
+      .map(unselectedExactSystemDraftItemPayload);
+
+    return {
+      organizationId,
+      templateKey,
+      draftId: exactDraft?.id || routeDraftId,
+      draftKey: routeDraftKey || exactDraft?.draft_key || normalizeDraftKey(identity.buildNumber || identity.hin || ""),
+      displayName: compact([identity.buildNumber || identity.hin || null, modelLabel, "Draft"]),
+      identity: {
+        ...identity,
+        buildYear: modelYearLabel,
+        workOrderNumber: identity.buildNumber,
+        sourceType: "manual",
+      },
+      finishSelections: finish,
+      items: [
+        ...options.map(draftItemPayload),
+        ...exactUnitSystems.map(exactSystemDraftItemPayload),
+        ...removedSystemPayloads,
+      ],
+      status: "draft",
+      sourceResourceId: resources[0]?.id || null,
+      metadata: {
+        source: "exact_build_screen",
+        selected_count: selectedOptions.length,
+        exact_unit_system_count: exactUnitSystems.length,
+      },
+    };
+  };
   const saveDraft = async () => {
     if (!organizationId) {
       setDraftNotice("Missing organization context. Return through Models or Work and try again.");
@@ -1332,6 +1467,98 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
                       ))}
                     </View>
                   ))}
+                </View>
+              ) : null}
+
+              {!hasFactoryBuild ? (
+                <View style={styles.panel}>
+                  <View style={styles.panelHeader}>
+                    <View>
+                      <Text style={styles.kicker}>Exact-Unit Additions</Text>
+                      <Text style={styles.panelTitle}>Add systems on this boat</Text>
+                    </View>
+                    <Text style={styles.panelCount}>{exactUnitSystems.length}</Text>
+                  </View>
+                  <Text style={styles.panelText}>
+                    Add installed systems that are visible on this exact boat but not yet modeled as template choices.
+                  </Text>
+                  <View style={styles.exactSystemForm}>
+                    <View style={styles.inputWrap}>
+                      <Text style={styles.inputLabel}>System name</Text>
+                      <TextInput
+                        value={systemDraft.label}
+                        onChangeText={(value) => updateSystemDraft("label", value)}
+                        style={styles.input}
+                        placeholder="Suzuki Stealth 200"
+                        placeholderTextColor={colors.textMuted}
+                      />
+                    </View>
+                    <View style={styles.segmentRow}>
+                      {EXACT_SYSTEM_GROUPS.map((group) => (
+                        <TouchableOpacity
+                          key={group}
+                          activeOpacity={0.82}
+                          onPress={() => updateSystemDraft("group", group)}
+                          style={[styles.segmentChip, systemDraft.group === group && styles.segmentChipSelected]}
+                        >
+                          <Text style={[styles.segmentChipText, systemDraft.group === group && styles.segmentChipTextSelected]}>{group}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    <View style={styles.fieldGrid}>
+                      <View style={styles.inputWrap}>
+                        <Text style={styles.inputLabel}>Quantity</Text>
+                        <TextInput
+                          value={String(systemDraft.quantity)}
+                          onChangeText={(value) => updateSystemDraft("quantity", value)}
+                          keyboardType="numeric"
+                          style={styles.input}
+                          placeholder="1"
+                          placeholderTextColor={colors.textMuted}
+                        />
+                      </View>
+                      <View style={styles.inputWrap}>
+                        <Text style={styles.inputLabel}>Source URL</Text>
+                        <TextInput
+                          value={systemDraft.source}
+                          onChangeText={(value) => updateSystemDraft("source", value)}
+                          style={styles.input}
+                          placeholder="Listing or OEM source"
+                          placeholderTextColor={colors.textMuted}
+                        />
+                      </View>
+                    </View>
+                    <View style={styles.inputWrap}>
+                      <Text style={styles.inputLabel}>Notes</Text>
+                      <TextInput
+                        value={systemDraft.notes}
+                        onChangeText={(value) => updateSystemDraft("notes", value)}
+                        style={[styles.input, styles.textArea]}
+                        multiline
+                        placeholder="Serial number, observed detail, or source note"
+                        placeholderTextColor={colors.textMuted}
+                      />
+                    </View>
+                    <TouchableOpacity activeOpacity={0.86} style={styles.addSystemButton} onPress={addExactUnitSystem}>
+                      <Ionicons name="add-circle-outline" size={18} color={colors.onPrimary} />
+                      <Text style={styles.addSystemButtonText}>Add System to This Boat</Text>
+                    </TouchableOpacity>
+                  </View>
+                  {exactUnitSystems.length ? (
+                    <View style={styles.exactSystemList}>
+                      {exactUnitSystems.map((system) => (
+                        <View key={system.key} style={styles.exactSystemItem}>
+                          <View style={styles.exactSystemItemText}>
+                            <Text style={styles.exactSystemName}>{system.label}</Text>
+                            <Text style={styles.exactSystemMeta}>{compact([system.group, Number(system.quantity || 1) > 1 ? `Qty ${system.quantity}` : null])}</Text>
+                          </View>
+                          <TouchableOpacity activeOpacity={0.82} style={styles.removeSystemButton} onPress={() => removeExactUnitSystem(system.key)}>
+                            <Text style={styles.removeSystemButtonText}>Remove</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
                 </View>
               ) : null}
 
@@ -1947,6 +2174,15 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     marginTop: spacing.md,
   },
+  exactSystemForm: {
+    gap: spacing.md,
+    marginTop: spacing.md,
+  },
+  segmentRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+  },
   inputWrap: {
     flexGrow: 1,
     minWidth: 170,
@@ -2472,6 +2708,69 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: spacing.sm,
     padding: spacing.md,
+  },
+  textArea: {
+    minHeight: 76,
+    textAlignVertical: "top",
+  },
+  addSystemButton: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: colors.brandBlue,
+    borderRadius: radius.sm,
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 40,
+    paddingHorizontal: spacing.md,
+  },
+  addSystemButtonText: {
+    color: colors.onPrimary,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  exactSystemList: {
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    marginTop: spacing.md,
+    overflow: "hidden",
+  },
+  exactSystemItem: {
+    alignItems: "center",
+    borderBottomColor: colors.border,
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    gap: spacing.md,
+    justifyContent: "space-between",
+    padding: spacing.md,
+  },
+  exactSystemItemText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  exactSystemName: {
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  exactSystemMeta: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 3,
+  },
+  removeSystemButton: {
+    borderColor: colors.accentRed,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    minHeight: 30,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+  },
+  removeSystemButtonText: {
+    color: colors.accentRed,
+    fontSize: 11,
+    fontWeight: "900",
   },
   reviewNoteText: {
     color: "#92400E",
