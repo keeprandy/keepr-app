@@ -2387,6 +2387,7 @@ identifyCurrentUser();
     if ((loadingRole && role === null) || loadingWorkspaces) return "SplashIntro";
     if (!role || onboardingState === null) return null;
     const webRoute = routeForCurrentWebPath();
+    if (webRoute === "KeeprAdminHome" || webRoute === "KeeprAdminOrgDetail") return webRoute;
     if (webRoute && isOrgWorkspaceActive) return webRoute;
 
     return shouldRouteToOnboarding
@@ -2444,6 +2445,7 @@ if (
   path.startsWith("/resolve/") ||
   path.startsWith("/inbox") ||
   path.startsWith("/super") ||
+  path.startsWith("/keepr-admin") ||
   path.startsWith("/CreateReminder") ||
   path.startsWith("/Notifications") ||
   (isOrgWorkspaceActive && isKeeprSpaceWebPath(path)) ||

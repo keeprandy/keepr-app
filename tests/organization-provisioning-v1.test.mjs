@@ -83,7 +83,9 @@ test("Keepr Admin route bypasses customer workspace and personal onboarding gate
   assert.equal(source.includes('path === "/keepr-admin" || path.startsWith("/keepr-admin/")'), true);
   assert.match(source, /const isKeeprAdminWebPathRoute =/);
   assert.match(source, /isKeeprAdminWebPathRoute\s*\?\s*currentWebPathRoute/);
+  assert.match(source, /webRoute === "KeeprAdminHome" \|\| webRoute === "KeeprAdminOrgDetail"/);
   assert.match(source, /isOrgWorkspaceActive && currentWebPathRoute/);
+  assert.equal(source.includes('path.startsWith("/keepr-admin")'), true);
 });
 
 test("generic OEM shell does not use Tiara fallback catalog or brand assumptions", () => {
