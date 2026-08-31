@@ -62,12 +62,15 @@ test("Workspace-context boat actions use projection-safe edit and hero paths", (
   const showcase = read("screens/BoatShowcaseScreen.js");
   const story = read("screens/BoatStoryScreen.js");
   const workspace = read("screens/KeeprProStewardshipViewScreen.js");
+  const keeprspaceApi = read("lib/keeprspaceApi.js");
 
   assert.match(showcase, /setKeeprSpaceAssetHero/);
   assert.match(showcase, /if \(routeOrganizationId\) \{[\s\S]*navigation\.navigate\("KeeprSpaceBoat"/);
   assert.match(story, /if \(organizationId\) \{[\s\S]*navigation\.navigate\("KeeprSpaceBoat"/);
   assert.match(workspace, /route\?\.params\?\.openEdit/);
   assert.match(workspace, /setShowBoatEdit\(true\)/);
+  assert.match(keeprspaceApi, /rpc\("set_asset_hero_placement"/);
+  assert.doesNotMatch(keeprspaceApi, /rpc\("set_asset_relationship_hero_placement"/);
 });
 
 test("Personal EditAsset avoids single-row coercion failures", () => {

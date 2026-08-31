@@ -1296,10 +1296,7 @@ const isWide = IS_WEB && width >= 980;
   const [relationshipHeroPlacementId, setRelationshipHeroPlacementId] = useState(null);
   const [activeAssetRelationshipId, setActiveAssetRelationshipId] = useState(null);
   const hasWorkspaceHeroContext = Boolean(organizationId && activeAssetRelationshipId);
-  const effectiveHeroPlacementId =
-    hasWorkspaceHeroContext && relationshipHeroPlacementId
-      ? relationshipHeroPlacementId
-      : assetHeroPlacementId;
+  const effectiveHeroPlacementId = assetHeroPlacementId;
 
   // NEW: picker state
   const [systemPickerOpen, setSystemPickerOpen] = useState(false);
@@ -2603,7 +2600,7 @@ const openAdd = () => {
           organizationId,
           placementId,
         });
-        setRelationshipHeroPlacementId(placementId);
+        setAssetHeroPlacementId(placementId);
       } else {
         const { error } = await supabase.rpc("set_asset_hero_placement", {
           p_asset_id: assetId,
@@ -2767,10 +2764,7 @@ const openAdd = () => {
     const placementId = assetPlacementIdForRow(row, assetId);
     if (!row?._isPhoto) return null;
     const isHero = effectiveHeroPlacementId && placementId === effectiveHeroPlacementId;
-    const isWorkspaceOverride =
-      hasWorkspaceHeroContext &&
-      relationshipHeroPlacementId &&
-      placementId === relationshipHeroPlacementId;
+    const isWorkspaceOverride = false;
     return (
       <View style={styles.heroDesignationGroup}>
         <TouchableOpacity
