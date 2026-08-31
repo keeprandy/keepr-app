@@ -233,7 +233,7 @@ export default function EditAssetScreen({ route, navigation }) {
           ].join(",")
         )
         .eq("id", assetId)
-        .single();
+        .maybeSingle();
 
       if (!isMounted) return;
 
@@ -310,6 +310,8 @@ export default function EditAssetScreen({ route, navigation }) {
         setRegistrationNumber(data.registration_number || "");
         setAssetMetadata(data.extra_metadata || {});
         setSelectedProIds(extractAssetKeeprProIds(data));
+      } else {
+        setError("This asset is not available to edit from this account.");
       }
 
       setLoading(false);
@@ -527,23 +529,32 @@ export default function EditAssetScreen({ route, navigation }) {
     }
     payload.extra_metadata = nextMetadata;
 
-    let result;
-    if (assetId) {
-      result = await supabase
-        .from("assets")
-        .update(payload)
-        .eq("id", assetId)
-        .select()
-        .maybeSingle();
-    } else {
-      result = await supabase
-        .from("assets")
-        .insert(payload)
-        .select()
-        .maybeSingle();
+    let data;
+    let error;
+    try {
+      let result;
+      if (assetId) {
+        result = await supabase
+          .from("assets")
+          .update(payload)
+          .eq("id", assetId)
+          .select()
+          .maybeSingle();
+      } else {
+        result = await supabase
+          .from("assets")
+          .insert(payload)
+          .select()
+          .maybeSingle();
+      }
+      data = result.data;
+      error = result.error;
+    } catch (saveError) {
+      setSaving(false);
+      console.error("Error saving asset", saveError);
+      setError(saveError?.message || "Could not reach Keepr to save this asset.");
+      return;
     }
-
-    const { data, error } = result;
 
     if (error) {
       setSaving(false);

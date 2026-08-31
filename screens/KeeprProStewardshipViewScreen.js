@@ -542,6 +542,12 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
   const [error, setError] = useState(null);
   const relationshipThreadId = portal?.projection_thread?.id || messages?.[0]?.id || null;
 
+  useEffect(() => {
+    if (route?.params?.openEdit || route?.params?.editBoat) {
+      setShowBoatEdit(true);
+    }
+  }, [route?.params?.editBoat, route?.params?.openEdit]);
+
   const load = useCallback(async ({ quiet = false } = {}) => {
     if (!assetId && !kac) {
       setError("Missing asset.");

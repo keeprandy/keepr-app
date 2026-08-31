@@ -876,6 +876,20 @@ const goToPublicStorySettings = () => {
 
   const goToEditBoat = () => {
     if (!boat) return;
+    const organizationId = route?.params?.organizationId || null;
+    if (organizationId) {
+      navigation.navigate("KeeprSpaceBoat", {
+        assetId: boat.id,
+        kac: route?.params?.kac || boat.kac_id || boat.kac || null,
+        organizationId,
+        stewardshipId: route?.params?.stewardshipId || null,
+        parentRoute: route?.params?.parentRoute || "KeeprSpaceFleet",
+        workspaceId: route?.params?.workspaceId || (organizationId ? `org:${organizationId}` : null),
+        systemsRole: route?.params?.systemsRole || null,
+        openEdit: true,
+      });
+      return;
+    }
     navigation.navigate("EditAsset", { assetId: boat.id });
   };
 

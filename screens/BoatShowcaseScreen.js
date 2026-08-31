@@ -28,7 +28,7 @@ import {
   getSignedUrl,
   removePlacementById,
 } from "../lib/attachmentsApi";
-import { getKeeprSpacePortfolio } from "../lib/keeprspaceApi";
+import { getKeeprSpacePortfolio, setKeeprSpaceAssetHero } from "../lib/keeprspaceApi";
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import { buildServiceActionRouteParams } from "../lib/serviceActionPrefill";
 import LightboxModal from "../components/LightboxModal";
@@ -445,6 +445,19 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
 
   const goToEditBoat = () => {
     if (!currentBoat?.id) return;
+    if (routeOrganizationId) {
+      navigation.navigate("KeeprSpaceBoat", {
+        assetId: currentBoat.id,
+        kac: routeKac || currentBoat.kac_id || currentBoat.kac || null,
+        organizationId: routeOrganizationId,
+        stewardshipId: route?.params?.stewardshipId || null,
+        parentRoute: parentRoute || "KeeprSpaceFleet",
+        workspaceId: routeWorkspaceId || (routeOrganizationId ? `org:${routeOrganizationId}` : null),
+        systemsRole,
+        openEdit: true,
+      });
+      return;
+    }
     navigation.navigate("EditAsset", {
       assetId: currentBoat.id,
       ...routeContext,
@@ -499,7 +512,9 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
         const latestHero = await refreshHeroPlacementId();
         const effectiveHero = latestHero ?? heroPlacementId ?? null;
 
-        const rows = await listAttachmentsForAsset(currentBoat.id);
+        const rows = await listAttachmentsForAsset(currentBoat.id, {
+          includeInheritedModelMedia: true,
+        });
 
         const showcased = (rows || []).filter((row) => row.is_showcase);
 
@@ -564,7 +579,7 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
         });
 
         // ✅ AUTO HERO: if exactly 1 showcase photo and no hero_placement_id, persist it
-        if (!effectiveHero && gallery.length === 1 && gallery[0]?.placement_id) {
+        if (!effectiveHero && gallery.length === 1 && gallery[0]?.placement_id && !gallery[0]?.isInheritedModelMedia) {
           try {
             const only = gallery[0];
             const { error: promoteErr } = await supabase
@@ -710,18 +725,26 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
         try {
           setPhotosLoading(true);
 
-          const { error: updateError } = await supabase
-            .from("assets")
-            .update({ hero_placement_id: photo.placement_id, hero_image_url: null })
-            .eq("id", currentBoat.id);
+          if (routeOrganizationId) {
+            await setKeeprSpaceAssetHero({
+              assetId: currentBoat.id,
+              organizationId: routeOrganizationId,
+              placementId: photo.placement_id,
+            });
+          } else {
+            const { error: updateError } = await supabase
+              .from("assets")
+              .update({ hero_placement_id: photo.placement_id, hero_image_url: null })
+              .eq("id", currentBoat.id);
 
-          if (updateError) {
-            console.error("Error updating hero_placement_id", updateError);
-            Alert.alert(
-              "Could not set hero",
-              updateError.message || "Please try again."
-            );
-            return;
+            if (updateError) {
+              console.error("Error updating hero_placement_id", updateError);
+              Alert.alert(
+                "Could not set hero",
+                updateError.message || "Please try again."
+              );
+              return;
+            }
           }
 
           setHeroPlacementId(photo.placement_id);
