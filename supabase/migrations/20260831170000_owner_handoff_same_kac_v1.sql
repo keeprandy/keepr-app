@@ -298,8 +298,7 @@ begin
 
   update public.assets
   set
-    owner_id = v_user_id,
-    updated_at = now()
+    owner_id = v_user_id
   where id = v_asset.id;
 
   return jsonb_build_object(

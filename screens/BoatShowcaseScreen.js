@@ -24,7 +24,7 @@ import { colors, spacing, radius, typography, shadows } from "../styles/theme";
 import { useAssets } from "../hooks/useAssets";
 import { supabase } from "../lib/supabaseClient";
 import {
-  listAttachmentsForTarget,
+  listAttachmentsForAsset,
   getSignedUrl,
   removePlacementById,
 } from "../lib/attachmentsApi";
@@ -120,6 +120,65 @@ function buildFallbackGallery(asset) {
   }
 
   return gallery;
+}
+
+function isImageAttachment(row = {}) {
+  const kind = row.kind || "";
+  const mime = String(row.mime_type || "").toLowerCase();
+  const fileName = row.file_name || row.storage_path || "";
+  const ext = fileName.split(".").pop()?.toLowerCase() || "";
+
+  return (
+    kind === "photo" ||
+    mime.startsWith("image/") ||
+    ["jpg", "jpeg", "png", "webp", "heic", "heif"].includes(ext)
+  );
+}
+
+function showcaseLayerFor(row = {}) {
+  if (row.is_inherited_model_media) {
+    return {
+      key: "oem",
+      label: "OEM model media",
+      detail: "Inherited from the bound model template",
+    };
+  }
+
+  const provenance = String(row.source_context?.provenance || "").toLowerCase();
+  if (provenance.includes("owner")) {
+    return {
+      key: "owner",
+      label: "Owner media",
+      detail: "Contributed to this KAC by the owner",
+    };
+  }
+  if (provenance.includes("dealer") || row.org_id) {
+    return {
+      key: "dealer",
+      label: "Dealer media",
+      detail: "Contributed to this exact KAC",
+    };
+  }
+  return {
+    key: "kac",
+    label: "KAC media",
+    detail: "Contributed to this exact KAC",
+  };
+}
+
+function showcaseLayerSummary(photos = []) {
+  const layers = [
+    ["oem", "OEM"],
+    ["dealer", "Dealer"],
+    ["owner", "Owner"],
+    ["kac", "KAC"],
+  ];
+  return layers
+    .map(([key, label]) => {
+      const count = photos.filter((photo) => photo.layer_key === key).length;
+      return count ? { key, label, count } : null;
+    })
+    .filter(Boolean);
 }
 
 // Persist legacy delete + hero for fallback items
@@ -440,23 +499,13 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
         const latestHero = await refreshHeroPlacementId();
         const effectiveHero = latestHero ?? heroPlacementId ?? null;
 
-        const rows = await listAttachmentsForTarget("asset", currentBoat.id);
+        const rows = await listAttachmentsForAsset(currentBoat.id);
 
         const showcased = (rows || []).filter((row) => row.is_showcase);
 
         setShowcaseFiles(
           showcased.filter((row) => {
-            const kind = row.kind || "";
-            const mime = String(row.mime_type || "").toLowerCase();
-            const fileName = row.file_name || row.storage_path || "";
-            const ext = fileName.split(".").pop()?.toLowerCase() || "";
-
-            const isImage =
-              kind === "photo" ||
-              mime.startsWith("image/") ||
-              ["jpg", "jpeg", "png", "webp", "heic", "heif"].includes(ext);
-
-            return row.kind !== "link" && !isImage;
+            return row.kind !== "link" && !isImageAttachment(row);
           })
         );
 
@@ -467,17 +516,7 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
         for (const row of rows || []) {
           if (!row.is_showcase) continue;
 
-          const kind = row.kind || "";
-          const mime = String(row.mime_type || "").toLowerCase();
-          const fileName = row.file_name || row.storage_path || "";
-          const ext = fileName.split(".").pop()?.toLowerCase() || "";
-
-          const looksLikeImage =
-            kind === "photo" ||
-            mime.startsWith("image/") ||
-           ["jpg", "jpeg", "png", "webp"].includes(ext)
-
-          if (!looksLikeImage) continue;
+          if (!isImageAttachment(row)) continue;
 
           let url = row.url || null;
           if (!url && row.bucket && row.storage_path) {
@@ -490,16 +529,29 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
 
           if (!url) continue;
 
+          const layer = showcaseLayerFor(row);
           gallery.push({
-            id: row.placement_id || row.attachment_id || row.id,
+            id:
+              row.placement_id ||
+              row.asset_placement_id ||
+              row.template_placement_id ||
+              row.attachment_id ||
+              row.id,
             url,
-            placement_id: row.placement_id,
+            placement_id: row.placement_id || row.asset_placement_id || null,
+            template_placement_id: row.template_placement_id || null,
             storage_path: row.storage_path,
             bucket: row.bucket,
             created_at: row.created_at,
             attribution: row.provenance_label || row.attribution || null,
+            provenance_detail: row.provenance_detail || row.source_context?.provenance_detail || null,
+            layer_key: layer.key,
+            layer_label: layer.label,
+            layer_detail: layer.detail,
+            isInheritedModelMedia: !!row.is_inherited_model_media,
+            isExactAssetMedia: !row.is_inherited_model_media,
             // ✅ hero by placement id (persistent)
-            isHero: effectiveHero ? effectiveHero === row.placement_id : false,
+            isHero: effectiveHero ? effectiveHero === (row.placement_id || row.asset_placement_id) : !!row.is_hero,
             fromTable: true,
           });
         }
@@ -645,6 +697,13 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
   const handleSetHero = useCallback(
     async (photo) => {
       if (!currentBoat?.id || !photo) return;
+      if (photo.isInheritedModelMedia) {
+        Alert.alert(
+          "Inherited model media",
+          "This photo comes from the model template. Add or choose a photo on this exact boat to make it the KAC hero."
+        );
+        return;
+      }
 
       // Preferred: placement hero
       if (photo?.placement_id) {
@@ -709,6 +768,13 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
   const handleDeletePhoto = useCallback(
     async (photo) => {
       if (!photo) return;
+      if (photo.isInheritedModelMedia) {
+        Alert.alert(
+          "Inherited model media",
+          "This photo belongs to the model template and is only inherited by this KAC. It was not copied onto the boat."
+        );
+        return;
+      }
 
       // Legacy fallback: persist removal from asset fields
       if (!photo.fromTable || !photo.placement_id) {
@@ -838,6 +904,7 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
   }
 
   const hasGallery = photos && photos.length > 0;
+  const showcaseLayers = showcaseLayerSummary(photos || []);
 
   const columns = Array.from({ length: numColumns }, () => []);
   if (hasGallery) {
@@ -935,10 +1002,22 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
         {/* Blurb */}
         <View style={styles.blurbCard}>
           <Text style={styles.blurbText}>
-            Use this screen as your “humble brag” — photos plus a full service history in Keepr
-            make it easy to show off condition, upgrades, and how well it’s been maintained.
+            This Showcase composes inherited model media with photos contributed to this exact KAC.
+            Keepr keeps each source separate so the same boat can make sense to Bennington, Wilson,
+            and the owner without duplicating the asset.
           </Text>
         </View>
+
+        {showcaseLayers.length ? (
+          <View style={styles.layerSummary}>
+            {showcaseLayers.map((layer) => (
+              <View key={layer.key} style={styles.layerPill}>
+                <Text style={styles.layerPillLabel}>{layer.label}</Text>
+                <Text style={styles.layerPillCount}>{layer.count}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
 
         <ShowcaseAttachmentsSection
           files={showcaseFiles}
@@ -997,6 +1076,12 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
                         </View>
                       )}
 
+                      <View style={styles.layerBadge}>
+                        <Text style={styles.layerBadgeText} numberOfLines={1}>
+                          {photo.layer_label || "KAC media"}
+                        </Text>
+                      </View>
+
                       {photo.isHero && (
                         <View style={styles.heroBadge}>
                           <Ionicons name="star" size={11} style={styles.heroBadgeIcon} />
@@ -1004,7 +1089,11 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
                         </View>
                       )}
                     <View style={styles.tileActionsRow}>
-                      {!photo.isHero && (
+                      {photo.isInheritedModelMedia ? (
+                        <View style={styles.readOnlyBadge}>
+                          <Text style={styles.readOnlyBadgeText}>Inherited</Text>
+                        </View>
+                      ) : !photo.isHero ? (
                         <TouchableOpacity
                           style={styles.tileActionButton}
                           onPress={() => handleSetHero(photo)}
@@ -1012,15 +1101,17 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
                         >
                           <Text style={styles.tileActionText}>Set as hero</Text>
                         </TouchableOpacity>
-                      )}
+                      ) : null}
 
-                      <TouchableOpacity
-                        style={styles.tileActionButtonDanger}
-                        onPress={() => handleDeletePhoto(photo)}
-                        activeOpacity={0.85}
-                      >
-                        <Text style={styles.tileActionText}>Remove</Text>
-                      </TouchableOpacity>
+                      {!photo.isInheritedModelMedia ? (
+                        <TouchableOpacity
+                          style={styles.tileActionButtonDanger}
+                          onPress={() => handleDeletePhoto(photo)}
+                          activeOpacity={0.85}
+                        >
+                          <Text style={styles.tileActionText}>Remove</Text>
+                        </TouchableOpacity>
+                      ) : null}
                     </View>
                     </TouchableOpacity>
                   );
@@ -1191,6 +1282,42 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     lineHeight: 18,
   },
+  layerSummary: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  layerPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 5,
+    marginRight: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+  layerPillLabel: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: colors.textSecondary,
+  },
+  layerPillCount: {
+    marginLeft: 6,
+    minWidth: 18,
+    borderRadius: 9,
+    overflow: "hidden",
+    textAlign: "center",
+    backgroundColor: colors.brandBlue,
+    color: colors.brandWhite,
+    fontSize: 10,
+    fontWeight: "900",
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
 
   gridRow: {
     flexDirection: "row",
@@ -1233,6 +1360,21 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: colors.brandWhite,
     fontWeight: "600",
+  },
+  layerBadge: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    maxWidth: "58%",
+    backgroundColor: "#F8FAFCCC",
+    borderRadius: radius.pill,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  layerBadgeText: {
+    fontSize: 10,
+    color: colors.textPrimary,
+    fontWeight: "800",
   },
 
   heroBadge: {
@@ -1281,6 +1423,20 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(81, 78, 78, 0.6)",
     alignItems: "center",
     justifyContent: "center",
+  },
+  readOnlyBadge: {
+    flex: 1,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 999,
+    backgroundColor: "rgba(17, 24, 39, 0.72)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  readOnlyBadgeText: {
+    color: colors.brandWhite,
+    fontSize: 11,
+    fontWeight: "800",
   },
   tileActionText: { fontSize: 11, fontWeight: "600", color: "white" },
 
