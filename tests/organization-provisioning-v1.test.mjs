@@ -88,6 +88,20 @@ test("Keepr Admin route bypasses customer workspace and personal onboarding gate
   assert.equal(source.includes('path.startsWith("/keepr-admin")'), true);
 });
 
+test("sidebar exposes Keepr Admin from platform-admin authority only", () => {
+  const source = read("components/SidebarNav.js");
+
+  assert.match(source, /const KEEPR_ADMIN_ITEM = \{ key: "KeeprAdminHome"/);
+  assert.match(source, /supabase\.rpc\("is_keepr_internal_admin"/);
+  assert.match(source, /p_user_id: userId/);
+  assert.match(source, /setIsInternalAdmin\(!error && data === true\)/);
+  assert.match(source, /isInternalAdmin/);
+  assert.match(source, /window\.location\.assign\("\/keepr-admin"\)/);
+  assert.match(source, /routeName === "KeeprAdminHome" \|\| routeName === "KeeprAdminOrgDetail"/);
+  assert.doesNotMatch(source, /user\.email.*keeprhome\.com/);
+  assert.doesNotMatch(source, /userRole === "keepr_admin"/);
+});
+
 test("generic OEM shell does not use Tiara fallback catalog or brand assumptions", () => {
   const source = read("screens/ActivatorHomeScreen.js");
 

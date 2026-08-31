@@ -28,6 +28,8 @@ const CONSUMER_ITEMS = [
   { key: "Settings", label: "Settings", icon: "settings-outline" },
 ];
 
+const KEEPR_ADMIN_ITEM = { key: "KeeprAdminHome", label: "Keepr Admin", icon: "shield-checkmark-outline" };
+
 /** SuperKeepr menu (SuperKeeprStack) */
 const SUPER_ITEMS = [
   { key: "SuperKeeprDashboard", label: "Portfolio", icon: "business-outline" },
@@ -387,6 +389,10 @@ function getLeafRouteSafe() {
 function normalizeToSection(routeName) {
   if (!routeName) return "Dashboard";
 
+if (routeName === "KeeprAdminHome" || routeName === "KeeprAdminOrgDetail") {
+  return "KeeprAdminHome";
+}
+
 if (routeName === "SuperKeeprDashboard" || routeName === "SuperKeeprStack") {
   return "SuperKeeprStack";
 }  
@@ -568,6 +574,7 @@ export default function SidebarNav({ currentRouteName }) {
   const userId = user?.id || null;
 
   const [userRole, setUserRole] = useState(null);
+  const [isInternalAdmin, setIsInternalAdmin] = useState(false);
 
 useEffect(() => {
   let active = true;
@@ -598,6 +605,34 @@ useEffect(() => {
   };
 
   loadRole();
+
+  return () => {
+    active = false;
+  };
+}, [userId]);
+
+useEffect(() => {
+  let active = true;
+
+  const loadInternalAdminAuthority = async () => {
+    if (!userId) {
+      if (active) setIsInternalAdmin(false);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase.rpc("is_keepr_internal_admin", {
+        p_user_id: userId,
+      });
+
+      if (!active) return;
+      setIsInternalAdmin(!error && data === true);
+    } catch {
+      if (active) setIsInternalAdmin(false);
+    }
+  };
+
+  loadInternalAdminAuthority();
 
   return () => {
     active = false;
@@ -732,10 +767,19 @@ useEffect(() => {
   })), [workspaces]);
 
 const navItems = useMemo(() => {
+  const withInternalAdminMode = (items) => {
+    if (!isInternalAdmin || items.some((item) => item.key === KEEPR_ADMIN_ITEM.key)) return items;
+    return [
+      ...items.slice(0, 1),
+      KEEPR_ADMIN_ITEM,
+      ...items.slice(1),
+    ];
+  };
+
   const workspaceItems = navItemsForWorkspace(sidebarWorkspace);
   if (workspaceItems) {
     const personal = personalWorkspace(workspaces);
-    return personal?.workspace_id && sidebarWorkspace?.workspace_type !== "keepr"
+    const items = personal?.workspace_id && sidebarWorkspace?.workspace_type !== "keepr"
       ? [
           ...workspaceItems,
           {
@@ -746,33 +790,34 @@ const navItems = useMemo(() => {
           },
         ]
       : workspaceItems;
+    return withInternalAdminMode(items);
   }
 
-  if (inSuperKeepr) return SUPER_ITEMS;
+  if (inSuperKeepr) return withInternalAdminMode(SUPER_ITEMS);
   if (inKeeprPro) {
-    return navItemsForWorkspace({
+    return withInternalAdminMode(navItemsForWorkspace({
       workspace_type: "keeprpro",
       display_name: "KeeprPro",
-    });
+    }));
   }
 
   if (userRole === "superkeepr" || userRole === "keeprpro") {
-    return [
+    return withInternalAdminMode([
       ...CONSUMER_ITEMS.slice(0, 1),
       ...workspaceNavItems,
       ...CONSUMER_ITEMS.slice(1),
-    ];
+    ]);
   }
 
   const consumerItems = CONSUMER_ITEMS.filter(
     (item) => item.key !== "SuperKeeprStack" && item.key !== "KeeprProStack"
   );
-  return [
+  return withInternalAdminMode([
     ...consumerItems.slice(0, 1),
     ...workspaceNavItems,
     ...consumerItems.slice(1),
-  ];
-}, [sidebarWorkspace, inSuperKeepr, inKeeprPro, userRole, workspaceNavItems, workspaces]);
+  ]);
+}, [sidebarWorkspace, inSuperKeepr, inKeeprPro, isInternalAdmin, userRole, workspaceNavItems, workspaces]);
 
     // Public View SideBar Collapse
   const isPublicFlow = useMemo(() => {
@@ -815,6 +860,14 @@ const navItems = useMemo(() => {
    * SAFE navigation wrapper
    */
   const go = (key) => {
+  if (key === "KeeprAdminHome") {
+    clearPersistedNavState();
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      window.location.assign("/keepr-admin");
+      return;
+    }
+  }
+
   if (key === "KeeprProStack" || key === "KeeprProHome") {
     if (returnToKeeprProHomeOnWeb()) return;
   }
@@ -1171,6 +1224,10 @@ if (isPublicFlow) return null;
         {navItems.map((item) => {
           const isActive = item.key === activeKey;
           const handleNavPress = () => {
+            if (item.key === "KeeprAdminHome" && Platform.OS === "web" && typeof window !== "undefined") {
+              window.location.assign("/keepr-admin");
+              return;
+            }
             const navHref = activatorHrefForSidebarKey(item.key, sidebarWorkspace);
             if (navHref && Platform.OS === "web" && typeof window !== "undefined") {
               window.location.assign(navHref);
@@ -1214,6 +1271,36 @@ if (isPublicFlow) return null;
       </View>
 
       <View style={styles.footer}>
+        {isInternalAdmin ? (
+          <TouchableOpacity
+            style={[
+              styles.modeChoice,
+              activeKey === "KeeprAdminHome" && styles.modeChoiceActive,
+              isCollapsed && styles.modeChoiceCollapsed,
+            ]}
+            onPress={() => go("KeeprAdminHome")}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Open Keepr Admin"
+          >
+            <Ionicons
+              name="shield-checkmark-outline"
+              size={18}
+              color={activeKey === "KeeprAdminHome" ? "#E5E7EB" : "#9CA3AF"}
+            />
+            {!isCollapsed ? (
+              <Text
+                style={[
+                  styles.modeChoiceText,
+                  activeKey === "KeeprAdminHome" && styles.modeChoiceTextActive,
+                ]}
+                numberOfLines={1}
+              >
+                Keepr Admin
+              </Text>
+            ) : null}
+          </TouchableOpacity>
+        ) : null}
         <View style={[styles.footerRow, isCollapsed && styles.footerRowCollapsed]}>
           <Ionicons name="person-circle-outline" size={22} color="#9CA3AF" />
           {!isCollapsed ? (
@@ -1347,6 +1434,32 @@ const styles = StyleSheet.create({
   },
 
   footer: { paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: "#0F172A" },
+  modeChoice: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: spacing.xs,
+    borderRadius: radius.md,
+    marginBottom: spacing.sm,
+  },
+  modeChoiceActive: {
+    backgroundColor: "rgba(54, 90, 170, 0.45)",
+    borderWidth: 1,
+    borderColor: "#365AAA",
+  },
+  modeChoiceCollapsed: {
+    justifyContent: "center",
+  },
+  modeChoiceText: {
+    marginLeft: spacing.xs,
+    fontSize: 12,
+    color: "#CBD5E1",
+    fontWeight: "700",
+    flex: 1,
+  },
+  modeChoiceTextActive: {
+    color: "#E5E7EB",
+  },
   footerRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: spacing.xs },
   footerText: { marginLeft: spacing.xs, fontSize: 12, color: "#9CA3AF", flex: 1 },
 });
