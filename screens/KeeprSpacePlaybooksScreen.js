@@ -28,7 +28,12 @@ import {
   upsertKeeprSpacePlaybook,
 } from "../lib/keeprspaceApi";
 import { fetchAssetHeroUris, getCachedAssetHeroUris } from "../lib/assetHeroResolver";
-import { assetProjectionSemantics } from "../lib/assetProjectionSemantics";
+import {
+  PLAYBOOK_SCOPE_LABELS,
+  assetProjectionSemantics,
+  playbookAllowedForProjection,
+  playbookScopeFor,
+} from "../lib/assetProjectionSemantics";
 import { supabase } from "../lib/supabaseClient";
 import { colors, radius, shadows, spacing } from "../styles/theme";
 
@@ -135,6 +140,13 @@ function isTemplatePlaybook(playbook) {
       metadata.playbook_kind === "template" ||
       playbook?.created_by_type === "template"
   );
+}
+
+function filterPlaybooksForProjection(playbookRows = [], semantics = {}, activeScope = null) {
+  return playbookRows.filter((playbook) => {
+    if (!playbookAllowedForProjection(playbook, semantics)) return false;
+    return activeScope ? playbookScopeFor(playbook) === activeScope : true;
+  });
 }
 
 function cloneTemplateStep(step = {}, index = 0) {
@@ -373,6 +385,7 @@ export default function KeeprSpacePlaybooksScreen({ navigation, route }) {
   const [name, setName] = useState("");
   const [playbookStartDate, setPlaybookStartDate] = useState("");
   const [playbookStartTime, setPlaybookStartTime] = useState("");
+  const [selectedPlaybookScope, setSelectedPlaybookScope] = useState(null);
   const [steps, setSteps] = useState([]);
   const [editingStructure, setEditingStructure] = useState(false);
 
@@ -419,6 +432,12 @@ export default function KeeprSpacePlaybooksScreen({ navigation, route }) {
     [currentWorkspace, selectedBoat, workspaceName]
   );
   const playbooksAllowed = Boolean(selectedBoatSemantics?.showPlaybooks);
+  const eligiblePlaybookScopes = selectedBoatSemantics?.eligiblePlaybookScopes || [];
+  const activePlaybookScope =
+    selectedPlaybookScope ||
+    selectedBoatSemantics?.defaultPlaybookScope ||
+    eligiblePlaybookScopes[0] ||
+    "service";
   const selectedBoatHeroUrl = (selectedBoatId && heroUrls[selectedBoatId]) || assetHeroUrl(selectedBoat);
   const activeServices = useMemo(
     () => (config?.service_offerings || []).filter((service) => String(service.status || "active").toLowerCase() === "active"),
@@ -473,14 +492,14 @@ export default function KeeprSpacePlaybooksScreen({ navigation, route }) {
         getKeeprSpaceOrgConfig({ organizationId }),
       ]);
       const nextBoats = nextPortfolio?.boats || [];
-      const eligibleBoats = nextBoats.filter((boat) =>
+      const semanticsForBoat = (boat) =>
         assetProjectionSemantics({
           asset: { ...boat, ...(boat?.identity || {}) },
           relationship: boat?.service_relationship || boat?.dealer_relationship || boat,
           workspace: currentWorkspace,
           providerName: workspaceDisplayName(currentWorkspace, nextConfig),
-        }).showPlaybooks
-      );
+        });
+      const eligibleBoats = nextBoats.filter((boat) => semanticsForBoat(boat).showPlaybooks);
       const routeBoatEligible = eligibleBoats.some((boat) => String(assetIdForBoat(boat)) === String(routeAssetId));
       const selectedBoatEligible = eligibleBoats.some((boat) => String(assetIdForBoat(boat)) === String(selectedAssetId));
       const nextAssetId =
@@ -494,6 +513,13 @@ export default function KeeprSpacePlaybooksScreen({ navigation, route }) {
       setSelectedAssetId(nextAssetId);
 
       if (nextAssetId && (routeBoatEligible || selectedBoatEligible || eligibleBoats.some((boat) => String(assetIdForBoat(boat)) === String(nextAssetId)))) {
+        const nextSelectedBoat = nextBoats.find((boat) => String(assetIdForBoat(boat)) === String(nextAssetId));
+        const nextSemantics = nextSelectedBoat ? semanticsForBoat(nextSelectedBoat) : null;
+        const nextScope =
+          selectedPlaybookScope && nextSemantics?.eligiblePlaybookScopes?.includes(selectedPlaybookScope)
+            ? selectedPlaybookScope
+            : nextSemantics?.defaultPlaybookScope || nextSemantics?.eligiblePlaybookScopes?.[0] || null;
+        setSelectedPlaybookScope(nextScope);
         const [nextPlaybooks, nextOrgPlaybooks] = await Promise.all([
           listKeeprSpacePlaybooks({
             organizationId,
@@ -507,10 +533,14 @@ export default function KeeprSpacePlaybooksScreen({ navigation, route }) {
           }),
         ]);
         const rows = prioritizePlaybooks(await hydratePlaybookActionStatuses(
-          (nextPlaybooks?.playbooks || []).filter((playbook) => !isTemplatePlaybook(playbook))
+          filterPlaybooksForProjection(
+            (nextPlaybooks?.playbooks || []).filter((playbook) => !isTemplatePlaybook(playbook)),
+            nextSemantics,
+            nextScope
+          )
         ));
         const templateRows = await hydratePlaybookActionStatuses(
-          (nextOrgPlaybooks?.playbooks || []).filter(isTemplatePlaybook)
+          filterPlaybooksForProjection((nextOrgPlaybooks?.playbooks || []).filter(isTemplatePlaybook), nextSemantics, nextScope)
         );
         setPlaybooks(rows);
         setTemplates(templateRows);
@@ -537,6 +567,7 @@ export default function KeeprSpacePlaybooksScreen({ navigation, route }) {
         setTemplates([]);
         setSelectedPlaybookId(null);
         setSourcePlaybookId(null);
+        setSelectedPlaybookScope(null);
         setName("");
         setSteps([]);
       }
@@ -545,7 +576,7 @@ export default function KeeprSpacePlaybooksScreen({ navigation, route }) {
     } finally {
       setLoading(false);
     }
-  }, [currentWorkspace, organizationId, routeAssetId, routeSystemId, selectedAssetId]);
+  }, [currentWorkspace, organizationId, routeAssetId, routeSystemId, selectedAssetId, selectedPlaybookScope]);
 
   useEffect(() => {
     load();
@@ -554,17 +585,21 @@ export default function KeeprSpacePlaybooksScreen({ navigation, route }) {
   const startNewPlaybook = useCallback(() => {
     setSelectedPlaybookId(null);
     setSourcePlaybookId(null);
-    setName(selectedBoat ? `${assetName(selectedBoat)} Playbook` : `${workspaceName} Playbook`);
+    const nextScope = activePlaybookScope;
+    setSelectedPlaybookScope(nextScope);
+    const scopeLabel = PLAYBOOK_SCOPE_LABELS[nextScope] || "Playbook";
+    setName(selectedBoat ? `${assetName(selectedBoat)} ${scopeLabel} Playbook` : `${workspaceName} ${scopeLabel} Playbook`);
     setPlaybookStartDate("");
     setPlaybookStartTime("");
     setSteps([]);
     setEditingStructure(false);
-  }, [selectedBoat, workspaceName]);
+  }, [activePlaybookScope, selectedBoat, workspaceName]);
 
   const selectPlaybook = useCallback((playbook) => {
     const meta = playbook?.metadata && typeof playbook.metadata === "object" ? playbook.metadata : {};
     setSelectedPlaybookId(playbook?.id || null);
     setSourcePlaybookId(playbook?.source_playbook_id || meta.source_playbook_id || null);
+    setSelectedPlaybookScope(playbookScopeFor(playbook));
     setName(playbook?.name || "");
     setPlaybookStartDate(meta.playbook_start_date || "");
     setPlaybookStartTime(meta.playbook_start_time || "");
@@ -576,6 +611,7 @@ export default function KeeprSpacePlaybooksScreen({ navigation, route }) {
     const meta = template?.metadata && typeof template.metadata === "object" ? template.metadata : {};
     setSelectedPlaybookId(null);
     setSourcePlaybookId(template?.id || null);
+    setSelectedPlaybookScope(playbookScopeFor(template));
     setName(String(template?.name || "New Playbook").replace(/\s+Template$/i, ""));
     setPlaybookStartDate(meta.playbook_start_date || "");
     setPlaybookStartTime(meta.playbook_start_time || "");
@@ -648,6 +684,7 @@ export default function KeeprSpacePlaybooksScreen({ navigation, route }) {
         workspace_name: workspaceName,
         source_playbook_id: sourcePlaybookId || null,
         is_template: false,
+        playbook_scope: activePlaybookScope,
         playbook_start_date: playbookStartDate || null,
         playbook_start_time: playbookStartDate && playbookStartTime ? normalizeTime(playbookStartTime) : null,
         playbook_schedule_state: playbookStartDate ? "anchored" : "unscheduled",
@@ -679,6 +716,7 @@ export default function KeeprSpacePlaybooksScreen({ navigation, route }) {
     selectedBoat,
     selectedPlaybook,
     selectedPlaybookId,
+    activePlaybookScope,
     sourcePlaybookId,
     steps,
     workspaceName,
@@ -1009,11 +1047,36 @@ export default function KeeprSpacePlaybooksScreen({ navigation, route }) {
                 <View style={styles.headerBoatCopy}>
                   <Text style={styles.headerBoatName}>{assetName(selectedBoat)}</Text>
                   <Text style={styles.headerBoatMeta} numberOfLines={1}>{assetSubtitle(selectedBoat)}</Text>
+                  <Text style={styles.headerBoatMeta} numberOfLines={1}>
+                    {selectedBoatSemantics?.playbookScopeLabel || PLAYBOOK_SCOPE_LABELS[activePlaybookScope]}
+                  </Text>
                 </View>
                 <TouchableOpacity style={styles.backToBoatButton} onPress={openBoat} activeOpacity={0.86}>
                   <Ionicons name="arrow-back-outline" size={15} color={colors.brandBlue} />
                   <Text style={styles.secondaryButtonText}>Back to Boat</Text>
                 </TouchableOpacity>
+              </View>
+            ) : null}
+            {eligiblePlaybookScopes.length > 1 ? (
+              <View style={styles.scopeRow}>
+                {eligiblePlaybookScopes.map((scope) => (
+                  <TouchableOpacity
+                    key={scope}
+                    style={[styles.choicePill, activePlaybookScope === scope && styles.choicePillActive]}
+                    onPress={() => {
+                      setSelectedPlaybookScope(scope);
+                      setSelectedPlaybookId(null);
+                      setSourcePlaybookId(null);
+                      setSteps([]);
+                      setEditingStructure(false);
+                    }}
+                    activeOpacity={0.86}
+                  >
+                    <Text style={[styles.choicePillText, activePlaybookScope === scope && styles.choicePillTextActive]}>
+                      {PLAYBOOK_SCOPE_LABELS[scope] || scope}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
               </View>
             ) : null}
           </View>
@@ -1112,6 +1175,7 @@ export default function KeeprSpacePlaybooksScreen({ navigation, route }) {
                 )}
                 <Text style={styles.panelTitle}>{assetName(selectedBoat)}</Text>
                 <Text style={styles.assetMeta}>{assetSubtitle(selectedBoat)}</Text>
+                <Text style={styles.assetMeta}>{selectedBoatSemantics?.playbookScopeLabel}</Text>
                 <TouchableOpacity style={styles.secondaryButtonFull} onPress={openBoat} activeOpacity={0.86}>
                   <Ionicons name="arrow-back-outline" size={15} color={colors.brandBlue} />
                   <Text style={styles.secondaryButtonText}>Back to Boat</Text>
@@ -1155,6 +1219,7 @@ export default function KeeprSpacePlaybooksScreen({ navigation, route }) {
                     <Text style={styles.badgeText}>{String(playbook.status || "draft").toUpperCase()}</Text>
                   </View>
                   <Text style={styles.playbookTitle}>{playbook.name}</Text>
+                  <Text style={styles.assetMeta}>{PLAYBOOK_SCOPE_LABELS[playbookScopeFor(playbook)] || "Service"}</Text>
                   <Text style={styles.assetMeta}>{playbookProgress(playbook)}</Text>
                 </TouchableOpacity>
               ))
@@ -1176,6 +1241,7 @@ export default function KeeprSpacePlaybooksScreen({ navigation, route }) {
                     <Text style={styles.templateBadgeText}>TEMPLATE</Text>
                   </View>
                   <Text style={styles.playbookTitle}>{template.name}</Text>
+                  <Text style={styles.assetMeta}>{PLAYBOOK_SCOPE_LABELS[playbookScopeFor(template)] || "Service"}</Text>
                   <Text style={styles.assetMeta}>{playbookProgress(template)}</Text>
                 </TouchableOpacity>
               ))
@@ -1197,6 +1263,7 @@ export default function KeeprSpacePlaybooksScreen({ navigation, route }) {
                 <Text style={styles.subtitle}>
                   {selectedBoat ? assetSubtitle(selectedBoat) : "Choose a boat"}{routeSystemId ? " · System-scoped" : ""}
                   {sourcePlaybookId ? " · From template" : ""}
+                  {activePlaybookScope ? ` · ${PLAYBOOK_SCOPE_LABELS[activePlaybookScope] || activePlaybookScope}` : ""}
                 </Text>
               </View>
               <View style={styles.statusPill}>
@@ -1482,6 +1549,12 @@ const styles = StyleSheet.create({
   headerCopy: {
     flex: 1,
     minWidth: Platform.OS === "web" ? 320 : undefined,
+  },
+  scopeRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    marginTop: spacing.sm,
   },
   eyebrow: {
     color: colors.brandBlue,

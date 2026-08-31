@@ -15,8 +15,11 @@ test("projection semantics distinguish visibility from meaning", () => {
   assert.match(helper, /assigned_dealer/);
   assert.match(helper, /selling_dealer/);
   assert.match(helper, /servicing_dealer/);
+  assert.match(helper, /eligiblePlaybookScopes/);
+  assert.match(helper, /sales_prep/);
+  assert.match(helper, /delivery/);
+  assert.match(helper, /inventory/);
   assert.match(helper, /relationshipType === "owner"/);
-  assert.match(helper, /showPlaybooks: false/);
   assert.match(helper, /showOwnerPanel: ownerPresent/);
   assert.match(helper, /showContribution: false/);
   assert.match(helper, /dealer_sales_workspace/);
@@ -46,8 +49,29 @@ test("playbooks are gated by asset relationship/access scope", () => {
   const playbooks = read("screens/KeeprSpacePlaybooksScreen.js");
 
   assert.match(playbooks, /assetProjectionSemantics/);
-  assert.match(playbooks, /\.showPlaybooks/);
+  assert.match(playbooks, /playbookAllowedForProjection/);
+  assert.match(playbooks, /selectedPlaybookScope/);
+  assert.match(playbooks, /metadata:[\s\S]*playbook_scope: activePlaybookScope/);
   assert.match(playbooks, /playbooksAllowed/);
   assert.match(playbooks, /Playbooks unavailable/);
   assert.match(playbooks, /This relationship does not enable owner or service playbooks/);
+});
+
+test("playbook scopes follow projection semantics", async () => {
+  const mod = await import("../lib/assetProjectionSemantics.js");
+
+  const inventory = mod.assetProjectionSemantics({
+    relationship: { relationship_type: "selling_dealer" },
+  });
+  assert.deepEqual(inventory.eligiblePlaybookScopes, ["inventory", "sales_prep", "delivery"]);
+  assert.equal(mod.playbookAllowedForProjection({ metadata: { playbook_scope: "delivery" } }, inventory), true);
+  assert.equal(mod.playbookAllowedForProjection({ metadata: { playbook_scope: "service" } }, inventory), false);
+  assert.equal(mod.playbookAllowedForProjection({ metadata: {} }, inventory), false);
+
+  const service = mod.assetProjectionSemantics({
+    relationship: { relationship_type: "servicing_dealer" },
+  });
+  assert.deepEqual(service.eligiblePlaybookScopes, ["service"]);
+  assert.equal(mod.playbookAllowedForProjection({ metadata: { playbook_scope: "delivery" } }, service), false);
+  assert.equal(mod.playbookAllowedForProjection({ metadata: {} }, service), true);
 });

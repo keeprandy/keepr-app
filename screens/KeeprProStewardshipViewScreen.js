@@ -42,7 +42,10 @@ import {
 } from "../lib/keeprspaceApi";
 import { getActionScheduleLabel, getActionScheduledDueAt } from "../lib/playbookSchedule";
 import { formatContributionAttribution } from "../lib/provenance";
-import { assetProjectionSemantics } from "../lib/assetProjectionSemantics";
+import {
+  assetProjectionSemantics,
+  playbookAllowedForProjection,
+} from "../lib/assetProjectionSemantics";
 import ActivatorBreadcrumb from "../components/ActivatorBreadcrumb";
 import { useWorkspace } from "../context/WorkspaceContext";
 import AttachmentViewerModal from "../components/AttachmentViewerModal";
@@ -329,9 +332,10 @@ function playbookDisplayStatus(playbook) {
   return String(playbook?.status || "draft").replace(/_/g, " ");
 }
 
-function visibleRelationshipPlaybooks(playbooks = []) {
+function visibleRelationshipPlaybooks(playbooks = [], semantics = {}) {
   const filtered = playbooks.filter((item) =>
-    !["archived", "deleted"].includes(String(item?.status || "").toLowerCase())
+    !["archived", "deleted"].includes(String(item?.status || "").toLowerCase()) &&
+    playbookAllowedForProjection(item, semantics)
   );
   const liveKeys = new Set(filtered.filter(isLivePlaybook).map(playbookDedupeKey));
   return filtered
@@ -1177,9 +1181,12 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
   const appointment = portal?.appointment || null;
   const sharedFiles = portal?.shared_files || [];
   const hasRelationshipThread = Boolean(relationshipThreadId);
-  const hasPersistedPlaybook = Boolean(playbook?.exists);
-  const hasPersistedAppointment = Boolean(appointment?.scheduled);
-  const visiblePlaybooks = projectionSemantics.showPlaybooks ? visibleRelationshipPlaybooks(relationshipPlaybooks) : [];
+  const persistedPlaybookAllowed = Boolean(!playbook?.exists || playbookAllowedForProjection(playbook, projectionSemantics));
+  const hasPersistedPlaybook = Boolean(playbook?.exists && persistedPlaybookAllowed);
+  const hasPersistedAppointment = Boolean(appointment?.scheduled && projectionSemantics.showServiceActions);
+  const visiblePlaybooks = projectionSemantics.showPlaybooks
+    ? visibleRelationshipPlaybooks(relationshipPlaybooks, projectionSemantics)
+    : [];
   const canEditCurrentAction = Boolean(
     currentActionOpen &&
       (portal?.permitted_operations?.update_action_status ||
@@ -1888,7 +1895,23 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
   };
 
   const renderPlaybookSummary = () => {
-    if (!visiblePlaybooks.length) return null;
+    if (!projectionSemantics.showPlaybooks) return null;
+    if (!visiblePlaybooks.length) {
+      return (
+        <View style={styles.card}>
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionTitleBlock}>
+              <Text style={styles.cardTitle}>{projectionSemantics.playbookTitle}</Text>
+              <Text style={styles.sectionHint}>{projectionSemantics.playbookHint}</Text>
+            </View>
+            <TouchableOpacity style={styles.inlineButton} onPress={openPlaybooks} activeOpacity={0.86}>
+              <Ionicons name="add-outline" size={16} color={colors.primary} />
+              <Text style={styles.inlineButtonText}>Create Playbook</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      );
+    }
 
     return (
       <View style={styles.card}>
