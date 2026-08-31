@@ -76,6 +76,16 @@ test("admin home creates generic organizations without OEM-specific branching", 
   assert.doesNotMatch(source, /Bennington/);
 });
 
+test("Keepr Admin route bypasses customer workspace and personal onboarding gates", () => {
+  const source = read("App.js");
+
+  assert.equal(source.includes('path.startsWith("/keepr-admin/org/")'), true);
+  assert.equal(source.includes('path === "/keepr-admin" || path.startsWith("/keepr-admin/")'), true);
+  assert.match(source, /const isKeeprAdminWebPathRoute =/);
+  assert.match(source, /isKeeprAdminWebPathRoute\s*\?\s*currentWebPathRoute/);
+  assert.match(source, /isOrgWorkspaceActive && currentWebPathRoute/);
+});
+
 test("generic OEM shell does not use Tiara fallback catalog or brand assumptions", () => {
   const source = read("screens/ActivatorHomeScreen.js");
 

@@ -2631,14 +2631,20 @@ const isBootLoading =
   initializing ||
   ((loadingRole && role === null) || loadingWorkspaces);
 
+const currentWebPathRoute = routeForCurrentWebPath();
+const isKeeprAdminWebPathRoute =
+  currentWebPathRoute === "KeeprAdminHome" || currentWebPathRoute === "KeeprAdminOrgDetail";
+
 const initialRouteName = isBootLoading
   ? "SplashIntro"
   : isResetLink
   ? "ResetPassword"
   : !user
   ? "Auth"
-  : isOrgWorkspaceActive && routeForCurrentWebPath()
-  ? routeForCurrentWebPath()
+  : isKeeprAdminWebPathRoute
+  ? currentWebPathRoute
+  : isOrgWorkspaceActive && currentWebPathRoute
+  ? currentWebPathRoute
   : shouldRouteToOnboarding
   ? "OnboardingStack"
   : routeForWorkspace(currentWorkspace, legacyProfileRole || role);
