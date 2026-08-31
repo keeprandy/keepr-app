@@ -154,3 +154,14 @@ test("Exact build draft UI can add systems that are not template choices", () =>
   assert.match(source, /mapping_status: "mapped"/);
   assert.match(source, /\.\.\.exactUnitSystems\.map\(exactSystemDraftItemPayload\)/);
 });
+
+test("Exact build screen does not use Tiara starter options for non-Tiara templates", () => {
+  const source = read("screens/ActivatorExactBuildScreen.js");
+
+  assert.match(source, /useTiaraFactoryFallback = isTiaraTemplateKey\(templateKey\)/);
+  assert.match(source, /useState\(\(\) => useTiaraFactoryFallback \? DEMO_FACTORY_OPTIONS : \[\]\)/);
+  assert.match(source, /useTiaraFactoryFallback \? getTiaraFactoryBuildWorkspace/);
+  assert.doesNotMatch(source, /useState\(DEMO_FACTORY_OPTIONS\)/);
+  assert.match(source, /const draftTemplate = draftWorkspace\?\.template \|\| null/);
+  assert.match(source, /const template = modelProjection\.template \|\| draftTemplate \|\| \{\}/);
+});

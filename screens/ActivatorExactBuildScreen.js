@@ -397,6 +397,11 @@ function normalizeDraftKey(value) {
     .replace(/^-+|-+$/g, "");
 }
 
+function isTiaraTemplateKey(value) {
+  const key = String(value || "").toLowerCase();
+  return key === TIARA_56_LS_TEMPLATE_KEY || key.startsWith("tiara-") || key.includes("tiara");
+}
+
 function optionDraftState(option) {
   return option.selected ? "selected" : "unselected";
 }
@@ -783,6 +788,7 @@ function FreshwaterFlowdownPanel({ items }) {
 
 export default function ActivatorExactBuildScreen({ navigation, route }) {
   const templateKey = route?.params?.templateKey || TIARA_56_LS_TEMPLATE_KEY;
+  const useTiaraFactoryFallback = isTiaraTemplateKey(templateKey);
   const exactBuildKey = route?.params?.buildKey || route?.params?.exactBuildKey || webSearchParam("build", "buildKey", "exactBuildKey") || null;
   const hullNumber = route?.params?.hullNumber || route?.params?.hin || webSearchParam("hull", "hullNumber", "hin") || null;
   const organizationId = route?.params?.organizationId || webSearchParam("organizationId") || null;
@@ -800,15 +806,23 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
   const [savingDraft, setSavingDraft] = useState(false);
   const [publishingDraft, setPublishingDraft] = useState(false);
   const [factoryBuild, setFactoryBuild] = useState(() => (
-    getTiaraExactFactoryBuild({ templateKey, buildKey: exactBuildKey, hullNumber })
-    || getDefaultTiaraExactFactoryBuildForTemplate(templateKey)
+    useTiaraFactoryFallback
+      ? (
+        getTiaraExactFactoryBuild({ templateKey, buildKey: exactBuildKey, hullNumber })
+        || getDefaultTiaraExactFactoryBuildForTemplate(templateKey)
+      )
+      : null
   ));
   const [factoryBuildSource, setFactoryBuildSource] = useState("none");
-  const [options, setOptions] = useState(DEMO_FACTORY_OPTIONS);
+  const [options, setOptions] = useState(() => useTiaraFactoryFallback ? DEMO_FACTORY_OPTIONS : []);
   const [finish, setFinish] = useState(FINISH_FIELDS);
   const [selectedFactoryLineId, setSelectedFactoryLineId] = useState(() => (
-    getTiaraExactFactoryBuild({ templateKey, buildKey: exactBuildKey, hullNumber })
-    || getDefaultTiaraExactFactoryBuildForTemplate(templateKey)
+    useTiaraFactoryFallback
+      ? (
+        getTiaraExactFactoryBuild({ templateKey, buildKey: exactBuildKey, hullNumber })
+        || getDefaultTiaraExactFactoryBuildForTemplate(templateKey)
+      )
+      : null
   )?.line_items?.[0]?.id || null);
   const [assignmentDraft, setAssignmentDraft] = useState({
     system_category: TIARA_SYSTEM_CATEGORIES[0],
@@ -835,18 +849,22 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
     if (!quiet) setLoading(true);
     setError(null);
     try {
-      const localBuild = getTiaraExactFactoryBuild({ templateKey, buildKey: exactBuildKey, hullNumber })
-        || (!exactBuildKey && !hullNumber ? getDefaultTiaraExactFactoryBuildForTemplate(templateKey) : null);
-      const localTemplateFallback = templateKey === TIARA_56_LS_TEMPLATE_KEY
+      const localBuild = useTiaraFactoryFallback
+        ? (
+          getTiaraExactFactoryBuild({ templateKey, buildKey: exactBuildKey, hullNumber })
+          || (!exactBuildKey && !hullNumber ? getDefaultTiaraExactFactoryBuildForTemplate(templateKey) : null)
+        )
+        : null;
+      const localTemplateFallback = useTiaraFactoryFallback && templateKey === TIARA_56_LS_TEMPLATE_KEY
         ? { template: tiara56LsCatalogTemplate, resources: [], showcase_media: [], items: [] }
         : null;
       const [next, buildWorkspace, exactDraft, organizationConfig] = await Promise.allSettled([
         getCatalogTemplateDetail({ templateKey }),
-        getTiaraFactoryBuildWorkspace({
+        useTiaraFactoryFallback ? getTiaraFactoryBuildWorkspace({
           hullNumber: hullNumber || localBuild?.work_order?.hull_number || null,
           templateKey,
           buildKey: exactBuildKey || localBuild?.build_key || null,
-        }),
+        }) : Promise.resolve(null),
         organizationId ? getExactBuildDraft({
           draftId: routeDraftId,
           draftKey: routeDraftKey,
@@ -900,26 +918,31 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
       setDetail(null);
       setOrgConfig(null);
       setTemplateAttachmentMedia([]);
-      const localBuild = getTiaraExactFactoryBuild({ templateKey, buildKey: exactBuildKey, hullNumber })
-        || (!exactBuildKey && !hullNumber ? getDefaultTiaraExactFactoryBuildForTemplate(templateKey) : null);
+      const localBuild = useTiaraFactoryFallback
+        ? (
+          getTiaraExactFactoryBuild({ templateKey, buildKey: exactBuildKey, hullNumber })
+          || (!exactBuildKey && !hullNumber ? getDefaultTiaraExactFactoryBuildForTemplate(templateKey) : null)
+        )
+        : null;
       setFactoryBuild(localBuild);
       setFactoryBuildSource(localBuild ? "local" : "none");
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [exactBuildKey, hullNumber, organizationId, routeDraftId, routeDraftKey, templateKey]);
+  }, [exactBuildKey, hullNumber, organizationId, routeDraftId, routeDraftKey, templateKey, useTiaraFactoryFallback]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  const modelProjection = useMemo(() => projectModelTemplateDetail(detail), [detail]);
-  const template = modelProjection.template || {};
-  const resources = modelProjection.resources || [];
   const workOrder = factoryBuild?.work_order || null;
   const exactDraft = draftWorkspace?.draft || null;
   const exactDraftItems = useMemo(() => draftWorkspace?.items || [], [draftWorkspace?.items]);
+  const modelProjection = useMemo(() => projectModelTemplateDetail(detail), [detail]);
+  const draftTemplate = draftWorkspace?.template || null;
+  const template = modelProjection.template || draftTemplate || {};
+  const resources = modelProjection.resources || [];
   const catalogTemplate = factoryBuild?.catalog_template || template || {};
   const publicModelContext = factoryBuild?.public_model_context || null;
   const factoryLines = factoryBuild?.line_items || [];
