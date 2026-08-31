@@ -17,10 +17,46 @@ const ORG_PRESETS = [
   { key: "oem", label: "OEM" },
   { key: "dealer", label: "Dealer" },
   { key: "member_team", label: "Member Team" },
+  { key: "parent_company", label: "Parent Company" },
 ];
 
+const ORG_FILTERS = [
+  { key: "", label: "All" },
+  ...ORG_PRESETS,
+];
+
+function orgTypeForDisplay(org) {
+  return org.organization_type || org.org_type || org.workspace_type || "org";
+}
+
+function orgTypeLabel(value) {
+  switch (value) {
+    case "oem":
+    case "manufacturer":
+      return "OEM";
+    case "dealer":
+    case "keeprdealer":
+      return "Dealer";
+    case "member_team":
+      return "Member Team";
+    case "parent_company":
+      return "Parent Company";
+    default:
+      return "Organization";
+  }
+}
+
+function orgIconName(org) {
+  const type = orgTypeForDisplay(org);
+  if (type === "dealer" || type === "keeprdealer") return "storefront-outline";
+  if (type === "member_team") return "people-outline";
+  if (type === "parent_company") return "git-network-outline";
+  return "business-outline";
+}
+
 export default function KeeprAdminHomeScreen({ navigation }) {
-  const [query, setQuery] = useState("Wilson Marine");
+  const [query, setQuery] = useState("");
+  const [orgTypeFilter, setOrgTypeFilter] = useState("");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -36,7 +72,7 @@ export default function KeeprAdminHomeScreen({ navigation }) {
     setLoading(true);
     setError(null);
     try {
-      const data = await searchKeeprAdminOrgs(query);
+      const data = await searchKeeprAdminOrgs(query, { organizationType: orgTypeFilter });
       setResults(data?.organizations || []);
     } catch (err) {
       setError(err?.message || "Could not search organizations.");
@@ -44,7 +80,7 @@ export default function KeeprAdminHomeScreen({ navigation }) {
     } finally {
       setLoading(false);
     }
-  }, [query]);
+  }, [orgTypeFilter, query]);
 
   useEffect(() => {
     runSearch();
@@ -71,6 +107,7 @@ export default function KeeprAdminHomeScreen({ navigation }) {
       setCreateAdminEmail("");
       setCreatePassword("");
       setCreateWebsite("");
+      setOrgTypeFilter(createPreset);
       if (orgId) {
         navigation.navigate("KeeprAdminOrgDetail", { organizationId: orgId });
       }
@@ -190,6 +227,24 @@ export default function KeeprAdminHomeScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
+      <View style={styles.filterRow}>
+        {ORG_FILTERS.map((filter) => {
+          const selected = filter.key === orgTypeFilter;
+          return (
+            <TouchableOpacity
+              key={filter.key || "all"}
+              style={[styles.filterButton, selected && styles.filterButtonActive]}
+              onPress={() => setOrgTypeFilter(filter.key)}
+              disabled={loading}
+            >
+              <Text style={[styles.filterButtonText, selected && styles.filterButtonTextActive]}>
+                {filter.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
       <View style={styles.list}>
@@ -201,10 +256,15 @@ export default function KeeprAdminHomeScreen({ navigation }) {
             onPress={() => navigation.navigate("KeeprAdminOrgDetail", { organizationId: org.id })}
           >
             <View style={styles.orgIcon}>
-              <Ionicons name="business-outline" size={20} color={colors.primary} />
+              <Ionicons name={orgIconName(org)} size={20} color={colors.primary} />
             </View>
             <View style={styles.orgBody}>
-              <Text style={styles.orgName}>{org.display_name || org.name || "Organization"}</Text>
+              <View style={styles.orgTitleRow}>
+                <Text style={styles.orgName}>{org.display_name || org.name || "Organization"}</Text>
+                <View style={styles.orgTypeBadge}>
+                  <Text style={styles.orgTypeBadgeText}>{orgTypeLabel(orgTypeForDisplay(org))}</Text>
+                </View>
+              </View>
               <Text style={styles.orgMeta} numberOfLines={1}>
                 {org.slug || "no slug"} · {org.workspace_type || "untyped"} · {org.status || "active"}
               </Text>
@@ -341,6 +401,33 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: spacing.sm,
   },
+  filterRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+  },
+  filterButton: {
+    minHeight: 34,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#fff",
+  },
+  filterButtonActive: {
+    borderColor: colors.primary,
+    backgroundColor: "#eef5ff",
+  },
+  filterButtonText: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  filterButtonTextActive: {
+    color: colors.primary,
+  },
   input: {
     flex: 1,
     minHeight: 48,
@@ -389,10 +476,30 @@ const styles = StyleSheet.create({
   orgBody: {
     flex: 1,
   },
+  orgTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    flexWrap: "wrap",
+  },
   orgName: {
     color: colors.textPrimary,
     fontSize: 16,
     fontWeight: "900",
+  },
+  orgTypeBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: radius.sm,
+    backgroundColor: "#f1f5f9",
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  orgTypeBadgeText: {
+    color: colors.textSecondary,
+    fontSize: 10,
+    fontWeight: "900",
+    textTransform: "uppercase",
   },
   orgMeta: {
     marginTop: 3,

@@ -14,13 +14,46 @@ import {
 import {
   activateKeeprSpaceOrg,
   getKeeprAdminOrgActivation,
+  searchKeeprAdminOrgs,
   searchKeeprAdminOperatorUsers,
+  upsertKeeprAdminOrgRelationship,
 } from "../lib/keeprAdminApi";
 import { useWorkspace } from "../context/WorkspaceContext";
 import { colors, radius, shadows, spacing } from "../styles/theme";
 
 const WORKSPACE_TYPES = ["keeprpro", "keeprdealer", "keeproem"];
 const MEMBER_ROLES = ["admin", "manager", "member", "provider_member"];
+const RELATIONSHIP_TYPES = [
+  { key: "authorized_dealer", label: "Dealer represents OEM", targetType: "oem" },
+  { key: "dealer_network_member", label: "Dealer network member", targetType: "dealer" },
+  { key: "oem_partner", label: "OEM partner", targetType: "oem" },
+  { key: "parent_company", label: "Parent company", targetType: "parent_company" },
+];
+
+function orgTypeForDisplay(org) {
+  return org.organization_type || org.org_type || org.workspace_type || "org";
+}
+
+function orgTypeLabel(value) {
+  switch (value) {
+    case "oem":
+    case "manufacturer":
+      return "OEM";
+    case "dealer":
+    case "keeprdealer":
+      return "Dealer";
+    case "member_team":
+      return "Member Team";
+    case "parent_company":
+      return "Parent Company";
+    default:
+      return "Organization";
+  }
+}
+
+function relationshipLabel(type) {
+  return RELATIONSHIP_TYPES.find((item) => item.key === type)?.label || type || "Relationship";
+}
 
 export default function KeeprAdminOrgDetailScreen({ navigation, route }) {
   const { refreshWorkspaces, setCurrentWorkspaceId } = useWorkspace();
@@ -34,11 +67,18 @@ export default function KeeprAdminOrgDetailScreen({ navigation, route }) {
   const [selectedOperator, setSelectedOperator] = useState(null);
   const [workspaceType, setWorkspaceType] = useState("keeprpro");
   const [memberRole, setMemberRole] = useState("admin");
+  const [relationshipType, setRelationshipType] = useState("authorized_dealer");
+  const [relationshipQuery, setRelationshipQuery] = useState("");
+  const [relationshipResults, setRelationshipResults] = useState([]);
+  const [selectedRelationshipOrg, setSelectedRelationshipOrg] = useState(null);
 
   const org = detail?.organization || {};
   const activation = detail?.activation;
   const workspace = detail?.workspace_preview;
   const operators = detail?.operators || [];
+  const relationshipsFrom = detail?.relationships_from || [];
+  const relationshipsTo = detail?.relationships_to || [];
+  const parentChain = detail?.parent_chain || [];
   const workspaceId = workspace?.workspace_id || (organizationId ? `org:${organizationId}` : null);
 
   const title = useMemo(() => {
@@ -81,6 +121,50 @@ export default function KeeprAdminOrgDetailScreen({ navigation, route }) {
     }
   }, [operatorQuery]);
 
+  const searchRelationshipOrgs = useCallback(async () => {
+    if (!relationshipQuery.trim()) return;
+    setError(null);
+    try {
+      const targetType = RELATIONSHIP_TYPES.find((item) => item.key === relationshipType)?.targetType || "";
+      const data = await searchKeeprAdminOrgs(relationshipQuery, {
+        organizationType: targetType,
+      });
+      setRelationshipResults((data?.organizations || []).filter((item) => item.id !== organizationId));
+    } catch (err) {
+      setError(err?.message || "Could not search organizations.");
+      setRelationshipResults([]);
+    }
+  }, [organizationId, relationshipQuery, relationshipType]);
+
+  const saveRelationship = useCallback(async () => {
+    if (!organizationId || !selectedRelationshipOrg?.id) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await upsertKeeprAdminOrgRelationship({
+        fromOrgId: organizationId,
+        toOrgId: selectedRelationshipOrg.id,
+        relationshipType,
+        status: "active",
+        metadata: {
+          source: "keepr_admin",
+          assignment_context:
+            relationshipType === "parent_company"
+              ? "child_points_to_parent"
+              : "dealer_points_to_represented_oem",
+        },
+      });
+      setRelationshipQuery("");
+      setRelationshipResults([]);
+      setSelectedRelationshipOrg(null);
+      await load();
+    } catch (err) {
+      setError(err?.message || "Could not save organization relationship.");
+    } finally {
+      setSaving(false);
+    }
+  }, [load, organizationId, relationshipType, selectedRelationshipOrg?.id]);
+
   const activate = useCallback(async () => {
     if (!organizationId || !selectedOperator?.id) return;
     setSaving(true);
@@ -106,13 +190,41 @@ export default function KeeprAdminOrgDetailScreen({ navigation, route }) {
     if (!workspaceId) return;
     await refreshWorkspaces?.();
     await setCurrentWorkspaceId?.(workspaceId);
+    if (workspace?.workspace_type === "keeproem") {
+      navigation.dispatch(
+        CommonActions.reset({
+          index: 0,
+          routes: [
+            {
+              name: "ActivatorHome",
+              params: {
+                workspaceId,
+                organizationId,
+                initialMode: "templates",
+                navSection: "ActivatorTemplates",
+              },
+            },
+          ],
+        })
+      );
+      return;
+    }
     navigation.dispatch(
       CommonActions.reset({
         index: 0,
-        routes: [{ name: "WilsonHome", params: { workspaceId } }],
+        routes: [
+          {
+            name: "KeeprSpaceModule",
+            params: { workspaceId },
+            state: {
+              index: 0,
+              routes: [{ name: "KeeprSpaceHome", params: { workspaceId } }],
+            },
+          },
+        ],
       })
     );
-  }, [navigation, refreshWorkspaces, setCurrentWorkspaceId, workspaceId]);
+  }, [navigation, organizationId, refreshWorkspaces, setCurrentWorkspaceId, workspace?.workspace_type, workspaceId]);
 
   if (loading) {
     return (
@@ -143,7 +255,9 @@ export default function KeeprAdminOrgDetailScreen({ navigation, route }) {
       <View style={styles.grid}>
         <Panel title="Activation">
           <Metric label="Status" value={activation?.status || "not started"} />
+          <Metric label="Org Type" value={orgTypeLabel(orgTypeForDisplay(org))} />
           <Metric label="Workspace Type" value={activation?.workspace_type || workspace?.workspace_type || "untyped"} />
+          <Metric label="Customer State" value={detail?.customer_state?.customer_state || "unset"} />
           <Metric label="Workspace ID" value={workspaceId || "unresolved"} />
           <TouchableOpacity style={styles.primaryButton} onPress={openWorkspace} disabled={!workspaceId}>
             <Ionicons name="open-outline" size={17} color="#fff" />
@@ -226,6 +340,71 @@ export default function KeeprAdminOrgDetailScreen({ navigation, route }) {
           <Text style={styles.primaryButtonText}>{saving ? "Activating" : "Activate KeeprSpace"}</Text>
         </TouchableOpacity>
       </Panel>
+
+      <Panel title="Organization Relationships">
+        <Text style={styles.muted}>Assign customer-to-customer relationships through organization IDs.</Text>
+        <View style={styles.segmentRow}>
+          {RELATIONSHIP_TYPES.map((type) => (
+            <TouchableOpacity
+              key={type.key}
+              style={[styles.segment, relationshipType === type.key && styles.segmentActive]}
+              onPress={() => {
+                setRelationshipType(type.key);
+                setSelectedRelationshipOrg(null);
+                setRelationshipResults([]);
+              }}
+            >
+              <Text style={[styles.segmentText, relationshipType === type.key && styles.segmentTextActive]}>
+                {type.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <View style={styles.searchRow}>
+          <TextInput
+            value={relationshipQuery}
+            onChangeText={setRelationshipQuery}
+            placeholder="Search related organization"
+            placeholderTextColor={colors.textMuted}
+            style={styles.input}
+            onSubmitEditing={searchRelationshipOrgs}
+          />
+          <TouchableOpacity style={styles.searchButton} onPress={searchRelationshipOrgs}>
+            <Ionicons name="search" size={18} color="#fff" />
+          </TouchableOpacity>
+        </View>
+        <View style={styles.results}>
+          {relationshipResults.map((relatedOrg) => (
+            <TouchableOpacity
+              key={relatedOrg.id}
+              style={[styles.userRow, selectedRelationshipOrg?.id === relatedOrg.id && styles.userRowActive]}
+              onPress={() => setSelectedRelationshipOrg(relatedOrg)}
+            >
+              <View style={styles.operatorBody}>
+                <Text style={styles.operatorName}>{relatedOrg.display_name || relatedOrg.name}</Text>
+                <Text style={styles.operatorMeta}>
+                  {orgTypeLabel(orgTypeForDisplay(relatedOrg))} · {relatedOrg.slug || relatedOrg.id}
+                </Text>
+              </View>
+              {selectedRelationshipOrg?.id === relatedOrg.id ? <Ionicons name="checkmark-circle" size={20} color={colors.primary} /> : null}
+            </TouchableOpacity>
+          ))}
+        </View>
+        <TouchableOpacity
+          style={[styles.primaryButton, (!selectedRelationshipOrg || saving) && styles.buttonDisabled]}
+          onPress={saveRelationship}
+          disabled={!selectedRelationshipOrg || saving}
+        >
+          {saving ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="git-merge-outline" size={17} color="#fff" />}
+          <Text style={styles.primaryButtonText}>{saving ? "Saving" : "Save Relationship"}</Text>
+        </TouchableOpacity>
+
+        <View style={styles.relationshipGrid}>
+          <RelationshipList title="Outgoing" rows={relationshipsFrom} emptyText="No outgoing relationships." />
+          <RelationshipList title="Incoming" rows={relationshipsTo} emptyText="No incoming relationships." />
+        </View>
+        {parentChain.length ? <ParentChain rows={parentChain} /> : null}
+      </Panel>
     </ScrollView>
   );
 }
@@ -244,6 +423,45 @@ function Metric({ label, value }) {
     <View style={styles.metric}>
       <Text style={styles.metricLabel}>{label}</Text>
       <Text style={styles.metricValue} numberOfLines={2}>{String(value || "-")}</Text>
+    </View>
+  );
+}
+
+function RelationshipList({ title, rows, emptyText }) {
+  return (
+    <View style={styles.relationshipList}>
+      <Text style={styles.relationshipListTitle}>{title}</Text>
+      {rows.length ? rows.map((relationship) => {
+        const related = relationship.related_org || {};
+        return (
+          <View key={relationship.id} style={styles.relationshipRow}>
+            <Text style={styles.operatorName}>{related.display_name || related.name || relationship.to_org_id || relationship.from_org_id}</Text>
+            <Text style={styles.operatorMeta}>
+              {relationshipLabel(relationship.relationship_type)} · {relationship.status || "active"} · {orgTypeLabel(orgTypeForDisplay(related))}
+            </Text>
+          </View>
+        );
+      }) : <Text style={styles.muted}>{emptyText}</Text>}
+    </View>
+  );
+}
+
+function ParentChain({ rows }) {
+  const names = rows.reduce((acc, row, index) => {
+    if (index === 0 && row.child_name) acc.push(row.child_name);
+    if (row.parent_name) acc.push(row.parent_name);
+    return acc;
+  }, []);
+
+  return (
+    <View style={styles.chainPanel}>
+      <Text style={styles.relationshipListTitle}>Parent Company Chain</Text>
+      <Text style={styles.chainText}>{names.join(" -> ")}</Text>
+      {rows.map((row) => (
+        <Text key={`${row.depth}:${row.parent_org_id}`} style={styles.operatorMeta}>
+          {row.depth}. {row.child_name} -> {row.parent_name}
+        </Text>
+      ))}
     </View>
   );
 }
@@ -413,6 +631,43 @@ const styles = StyleSheet.create({
   },
   results: {
     gap: spacing.xs,
+  },
+  relationshipGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  relationshipList: {
+    flexGrow: 1,
+    flexBasis: 300,
+    gap: spacing.xs,
+    padding: spacing.sm,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: "#f8fafc",
+  },
+  relationshipListTitle: {
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  relationshipRow: {
+    paddingVertical: 6,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  chainPanel: {
+    gap: spacing.xs,
+    padding: spacing.sm,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: "#f8fafc",
+  },
+  chainText: {
+    color: colors.textPrimary,
+    fontWeight: "900",
   },
   userRow: {
     flexDirection: "row",

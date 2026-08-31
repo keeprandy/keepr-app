@@ -65,15 +65,50 @@ test("catalog authoring requires owner, admin, or manager roles", () => {
 
 test("admin home creates generic organizations without OEM-specific branching", () => {
   const source = read("screens/KeeprAdminHomeScreen.js");
+  const client = read("lib/keeprAdminApi.js");
+  const relationshipsSql = read("supabase/migrations/20260831133000_keepr_admin_org_relationships_v1.sql");
 
   assert.match(source, /Create Organization/);
   assert.match(source, /ORG_PRESETS/);
   assert.match(source, /key: "oem"/);
   assert.match(source, /key: "dealer"/);
   assert.match(source, /key: "member_team"/);
+  assert.match(source, /key: "parent_company"/);
+  assert.match(source, /ORG_FILTERS/);
+  assert.match(source, /organizationType: orgTypeFilter/);
   assert.match(source, /createKeeprOrganization/);
   assert.doesNotMatch(source, /Create OEM/);
   assert.doesNotMatch(source, /Bennington/);
+  assert.doesNotMatch(source, /useState\("Wilson Marine"\)/);
+  assert.match(client, /p_organization_type: filters\?\.organizationType/);
+  assert.match(relationshipsSql, /when 'parent_company' then jsonb_build_object/);
+  assert.match(relationshipsSql, /drop function if exists public\.search_keepr_admin_orgs\(text\)/);
+  assert.match(relationshipsSql, /p_organization_type text default null/);
+});
+
+test("Keepr Admin models org relationships without customer-specific routes", () => {
+  const detail = read("screens/KeeprAdminOrgDetailScreen.js");
+  const client = read("lib/keeprAdminApi.js");
+  const relationshipsSql = read("supabase/migrations/20260831133000_keepr_admin_org_relationships_v1.sql");
+
+  assert.match(detail, /RELATIONSHIP_TYPES/);
+  assert.match(detail, /authorized_dealer/);
+  assert.match(detail, /parent_company/);
+  assert.match(detail, /searchKeeprAdminOrgs\(relationshipQuery/);
+  assert.match(detail, /upsertKeeprAdminOrgRelationship/);
+  assert.match(detail, /name: "KeeprSpaceModule"/);
+  assert.match(detail, /name: "ActivatorHome"/);
+  assert.doesNotMatch(detail, /WilsonHome/);
+  assert.match(client, /upsertKeeprAdminOrgRelationship/);
+  assert.match(relationshipsSql, /create or replace function public\.upsert_keepr_admin_org_relationship/);
+  assert.match(relationshipsSql, /organization\.relationship\.upserted/);
+  assert.match(relationshipsSql, /relationships_from/);
+  assert.match(relationshipsSql, /relationships_to/);
+  assert.match(relationshipsSql, /parent_chain/);
+  assert.match(relationshipsSql, /with recursive parent_chain/);
+  assert.match(detail, /ParentChain/);
+  assert.match(detail, /Parent Company Chain/);
+  assert.match(relationshipsSql, /check \(relationship_type in \(/);
 });
 
 test("Keepr Admin route bypasses customer workspace and personal onboarding gates", () => {
