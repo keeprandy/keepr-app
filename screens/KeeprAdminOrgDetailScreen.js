@@ -16,6 +16,7 @@ import {
   getKeeprAdminOrgActivation,
   searchKeeprAdminOrgs,
   searchKeeprAdminOperatorUsers,
+  updateKeeprAdminOrgClassification,
   upsertKeeprAdminOrgRelationship,
 } from "../lib/keeprAdminApi";
 import { useWorkspace } from "../context/WorkspaceContext";
@@ -23,6 +24,13 @@ import { colors, radius, shadows, spacing } from "../styles/theme";
 
 const WORKSPACE_TYPES = ["keeprpro", "keeprdealer", "keeproem"];
 const MEMBER_ROLES = ["admin", "manager", "member", "provider_member"];
+const ORG_CLASSIFICATIONS = [
+  { key: "oem", label: "OEM" },
+  { key: "dealer", label: "Dealer" },
+  { key: "member_team", label: "Member Team" },
+  { key: "parent_company", label: "Parent Company" },
+  { key: "org", label: "Organization" },
+];
 const RELATIONSHIP_TYPES = [
   { key: "authorized_dealer", label: "Dealer represents OEM", targetType: "oem" },
   { key: "dealer_network_member", label: "Dealer network member", targetType: "dealer" },
@@ -67,6 +75,7 @@ export default function KeeprAdminOrgDetailScreen({ navigation, route }) {
   const [selectedOperator, setSelectedOperator] = useState(null);
   const [workspaceType, setWorkspaceType] = useState("keeprpro");
   const [memberRole, setMemberRole] = useState("admin");
+  const [classificationType, setClassificationType] = useState("org");
   const [relationshipType, setRelationshipType] = useState("authorized_dealer");
   const [relationshipQuery, setRelationshipQuery] = useState("");
   const [relationshipResults, setRelationshipResults] = useState([]);
@@ -96,7 +105,15 @@ export default function KeeprAdminOrgDetailScreen({ navigation, route }) {
         next?.activation?.workspace_type ||
         next?.workspace_preview?.workspace_type ||
         "keeprpro";
+      const nextClassification = orgTypeForDisplay(next?.organization || {});
       setWorkspaceType(WORKSPACE_TYPES.includes(nextWorkspaceType) ? nextWorkspaceType : "keeprpro");
+      setClassificationType(
+        ORG_CLASSIFICATIONS.some((item) => item.key === nextClassification)
+          ? nextClassification
+          : nextClassification === "manufacturer"
+            ? "oem"
+            : "org"
+      );
     } catch (err) {
       setError(err?.message || "Could not load activation.");
       setDetail(null);
@@ -135,6 +152,24 @@ export default function KeeprAdminOrgDetailScreen({ navigation, route }) {
       setRelationshipResults([]);
     }
   }, [organizationId, relationshipQuery, relationshipType]);
+
+  const saveClassification = useCallback(async () => {
+    if (!organizationId || !classificationType) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await updateKeeprAdminOrgClassification({
+        organizationId,
+        organizationType: classificationType,
+        metadata: { source: "keepr_admin_org_detail" },
+      });
+      await load();
+    } catch (err) {
+      setError(err?.message || "Could not save organization classification.");
+    } finally {
+      setSaving(false);
+    }
+  }, [classificationType, load, organizationId]);
 
   const saveRelationship = useCallback(async () => {
     if (!organizationId || !selectedRelationshipOrg?.id) return;
@@ -279,6 +314,31 @@ export default function KeeprAdminOrgDetailScreen({ navigation, route }) {
           )}
         </Panel>
       </View>
+
+      <Panel title="Organization Classification">
+        <Text style={styles.muted}>Classification is separate from workspace type and relationships.</Text>
+        <View style={styles.segmentRow}>
+          {ORG_CLASSIFICATIONS.map((type) => (
+            <TouchableOpacity
+              key={type.key}
+              style={[styles.segment, classificationType === type.key && styles.segmentActive]}
+              onPress={() => setClassificationType(type.key)}
+            >
+              <Text style={[styles.segmentText, classificationType === type.key && styles.segmentTextActive]}>
+                {type.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <TouchableOpacity
+          style={[styles.primaryButton, saving && styles.buttonDisabled]}
+          onPress={saveClassification}
+          disabled={saving}
+        >
+          {saving ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="save-outline" size={17} color="#fff" />}
+          <Text style={styles.primaryButtonText}>{saving ? "Saving" : "Save Classification"}</Text>
+        </TouchableOpacity>
+      </Panel>
 
       <Panel title="Assign Existing Operator">
         <View style={styles.segmentRow}>

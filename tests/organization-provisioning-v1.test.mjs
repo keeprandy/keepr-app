@@ -111,6 +111,24 @@ test("Keepr Admin models org relationships without customer-specific routes", ()
   assert.match(relationshipsSql, /check \(relationship_type in \(/);
 });
 
+test("Keepr Admin edits organization classification separately from workspace surface", () => {
+  const detail = read("screens/KeeprAdminOrgDetailScreen.js");
+  const client = read("lib/keeprAdminApi.js");
+  const sql = read("supabase/migrations/20260831143000_keepr_admin_org_classification_v1.sql");
+
+  assert.match(detail, /Organization Classification/);
+  assert.match(detail, /ORG_CLASSIFICATIONS/);
+  assert.match(detail, /Save Classification/);
+  assert.match(detail, /updateKeeprAdminOrgClassification/);
+  assert.match(client, /updateKeeprAdminOrgClassification/);
+  assert.match(sql, /create or replace function public\.update_keepr_admin_org_classification/);
+  assert.match(sql, /organization\.classification\.updated/);
+  assert.match(sql, /workspace_type', v_updated\.workspace_type/);
+  assert.doesNotMatch(sql, /workspace_type =/);
+  assert.match(sql, /when 'dealer' then 'dealer'/);
+  assert.match(sql, /when 'oem' then 'manufacturer'/);
+});
+
 test("Keepr Admin route bypasses customer workspace and personal onboarding gates", () => {
   const source = read("App.js");
 
