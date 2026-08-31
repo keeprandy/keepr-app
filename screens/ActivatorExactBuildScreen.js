@@ -23,6 +23,7 @@ import {
   upsertExactBuildDraft,
 } from "../lib/activatorApi";
 import { getSignedUrl, listAttachmentsForTarget } from "../lib/attachmentsApi";
+import { getKeeprSpaceOrgConfig } from "../lib/keeprspaceApi";
 import {
   TIARA_56_LS_TEMPLATE_KEY,
   TIARA_SYSTEM_CATEGORIES,
@@ -36,7 +37,6 @@ import { layoutStyles } from "../styles/layout";
 import { colors, radius, shadows, spacing } from "../styles/theme";
 
 const BOAT_HERO = require("../assets/boats/tiara/tiara_39ls_hero.jpg");
-const TIARA_OEM_LOGO = require("../assets/boats/tiara/tiara_oem_logo.png");
 
 const SHOWCASE_ASSETS = {
   tiara_39ls_aft_cockpit: require("../assets/boats/tiara/tiara_39ls_aft_cockpit.jpg"),
@@ -161,7 +161,7 @@ const DEMO_FACTORY_OPTIONS = [
 ];
 
 const FINISH_FIELDS = [
-  { key: "hull_color", label: "Hull color", value: "Pearl White" },
+  { key: "hull_color", label: "Exterior color", value: "Pearl White" },
   { key: "bootline", label: "Bootline", value: "Crystal Blue" },
   { key: "upholstery", label: "Upholstery", value: "Cool Touch Natural" },
   { key: "interior_package", label: "Interior package", value: "Modern teak" },
@@ -223,6 +223,46 @@ function mediaByRole(media = [], role) {
   if (role === "hero") return media.find((item) => item.is_hero || item.role === role || item.metadata?.role === role);
   if (role === "showcase") return media.find((item) => item.is_showcase || item.role === role || item.metadata?.role === role);
   return media.find((item) => item.role === role || item.metadata?.role === role);
+}
+
+function imageSourceFromUri(uri, fallback = null) {
+  const clean = typeof uri === "string" ? uri.trim() : "";
+  if (clean) return { uri: clean };
+  return fallback;
+}
+
+function initialsForName(name) {
+  return String(name || "OEM")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("") || "OEM";
+}
+
+function orgBrandContextFromConfig(config, fallback = {}) {
+  const org = config?.organization || {};
+  const pro = config?.keepr_pro || {};
+  const name =
+    pro.display_name ||
+    org.display_name ||
+    org.name ||
+    fallback.manufacturer ||
+    fallback.brand ||
+    "OEM Organization";
+  const location =
+    pro.location ||
+    org.location ||
+    fallback.location ||
+    "";
+
+  return {
+    name,
+    location,
+    logoUri: pro.logo_url || org.logo_url || org.photo_url || null,
+    headerImageUri: pro.header_image_url || org.header_image_url || org.team_photo_url || null,
+    isFallback: !config?.organization && !config?.keepr_pro,
+  };
 }
 
 async function hydrateTemplateAttachmentMedia(template) {
@@ -460,7 +500,7 @@ function ToggleRow({ option, onToggle, onQuantityChange }) {
         <View style={styles.optionTitleRow}>
           <Text style={styles.optionTitle}>{option.label}</Text>
           <Text style={[styles.optionState, selected && styles.optionStateSelected]}>
-            {selected ? "Selected for this hull" : "Not on this hull"}
+            {selected ? "Selected for this boat" : "Not on this boat"}
           </Text>
         </View>
         {option.description ? <Text style={styles.optionDescription}>{option.description}</Text> : null}
@@ -546,7 +586,7 @@ function FactoryBuildTable({ lines, selectedLineId, onPressLine }) {
   return (
     <View style={styles.factoryTable}>
       <View style={[styles.factoryRow, styles.factoryHeaderRow]}>
-        <Text style={[styles.factoryHeaderText, styles.factoryCodeCell]}>Tiara Code</Text>
+        <Text style={[styles.factoryHeaderText, styles.factoryCodeCell]}>Factory Code</Text>
         <Text style={[styles.factoryHeaderText, styles.factoryDescriptionCell]}>Factory Description</Text>
         <Text style={[styles.factoryHeaderText, styles.factoryMappingCell]}>Keepr Mapping</Text>
         <Text style={[styles.factoryHeaderText, styles.factoryStatusCell]}>Status</Text>
@@ -677,6 +717,7 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
   const routeDraftId = route?.params?.draftId || webSearchParam("draftId") || null;
   const routeDraftKey = route?.params?.draftKey || webSearchParam("draftKey") || null;
   const [detail, setDetail] = useState(null);
+  const [orgConfig, setOrgConfig] = useState(null);
   const [templateAttachmentMedia, setTemplateAttachmentMedia] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -718,7 +759,7 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
       const localTemplateFallback = templateKey === TIARA_56_LS_TEMPLATE_KEY
         ? { template: tiara56LsCatalogTemplate, resources: [], showcase_media: [], items: [] }
         : null;
-      const [next, buildWorkspace, exactDraft] = await Promise.allSettled([
+      const [next, buildWorkspace, exactDraft, organizationConfig] = await Promise.allSettled([
         getCatalogTemplateDetail({ templateKey }),
         getTiaraFactoryBuildWorkspace({
           hullNumber: hullNumber || localBuild?.work_order?.hull_number || null,
@@ -731,6 +772,7 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
           templateKey,
           organizationId,
         }) : Promise.resolve(null),
+        organizationId ? getKeeprSpaceOrgConfig({ organizationId }) : Promise.resolve(null),
       ]);
       if (next.status === "fulfilled" && next.value) {
         setDetail(next.value);
@@ -765,10 +807,17 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
       } else {
         setDraftWorkspace(null);
       }
+
+      if (organizationConfig.status === "fulfilled" && organizationConfig.value) {
+        setOrgConfig(organizationConfig.value);
+      } else {
+        setOrgConfig(null);
+      }
     } catch (err) {
       console.error("Activator exact build failed:", err);
       setError(err?.message || "Could not open this build workspace.");
       setDetail(null);
+      setOrgConfig(null);
       setTemplateAttachmentMedia([]);
       const localBuild = getTiaraExactFactoryBuild({ templateKey, buildKey: exactBuildKey, hullNumber })
         || (!exactBuildKey && !hullNumber ? getDefaultTiaraExactFactoryBuildForTemplate(templateKey) : null);
@@ -798,6 +847,11 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
   const exactBuildLabel = workOrder?.build_code || exactDraft?.draft_key || exactBuildKey || "Exact build";
   const modelLabel = catalogTemplate?.model || template?.model || "model";
   const modelYearLabel = catalogTemplate?.model_year || template?.model_year || "2027";
+  const orgBrandContext = orgBrandContextFromConfig(orgConfig, catalogTemplate || template || {});
+  const orgLogoSource = imageSourceFromUri(orgBrandContext.logoUri);
+  const heroSource = heroMedia ? mediaAsset(heroMedia) : imageSourceFromUri(orgBrandContext.headerImageUri, BOAT_HERO);
+  const orgLocationMeta = compact([orgBrandContext.location, "OEM factory build"]) || "OEM factory build";
+  const modelBrandLabel = catalogTemplate?.manufacturer || template?.manufacturer || orgBrandContext.name;
   const hasFactoryBuild = Boolean(factoryBuild && factoryLines.length);
   const digitalTwinAssetId = workOrder?.asset_id || factoryBuild?.asset_id || null;
   const digitalTwinKac = workOrder?.kac_id || factoryBuild?.kac_id || (workOrder?.build_code ? `KAC-TIARA-56LS-${String(workOrder.build_code).toUpperCase()}` : null);
@@ -1064,7 +1118,7 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
           navigation={navigation}
           items={[
             {
-              label: "Configure Hulls",
+              label: "Configure Boats",
               route: "ActivatorHome",
               params: {
                 initialMode: "builds",
@@ -1082,23 +1136,29 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
             </View>
           )}
         />
-        <ImageBackground source={mediaAsset(heroMedia)} resizeMode="cover" style={styles.hero} imageStyle={styles.heroImage}>
+        <ImageBackground source={heroSource} resizeMode="cover" style={styles.hero} imageStyle={styles.heroImage}>
           <View style={styles.heroOverlay}>
             <View style={styles.heroBrandCard}>
-              <Image source={TIARA_OEM_LOGO} resizeMode="contain" style={styles.heroLogo} />
+              {orgLogoSource ? (
+                <Image source={orgLogoSource} resizeMode="contain" style={styles.heroLogo} />
+              ) : (
+                <View style={styles.heroLogoFallback}>
+                  <Text style={styles.heroLogoFallbackText}>{initialsForName(orgBrandContext.name)}</Text>
+                </View>
+              )}
               <View style={styles.heroBrandTextWrap}>
-                <Text style={styles.heroBrandName}>Tiara Yachts</Text>
-                <Text style={styles.heroBrandMeta}>Holland, Michigan · OEM factory build</Text>
+                <Text style={styles.heroBrandName}>{orgBrandContext.name}</Text>
+                <Text style={styles.heroBrandMeta}>{orgLocationMeta}</Text>
               </View>
             </View>
             <Text style={styles.modelWatermark}>{hasFactoryBuild ? exactBuildLabel : modelLabel}</Text>
             <View style={styles.heroCopy}>
               <Text style={styles.eyebrow}>Keepr Activator · Exact Factory Build</Text>
-              <Text style={styles.title}>{hasFactoryBuild ? `${exactBuildLabel} exact build metadata` : `Build a Tiara ${modelLabel}`}</Text>
+              <Text style={styles.title}>{hasFactoryBuild ? `${exactBuildLabel} exact build metadata` : `Build a ${modelBrandLabel} ${modelLabel}`}</Text>
               <Text style={styles.subtitle}>
                 {hasFactoryBuild
-                  ? `Tiara work order ${workOrder?.order_number} is preserved line by line, then mapped into Keepr systems, components, options, configuration, and source-material work queues for this exact hull.`
-                  : `Configure one exact hull from the published MY${modelYearLabel} ${modelLabel} template. A factory work order can then turn that model definition into as-built systems, components, options, and source queues.`}
+                  ? `${orgBrandContext.name} work order ${workOrder?.order_number} is preserved line by line, then mapped into Keepr systems, components, options, configuration, and source-material work queues for this exact boat.`
+                  : `Configure one exact boat from the published MY${modelYearLabel} ${modelLabel} template. A factory work order can then turn that model definition into as-built systems, components, options, and source queues.`}
               </Text>
               <View style={styles.heroBadges}>
                 <View style={styles.heroBadge}>
@@ -1107,7 +1167,7 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
                 </View>
                 <View style={styles.heroBadge}>
                   <Ionicons name="boat-outline" size={14} color={colors.brandNavy} />
-                  <Text style={styles.heroBadgeText}>{hasFactoryBuild ? `HIN ${workOrder?.hin}` : "Exact hull workspace"}</Text>
+                  <Text style={styles.heroBadgeText}>{hasFactoryBuild ? `HIN ${workOrder?.hin}` : "Exact boat workspace"}</Text>
                 </View>
                 <View style={styles.heroBadge}>
                   <Ionicons name="document-text-outline" size={14} color={colors.brandNavy} />
@@ -1123,7 +1183,7 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
         {loading ? (
           <View style={styles.centered}>
             <ActivityIndicator color={colors.brandBlue} />
-            <Text style={styles.mutedText}>Opening Tiara starter pack...</Text>
+            <Text style={styles.mutedText}>Opening exact build workspace...</Text>
           </View>
         ) : error ? (
           <View style={styles.emptyPanel}>
@@ -1139,7 +1199,7 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
                   <View style={styles.panelHeader}>
                     <View>
                       <Text style={styles.kicker}>Factory Build</Text>
-                      <Text style={styles.panelTitle}>Tiara work-order ingestion</Text>
+                      <Text style={styles.panelTitle}>Factory work-order ingestion</Text>
                     </View>
                     <Text style={styles.panelCount}>{factoryLines.length} lines</Text>
                   </View>
@@ -1156,7 +1216,7 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
                       <Text style={styles.workOrderFactValue}>{workOrder?.order_date}</Text>
                     </View>
                     <View style={styles.workOrderFact}>
-                      <Text style={styles.workOrderFactLabel}>Hull / HIN</Text>
+                      <Text style={styles.workOrderFactLabel}>HIN</Text>
                       <Text style={styles.workOrderFactValue}>{workOrder?.hin}</Text>
                     </View>
                     <View style={styles.workOrderFact}>
@@ -1325,7 +1385,7 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
               <View style={styles.panel}>
                 <View style={styles.panelHeader}>
                   <View>
-                    <Text style={styles.kicker}>Exact Hull Identity</Text>
+                    <Text style={styles.kicker}>Exact Boat Identity</Text>
                     <Text style={styles.panelTitle}>{hasFactoryBuild ? "From Tiara work order" : "Freeze inputs"}</Text>
                   </View>
                   <View style={[styles.freezePill, readyToFreeze && styles.freezePillReady]}>
@@ -1364,7 +1424,7 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
                 ) : null}
                 <View style={[styles.milestoneCard, readyToFreeze && styles.milestoneCardReady]}>
                   <Text style={styles.milestoneKicker}>{hasFactoryBuild ? "Factory Build Evidence" : "Factory Configuration Ready"}</Text>
-                  <Text style={styles.milestoneTitle}>{hasFactoryBuild ? "Tiara proof is attached before normalization." : "OEM layer can be frozen for this hull."}</Text>
+                  <Text style={styles.milestoneTitle}>{hasFactoryBuild ? `${orgBrandContext.name} proof is attached before normalization.` : "OEM layer can be frozen for this boat."}</Text>
                   <View style={styles.milestoneStats}>
                     <Text style={styles.milestoneStat}>{compiled.systems.length} systems</Text>
                     <Text style={styles.milestoneStat}>{hasFactoryBuild ? `${factoryLines.length} factory lines` : `${compiled.resources.length} resources`}</Text>
@@ -1435,7 +1495,7 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
                 ) : null}
                 {draftNotice ? <Text style={styles.draftNotice}>{draftNotice}</Text> : null}
                 <Text style={styles.stopNote}>
-                  {hasFactoryBuild ? "No production changes: this action is intentionally staged before Dealer Handoff." : "Save preserves this hull's selected template items and identity fields. Publish creates or binds the canonical Keepr boat."}
+                  {hasFactoryBuild ? "No production changes: this action is intentionally staged before Dealer Handoff." : "Save preserves this boat's selected template items and identity fields. Publish creates or binds the canonical Keepr boat."}
                 </Text>
               </View>
 
@@ -1465,7 +1525,7 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
                     <Ionicons name="globe-outline" size={18} color={colors.brandBlue} />
                   </View>
                   <Text style={styles.panelText}>
-                    Tiara public model content supports presentation and catalog alignment. It does not replace the {exactBuildLabel} work order as proof that equipment belongs on this hull.
+                    Published model content supports presentation and catalog alignment. It does not replace the {exactBuildLabel} work order as proof that equipment belongs on this boat.
                   </Text>
                   <View style={styles.publicContextGrid}>
                     {(publicModelContext?.specs || []).slice(0, 6).map((spec) => (
@@ -1577,6 +1637,19 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     height: 54,
     width: 54,
+  },
+  heroLogoFallback: {
+    alignItems: "center",
+    backgroundColor: colors.brandNavy,
+    borderRadius: radius.sm,
+    height: 54,
+    justifyContent: "center",
+    width: 54,
+  },
+  heroLogoFallbackText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "900",
   },
   heroBrandTextWrap: {
     flex: 1,

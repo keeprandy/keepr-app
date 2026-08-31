@@ -127,3 +127,17 @@ test("Dealer workspace resolves canonical KAC hero before projection media", () 
   assert.match(fleet, /fetchAssetHeroUris\(boatHeroIds, FLEET_HERO_OPTIONS\)/);
   assert.doesNotMatch(fleet, /fetchAssetHeroUris\(boatHeroIds,[\s\S]{0,120}organizationId/);
 });
+
+test("Exact build shell uses organization branding instead of Tiara fallback copy", () => {
+  const source = read("screens/ActivatorExactBuildScreen.js");
+
+  assert.match(source, /getKeeprSpaceOrgConfig\(\{ organizationId \}\)/);
+  assert.match(source, /orgBrandContextFromConfig/);
+  assert.match(source, /<Text style=\{styles\.heroBrandName\}>\{orgBrandContext\.name\}<\/Text>/);
+  assert.match(source, /`Build a \$\{modelBrandLabel\} \$\{modelLabel\}`/);
+  assert.match(source, /label: "Configure Boats"/);
+  assert.match(source, /Exact Boat Identity/);
+  assert.doesNotMatch(source, /Build a Tiara \$\{modelLabel\}/);
+  assert.doesNotMatch(source, /Opening Tiara starter pack/);
+  assert.doesNotMatch(source, /Selected for this hull/);
+});
