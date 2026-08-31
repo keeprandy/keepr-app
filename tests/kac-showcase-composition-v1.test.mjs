@@ -116,3 +116,14 @@ test("Boat Story resolves one canonical KAC hero without projection-local overri
   assert.match(source, /listAttachmentsForAsset\(boatId\)/);
   assert.doesNotMatch(source, /listAttachmentsForTarget\("asset", boatId\)/);
 });
+
+test("Dealer workspace resolves canonical KAC hero before projection media", () => {
+  const detail = read("screens/KeeprProStewardshipViewScreen.js");
+  const fleet = read("screens/KeeprSpaceFleetScreen.js");
+
+  assert.match(detail, /fetchAssetHeroUris\(\[heroAssetId\], BOAT_HERO_OPTIONS\)/);
+  assert.doesNotMatch(detail, /fetchAssetHeroUris\(\[heroAssetId\],[\s\S]{0,160}organizationId/);
+  assert.doesNotMatch(detail, /relationship_hero_placement_id: heroAsset\.relationship_hero_placement_id/);
+  assert.match(fleet, /fetchAssetHeroUris\(boatHeroIds, FLEET_HERO_OPTIONS\)/);
+  assert.doesNotMatch(fleet, /fetchAssetHeroUris\(boatHeroIds,[\s\S]{0,120}organizationId/);
+});

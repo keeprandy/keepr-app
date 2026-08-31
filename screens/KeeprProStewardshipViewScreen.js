@@ -1028,16 +1028,12 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
     }
 
     const signHero = async () => {
-      const resolvedUrls = await fetchAssetHeroUris([heroAssetId], {
-        ...BOAT_HERO_OPTIONS,
-        organizationId: projection?.relationship?.organization_id || organizationId || null,
-      });
+      const resolvedUrls = await fetchAssetHeroUris([heroAssetId], BOAT_HERO_OPTIONS);
       const assetHero =
         resolvedUrls[heroAssetId] ||
         (await resolveAssetHeroUri(
           {
             id: heroAssetId,
-            relationship_hero_placement_id: heroAsset.relationship_hero_placement_id,
             hero_placement_id: heroAsset.hero_placement_id,
             hero_image_url: heroAsset.hero_image_url,
             hero_thumb_url: heroAsset.hero_thumb_url,
@@ -1072,8 +1068,6 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
     signHero();
   }, [
     heroAsset,
-    organizationId,
-    projection?.relationship?.organization_id,
     setHeroIfChanged,
   ]);
 
