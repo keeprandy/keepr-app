@@ -36,6 +36,7 @@ import {
   listRelationshipSharedHistory,
 } from "../lib/relationshipContributionsApi";
 import {
+  initiateAssetOwnerHandoff,
   listKeeprSpacePlaybooks,
   removeKeeprSpaceBoatAsset,
   updateKeeprSpaceBoatAsset,
@@ -532,6 +533,10 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
   const [boatEditDraft, setBoatEditDraft] = useState({});
   const [savingBoatEdit, setSavingBoatEdit] = useState(false);
   const [removingBoat, setRemovingBoat] = useState(false);
+  const [ownerHandoffEmail, setOwnerHandoffEmail] = useState("");
+  const [ownerHandoffName, setOwnerHandoffName] = useState("");
+  const [ownerHandoffStatus, setOwnerHandoffStatus] = useState(null);
+  const [sendingOwnerHandoff, setSendingOwnerHandoff] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
@@ -1318,6 +1323,39 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
     });
   };
 
+  const initiateOwnerHandoff = async () => {
+    if (!asset.id) return;
+    const email = ownerHandoffEmail.trim().toLowerCase();
+    if (!email || !email.includes("@")) {
+      Alert.alert("Owner email required", "Enter the owner's email before starting handoff.");
+      return;
+    }
+    const orgId = projection?.organization?.id || organizationId || null;
+    setSendingOwnerHandoff(true);
+    setOwnerHandoffStatus(null);
+    try {
+      const result = await initiateAssetOwnerHandoff({
+        assetId: asset.id,
+        ownerEmail: email,
+        ownerDisplayName: ownerHandoffName,
+        initiatedByOrgId: orgId,
+      });
+      setOwnerHandoffStatus({
+        type: "success",
+        message: `Pending owner handoff created for ${result?.pending_owner_email || email}.`,
+      });
+      setOwnerHandoffEmail("");
+      setOwnerHandoffName("");
+      await load({ quiet: true });
+    } catch (err) {
+      const message = err?.message || "Please try again.";
+      setOwnerHandoffStatus({ type: "error", message });
+      Alert.alert("Could not start owner handoff", message);
+    } finally {
+      setSendingOwnerHandoff(false);
+    }
+  };
+
   const canonicalSystemId = (system) =>
     system?.system_id || system?.systemId || system?.metadata?.system_id || system?.id || null;
 
@@ -1974,6 +2012,63 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
             </View>
           );
         })}
+      </View>
+    );
+  };
+
+  const renderOwnerHandoffCard = () => {
+    if (!projectionSemantics.showInventoryActions || !portal?.permitted_operations?.invite_owner) return null;
+
+    return (
+      <View style={styles.card}>
+        <View style={styles.sectionHeader}>
+          <View style={styles.sectionTitleBlock}>
+            <Text style={styles.cardTitle}>Owner handoff</Text>
+            <Text style={styles.sectionHint}>
+              Invite the next owner to claim this exact KAC. Dealer and manufacturer relationships stay attached.
+            </Text>
+          </View>
+        </View>
+        {ownerHandoffStatus ? (
+          <Text style={ownerHandoffStatus.type === "error" ? styles.error : styles.successText}>
+            {ownerHandoffStatus.message}
+          </Text>
+        ) : null}
+        <View style={styles.boatEditGrid}>
+          <View style={styles.boatEditField}>
+            <Text style={styles.detailLabel}>Owner email</Text>
+            <TextInput
+              value={ownerHandoffEmail}
+              onChangeText={setOwnerHandoffEmail}
+              placeholder="owner@example.com"
+              autoCapitalize="none"
+              keyboardType="email-address"
+              style={styles.boatEditInput}
+            />
+          </View>
+          <View style={styles.boatEditField}>
+            <Text style={styles.detailLabel}>Owner name</Text>
+            <TextInput
+              value={ownerHandoffName}
+              onChangeText={setOwnerHandoffName}
+              placeholder="Optional"
+              style={styles.boatEditInput}
+            />
+          </View>
+        </View>
+        <View style={styles.boatEditActions}>
+          <TouchableOpacity
+            style={[styles.primaryButton, sendingOwnerHandoff && styles.disabled]}
+            onPress={initiateOwnerHandoff}
+            disabled={sendingOwnerHandoff}
+            activeOpacity={0.86}
+          >
+            <Ionicons name="person-add-outline" size={16} color="#FFFFFF" />
+            <Text style={styles.primaryButtonText}>
+              {sendingOwnerHandoff ? "Starting..." : "Start Owner Handoff"}
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   };
@@ -2952,6 +3047,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
                 ) : null}
 
                 {renderPlaybookSummary()}
+                {renderOwnerHandoffCard()}
 
                 <View style={styles.visualGrid}>
                   {projectionSemantics.showOwnerPanel ? (
@@ -3178,6 +3274,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
             ) : null}
 
             {renderPlaybookSummary()}
+            {renderOwnerHandoffCard()}
 
             <View style={styles.card}>
               <Text style={styles.cardLabel}>Keepr asset summary</Text>
@@ -4451,6 +4548,16 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.textSecondary,
     textAlign: "center",
+  },
+  error: {
+    ...typography.caption,
+    color: colors.danger,
+    fontWeight: "800",
+  },
+  successText: {
+    ...typography.caption,
+    color: colors.accentGreen,
+    fontWeight: "800",
   },
   stateCard: {
     backgroundColor: "#FFFFFF",

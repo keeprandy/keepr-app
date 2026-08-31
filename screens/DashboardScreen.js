@@ -34,6 +34,10 @@ import { track } from "../lib/analytics";
 import AddAssetTypeModal from "../components/AddAssetTypeModal";
 import MobileNavDrawer from "../components/navigation/MobileNavDrawer";
 import { getLastInboxMode, navigateToInbox } from "../lib/inboxNavigation";
+import {
+  acceptAssetOwnerHandoff,
+  listPendingAssetOwnerHandoffs,
+} from "../lib/keeprspaceApi";
 
 /**
  * Sort helper: prefers explicit sort_rank, then "primary", then created_at, then name.
@@ -287,6 +291,8 @@ export default function DashboardScreen({ navigation }) {
   const [achLoading, setAchLoading] = useState(true);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [actionInboxCount, setActionInboxCount] = useState(0);
+  const [pendingOwnerHandoffs, setPendingOwnerHandoffs] = useState([]);
+  const [acceptingHandoffId, setAcceptingHandoffId] = useState(null);
 
   // Dashboard Mode
 const dashboardMode = useMemo(() => {
@@ -383,6 +389,21 @@ const handleSystemAttentionPress = useCallback(() => {
     source: "dashboard",  // optional analytics hook
   });
 }, [navigation]);
+
+const loadPendingOwnerHandoffs = useCallback(async () => {
+  if (authInitializing || !user?.id) {
+    setPendingOwnerHandoffs([]);
+    return;
+  }
+  try {
+    const data = await listPendingAssetOwnerHandoffs();
+    setPendingOwnerHandoffs(Array.isArray(data?.handoffs) ? data.handoffs : []);
+  } catch (e) {
+    console.log("Pending owner handoffs unavailable", e);
+    setPendingOwnerHandoffs([]);
+  }
+}, [authInitializing, user?.id]);
+
   const renderSystemModeWidget = useCallback(() => {
     if (systemModeLoading) return null;
     if (!systemModeSummary) return null;
@@ -682,6 +703,10 @@ setAch(null);
   loadSystemModeSummary();
 }, [loadSystemModeSummary]);
 
+useEffect(() => {
+  loadPendingOwnerHandoffs();
+}, [loadPendingOwnerHandoffs]);
+
 const reloadDashboard = useCallback(async () => {
   try {
     await Promise.all([
@@ -691,6 +716,7 @@ const reloadDashboard = useCallback(async () => {
       refetchOtherAssets?.(),
       loadIdentityAndAchievements?.(),
       loadSystemModeSummary?.(),
+      loadPendingOwnerHandoffs?.(),
     ]);
   } catch (e) {
     console.log("Dashboard refresh on focus failed", e);
@@ -702,7 +728,26 @@ const reloadDashboard = useCallback(async () => {
   refetchOtherAssets,
   loadIdentityAndAchievements,
   loadSystemModeSummary,
+  loadPendingOwnerHandoffs,
 ]);
+
+const acceptOwnerHandoff = useCallback(async (handoff) => {
+  if (!handoff?.asset_relationship_id) return;
+  setAcceptingHandoffId(handoff.asset_relationship_id);
+  try {
+    await acceptAssetOwnerHandoff({ assetRelationshipId: handoff.asset_relationship_id });
+    await Promise.all([
+      refetchBoats?.(),
+      loadPendingOwnerHandoffs(),
+      loadIdentityAndAchievements?.(),
+    ]);
+    Alert.alert("Boat added to your Keepr", `${handoff.asset_name || handoff.kac_id || "This boat"} is now in your ownership view.`);
+  } catch (e) {
+    Alert.alert("Could not accept handoff", e?.message || "Please try again.");
+  } finally {
+    setAcceptingHandoffId(null);
+  }
+}, [loadIdentityAndAchievements, loadPendingOwnerHandoffs, refetchBoats]);
 
 const onRefresh = useCallback(async () => {
   setRefreshing(true);
@@ -1057,6 +1102,44 @@ if (Platform.OS !== "ios") {
             showsVerticalScrollIndicator={false}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           >
+            {pendingOwnerHandoffs.length ? (
+              <View style={styles.ownerHandoffCard}>
+                <View style={styles.ownerHandoffHeader}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.ownerHandoffEyebrow}>Owner Handoff</Text>
+                    <Text style={styles.ownerHandoffTitle}>Boats ready for your Keepr</Text>
+                    <Text style={styles.ownerHandoffSubtitle}>
+                      Accepting keeps the same KAC, model, systems, source, and history attached.
+                    </Text>
+                  </View>
+                  <Ionicons name="boat-outline" size={24} color={colors.brandBlue} />
+                </View>
+                {pendingOwnerHandoffs.map((handoff) => (
+                  <View key={handoff.asset_relationship_id} style={styles.ownerHandoffRow}>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={styles.ownerHandoffBoat}>
+                        {handoff.asset_name || [handoff.year, handoff.make, handoff.model].filter(Boolean).join(" ") || handoff.kac_id || "Boat"}
+                      </Text>
+                      <Text style={styles.ownerHandoffMeta} numberOfLines={2}>
+                        {[handoff.kac_id, handoff.dealer_name ? `From ${handoff.dealer_name}` : null, handoff.status].filter(Boolean).join(" · ")}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      style={[styles.ownerHandoffButton, acceptingHandoffId === handoff.asset_relationship_id && styles.ownerHandoffButtonDisabled]}
+                      onPress={() => acceptOwnerHandoff(handoff)}
+                      disabled={acceptingHandoffId === handoff.asset_relationship_id}
+                      activeOpacity={0.86}
+                    >
+                      <Ionicons name="checkmark-circle-outline" size={16} color="#FFFFFF" />
+                      <Text style={styles.ownerHandoffButtonText}>
+                        {acceptingHandoffId === handoff.asset_relationship_id ? "Accepting..." : "Accept"}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+
             {/* Header */}
             <View style={styles.headerWrap}>
               {isWide ? (
@@ -2234,6 +2317,75 @@ headerWebRow: {
     alignItems: "center",
     padding: spacing.md,
     backgroundColor: "#ffffff",
+  },
+  ownerHandoffCard: {
+    ...cardStyles.base,
+    backgroundColor: "#FFFFFF",
+    borderColor: "#BFDBFE",
+    borderWidth: 1,
+    marginBottom: spacing.md,
+    padding: spacing.md,
+  },
+  ownerHandoffHeader: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  ownerHandoffEyebrow: {
+    color: colors.brandBlue,
+    fontSize: 11,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  ownerHandoffTitle: {
+    color: colors.textPrimary,
+    fontSize: 16,
+    fontWeight: "900",
+  },
+  ownerHandoffSubtitle: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 2,
+  },
+  ownerHandoffRow: {
+    alignItems: "center",
+    borderTopColor: colors.borderSubtle,
+    borderTopWidth: 1,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    paddingTop: spacing.sm,
+  },
+  ownerHandoffBoat: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  ownerHandoffMeta: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 2,
+  },
+  ownerHandoffButton: {
+    alignItems: "center",
+    backgroundColor: colors.brandBlue,
+    borderRadius: radius.sm,
+    flexDirection: "row",
+    gap: spacing.xs,
+    minHeight: 38,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  ownerHandoffButtonDisabled: {
+    opacity: 0.65,
+  },
+  ownerHandoffButtonText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "900",
   },
   cardTitle: {
     fontWeight: "800",

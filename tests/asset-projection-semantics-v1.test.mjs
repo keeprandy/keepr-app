@@ -20,10 +20,37 @@ test("projection semantics distinguish visibility from meaning", () => {
   assert.match(helper, /delivery/);
   assert.match(helper, /inventory/);
   assert.match(helper, /relationshipType === "owner"/);
+  assert.match(helper, /pending_owner/);
   assert.match(helper, /showOwnerPanel: ownerPresent/);
   assert.match(helper, /showContribution: false/);
   assert.match(helper, /dealer_sales_workspace/);
   assert.match(helper, /owner_full/);
+});
+
+test("pending owner handoff does not grant owner projection", async () => {
+  const mod = await import("../lib/assetProjectionSemantics.js");
+
+  const pending = mod.assetProjectionSemantics({
+    relationship: {
+      relationship_type: "owner",
+      status: "invited",
+      access_scope: "transfer_workspace",
+      claim_state: "invited",
+    },
+  });
+  assert.equal(pending.projection, "pending_owner");
+  assert.equal(pending.showPlaybooks, false);
+
+  const accepted = mod.assetProjectionSemantics({
+    relationship: {
+      relationship_type: "owner",
+      status: "active",
+      access_scope: "owner_full",
+      claim_state: "accepted",
+    },
+  });
+  assert.equal(accepted.projection, "owner");
+  assert.deepEqual(accepted.eligiblePlaybookScopes, ["owner"]);
 });
 
 test("fleet and detail screens use relationship projection semantics", () => {
