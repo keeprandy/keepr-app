@@ -959,6 +959,17 @@ export default function AssetAttachmentsScreen({ route, navigation }) {
     route?.params?.orgId ||
     returnParams?.organizationId ||
     null;
+  const contributionSourceContext = useMemo(() => ({
+    contribution_context: "asset_attachment",
+    target_type: "asset",
+    target_id: assetId || undefined,
+    organization_id: organizationId || undefined,
+    contributed_by_org_id: organizationId || undefined,
+    relationship_role: relationshipRole || undefined,
+    team_member_type: teamMemberType || undefined,
+    systems_role: systemsRole || undefined,
+    workspace_id: workspaceId || undefined,
+  }), [assetId, organizationId, relationshipRole, systemsRole, teamMemberType, workspaceId]);
  
 
   // Scope override: null = use route scope, "none" = show all
@@ -1233,6 +1244,7 @@ const isWide = IS_WEB && width >= 980;
             (kind === "photo" ? "photo.jpg" : "file"),
           mimeType: file.type || "application/octet-stream",
           sizeBytes: Number.isFinite(file.size) ? file.size : null,
+          sourceContext: contributionSourceContext,
           placements,
         });
 
@@ -1245,7 +1257,7 @@ const isWide = IS_WEB && width >= 980;
         }
       }
     },
-    [assetId, fromTargetId, fromTargetRole, fromTargetType, refresh]
+    [assetId, contributionSourceContext, fromTargetId, fromTargetRole, fromTargetType, refresh]
   );
 
   const onWebFileChange = useCallback(
@@ -1755,6 +1767,21 @@ const isWide = IS_WEB && width >= 980;
   }, [fromTargetId, fromTargetType, hasContextRoute, normalized, selected]);
 
   const handleBack = () => {
+    if (returnRoute === "KeeprSpaceBoat" && assetId) {
+      navigation.navigate("KeeprSpaceModule", {
+        screen: "KeeprSpaceBoat",
+        params: {
+          assetId,
+          boatId: assetId,
+          kac,
+          organizationId,
+          stewardshipId: route?.params?.stewardshipId || null,
+          parentRoute,
+          workspaceId,
+        },
+      });
+      return;
+    }
     if (returnRoute === "BoatStory" && assetId) {
       navigation.navigate("BoatStory", {
         assetId,
@@ -2007,6 +2034,7 @@ const res = await ImagePicker.launchCameraAsync({
       fileName: a.fileName || a.uri.split("/").pop() || "camera-photo.jpg",
       mimeType: a.mimeType || "image/jpeg",
       sizeBytes: a.fileSize || null,
+      sourceContext: contributionSourceContext,
       placements,
     });
 
@@ -2016,7 +2044,7 @@ const res = await ImagePicker.launchCameraAsync({
   } finally {
     setUploading(false);
   }
-}, [assetId, fromTargetId, fromTargetRole, fromTargetType, refresh, triggerWebPicker]);
+}, [assetId, contributionSourceContext, fromTargetId, fromTargetRole, fromTargetType, refresh, triggerWebPicker]);
 
 const addPhotoFromLibrary = useCallback(async () => {
   if (IS_WEB) {
@@ -2072,6 +2100,7 @@ const addPhotoFromLibrary = useCallback(async () => {
         fileName: a.fileName || a.uri.split("/").pop() || "photo.jpg",
         mimeType: a.mimeType || "image/jpeg",
         sizeBytes: a.fileSize || null,
+        sourceContext: contributionSourceContext,
         placements,
       });
 
@@ -2083,6 +2112,7 @@ const addPhotoFromLibrary = useCallback(async () => {
     }
   }, [
     assetId,
+    contributionSourceContext,
     ensureMediaPermission,
     fromTargetId,
     fromTargetRole,
@@ -2138,6 +2168,7 @@ const addPhotoFromLibrary = useCallback(async () => {
       fileName: f.name || f.uri.split("/").pop() || "file",
       mimeType: f.mimeType || "application/octet-stream",
       sizeBytes: f.size || null,
+      sourceContext: contributionSourceContext,
       placements,
     });
 
@@ -2149,6 +2180,7 @@ const addPhotoFromLibrary = useCallback(async () => {
   }
 }, [
   assetId,
+  contributionSourceContext,
   fromTargetId,
   fromTargetRole,
   fromTargetType,
@@ -2183,11 +2215,12 @@ const addPhotoFromLibrary = useCallback(async () => {
       url,
       title,
       notes,
+      sourceContext: contributionSourceContext,
       placements,
     });
 
     await refresh();
-  }, [assetId, fromTargetId, fromTargetRole, fromTargetType, refresh]);
+  }, [assetId, contributionSourceContext, fromTargetId, fromTargetRole, fromTargetType, refresh]);
 
 const openAdd = () => {
   if (uploading) return;  
@@ -2633,9 +2666,27 @@ const openAdd = () => {
       attachmentId: row.attachment_id || row.id,
       role: row.role,
       returnRoute: "AssetAttachments",
-      returnParams: { assetId, assetName },
+      assetName,
+      kac,
+      organizationId,
+      workspaceId,
+      relationshipRole,
+      teamMemberType,
+      systemsRole,
+      parentRoute,
     });
-  }, [assetId, assetName, navigation]);
+  }, [
+    assetId,
+    assetName,
+    kac,
+    navigation,
+    organizationId,
+    parentRoute,
+    relationshipRole,
+    systemsRole,
+    teamMemberType,
+    workspaceId,
+  ]);
 
   const toggleShowcaseForRow = useCallback(async (row) => {
     if (!row || !assetId) return;

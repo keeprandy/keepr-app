@@ -243,7 +243,33 @@ export default function ProofBuilderScreen({ route, navigation }) {
   const assetId = route?.params?.assetId || null;
   const attachmentId = route?.params?.attachmentId || null;
   const returnRoute = route?.params?.returnRoute || null;
-  const returnParams = route?.params?.returnParams || null;
+  const returnParams = useMemo(() => {
+    if (route?.params?.returnParams && typeof route.params.returnParams === "object") {
+      return route.params.returnParams;
+    }
+    return {
+      assetId,
+      assetName: route?.params?.assetName || undefined,
+      kac: route?.params?.kac || undefined,
+      organizationId: route?.params?.organizationId || undefined,
+      workspaceId: route?.params?.workspaceId || undefined,
+      relationshipRole: route?.params?.relationshipRole || undefined,
+      teamMemberType: route?.params?.teamMemberType || undefined,
+      systemsRole: route?.params?.systemsRole || undefined,
+      parentRoute: route?.params?.parentRoute || undefined,
+    };
+  }, [
+    assetId,
+    route?.params?.assetName,
+    route?.params?.kac,
+    route?.params?.organizationId,
+    route?.params?.parentRoute,
+    route?.params?.relationshipRole,
+    route?.params?.returnParams,
+    route?.params?.systemsRole,
+    route?.params?.teamMemberType,
+    route?.params?.workspaceId,
+  ]);
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");

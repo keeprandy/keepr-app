@@ -69,3 +69,26 @@ test("Personal EditAsset avoids single-row coercion failures", () => {
   assert.match(source, /This asset is not available to edit from this account/);
   assert.match(source, /Could not reach Keepr to save this asset/);
 });
+
+test("Attachment routes keep return context flat on web", () => {
+  const attachments = read("screens/AssetAttachmentsScreen.js");
+  const workspace = read("screens/KeeprProStewardshipViewScreen.js");
+  const proofBuilder = read("screens/ProofBuilderScreen.js");
+
+  assert.doesNotMatch(workspace, /returnParams:\s*\{/);
+  assert.doesNotMatch(attachments, /returnParams:\s*\{\s*assetId,\s*assetName\s*\}/);
+  assert.match(attachments, /returnRoute: "AssetAttachments"[\s\S]*assetName,[\s\S]*organizationId,/);
+  assert.match(proofBuilder, /typeof route\.params\.returnParams === "object"/);
+  assert.match(proofBuilder, /organizationId: route\?\.params\?\.organizationId/);
+});
+
+test("KAC media writes allow operational asset relationship scopes only", () => {
+  const migration = read("supabase/migrations/20260831193000_asset_relationship_media_write_scopes.sql");
+
+  assert.match(migration, /from public\.asset_relationships r/);
+  assert.match(migration, /r\.asset_id = p_asset_id/);
+  assert.match(migration, /'dealer_sales_workspace'/);
+  assert.match(migration, /'dealer_delivery_workspace'/);
+  assert.match(migration, /'oem_context'/);
+  assert.doesNotMatch(migration, /organization_brand_relationships/);
+});

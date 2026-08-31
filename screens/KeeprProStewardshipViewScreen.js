@@ -1223,14 +1223,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
       parentRoute,
       workspaceId: route?.params?.workspaceId || (organizationId ? `org:${organizationId}` : null),
       returnRoute: "KeeprSpaceBoat",
-      returnParams: {
-        assetId: asset.id,
-        kac: asset.kac_id || kac || null,
-        organizationId: projection?.organization?.id || organizationId,
-        stewardshipId: portal?.stewardship_id || projection?.stewardship?.id || null,
-        parentRoute,
-        workspaceId: route?.params?.workspaceId || (organizationId ? `org:${organizationId}` : null),
-      },
+      kac: asset.kac_id || kac || null,
     });
   };
 
