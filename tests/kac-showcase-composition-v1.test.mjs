@@ -30,6 +30,15 @@ test("Inherited model media remains read-only in KAC Showcase", () => {
   assert.match(source, /Inherited/);
 });
 
+test("First exact-KAC showcase photo auto-promotes even with inherited model media", () => {
+  const source = read("screens/BoatShowcaseScreen.js");
+
+  assert.match(source, /const exactAssetGallery = gallery\.filter/);
+  assert.match(source, /exactAssetGallery\.length === 1/);
+  assert.doesNotMatch(source, /gallery\.length === 1 && gallery\[0\]\?\.placement_id/);
+  assert.match(source, /setKeeprSpaceAssetHero/);
+});
+
 test("Attachment API already preserves inherited model media provenance", () => {
   const source = read("lib/attachmentsApi.js");
 

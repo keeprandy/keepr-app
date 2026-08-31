@@ -578,14 +578,27 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
           return bT - aT;
         });
 
-        // ✅ AUTO HERO: if exactly 1 showcase photo and no hero_placement_id, persist it
-        if (!effectiveHero && gallery.length === 1 && gallery[0]?.placement_id && !gallery[0]?.isInheritedModelMedia) {
+        // Auto-hero the first exact-KAC photo even when inherited model media is present.
+        const exactAssetGallery = gallery.filter(
+          (photo) => photo?.placement_id && !photo?.isInheritedModelMedia
+        );
+        if (!effectiveHero && exactAssetGallery.length === 1) {
           try {
-            const only = gallery[0];
-            const { error: promoteErr } = await supabase
-              .from("assets")
-              .update({ hero_placement_id: only.placement_id, hero_image_url: null })
-              .eq("id", currentBoat.id);
+            const only = exactAssetGallery[0];
+            let promoteErr = null;
+            if (routeOrganizationId) {
+              await setKeeprSpaceAssetHero({
+                assetId: currentBoat.id,
+                organizationId: routeOrganizationId,
+                placementId: only.placement_id,
+              });
+            } else {
+              const { error } = await supabase
+                .from("assets")
+                .update({ hero_placement_id: only.placement_id, hero_image_url: null })
+                .eq("id", currentBoat.id);
+              promoteErr = error;
+            }
 
             if (!promoteErr) {
               setHeroPlacementId(only.placement_id);
@@ -618,7 +631,7 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
         setPhotosLoading(false);
       }
     },
-    [currentBoat, heroPlacementId, refreshHeroPlacementId]
+    [currentBoat, heroPlacementId, refreshHeroPlacementId, routeOrganizationId]
   );
 
   useFocusEffect(
