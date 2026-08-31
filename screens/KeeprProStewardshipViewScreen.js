@@ -42,6 +42,7 @@ import {
 } from "../lib/keeprspaceApi";
 import { getActionScheduleLabel, getActionScheduledDueAt } from "../lib/playbookSchedule";
 import { formatContributionAttribution } from "../lib/provenance";
+import { assetProjectionSemantics } from "../lib/assetProjectionSemantics";
 import ActivatorBreadcrumb from "../components/ActivatorBreadcrumb";
 import { useWorkspace } from "../context/WorkspaceContext";
 import AttachmentViewerModal from "../components/AttachmentViewerModal";
@@ -435,7 +436,13 @@ function RelationshipFileStrip({ files = [], onOpenFile, onAddFile, uploading = 
 export default function KeeprProStewardshipViewScreen({ route, navigation }) {
   const { currentWorkspace } = useWorkspace();
   const { assetId, kac } = route?.params || {};
-  const requestedSystemsRole = route?.params?.systemsRole || route?.params?.role || "oem";
+  const rawSystemsRole = route?.params?.systemsRole || route?.params?.role || null;
+  const requestedSystemsRole =
+    currentWorkspace?.workspace_type === "keeproem"
+      ? rawSystemsRole || "oem"
+      : rawSystemsRole === "oem"
+      ? null
+      : rawSystemsRole;
   const isOemProjection =
     requestedSystemsRole === "oem" ||
     currentWorkspace?.workspace_type === "keeproem";
@@ -670,7 +677,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
           }),
           supabase.rpc("get_asset_systems_experience", {
             p_asset_id: resolvedAssetId,
-            p_role: requestedSystemsRole,
+            p_role: requestedSystemsRole || (currentWorkspace?.workspace_type === "keeproem" ? "oem" : "provider"),
           }),
         ]);
 
@@ -884,7 +891,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [assetId, kac, organizationId, requestedSystemsRole]);
+  }, [assetId, currentWorkspace?.workspace_type, kac, organizationId, requestedSystemsRole]);
 
   useEffect(() => {
     load();
@@ -1145,15 +1152,26 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
   const records = projection?.service_records || [];
   const actions = projection?.actions || [];
   const currentAction = portal?.current_action || null;
+  const providerName = projection?.organization?.name || projection?.keepr_pro?.name || "KeeprPro";
+  const ownerName = portal?.owner_display_name || asset.owner_display_name || "Owner";
+  const projectionSemantics = assetProjectionSemantics({
+    asset,
+    relationship: projection?.relationship || {},
+    workspace: currentWorkspace,
+    providerName,
+  });
   const activeWorkTitle = currentAction?.title || "";
   const currentActionOpen =
+    projectionSemantics.showServiceActions &&
     currentAction?.id && !["completed", "deleted", "archived"].includes(String(currentAction.status || "open"));
   const sharedActions = currentActionOpen
     ? [currentAction, ...actions.filter((action) => action.id !== currentAction.id)]
-    : actions;
-  const sharedActionCount = Number.isFinite(Number(portal?.shared_action_count))
-    ? Number(portal.shared_action_count)
-    : sharedActions.length;
+    : projectionSemantics.showServiceActions ? actions : [];
+  const sharedActionCount = projectionSemantics.showServiceActions
+    ? Number.isFinite(Number(portal?.shared_action_count))
+      ? Number(portal.shared_action_count)
+      : sharedActions.length
+    : 0;
   const whatNext = portal?.what_next || null;
   const playbook = portal?.playbook || null;
   const appointment = portal?.appointment || null;
@@ -1161,7 +1179,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
   const hasRelationshipThread = Boolean(relationshipThreadId);
   const hasPersistedPlaybook = Boolean(playbook?.exists);
   const hasPersistedAppointment = Boolean(appointment?.scheduled);
-  const visiblePlaybooks = visibleRelationshipPlaybooks(relationshipPlaybooks);
+  const visiblePlaybooks = projectionSemantics.showPlaybooks ? visibleRelationshipPlaybooks(relationshipPlaybooks) : [];
   const canEditCurrentAction = Boolean(
     currentActionOpen &&
       (portal?.permitted_operations?.update_action_status ||
@@ -1247,6 +1265,13 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
 
   const openNewAction = () => {
     if (!asset.id) return;
+    if (!projectionSemantics.showServiceActions) {
+      Alert.alert(
+        "Service actions unavailable",
+        "This workspace relationship is inventory or delivery-scoped. Add a service or owner relationship before creating service Actions."
+      );
+      return;
+    }
     const orgId = projection?.organization?.id || organizationId || null;
     navigation.navigate(
       "CreateReminder",
@@ -1271,6 +1296,10 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
 
   const openPlaybooks = () => {
     if (!asset.id) return;
+    if (!projectionSemantics.showPlaybooks) {
+      Alert.alert("Playbooks unavailable", projectionSemantics.playbookHint);
+      return;
+    }
     const orgId = projection?.organization?.id || organizationId || null;
     navigation.navigate("KeeprSpacePlaybooks", {
       assetId: asset.id,
@@ -1307,15 +1336,13 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
   const waitingOn = currentAction?.id ? actionResponsibleName(currentAction) : "No one";
   const nextStepLabel = currentAction?.id ? whatNext?.title || "No next step has been set." : "No active work is waiting.";
   const targetDateLabel = currentAction ? getActionScheduleLabel(currentAction, formatDate) : "No target date set";
-  const ownerName = portal?.owner_display_name || asset.owner_display_name || "Owner";
-  const providerName = projection?.organization?.name || projection?.keepr_pro?.name || "KeeprPro";
-  const relationshipTitle = `${ownerName} ↔ ${providerName}`;
+  const relationshipTitle = projectionSemantics.relationshipTitle || `${ownerName} ↔ ${providerName}`;
   const relationshipRole =
     projection?.relationship?.relationship_purpose ||
     projection?.relationship?.relationship_type ||
     "service";
   const relationshipStatus = projection?.relationship?.status || "active";
-  const relationshipRoleLabel = labelize(relationshipRole);
+  const relationshipRoleLabel = projectionSemantics.workspaceRoleLabel || labelize(relationshipRole);
   const relationshipStatusLabel = labelize(relationshipStatus);
   const boatDescriptor = compact([asset.year, asset.make, asset.model]);
   const boatFacts = [
@@ -1867,8 +1894,8 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
       <View style={styles.card}>
         <View style={styles.sectionHeader}>
           <View style={styles.sectionTitleBlock}>
-        <Text style={styles.cardTitle}>Playbook loop</Text>
-        <Text style={styles.sectionHint}>Recurring relationship plans for this boat. Playbooks organize; Actions execute.</Text>
+        <Text style={styles.cardTitle}>{projectionSemantics.playbookTitle}</Text>
+        <Text style={styles.sectionHint}>{projectionSemantics.playbookHint}</Text>
           </View>
           <TouchableOpacity style={styles.inlineButton} onPress={openPlaybooks} activeOpacity={0.86}>
             <Ionicons name="reader-outline" size={16} color={colors.primary} />
@@ -2312,8 +2339,8 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
     <View style={styles.card}>
       <View style={styles.sectionHeader}>
         <View style={styles.sectionTitleBlock}>
-          <Text style={styles.cardTitle}>Contribute a record</Text>
-          <Text style={styles.sectionHint}>Send a provider-authored record to the owner's Inbox for review.</Text>
+        <Text style={styles.cardTitle}>Contribute a record</Text>
+          <Text style={styles.sectionHint}>Send a provider-authored record for owner review.</Text>
         </View>
         <TouchableOpacity
           style={styles.inlineButton}
@@ -2489,17 +2516,17 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
               ]}
               right={(
                 <View style={styles.breadcrumbWorkspace}>
-                  <Ionicons name={workspaceRoleIcon} size={14} color={colors.brandNavy} />
+                  <Ionicons name={projectionSemantics.workspaceRoleIcon || workspaceRoleIcon} size={14} color={colors.brandNavy} />
                   <Text style={styles.breadcrumbWorkspaceText} numberOfLines={1}>{providerName}</Text>
-                  <Text style={styles.breadcrumbSwitchText}>{workspaceRoleLabel}</Text>
+                  <Text style={styles.breadcrumbSwitchText}>{projectionSemantics.modeLabel || workspaceRoleLabel}</Text>
                 </View>
               )}
             />
             <View style={styles.header}>
-              <Text style={styles.eyebrow}>KeeprSpace</Text>
+              <Text style={styles.eyebrow}>{projectionSemantics.headerEyebrow}</Text>
               <Text style={styles.title}>{relationshipTitle}</Text>
               <Text style={styles.subtitle}>
-                {asset.name} · Active Keeprship with {providerName}
+                {projectionSemantics.subtitle}
               </Text>
               <View style={styles.boatCrudRow}>
                 <TouchableOpacity style={styles.boatCrudButton} onPress={() => setShowBoatEdit((value) => !value)} activeOpacity={0.86}>
@@ -2682,29 +2709,31 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
                       <View style={styles.heroFallbackContent}>
                         <Ionicons name="boat-outline" size={40} color="#2563EB" />
                         <Text style={styles.heroFallbackTitle}>{asset.name || "Boat"}</Text>
-                        <Text style={styles.heroFallbackMeta}>Keeprship photo will appear here when shared</Text>
+                        <Text style={styles.heroFallbackMeta}>{projectionSemantics.heroFallbackMeta}</Text>
                       </View>
                     )}
                     <View style={styles.heroOverlay}>
-                      <Text style={styles.heroContext}>Active Keeprship</Text>
+                      <Text style={styles.heroContext}>{projectionSemantics.heroContext}</Text>
                       <Text style={styles.heroTitle}>{asset.name}</Text>
                       <Text style={styles.heroMeta}>{boatDescriptor}</Text>
                     </View>
                   </View>
 
                   <View style={styles.relationshipSummaryCard}>
-                    <Text style={styles.cardLabel}>Keeprship</Text>
+                    <Text style={styles.cardLabel}>{projectionSemantics.summaryLabel}</Text>
                     <Text style={styles.cardTitle}>{relationshipTitle}</Text>
                     <Text style={styles.sectionHint}>
-                      One shared relationship: work, messages, files, history, and playbooks stay attached to this boat.
+                      {projectionSemantics.summaryHint}
                     </Text>
                     <View style={styles.relationshipContextGrid}>
+                      {projectionSemantics.showOwnerPanel ? (
+                        <View style={styles.relationshipContextItem}>
+                          <Text style={styles.detailLabel}>{projectionSemantics.personPanelLabel}</Text>
+                          <Text style={styles.detailValue}>{ownerName}</Text>
+                        </View>
+                      ) : null}
                       <View style={styles.relationshipContextItem}>
-                        <Text style={styles.detailLabel}>Owner</Text>
-                        <Text style={styles.detailValue}>{ownerName}</Text>
-                      </View>
-                      <View style={styles.relationshipContextItem}>
-                        <Text style={styles.detailLabel}>Provider role</Text>
+                        <Text style={styles.detailLabel}>{projectionSemantics.providerPanelLabel}</Text>
                         <Text style={styles.detailValue}>{relationshipRoleLabel}</Text>
                       </View>
                       <View style={styles.relationshipContextItem}>
@@ -2902,31 +2931,33 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
                 {renderPlaybookSummary()}
 
                 <View style={styles.visualGrid}>
-                  <View style={styles.visualPanel}>
-                    <Text style={styles.cardLabel}>{ownerName}</Text>
-                    <Text style={styles.visualValue}>Owner</Text>
-                    {currentActionOpen && waitingOn === ownerName ? (
-                      <Text style={styles.visualMuted}>Current responsibility: {nextStepLabel}</Text>
-                    ) : null}
-                    <View style={styles.contactRow}>
-                      {ownerPhone ? (
-                      <TouchableOpacity style={styles.inlineButton} onPress={() => contactByPhone(ownerPhone)}>
-                        <Ionicons name="call-outline" size={15} color={colors.primary} />
-                        <Text style={styles.inlineButtonText}>Call</Text>
-                      </TouchableOpacity>
+                  {projectionSemantics.showOwnerPanel ? (
+                    <View style={styles.visualPanel}>
+                      <Text style={styles.cardLabel}>{ownerName}</Text>
+                      <Text style={styles.visualValue}>{projectionSemantics.personPanelLabel}</Text>
+                      {currentActionOpen && waitingOn === ownerName ? (
+                        <Text style={styles.visualMuted}>Current responsibility: {nextStepLabel}</Text>
                       ) : null}
-                      {ownerEmail ? (
-                      <TouchableOpacity style={styles.inlineButton} onPress={() => contactByEmail(ownerEmail)}>
-                        <Ionicons name="mail-outline" size={15} color={colors.primary} />
-                        <Text style={styles.inlineButtonText}>Email</Text>
-                      </TouchableOpacity>
-                      ) : null}
-                      <TouchableOpacity style={styles.inlineButton} onPress={openMessages}>
-                        <Ionicons name="chatbubble-outline" size={15} color={colors.primary} />
-                        <Text style={styles.inlineButtonText}>Message</Text>
-                      </TouchableOpacity>
+                      <View style={styles.contactRow}>
+                        {ownerPhone ? (
+                        <TouchableOpacity style={styles.inlineButton} onPress={() => contactByPhone(ownerPhone)}>
+                          <Ionicons name="call-outline" size={15} color={colors.primary} />
+                          <Text style={styles.inlineButtonText}>Call</Text>
+                        </TouchableOpacity>
+                        ) : null}
+                        {ownerEmail ? (
+                        <TouchableOpacity style={styles.inlineButton} onPress={() => contactByEmail(ownerEmail)}>
+                          <Ionicons name="mail-outline" size={15} color={colors.primary} />
+                          <Text style={styles.inlineButtonText}>Email</Text>
+                        </TouchableOpacity>
+                        ) : null}
+                        <TouchableOpacity style={styles.inlineButton} onPress={openMessages}>
+                          <Ionicons name="chatbubble-outline" size={15} color={colors.primary} />
+                          <Text style={styles.inlineButtonText}>Message</Text>
+                        </TouchableOpacity>
+                      </View>
                     </View>
-                  </View>
+                  ) : null}
                   <View style={styles.visualPanel}>
                     <TouchableOpacity onPress={openProviderProfile} activeOpacity={0.85}>
                       <Text style={[styles.cardLabel, styles.linkLabel]}>{providerName}</Text>
@@ -2962,7 +2993,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
 
                 {renderConversationSummary()}
 
-                {hasPersistedPlaybook || hasPersistedAppointment ? (
+                {projectionSemantics.showPlaybooks && (hasPersistedPlaybook || hasPersistedAppointment) ? (
                   <View style={styles.visualGrid}>
                     {hasPersistedPlaybook ? (
                       <View style={styles.visualPanel}>
@@ -2985,7 +3016,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
                     <View style={styles.sectionHeader}>
                       <View style={styles.sectionTitleBlock}>
                         <Text style={styles.cardTitle}>Asset systems</Text>
-                        <Text style={styles.sectionHint}>Systems connected to this Keepr asset and available for records, Actions, and Playbooks.</Text>
+                        <Text style={styles.sectionHint}>{projectionSemantics.systemsHint}</Text>
                       </View>
                       <Text style={styles.count}>{visibleRelatedSystems.length}</Text>
                     </View>
@@ -3062,7 +3093,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
                   </View>
                 ) : null}
 
-                {renderContributionCard()}
+                {projectionSemantics.showContribution ? renderContributionCard() : null}
 
                 {records.length ? (
                   <View style={styles.card}>
@@ -3096,7 +3127,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
             ) : (
               <>
                 <View style={styles.listViewLabel}>
-                  <Text style={styles.cardLabel}>Keeprship · List View</Text>
+                  <Text style={styles.cardLabel}>{projectionSemantics.summaryLabel} · List View</Text>
                   <Text style={styles.listViewText}>
                     {portal?.relationship_title || relationshipTitle}
                   </Text>
@@ -3128,10 +3159,12 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
             <View style={styles.card}>
               <Text style={styles.cardLabel}>Keepr asset summary</Text>
               <View style={styles.detailGrid}>
-                <View style={styles.detailItem}>
-                  <Text style={styles.detailLabel}>Owner</Text>
-                  <Text style={styles.detailValue}>{asset.owner_display_name}</Text>
-                </View>
+                {projectionSemantics.showOwnerPanel ? (
+                  <View style={styles.detailItem}>
+                    <Text style={styles.detailLabel}>{projectionSemantics.personPanelLabel}</Text>
+                    <Text style={styles.detailValue}>{asset.owner_display_name || ownerName}</Text>
+                  </View>
+                ) : null}
                 <View style={styles.detailItem}>
                   <Text style={styles.detailLabel}>Type</Text>
                   <Text style={styles.detailValue}>{asset.type}</Text>
@@ -3155,7 +3188,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
               </View>
             </View>
 
-            {hasPersistedPlaybook || hasPersistedAppointment ? (
+            {projectionSemantics.showPlaybooks && (hasPersistedPlaybook || hasPersistedAppointment) ? (
             <View style={styles.card}>
               <View style={styles.sectionHeader}>
                 <Text style={styles.cardTitle}>Playbook loop</Text>
@@ -3182,7 +3215,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
               <View style={styles.sectionHeader}>
                 <View style={styles.sectionTitleBlock}>
                   <Text style={styles.cardTitle}>Asset systems</Text>
-                  <Text style={styles.sectionHint}>Systems connected to this Keepr asset and available for records, Actions, and Playbooks.</Text>
+                  <Text style={styles.sectionHint}>{projectionSemantics.systemsHint}</Text>
                 </View>
                 <Text style={styles.count}>{visibleRelatedSystems.length}</Text>
               </View>
@@ -3221,7 +3254,7 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
             </View>
             ) : null}
 
-            {renderContributionCard()}
+            {projectionSemantics.showContribution ? renderContributionCard() : null}
 
             {sharedActions.length ? (
             <View style={styles.card}>

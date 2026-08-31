@@ -28,6 +28,7 @@ import {
   upsertKeeprSpacePlaybook,
 } from "../lib/keeprspaceApi";
 import { fetchAssetHeroUris, getCachedAssetHeroUris } from "../lib/assetHeroResolver";
+import { assetProjectionSemantics } from "../lib/assetProjectionSemantics";
 import { supabase } from "../lib/supabaseClient";
 import { colors, radius, shadows, spacing } from "../styles/theme";
 
@@ -376,10 +377,24 @@ export default function KeeprSpacePlaybooksScreen({ navigation, route }) {
   const [editingStructure, setEditingStructure] = useState(false);
 
   const workspaceName = workspaceDisplayName(currentWorkspace, config);
-  const boats = useMemo(() => portfolio?.boats || [], [portfolio]);
+  const allBoats = useMemo(() => portfolio?.boats || [], [portfolio]);
+  const boats = useMemo(
+    () =>
+      allBoats.filter((boat) =>
+        assetProjectionSemantics({
+          asset: { ...boat, ...(boat?.identity || {}) },
+          relationship: boat?.service_relationship || boat?.dealer_relationship || boat,
+          workspace: currentWorkspace,
+          providerName: workspaceName,
+        }).showPlaybooks
+      ),
+    [allBoats, currentWorkspace, workspaceName]
+  );
   const selectedBoat = useMemo(() => {
     const match = boats.find((boat) => String(assetIdForBoat(boat)) === String(selectedAssetId || routeAssetId));
     if (match) return match;
+    const ineligibleMatch = allBoats.find((boat) => String(assetIdForBoat(boat)) === String(selectedAssetId || routeAssetId));
+    if (ineligibleMatch) return ineligibleMatch;
     if (isBoatScoped && routeAssetId) {
       return {
         id: routeAssetId,
@@ -389,8 +404,21 @@ export default function KeeprSpacePlaybooksScreen({ navigation, route }) {
       };
     }
     return boats[0] || null;
-  }, [boats, isBoatScoped, route?.params?.assetName, route?.params?.kac, routeAssetId, selectedAssetId]);
+  }, [allBoats, boats, isBoatScoped, route?.params?.assetName, route?.params?.kac, routeAssetId, selectedAssetId]);
   const selectedBoatId = selectedBoat ? assetIdForBoat(selectedBoat) : selectedAssetId || routeAssetId || null;
+  const selectedBoatSemantics = useMemo(
+    () =>
+      selectedBoat
+        ? assetProjectionSemantics({
+            asset: { ...selectedBoat, ...(selectedBoat?.identity || {}) },
+            relationship: selectedBoat?.service_relationship || selectedBoat?.dealer_relationship || selectedBoat,
+            workspace: currentWorkspace,
+            providerName: workspaceName,
+          })
+        : null,
+    [currentWorkspace, selectedBoat, workspaceName]
+  );
+  const playbooksAllowed = Boolean(selectedBoatSemantics?.showPlaybooks);
   const selectedBoatHeroUrl = (selectedBoatId && heroUrls[selectedBoatId]) || assetHeroUrl(selectedBoat);
   const activeServices = useMemo(
     () => (config?.service_offerings || []).filter((service) => String(service.status || "active").toLowerCase() === "active"),
@@ -445,12 +473,27 @@ export default function KeeprSpacePlaybooksScreen({ navigation, route }) {
         getKeeprSpaceOrgConfig({ organizationId }),
       ]);
       const nextBoats = nextPortfolio?.boats || [];
-      const nextAssetId = routeAssetId || selectedAssetId || assetIdForBoat(nextBoats[0]) || null;
+      const eligibleBoats = nextBoats.filter((boat) =>
+        assetProjectionSemantics({
+          asset: { ...boat, ...(boat?.identity || {}) },
+          relationship: boat?.service_relationship || boat?.dealer_relationship || boat,
+          workspace: currentWorkspace,
+          providerName: workspaceDisplayName(currentWorkspace, nextConfig),
+        }).showPlaybooks
+      );
+      const routeBoatEligible = eligibleBoats.some((boat) => String(assetIdForBoat(boat)) === String(routeAssetId));
+      const selectedBoatEligible = eligibleBoats.some((boat) => String(assetIdForBoat(boat)) === String(selectedAssetId));
+      const nextAssetId =
+        routeAssetId && routeBoatEligible
+          ? routeAssetId
+          : selectedAssetId && selectedBoatEligible
+          ? selectedAssetId
+          : assetIdForBoat(eligibleBoats[0]) || routeAssetId || null;
       setPortfolio(nextPortfolio);
       setConfig(nextConfig);
       setSelectedAssetId(nextAssetId);
 
-      if (nextAssetId) {
+      if (nextAssetId && (routeBoatEligible || selectedBoatEligible || eligibleBoats.some((boat) => String(assetIdForBoat(boat)) === String(nextAssetId)))) {
         const [nextPlaybooks, nextOrgPlaybooks] = await Promise.all([
           listKeeprSpacePlaybooks({
             organizationId,
@@ -489,12 +532,20 @@ export default function KeeprSpacePlaybooksScreen({ navigation, route }) {
           setSourcePlaybookId(null);
         }
       }
+      if (!eligibleBoats.length || (routeAssetId && !routeBoatEligible)) {
+        setPlaybooks([]);
+        setTemplates([]);
+        setSelectedPlaybookId(null);
+        setSourcePlaybookId(null);
+        setName("");
+        setSteps([]);
+      }
     } catch (err) {
       setError(err?.message || "Could not load playbooks.");
     } finally {
       setLoading(false);
     }
-  }, [organizationId, routeAssetId, routeSystemId, selectedAssetId]);
+  }, [currentWorkspace, organizationId, routeAssetId, routeSystemId, selectedAssetId]);
 
   useEffect(() => {
     load();
@@ -902,6 +953,39 @@ export default function KeeprSpacePlaybooksScreen({ navigation, route }) {
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
+        {selectedBoat && !playbooksAllowed ? (
+          <View style={styles.header}>
+            <View style={styles.headerCopy}>
+              <Text style={styles.eyebrow}>KeeprSpace Playbooks</Text>
+              <Text style={styles.title}>{selectedBoatSemantics?.playbookTitle || "Playbooks unavailable"}</Text>
+              <Text style={styles.subtitle}>
+                {selectedBoatSemantics?.playbookHint || "This relationship does not enable owner or service playbooks."}
+              </Text>
+              <View style={styles.headerBoatCard}>
+                {selectedBoatHeroUrl ? (
+                  <Image source={{ uri: selectedBoatHeroUrl }} style={styles.headerBoatImage} resizeMode="cover" />
+                ) : (
+                  <View style={styles.headerBoatFallback}>
+                    <Ionicons name="boat-outline" size={22} color={colors.brandBlue} />
+                  </View>
+                )}
+                <View style={styles.headerBoatCopy}>
+                  <Text style={styles.headerBoatName}>{assetName(selectedBoat)}</Text>
+                  <Text style={styles.headerBoatMeta} numberOfLines={1}>
+                    {compact([assetSubtitle(selectedBoat), selectedBoatSemantics?.workspaceRoleLabel])}
+                  </Text>
+                </View>
+                <TouchableOpacity style={styles.backToBoatButton} onPress={openBoat} activeOpacity={0.86}>
+                  <Ionicons name="arrow-back-outline" size={15} color={colors.brandBlue} />
+                  <Text style={styles.secondaryButtonText}>Back to Boat</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        ) : null}
+
+        {selectedBoat && !playbooksAllowed ? null : (
+        <>
         <View style={styles.header}>
           <View style={styles.headerCopy}>
             <Text style={styles.eyebrow}>KeeprSpace Playbooks</Text>
@@ -1360,6 +1444,8 @@ export default function KeeprSpacePlaybooksScreen({ navigation, route }) {
             </View>
           </View>
         </View>
+        </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );

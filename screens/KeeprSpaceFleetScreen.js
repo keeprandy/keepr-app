@@ -21,6 +21,7 @@ import { useWorkspace } from "../context/WorkspaceContext";
 import { getSignedUrl } from "../lib/attachmentsApi";
 import { fetchAssetHeroUris, getCachedAssetHeroUris } from "../lib/assetHeroResolver";
 import { getKeeprSpacePortfolio, removeKeeprSpaceBoatRelationship } from "../lib/keeprspaceApi";
+import { assetProjectionSemantics } from "../lib/assetProjectionSemantics";
 import { supabase } from "../lib/supabaseClient";
 import {
   TIARA_56_LS_TEMPLATE_KEY,
@@ -142,6 +143,14 @@ function heroSourceForBoat(boat, heroUri = null) {
 }
 
 function workspaceConnectionLabel(boat) {
+  const semantics = assetProjectionSemantics({
+    asset: {
+      ...boat,
+      ...(boat?.identity || {}),
+    },
+    relationship: boat?.service_relationship || boat?.dealer_relationship || boat,
+  });
+  if (semantics.connectionLabel) return semantics.connectionLabel;
   if (hasFactoryBuildLayer(boat)) {
     return "Factory build";
   }
@@ -328,14 +337,23 @@ function MetricTile({ label, value, icon }) {
   );
 }
 
-function BoatCard({ boat, onPress, heroUri = null, onOpenFactoryBuild = null, onRemove = null, removing = false }) {
+function BoatCard({ boat, onPress, heroUri = null, onOpenFactoryBuild = null, onRemove = null, removing = false, workspace = null }) {
   const dealer = boat?.dealer_relationship || boat?.service_relationship || {};
+  const semantics = assetProjectionSemantics({
+    asset: {
+      ...boat,
+      ...(boat?.identity || {}),
+    },
+    relationship: dealer.relationship_type || dealer.access_scope ? dealer : boat,
+    workspace,
+    providerName: workspaceDisplayName(workspace, null),
+  });
   const verification = boat?.verification || {};
   const activation = boat?.activation || {};
   const readiness = `${verification.percent || boat?.verification_percent || 0}% verified`;
   const state = activation.status || boat?.owner_state || dealer.status || "in review";
   const tone = statusTone(state);
-  const relationshipLabel = dealer.relationship_purpose || dealer.relationship_type || boat?.relationship_type || "Service";
+  const relationshipLabel = semantics.workspaceRoleLabel || dealer.relationship_purpose || dealer.relationship_type || boat?.relationship_type || "Workspace";
   const relationshipStatus = dealer.status || activation.status || boat?.owner_state || "Active";
   const hasFactoryBuild = hasFactoryBuildLayer(boat);
   const factoryBuild = factoryBuildParamsForBoat(boat);
@@ -393,7 +411,7 @@ function BoatCard({ boat, onPress, heroUri = null, onOpenFactoryBuild = null, on
             </View>
           </View>
           <View style={styles.serviceRelationshipOpen}>
-            <Text style={styles.serviceRelationshipOpenText}>Open Keeprship</Text>
+            <Text style={styles.serviceRelationshipOpenText}>{semantics.openLabel}</Text>
             <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
           </View>
           {hasFactoryBuild ? (
@@ -814,6 +832,7 @@ export default function KeeprSpaceFleetScreen({ route, navigation }) {
                       heroUri={heroUrls[assetId] || null}
                       onRemove={confirmRemoveBoat}
                       removing={removingId === (boat.asset_relationship_id || boat.stewardship_id || assetId)}
+                      workspace={currentWorkspace}
                     />
                   );
                 })}
