@@ -47,6 +47,76 @@ function safeFileName(value, fallback = "keepr-source-document.pdf") {
   return name || fallback;
 }
 
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(safeString(value));
+}
+
+function compactUnique(values = []) {
+  return Array.from(new Set(values.map((value) => safeString(value)).filter(Boolean)));
+}
+
+function collectTemplateRefsFromAsset(asset) {
+  const metadata = asObject(asset?.extra_metadata);
+  const nested = [
+    asObject(metadata.catalog_template),
+    asObject(metadata.model_template),
+    asObject(metadata.template),
+    asObject(metadata.factory_build),
+  ];
+  const ids = compactUnique([
+    metadata.catalog_template_id,
+    metadata.asset_model_template_id,
+    metadata.model_template_id,
+    metadata.template_id,
+    ...nested.flatMap((entry) => [
+      entry.catalog_template_id,
+      entry.asset_model_template_id,
+      entry.model_template_id,
+      entry.template_id,
+    ]),
+  ]).filter(isUuid);
+  const keys = compactUnique([
+    metadata.catalog_template_key,
+    metadata.asset_model_template_key,
+    metadata.model_template_key,
+    metadata.template_key,
+    ...nested.flatMap((entry) => [
+      entry.catalog_template_key,
+      entry.asset_model_template_key,
+      entry.model_template_key,
+      entry.template_key,
+    ]),
+  ]);
+  return { ids, keys };
+}
+
+async function listTemplateIdsForAsset(supabase, asset) {
+  const ids = new Set();
+  const { data: bindings } = await supabase
+    .from("asset_template_bindings")
+    .select("template_id,binding_status")
+    .eq("asset_id", asset.id)
+    .in("binding_status", ["suggested", "inherited", "verified"]);
+  (bindings || []).forEach((binding) => {
+    if (binding?.template_id) ids.add(binding.template_id);
+  });
+
+  const refs = collectTemplateRefsFromAsset(asset);
+  refs.ids.forEach((id) => ids.add(id));
+
+  if (refs.keys.length) {
+    const { data } = await supabase
+      .from("asset_model_templates")
+      .select("id,template_key")
+      .in("template_key", refs.keys);
+    (data || []).forEach((template) => {
+      if (template?.id) ids.add(template.id);
+    });
+  }
+
+  return Array.from(ids);
+}
+
 async function streamPublicMedia({ placementId, fallbackFileName, req, res }) {
   const supabaseUrl = getEnv("SUPABASE_URL") || getEnv("EXPO_PUBLIC_SUPABASE_URL");
   const anonKey = getEnv("EXPO_PUBLIC_SUPABASE_ANON_KEY") || getEnv("SUPABASE_ANON_KEY");
@@ -83,6 +153,32 @@ async function streamPublicMedia({ placementId, fallbackFileName, req, res }) {
   return res.status(200).send(body);
 }
 
+async function streamStorageAttachment({ supabase, attachment, fallbackFileName, req, res }) {
+  if (!attachment?.bucket || !attachment?.storage_path) {
+    return res.status(404).json({ error: "source_file_not_found" });
+  }
+
+  const { data, error } = await supabase.storage
+    .from(attachment.bucket)
+    .createSignedUrl(attachment.storage_path, 60);
+  if (error || !data?.signedUrl) return res.status(404).json({ error: "source_file_not_found" });
+
+  const upstream = await fetch(data.signedUrl);
+  if (!upstream.ok) return res.status(502).json({ error: "source_file_fetch_failed" });
+
+  const contentType = cleanContentType(upstream.headers.get("content-type") || attachment.mime_type);
+  const fileName = safeFileName(fallbackFileName || attachment.file_name || attachment.title);
+  res.setHeader("Content-Type", contentType);
+  res.setHeader("Content-Disposition", `inline; filename="${fileName}"`);
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+
+  if (req.method === "HEAD") return res.status(200).end();
+
+  const body = Buffer.from(await upstream.arrayBuffer());
+  return res.status(200).send(body);
+}
+
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
 
@@ -104,7 +200,7 @@ export default async function handler(req, res) {
   try {
     const { data: asset, error: assetError } = await supabase
       .from("assets")
-      .select("id, kac_id")
+      .select("id, kac_id, extra_metadata")
       .eq("kac_id", kac)
       .is("deleted_at", null)
       .maybeSingle();
@@ -112,7 +208,7 @@ export default async function handler(req, res) {
     if (assetError) throw assetError;
     if (!asset?.id) return res.status(404).json({ error: "source_file_not_found" });
 
-    const { data: placement, error: placementError } = await supabase
+    const { data: assetPlacement, error: placementError } = await supabase
       .from("attachment_placements")
       .select("id, attachment_id, target_type, target_id, role")
       .eq("target_type", "asset")
@@ -121,6 +217,26 @@ export default async function handler(req, res) {
       .maybeSingle();
 
     if (placementError) throw placementError;
+    let placement = assetPlacement || null;
+    let inheritedModelPlacement = false;
+
+    if (!placement?.id) {
+      const templateIds = await listTemplateIdsForAsset(supabase, asset);
+      if (templateIds.length) {
+        const { data: templatePlacement, error: templatePlacementError } = await supabase
+          .from("attachment_placements")
+          .select("id, attachment_id, target_type, target_id, role")
+          .eq("target_type", "model_template")
+          .eq("attachment_id", attachmentId)
+          .in("target_id", templateIds)
+          .limit(1)
+          .maybeSingle();
+        if (templatePlacementError) throw templatePlacementError;
+        placement = templatePlacement || null;
+        inheritedModelPlacement = !!placement?.id;
+      }
+    }
+
     if (!placement?.id) return res.status(404).json({ error: "source_file_not_found" });
 
     const { data: attachment, error: attachmentError } = await supabase
@@ -139,6 +255,16 @@ export default async function handler(req, res) {
 
     if (aiContext === "off" || isPrivatePrivacy(privacy)) {
       return res.status(404).json({ error: "source_file_not_found" });
+    }
+
+    if (inheritedModelPlacement) {
+      return streamStorageAttachment({
+        supabase,
+        attachment,
+        fallbackFileName: attachment.file_name || attachment.title,
+        req,
+        res,
+      });
     }
 
     const { data: publicRow, error: publicRowError } = await supabase

@@ -149,6 +149,32 @@ test("OEM model resources can open Proof Builder at model-template scope", () =>
   assert.match(proofBuilder, /\.eq\("target_type", "model_template"\)/);
 });
 
+test("Public KAC source manifest includes inherited AI-enabled model resources", () => {
+  const sourceRoute = read("api/k/[kac]/source.js");
+
+  assert.match(sourceRoute, /async function listTemplatesForAsset/);
+  assert.match(sourceRoute, /asset_template_bindings/);
+  assert.match(sourceRoute, /collectTemplateRefsFromAsset/);
+  assert.match(sourceRoute, /\.eq\("target_type", "model_template"\)/);
+  assert.match(sourceRoute, /\.in\("target_id", templateIds\)/);
+  assert.match(sourceRoute, /inherited_from_model: row\.target_type === "model_template"/);
+  assert.match(sourceRoute, /provenance_label: sourceContext\.provenance_label/);
+  assert.match(sourceRoute, /listAuthorizedAISources\(sourceSupabase, asset,/);
+});
+
+test("Public KAC source-file route can serve inherited model resource files", () => {
+  const sourceFileRoute = read("api/k/[kac]/source-file/[attachmentId].js");
+
+  assert.match(sourceFileRoute, /async function listTemplateIdsForAsset/);
+  assert.match(sourceFileRoute, /asset_template_bindings/);
+  assert.match(sourceFileRoute, /collectTemplateRefsFromAsset/);
+  assert.match(sourceFileRoute, /\.eq\("target_type", "model_template"\)/);
+  assert.match(sourceFileRoute, /\.in\("target_id", templateIds\)/);
+  assert.match(sourceFileRoute, /inheritedModelPlacement/);
+  assert.match(sourceFileRoute, /streamStorageAttachment/);
+  assert.match(sourceFileRoute, /aiContext === "off" \|\| isPrivatePrivacy\(privacy\)/);
+});
+
 test("Workspace-context boat actions use projection-safe edit and hero paths", () => {
   const showcase = read("screens/BoatShowcaseScreen.js");
   const story = read("screens/BoatStoryScreen.js");

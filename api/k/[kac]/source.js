@@ -57,6 +57,88 @@ function normalizeRole(value) {
   return clean.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "other";
 }
 
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(safeString(value));
+}
+
+function compactUnique(values = []) {
+  return Array.from(new Set(values.map((value) => safeString(value)).filter(Boolean)));
+}
+
+function collectTemplateRefsFromAsset(asset) {
+  const metadata = asObject(asset?.extra_metadata);
+  const nested = [
+    asObject(metadata.catalog_template),
+    asObject(metadata.model_template),
+    asObject(metadata.template),
+    asObject(metadata.factory_build),
+  ];
+  const ids = compactUnique([
+    metadata.catalog_template_id,
+    metadata.asset_model_template_id,
+    metadata.model_template_id,
+    metadata.template_id,
+    ...nested.flatMap((entry) => [
+      entry.catalog_template_id,
+      entry.asset_model_template_id,
+      entry.model_template_id,
+      entry.template_id,
+    ]),
+  ]).filter(isUuid);
+  const keys = compactUnique([
+    metadata.catalog_template_key,
+    metadata.asset_model_template_key,
+    metadata.model_template_key,
+    metadata.template_key,
+    ...nested.flatMap((entry) => [
+      entry.catalog_template_key,
+      entry.asset_model_template_key,
+      entry.model_template_key,
+      entry.template_key,
+    ]),
+  ]);
+  return { ids, keys };
+}
+
+async function listTemplatesForAsset(supabase, asset) {
+  const templatesById = new Map();
+
+  const { data: bindings } = await supabase
+    .from("asset_template_bindings")
+    .select("template_id,binding_status,asset_model_templates ( id,template_key,manufacturer,model,model_year )")
+    .eq("asset_id", asset.id)
+    .in("binding_status", ["suggested", "inherited", "verified"])
+    .order("created_at", { ascending: false });
+
+  (bindings || []).forEach((binding) => {
+    const template = binding.asset_model_templates;
+    if (template?.id) templatesById.set(template.id, template);
+  });
+
+  const refs = collectTemplateRefsFromAsset(asset);
+  if (refs.ids.length) {
+    const { data } = await supabase
+      .from("asset_model_templates")
+      .select("id,template_key,manufacturer,model,model_year")
+      .in("id", refs.ids);
+    (data || []).forEach((template) => {
+      if (template?.id) templatesById.set(template.id, template);
+    });
+  }
+
+  if (refs.keys.length) {
+    const { data } = await supabase
+      .from("asset_model_templates")
+      .select("id,template_key,manufacturer,model,model_year")
+      .in("template_key", refs.keys);
+    (data || []).forEach((template) => {
+      if (template?.id) templatesById.set(template.id, template);
+    });
+  }
+
+  return Array.from(templatesById.values());
+}
+
 function profileLabel(row) {
   return row?.display_name || row?.full_name || row?.email || null;
 }
@@ -189,7 +271,8 @@ async function urlForSource(supabase, attachment, { isAuthenticated, privacy, ba
   return data?.signedUrl || null;
 }
 
-async function listAuthorizedAISources(supabase, assetId, { isAuthenticated, baseUrl, kac }) {
+async function listAuthorizedAISources(supabase, asset, { isAuthenticated, baseUrl, kac }) {
+  const assetId = asset?.id;
   const { data: assetPlacements, error: placementError } = await supabase
     .from("attachment_placements")
     .select(`
@@ -222,8 +305,46 @@ async function listAuthorizedAISources(supabase, assetId, { isAuthenticated, bas
 
   if (placementError) throw placementError;
 
+  const templates = await listTemplatesForAsset(supabase, asset);
+  const templateIds = templates.map((template) => template.id).filter(Boolean);
+  const { data: templatePlacements, error: templatePlacementError } = templateIds.length
+    ? await supabase
+        .from("attachment_placements")
+        .select(`
+          id,
+          attachment_id,
+          role,
+          label,
+          sort_order,
+          is_showcase,
+          created_at,
+          target_type,
+          target_id,
+          attachments (
+            id,
+            kind,
+            title,
+            notes,
+            url,
+            file_name,
+            mime_type,
+            bucket,
+            storage_path,
+            owner_user_id,
+            org_id,
+            created_at,
+            source_context,
+            ai_metadata
+          )
+        `)
+        .eq("target_type", "model_template")
+        .in("target_id", templateIds)
+    : { data: [], error: null };
+
+  if (templatePlacementError) throw templatePlacementError;
+
   const attachmentIds = Array.from(
-    new Set((assetPlacements || []).map((row) => row.attachment_id).filter(Boolean))
+    new Set([...(assetPlacements || []), ...(templatePlacements || [])].map((row) => row.attachment_id).filter(Boolean))
   );
   if (!attachmentIds.length) return [];
 
@@ -236,7 +357,7 @@ async function listAuthorizedAISources(supabase, assetId, { isAuthenticated, bas
 
   const contributorMeta = await contributorIndexes(
     supabase,
-    (assetPlacements || []).map((row) => row.attachments).filter(Boolean)
+    [...(assetPlacements || []), ...(templatePlacements || [])].map((row) => row.attachments).filter(Boolean)
   );
   const placementsByAttachment = new Map();
   (allPlacements || []).forEach((placement) => {
@@ -245,7 +366,7 @@ async function listAuthorizedAISources(supabase, assetId, { isAuthenticated, bas
   });
 
   const byAttachment = new Map();
-  for (const row of assetPlacements || []) {
+  for (const row of [...(assetPlacements || []), ...(templatePlacements || [])]) {
     const attachment = row.attachments || {};
     const meta = asObject(attachment.ai_metadata);
     const aiContext = normalizeAIContext(meta.ai_context || meta.aiContext);
@@ -274,6 +395,7 @@ async function listAuthorizedAISources(supabase, assetId, { isAuthenticated, bas
         String(a.target_id || "").localeCompare(String(b.target_id || ""))
       );
 
+    const sourceContext = asObject(attachment.source_context);
     const source = {
       title: attachment.title || attachment.file_name || attachment.url || "Attachment",
       attachment_id: row.attachment_id,
@@ -285,6 +407,10 @@ async function listAuthorizedAISources(supabase, assetId, { isAuthenticated, bas
       url: sourceUrl,
       mime_type: attachment.mime_type || null,
       kind: attachment.kind || null,
+      provenance: sourceContext.provenance || null,
+      provenance_label: sourceContext.provenance_label || null,
+      provenance_detail: sourceContext.provenance_detail || null,
+      inherited_from_model: row.target_type === "model_template",
       placements,
     };
 
@@ -339,7 +465,7 @@ export default async function handler(req, res) {
 
     if (systemsError) throw systemsError;
 
-    const sources = await listAuthorizedAISources(sourceSupabase, asset.id, {
+    const sources = await listAuthorizedAISources(sourceSupabase, asset, {
       isAuthenticated,
       baseUrl: requestBaseUrl(req),
       kac,
