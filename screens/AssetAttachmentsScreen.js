@@ -1344,9 +1344,7 @@ const isWide = IS_WEB && width >= 980;
   const assocBusyRef = useRef(false);
   const [showcaseBusy, setShowcaseBusy] = useState(false);
   const [assetHeroPlacementId, setAssetHeroPlacementId] = useState(null);
-  const [relationshipHeroPlacementId, setRelationshipHeroPlacementId] = useState(null);
-  const [activeAssetRelationshipId, setActiveAssetRelationshipId] = useState(null);
-  const hasWorkspaceHeroContext = Boolean(organizationId && activeAssetRelationshipId);
+  const hasWorkspaceHeroContext = Boolean(organizationId);
   const effectiveHeroPlacementId = assetHeroPlacementId;
 
   // NEW: picker state
@@ -1396,38 +1394,12 @@ const isWide = IS_WEB && width >= 980;
         setAssetHeroPlacementId(null);
         return;
       }
-      const [{ data, error }, relationshipResult] = await Promise.all([
-        supabase
+      const { data, error } = await supabase
         .from("assets")
         .select("hero_placement_id")
         .eq("id", assetId)
-          .maybeSingle(),
-        organizationId
-          ? supabase
-              .from("asset_relationships")
-              .select("id,metadata")
-              .eq("asset_id", assetId)
-              .eq("organization_id", organizationId)
-              .eq("status", "active")
-              .order("created_at", { ascending: false })
-              .limit(1)
-              .maybeSingle()
-          : Promise.resolve({ data: null, error: null }),
-      ]);
+        .maybeSingle();
       if (!cancelled && !error) setAssetHeroPlacementId(data?.hero_placement_id || null);
-      if (!cancelled) {
-        if (relationshipResult?.error || !relationshipResult?.data?.id) {
-          setActiveAssetRelationshipId(null);
-          setRelationshipHeroPlacementId(null);
-        } else {
-          setActiveAssetRelationshipId(relationshipResult.data.id);
-          setRelationshipHeroPlacementId(
-            relationshipResult.data.metadata?.presentation?.hero_placement_id ||
-              relationshipResult.data.metadata?.presentation?.heroPlacementId ||
-              null
-          );
-        }
-      }
     };
     loadAssetHeroPlacement();
     return () => {
@@ -2696,13 +2668,13 @@ const openAdd = () => {
     try {
       setShowcaseBusy(true);
       await clearKeeprSpaceAssetHero({ assetId, organizationId });
-      setRelationshipHeroPlacementId(null);
+      setAssetHeroPlacementId(null);
       try {
         DeviceEventEmitter.emit("keepr:attachment:updated", { assetId });
       } catch {}
       await refresh();
     } catch (e) {
-      Alert.alert("Hero update failed", e?.message || "Could not clear this workspace Hero.");
+      Alert.alert("Hero update failed", e?.message || "Could not clear this KAC Hero.");
     } finally {
       setShowcaseBusy(false);
     }
@@ -2823,7 +2795,7 @@ const openAdd = () => {
     const placementId = assetPlacementIdForRow(row, assetId);
     if (!row?._isPhoto) return null;
     const isHero = effectiveHeroPlacementId && placementId === effectiveHeroPlacementId;
-    const isWorkspaceOverride = false;
+    const canClearHero = Boolean(isHero && hasWorkspaceHeroContext);
     return (
       <View style={styles.heroDesignationGroup}>
         <TouchableOpacity
@@ -2850,7 +2822,7 @@ const openAdd = () => {
             {isHero ? "Hero" : "Make Hero"}
           </Text>
         </TouchableOpacity>
-        {isWorkspaceOverride ? (
+        {canClearHero ? (
           <TouchableOpacity
             style={[styles.heroClearButton, showcaseBusy && { opacity: 0.55 }]}
             onPress={(e) => {
@@ -2859,7 +2831,7 @@ const openAdd = () => {
             }}
             disabled={showcaseBusy}
             accessibilityRole="button"
-            accessibilityLabel="Clear workspace Hero"
+            accessibilityLabel="Clear KAC Hero"
           >
             <Text style={styles.heroClearText}>Clear</Text>
           </TouchableOpacity>
@@ -2872,7 +2844,6 @@ const openAdd = () => {
     handleClearWorkspaceHero,
     handleSetAssetHeroForRow,
     hasWorkspaceHeroContext,
-    relationshipHeroPlacementId,
     showcaseBusy,
   ]);
 

@@ -28,7 +28,7 @@ import {
   getSignedUrl,
   removePlacementById,
 } from "../lib/attachmentsApi";
-import { getKeeprSpacePortfolio, setKeeprSpaceAssetHero } from "../lib/keeprspaceApi";
+import { clearKacHero, getKeeprSpacePortfolio, setKacHero, setKeeprSpaceAssetHero } from "../lib/keeprspaceApi";
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import { buildServiceActionRouteParams } from "../lib/serviceActionPrefill";
 import LightboxModal from "../components/LightboxModal";
@@ -578,38 +578,7 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
           return bT - aT;
         });
 
-        // Auto-hero the first exact-KAC photo even when inherited model media is present.
-        const exactAssetGallery = gallery.filter(
-          (photo) => photo?.placement_id && !photo?.isInheritedModelMedia
-        );
-        if (!effectiveHero && exactAssetGallery.length === 1) {
-          try {
-            const only = exactAssetGallery[0];
-            let promoteErr = null;
-            if (routeOrganizationId) {
-              await setKeeprSpaceAssetHero({
-                assetId: currentBoat.id,
-                organizationId: routeOrganizationId,
-                placementId: only.placement_id,
-              });
-            } else {
-              const { error } = await supabase
-                .from("assets")
-                .update({ hero_placement_id: only.placement_id, hero_image_url: null })
-                .eq("id", currentBoat.id);
-              promoteErr = error;
-            }
-
-            if (!promoteErr) {
-              setHeroPlacementId(only.placement_id);
-              only.isHero = true; // immediate UI feedback
-            } else {
-              console.log("BoatShowcase auto-hero promote error", promoteErr);
-            }
-          } catch (e) {
-            console.log("BoatShowcase auto-hero promote exception", e);
-          }
-        } else if ((effectiveHero || heroPlacementId) && gallery.length) {
+        if ((effectiveHero || heroPlacementId) && gallery.length) {
           const heroId = effectiveHero || heroPlacementId;
           gallery.forEach((p) => {
             p.isHero = !!p.placement_id && p.placement_id === heroId;
@@ -709,7 +678,6 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
         },
       });
 
-      // loadPhotos will auto-promote to hero if it's the only showcase photo
       await loadPhotos({ useFallback: false });
     } catch (err) {
       console.error("Add boat showcase photo error", err);
@@ -725,15 +693,7 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
   const handleSetHero = useCallback(
     async (photo) => {
       if (!currentBoat?.id || !photo) return;
-      if (photo.isInheritedModelMedia) {
-        Alert.alert(
-          "Inherited model media",
-          "This photo comes from the model template. Add or choose a photo on this exact boat to make it the KAC hero."
-        );
-        return;
-      }
 
-      // Preferred: placement hero
       if (photo?.placement_id) {
         try {
           setPhotosLoading(true);
@@ -745,19 +705,10 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
               placementId: photo.placement_id,
             });
           } else {
-            const { error: updateError } = await supabase
-              .from("assets")
-              .update({ hero_placement_id: photo.placement_id, hero_image_url: null })
-              .eq("id", currentBoat.id);
-
-            if (updateError) {
-              console.error("Error updating hero_placement_id", updateError);
-              Alert.alert(
-                "Could not set hero",
-                updateError.message || "Please try again."
-              );
-              return;
-            }
+            await setKacHero({
+              assetId: currentBoat.id,
+              placementId: photo.placement_id,
+            });
           }
 
           setHeroPlacementId(photo.placement_id);
@@ -848,12 +799,9 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
           setPhotosLoading(true);
           await removePlacementById(photo.placement_id);
 
-          // If we removed the hero photo from showcase, clear hero_placement_id
+          // If we removed the selected hero photo from this KAC, clear the canonical pointer.
           if (photo.isHero) {
-            await supabase
-              .from("assets")
-              .update({ hero_placement_id: null })
-              .eq("id", currentBoat.id);
+            await clearKacHero({ assetId: currentBoat.id });
             setHeroPlacementId(null);
           }
 

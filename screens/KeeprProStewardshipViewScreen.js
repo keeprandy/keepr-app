@@ -982,13 +982,8 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
   const heroAsset = useMemo(() => {
     const asset = projection?.asset || {};
     const hero = projection?.hero_media || null;
-    const relationshipHeroPlacementId =
-      projection?.relationship?.metadata?.presentation?.hero_placement_id ||
-      projection?.relationship?.metadata?.presentation?.heroPlacementId ||
-      null;
     return {
       id: asset.id || assetId || null,
-      relationship_hero_placement_id: relationshipHeroPlacementId,
       hero_placement_id: asset.hero_placement_id || null,
       hero_image_url: asset.hero_image_url || null,
       hero_thumb_url: asset.hero_thumb_url || null,
@@ -1000,7 +995,6 @@ export default function KeeprProStewardshipViewScreen({ route, navigation }) {
     projection?.asset?.hero_placement_id,
     projection?.asset?.hero_image_url,
     projection?.asset?.hero_thumb_url,
-    projection?.relationship?.metadata,
     projection?.hero_media?.bucket,
     projection?.hero_media?.storage_path,
     assetId,

@@ -44,7 +44,7 @@ import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import { getSignedUrl, listAttachmentsForAsset } from "../lib/attachmentsApi";
 import { resolveAssetHeroUri } from "../lib/assetHeroResolver";
 import { formatContributionAttribution } from "../lib/provenance";
-import { getKeeprSpacePortfolio } from "../lib/keeprspaceApi";
+import { getKeeprSpacePortfolio, setKacHero } from "../lib/keeprspaceApi";
 
 // Context-aware Add Event pill
 import EventPill from "../components/EventPill";
@@ -776,7 +776,7 @@ const goToPublicStorySettings = () => {
       ],
       });
 
-      // Find newest image placement for this asset and set as hero
+      // This is an explicit hero upload action, so it may set the canonical KAC hero.
       const { data: placements, error: pErr } = await supabase
         .from("attachment_placements")
         .select("id, created_at, attachments!inner(kind, mime_type)")
@@ -795,12 +795,11 @@ const goToPublicStorySettings = () => {
         ) || null;
 
       if (newestImagePlacement?.id) {
-        const { error: uErr } = await supabase
-          .from("assets")
-          .update({ hero_placement_id: newestImagePlacement.id })
-          .eq("id", boat.id);
-
-        if (uErr) throw uErr;
+        await setKacHero({
+          assetId: boat.id,
+          placementId: newestImagePlacement.id,
+          actorContext: { origin: "boat_story_upload_hero" },
+        });
       }
 
       await refreshBoat();

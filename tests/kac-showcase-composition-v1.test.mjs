@@ -20,23 +20,23 @@ test("Boat Showcase composes inherited model media with exact-KAC media", () => 
   assert.match(source, /Owner media/);
 });
 
-test("Inherited model media remains read-only in KAC Showcase", () => {
+test("Inherited model media remains delete-safe in KAC Showcase", () => {
   const source = read("screens/BoatShowcaseScreen.js");
 
   assert.match(source, /photo\.isInheritedModelMedia/);
-  assert.match(source, /This photo comes from the model template/);
   assert.match(source, /It was not copied onto the boat/);
   assert.match(source, /readOnlyBadge/);
   assert.match(source, /Inherited/);
 });
 
-test("First exact-KAC showcase photo auto-promotes even with inherited model media", () => {
+test("First exact-KAC showcase photo does not silently persist hero state", () => {
   const source = read("screens/BoatShowcaseScreen.js");
 
-  assert.match(source, /const exactAssetGallery = gallery\.filter/);
-  assert.match(source, /exactAssetGallery\.length === 1/);
+  assert.doesNotMatch(source, /const exactAssetGallery = gallery\.filter/);
+  assert.doesNotMatch(source, /exactAssetGallery\.length === 1/);
   assert.doesNotMatch(source, /gallery\.length === 1 && gallery\[0\]\?\.placement_id/);
-  assert.match(source, /setKeeprSpaceAssetHero/);
+  assert.doesNotMatch(source, /auto-promote/);
+  assert.match(source, /handleSetHero/);
 });
 
 test("Attachment API already preserves inherited model media provenance", () => {
@@ -243,17 +243,65 @@ test("Dealer workspace resolves canonical KAC hero before projection media", () 
   const detail = read("screens/KeeprProStewardshipViewScreen.js");
   const fleet = read("screens/KeeprSpaceFleetScreen.js");
   const resolver = read("lib/assetHeroResolver.js");
-  const migration = read("supabase/migrations/20260901123000_canonical_kac_hero_precedence.sql");
+  const migration = read("supabase/migrations/20260901172000_canonical_kac_hero_contract.sql");
 
   assert.match(detail, /fetchAssetHeroUris\(\[heroAssetId\], BOAT_HERO_OPTIONS\)/);
   assert.doesNotMatch(detail, /fetchAssetHeroUris\(\[heroAssetId\],[\s\S]{0,160}organizationId/);
   assert.doesNotMatch(detail, /relationship_hero_placement_id: heroAsset\.relationship_hero_placement_id/);
-  assert.match(fleet, /fetchAssetHeroUris\(boatHeroIds, \{ \.\.\.FLEET_HERO_OPTIONS, organizationId \}\)/);
+  assert.match(fleet, /fetchAssetHeroUris\(boatHeroIds, FLEET_HERO_OPTIONS\)/);
   assert.match(resolver, /const assetHero = await resolvePlacementHeroUri\(placementId/);
   assert.match(resolver, /const bestExactAssetHero = await resolveBestAssetAttachmentHero/);
   assert.match(resolver, /const inheritedModelHero = await resolveInheritedModelHero/);
   assert.match(migration, /when ap\.id = v_asset\.hero_placement_id then 300/);
-  assert.match(migration, /when ap\.id = v_relationship_hero_placement_id then 110/);
+  assert.doesNotMatch(migration, /v_relationship_hero_placement_id/);
+});
+
+test("Canonical KAC Hero contract has one shared read and write path", () => {
+  const resolver = read("lib/assetHeroResolver.js");
+  const api = read("lib/keeprspaceApi.js");
+  const migration = read("supabase/migrations/20260901172000_canonical_kac_hero_contract.sql");
+
+  assert.match(resolver, /export async function resolveKacHero/);
+  assert.match(resolver, /export async function fetchKacHeroUris/);
+  assert.match(resolver, /export const resolveAssetHeroUri = resolveKacHero/);
+  assert.match(resolver, /export const fetchAssetHeroUris = fetchKacHeroUris/);
+  assert.doesNotMatch(resolver, /relationshipHeroPlacementIdFromMetadata/);
+  assert.doesNotMatch(resolver, /resolveSharedHeroMediaViaRpc/);
+  assert.doesNotMatch(resolver, /resolve_asset_shared_hero_media/);
+  assert.doesNotMatch(resolver, /organizationId && assetId/);
+
+  assert.match(api, /export async function setKacHero/);
+  assert.match(api, /export async function clearKacHero/);
+  assert.match(api, /rpc\("set_asset_hero_placement"/);
+  assert.match(api, /rpc\("clear_asset_hero_placement"/);
+  assert.doesNotMatch(api, /clear_asset_relationship_hero_placement/);
+  assert.doesNotMatch(api, /set_asset_relationship_hero_placement/);
+
+  assert.match(migration, /create table if not exists public\.asset_hero_audit_events/);
+  assert.match(migration, /public\.kac_hero_placement_is_valid/);
+  assert.match(migration, /ap\.target_type = 'asset'/);
+  assert.match(migration, /ap\.target_type = 'model_template'/);
+  assert.match(migration, /public\.kac_has_active_owner/);
+  assert.match(migration, /relationship_type in \('assigned_dealer', 'selling_dealer', 'delivery_dealer'\)/);
+  assert.match(migration, /drop function if exists public\.set_asset_hero_placement\(uuid, uuid\)/);
+  assert.doesNotMatch(migration, /update public\.attachment_placements[\s\S]{0,180}set role/);
+});
+
+test("Showcase and attachments only mutate explicit KAC Hero pointer", () => {
+  const showcase = read("screens/BoatShowcaseScreen.js");
+  const attachments = read("screens/AssetAttachmentsScreen.js");
+
+  assert.match(showcase, /setKacHero/);
+  assert.match(showcase, /clearKacHero/);
+  assert.doesNotMatch(showcase, /\.from\("assets"\)[\s\S]{0,120}\.update\(\{ hero_placement_id/);
+  assert.doesNotMatch(showcase, /relationship_hero_placement_id/);
+  assert.doesNotMatch(showcase, /workspace Hero/);
+
+  assert.match(attachments, /clearKeeprSpaceAssetHero/);
+  assert.match(attachments, /Clear KAC Hero/);
+  assert.doesNotMatch(attachments, /relationshipHeroPlacementId/);
+  assert.doesNotMatch(attachments, /activeAssetRelationshipId/);
+  assert.doesNotMatch(attachments, /workspace Hero/);
 });
 
 test("Exact build shell uses organization branding instead of Tiara fallback copy", () => {
