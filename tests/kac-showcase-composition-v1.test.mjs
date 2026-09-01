@@ -58,8 +58,10 @@ test("General attachment surfaces do not inherit model media by default", () => 
 
   assert.match(source, /export async function listAttachmentsForAsset\(assetId, options = \{\}\)/);
   assert.match(source, /const includeInheritedModelMedia = !!options\.includeInheritedModelMedia/);
-  assert.match(source, /return includeInheritedModelMedia \? await listInheritedTemplateMediaForAsset\(assetId\) : \[\]/);
-  assert.match(source, /if \(!includeInheritedModelMedia\) return directRows/);
+  assert.match(source, /const includeInheritedModelAttachments = !!options\.includeInheritedModelAttachments/);
+  assert.match(source, /const includeInheritedTemplateAttachments = includeInheritedModelAttachments \|\| includeInheritedModelMedia/);
+  assert.match(source, /if \(!includeInheritedTemplateAttachments\) return directRows/);
+  assert.match(source, /mediaOnly: includeInheritedModelMedia && !includeInheritedModelAttachments/);
 });
 
 test("Asset attachment screen can filter composed KAC media by contributor lane", () => {
@@ -69,15 +71,36 @@ test("Asset attachment screen can filter composed KAC media by contributor lane"
   assert.match(source, /const \[sourceFilter, setSourceFilter\] = useState\("all"\)/);
   assert.match(source, /function sourceLaneForAttachment/);
   assert.match(source, /is_inherited_model_media[\s\S]*return "oem"/);
+  assert.match(source, /is_inherited_model_attachment/);
   assert.match(source, /source_lane_label: sourceLaneLabel\(sourceLane\)/);
   assert.match(source, /const includeInheritedModelMedia = \["all", "photo", "showcase"\]\.includes\(tab\)/);
+  assert.match(source, /const includeInheritedModelAttachments = \["all", "file", "showcase"\]\.includes\(tab\)/);
   assert.match(source, /useAssetAttachments\(assetId,\s*\{\s*includeInheritedModelMedia,/);
+  assert.match(source, /includeInheritedModelAttachments,/);
   assert.match(source, /\["all", "All sources"\]/);
   assert.match(source, /\["oem", "OEM"\]/);
   assert.match(source, /\["dealer", "Dealer"\]/);
   assert.match(source, /\["owner", "Owner"\]/);
   assert.match(source, /styles\.sourceLanePill/);
-  assert.match(hook, /listAttachmentsForAsset\(targetId, \{ includeInheritedModelMedia \}\)/);
+  assert.match(hook, /listAttachmentsForAsset\(targetId,\s*\{[\s\S]*includeInheritedModelMedia,[\s\S]*includeInheritedModelAttachments,/);
+});
+
+test("Model resources are attachment-backed and inherit to KACs", () => {
+  const catalog = read("screens/ActivatorCatalogTemplateScreen.js");
+  const api = read("lib/attachmentsApi.js");
+
+  assert.match(catalog, /MODEL_RESOURCE_ROLES/);
+  assert.match(catalog, /hydrateTemplateAttachmentResources/);
+  assert.match(catalog, /createLinkAttachment/);
+  assert.match(catalog, /uploadTemplateResourceFile/);
+  assert.match(catalog, /target_type: "model_template"[\s\S]*role,/);
+  assert.match(catalog, /provenance: "model_template"/);
+  assert.match(catalog, /provided_by_label/);
+  assert.match(catalog, /authored_by_label/);
+  assert.doesNotMatch(catalog, /\.from\("asset_resources"\)\s*\.insert/);
+  assert.match(api, /normalizeTemplateAttachmentPlacement/);
+  assert.match(api, /is_inherited_model_attachment: true/);
+  assert.match(api, /listAssetAIContextSources[\s\S]*includeInheritedModelAttachments: true/);
 });
 
 test("Workspace-context boat actions use projection-safe edit and hero paths", () => {

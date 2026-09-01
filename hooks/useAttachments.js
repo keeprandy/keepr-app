@@ -11,6 +11,7 @@ import {
  */
 export function useAttachments(targetType, targetId, options = {}) {
   const includeInheritedModelMedia = !!options.includeInheritedModelMedia;
+  const includeInheritedModelAttachments = !!options.includeInheritedModelAttachments;
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -29,7 +30,10 @@ export function useAttachments(targetType, targetId, options = {}) {
 
       if (targetType === "asset") {
         // Canonical grouped asset view
-        rows = await listAttachmentsForAsset(targetId, { includeInheritedModelMedia });
+        rows = await listAttachmentsForAsset(targetId, {
+          includeInheritedModelMedia,
+          includeInheritedModelAttachments,
+        });
       } else {
         // System / record / other targets
         rows = await listAttachmentsForTarget(targetType, targetId);
@@ -41,7 +45,7 @@ export function useAttachments(targetType, targetId, options = {}) {
     } finally {
       setLoading(false);
     }
-  }, [includeInheritedModelMedia, targetType, targetId]);
+  }, [includeInheritedModelAttachments, includeInheritedModelMedia, targetType, targetId]);
 
   useEffect(() => {
     refresh();

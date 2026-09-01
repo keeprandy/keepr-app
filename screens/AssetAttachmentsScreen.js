@@ -180,15 +180,33 @@ function isImageMime(m = "") {
 }
 
 function sourceLaneForAttachment(row, relationshipRole) {
-  if (row?.is_inherited_model_media || row?.source_context?.provenance === "model_template") return "oem";
+  const contextObj = row?.source_context && typeof row.source_context === "object" ? row.source_context : {};
+  if (
+    row?.is_inherited_model_media ||
+    row?.is_inherited_model_attachment ||
+    contextObj.provenance === "model_template"
+  ) {
+    return "oem";
+  }
 
-  const role = safeStr(row?.source_context?.relationship_role || relationshipRole).toLowerCase();
-  const context = safeStr(row?.source_context?.contribution_context).toLowerCase();
-  if (["dealer", "selling_dealer", "assigned_dealer", "servicing_dealer"].includes(role)) return "dealer";
-  if (["owner", "current_owner", "pending_owner"].includes(role)) return "owner";
-  if (["oem", "manufacturer"].includes(role)) return "oem";
+  const orgRole = safeStr(
+    contextObj.contributor_role ||
+    contextObj.contributed_by_org_role ||
+    contextObj.relationship_role
+  ).toLowerCase();
+  const context = safeStr(contextObj.contribution_context).toLowerCase();
+  const routeRole = safeStr(relationshipRole).toLowerCase();
+
+  if (["oem", "manufacturer"].includes(orgRole)) return "oem";
+  if (["owner", "current_owner", "pending_owner"].includes(orgRole)) return "owner";
+  if (["dealer", "selling_dealer", "assigned_dealer", "servicing_dealer"].includes(orgRole)) return "dealer";
+
   if (context.includes("owner")) return "owner";
   if (context.includes("dealer")) return "dealer";
+  if (context.includes("oem") || context.includes("template")) return "oem";
+  if (["dealer", "selling_dealer", "assigned_dealer", "servicing_dealer"].includes(routeRole)) return "dealer";
+  if (["owner", "current_owner", "pending_owner"].includes(routeRole)) return "owner";
+  if (["oem", "manufacturer"].includes(routeRole)) return "oem";
   return "dealer";
 }
 
@@ -979,17 +997,22 @@ export default function AssetAttachmentsScreen({ route, navigation }) {
     route?.params?.orgId ||
     returnParams?.organizationId ||
     null;
+  const normalizedRelationshipRole = safeStr(relationshipRole).toLowerCase();
   const contributionSourceContext = useMemo(() => ({
-    contribution_context: "asset_attachment",
+    contribution_context: normalizedRelationshipRole
+      ? `${normalizedRelationshipRole}_asset_attachment`
+      : "asset_attachment",
     target_type: "asset",
     target_id: assetId || undefined,
     organization_id: organizationId || undefined,
     contributed_by_org_id: organizationId || undefined,
+    contributor_role: normalizedRelationshipRole || undefined,
+    contributed_by_org_role: normalizedRelationshipRole || undefined,
     relationship_role: relationshipRole || undefined,
     team_member_type: teamMemberType || undefined,
     systems_role: systemsRole || undefined,
     workspace_id: workspaceId || undefined,
-  }), [assetId, organizationId, relationshipRole, systemsRole, teamMemberType, workspaceId]);
+  }), [assetId, normalizedRelationshipRole, organizationId, relationshipRole, systemsRole, teamMemberType, workspaceId]);
  
 
   // Scope override: null = use route scope, "none" = show all
@@ -1221,8 +1244,10 @@ const isWide = IS_WEB && width >= 980;
 
   // Attachments hook (must be defined before any callbacks that reference `refresh`)
   const includeInheritedModelMedia = ["all", "photo", "showcase"].includes(tab);
+  const includeInheritedModelAttachments = ["all", "file", "showcase"].includes(tab);
   const { items: hookItems, loading, error, refresh } = useAssetAttachments(assetId, {
     includeInheritedModelMedia,
+    includeInheritedModelAttachments,
   });
 
   // Safari/iPad web: use native <input type="file"> instead of Expo pickers (they often fail to open)
@@ -1556,7 +1581,7 @@ const isWide = IS_WEB && width >= 980;
         },
       };
     });
-  }, [hookItems, assetId, linkCoverOverrides]);
+  }, [hookItems, assetId, linkCoverOverrides, relationshipRole]);
 
   // ✅ Keep selected attachment in sync when we refresh (so new associations show immediately)
   // IMPORTANT: always sync from `normalized` (it contains the derived asset placement role/showcase)

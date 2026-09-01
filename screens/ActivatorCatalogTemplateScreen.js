@@ -6,6 +6,7 @@ import {
   ImageBackground,
   Linking,
   Modal,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -15,18 +16,20 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 
 import ActivatorBreadcrumb from "../components/ActivatorBreadcrumb";
 import { getCatalogTemplateDetail } from "../lib/activatorApi";
 import { getSignedUrl, listAttachmentsForTarget, removePlacementById } from "../lib/attachmentsApi";
-import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
+import { createLinkAttachment, uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import { projectModelTemplateDetail } from "../lib/modelTemplateProjection";
 import { supabase } from "../lib/supabaseClient";
 import { layoutStyles } from "../styles/layout";
 import { colors, radius, shadows, spacing } from "../styles/theme";
 
 const DEFAULT_TEMPLATE_HERO = require("../assets/boats/tiara/tiara_oem_banner.png");
+const IS_WEB = Platform.OS === "web";
 
 const TABS = [
   { key: "overview", label: "Overview", icon: "boat-outline" },
@@ -39,6 +42,15 @@ const TABS = [
   { key: "specifications", label: "Specifications", icon: "analytics-outline" },
   { key: "care", label: "Care", icon: "checkbox-outline" },
   { key: "resources", label: "Resources", icon: "document-text-outline" },
+];
+
+const MODEL_RESOURCE_ROLES = [
+  { key: "manual", label: "Owner's Manual" },
+  { key: "warranty", label: "Warranty" },
+  { key: "buyer_guide", label: "Buyer Guide" },
+  { key: "spec_sheet", label: "Spec Sheet" },
+  { key: "install_guide", label: "Install Guide" },
+  { key: "source", label: "Source" },
 ];
 
 const SECTION_TABS = {
@@ -209,6 +221,11 @@ function templateMediaLabel(template = {}) {
   return [year, template.manufacturer, template.model, "model media"].filter(Boolean).join(" ");
 }
 
+function modelTemplateLabel(template = {}) {
+  const year = template.model_year ? `MY${template.model_year}` : null;
+  return [year, template.manufacturer, template.model].filter(Boolean).join(" ") || template.template_key || "Model";
+}
+
 function normalizeTemplateAttachmentMedia(row, template = {}) {
   const sourceContext = row?.source_context && typeof row.source_context === "object" ? row.source_context : {};
   const heroPlacementId = templateHeroPlacementId(template);
@@ -281,6 +298,10 @@ function titleFromPickedAsset(asset, fallback = "Model media photo") {
   const uri = asset?.uri || "";
   const tail = uri.split(/[/?#]/).filter(Boolean).pop();
   return tail || fallback;
+}
+
+function modelResourceRoleLabel(role) {
+  return MODEL_RESOURCE_ROLES.find((item) => item.key === role)?.label || labelize(role || "Resource");
 }
 
 function mediaFromResource(resource) {
@@ -483,6 +504,81 @@ async function hydrateTemplateAttachmentMedia(template) {
   );
 }
 
+function normalizeTemplateAttachmentResource(row, template = {}) {
+  const sourceContext = row?.source_context && typeof row.source_context === "object" ? row.source_context : {};
+  const aiMetadata = row?.ai_metadata && typeof row.ai_metadata === "object" ? row.ai_metadata : {};
+  const role = row.role || aiMetadata.role || row.kind || "resource";
+  const url = resourceUrl(row);
+  return {
+    id: row.attachment_id || row.id,
+    attachment_id: row.attachment_id || row.id,
+    placement_id: row.placement_id || null,
+    title: row.title || row.label || row.file_name || titleFromUrl(url || "Model resource"),
+    resource_type: row.kind === "link" ? "link" : role,
+    kind: row.kind,
+    url,
+    file_name: row.file_name,
+    mime_type: row.mime_type,
+    bucket: row.bucket,
+    storage_path: row.storage_path,
+    source_name: sourceContext.source_name || template.manufacturer || null,
+    source_platform: "Keepr OEM Catalog",
+    authority_state: sourceContext.authority_state || aiMetadata.authority || "official",
+    source_context: {
+      ...sourceContext,
+      provenance: "model_template",
+      provenance_label: sourceContext.provenance_label || `${modelTemplateLabel(template)} model resource`,
+      provenance_detail:
+        sourceContext.provenance_detail ||
+        "Reusable model/catalog resource inherited by exact KACs; not exact-hull evidence.",
+      template_id: template.id || sourceContext.template_id || null,
+      template_key: template.template_key || sourceContext.template_key || null,
+      not_exact_hull_evidence: true,
+    },
+    ai_metadata: aiMetadata,
+    metadata: {
+      attachment_id: row.attachment_id || row.id,
+      placement_id: row.placement_id || null,
+      source_document_title: sourceContext.provenance_label || `${modelTemplateLabel(template)} model resource`,
+      source_context: sourceContext,
+      role,
+      not_exact_hull_evidence: true,
+    },
+  };
+}
+
+async function hydrateTemplateAttachmentResources(template) {
+  if (!template?.id) return [];
+  const rows = await listAttachmentsForTarget("model_template", template.id);
+  const resourceRows = (rows || []).filter((row) => {
+    const mime = String(row.mime_type || "").toLowerCase();
+    return row.kind !== "photo" && !mime.startsWith("image/");
+  });
+
+  return Promise.all(
+    resourceRows.map(async (row) => {
+      const normalized = normalizeTemplateAttachmentResource(row, template);
+      if (normalized.url || !normalized.bucket || !normalized.storage_path) return normalized;
+      try {
+        const signedUrl = await getSignedUrl({
+          bucket: normalized.bucket,
+          path: normalized.storage_path,
+          expiresIn: 3600,
+        });
+        return {
+          ...normalized,
+          url: signedUrl,
+          attachment_signed_url: signedUrl,
+          attachment_storage_signed_url: signedUrl,
+        };
+      } catch (err) {
+        console.log("Template resource signing failed", err);
+        return normalized;
+      }
+    })
+  );
+}
+
 function TabButton({ tab, active, onPress }) {
   return (
     <TouchableOpacity
@@ -498,8 +594,38 @@ function TabButton({ tab, active, onPress }) {
   );
 }
 
-function ResourcePanel({ resources, onOpenResources }) {
+function resourceTypeForRow(resource = {}) {
+  if (resource.resource_type) return resource.resource_type;
+  if (resource.kind === "link") return "link";
+  if (resource.kind === "photo") return "photo";
+  return resource.role || resource.ai_metadata?.role || "resource";
+}
+
+function resourceProvenanceText(resource = {}) {
+  const sourceContext = resource.source_context && typeof resource.source_context === "object"
+    ? resource.source_context
+    : {};
+  return compact([
+    "OEM",
+    sourceContext.source_name || sourceContext.provided_by_label || resource.source_name,
+    sourceContext.provenance === "model_template" ? "Model Resource" : null,
+    sourceContext.template_key ? "Inherited by KACs" : null,
+  ]) || resource.provenance_label || resource.attribution || "Model resource";
+}
+
+function ResourcePanel({
+  resources,
+  onOpenResources,
+  resourceLinkUrl = "",
+  onResourceLinkUrlChange,
+  onAddResourceUrl,
+  onUploadResource,
+  resourceRole,
+  onResourceRoleChange,
+  addingResource = false,
+}) {
   const visible = resources.slice(0, 4);
+  const canManage = !!(onAddResourceUrl || onUploadResource);
   return (
     <View style={styles.resourcesPanel}>
       <View style={styles.sectionHeader}>
@@ -513,6 +639,7 @@ function ResourcePanel({ resources, onOpenResources }) {
         <View style={styles.resourceList}>
           {visible.map((resource) => {
             const url = resourceUrl(resource);
+            const resourceType = resourceTypeForRow(resource);
             return (
               <TouchableOpacity
                 key={resource.id || resource.title}
@@ -521,12 +648,12 @@ function ResourcePanel({ resources, onOpenResources }) {
                 style={styles.resourceRow}
               >
                 <View style={styles.resourceIcon}>
-                  <Ionicons name={resource.resource_type === "photo" ? "image-outline" : "document-text-outline"} size={16} color={colors.brandBlue} />
+                  <Ionicons name={resourceType === "photo" ? "image-outline" : resourceType === "link" ? "link-outline" : "document-text-outline"} size={16} color={colors.brandBlue} />
                 </View>
                 <View style={styles.resourceCopy}>
                   <Text style={styles.resourceTitle} numberOfLines={1}>{resource.title || titleFromUrl(url || "Resource")}</Text>
                   <Text style={styles.resourceMeta} numberOfLines={1}>
-                    {compact([labelize(resource.resource_type || "resource"), resource.source_platform || resource.source_name, resource.authority_state])}
+                    {resourceProvenanceText(resource)}
                   </Text>
                 </View>
                 {url ? <Ionicons name="open-outline" size={15} color={colors.textMuted} /> : null}
@@ -537,6 +664,52 @@ function ResourcePanel({ resources, onOpenResources }) {
       ) : (
         <Text style={styles.resourceEmpty}>No documents or media are connected to this model yet.</Text>
       )}
+      {canManage ? (
+        <View style={styles.modelResourceManager}>
+          <View style={styles.resourceRoleRow}>
+            {MODEL_RESOURCE_ROLES.map((role) => (
+              <TouchableOpacity
+                key={role.key}
+                activeOpacity={0.86}
+                style={[styles.resourceRoleButton, resourceRole === role.key && styles.resourceRoleButtonActive]}
+                onPress={() => onResourceRoleChange?.(role.key)}
+                disabled={addingResource}
+              >
+                <Text style={[styles.resourceRoleText, resourceRole === role.key && styles.resourceRoleTextActive]}>
+                  {role.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <View style={styles.mediaManager}>
+            <TextInput
+              value={resourceLinkUrl}
+              onChangeText={onResourceLinkUrlChange}
+              placeholder="Paste OEM resource URL"
+              placeholderTextColor={colors.textMuted}
+              style={styles.mediaInput}
+            />
+            <TouchableOpacity
+              style={styles.mediaButton}
+              onPress={onAddResourceUrl}
+              disabled={addingResource}
+              activeOpacity={0.86}
+            >
+              <Ionicons name="link-outline" size={15} color={colors.brandNavy} />
+              <Text style={styles.mediaButtonText}>Add Link</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.mediaPrimaryButton}
+              onPress={onUploadResource}
+              disabled={addingResource}
+              activeOpacity={0.86}
+            >
+              {addingResource ? <ActivityIndicator color={colors.onPrimary} /> : <Ionicons name="cloud-upload-outline" size={15} color={colors.onPrimary} />}
+              <Text style={styles.mediaPrimaryButtonText}>Add File</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
       <TouchableOpacity activeOpacity={0.86} style={styles.resourceManageButton} onPress={onOpenResources}>
         <Ionicons name="document-text-outline" size={15} color={colors.brandNavy} />
         <Text style={styles.resourceManageText}>View resources</Text>
@@ -941,6 +1114,10 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
   const [mediaUrl, setMediaUrl] = useState("");
   const [addingMedia, setAddingMedia] = useState(false);
   const [templateAttachmentMedia, setTemplateAttachmentMedia] = useState([]);
+  const [templateAttachmentResources, setTemplateAttachmentResources] = useState([]);
+  const [resourceLinkUrl, setResourceLinkUrl] = useState("");
+  const [resourceRole, setResourceRole] = useState("manual");
+  const [addingResource, setAddingResource] = useState(false);
   const [identityModalVisible, setIdentityModalVisible] = useState(false);
   const [identityDraft, setIdentityDraft] = useState({
     manufacturer: "",
@@ -956,9 +1133,13 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
     setError(null);
     try {
       const next = await hydrateTemplatePhotoResources(await getCatalogTemplateDetail({ templateKey }));
-      const attachmentMedia = await hydrateTemplateAttachmentMedia(next?.template);
+      const [attachmentMedia, attachmentResources] = await Promise.all([
+        hydrateTemplateAttachmentMedia(next?.template),
+        hydrateTemplateAttachmentResources(next?.template),
+      ]);
       setDetail(next);
       setTemplateAttachmentMedia(attachmentMedia);
+      setTemplateAttachmentResources(attachmentResources);
       const items = next?.items || [];
       setSelectedItem((current) => {
         if (!current) return null;
@@ -970,6 +1151,7 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
       setError(err?.message || "Could not load this model catalog.");
       setDetail(null);
       setTemplateAttachmentMedia([]);
+      setTemplateAttachmentResources([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -982,7 +1164,14 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
 
   const modelProjection = useMemo(() => projectModelTemplateDetail(detail), [detail]);
   const items = modelProjection.items || [];
-  const resources = modelProjection.resources || [];
+  const resources = useMemo(() => {
+    const byId = new Map();
+    [...(templateAttachmentResources || []), ...(modelProjection.resources || [])].forEach((resource) => {
+      const key = resource?.attachment_id || resource?.resource_id || resource?.id || resource?.url;
+      if (key && !byId.has(key)) byId.set(key, resource);
+    });
+    return Array.from(byId.values());
+  }, [modelProjection.resources, templateAttachmentResources]);
   const template = modelProjection.template || {};
   const showcaseMedia = normalizeTemplateMedia(modelProjection, templateAttachmentMedia, modelProjection.template || {});
   const heroMedia = mediaByRole(showcaseMedia, "hero") || modelProjection.media?.hero;
@@ -1129,7 +1318,43 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
     not_exact_hull_media: true,
   });
 
+  const templateResourceSourceContext = (role, source = "oem_template_resource") => {
+    const roleLabel = modelResourceRoleLabel(role);
+    const orgName = template.manufacturer || "OEM";
+    return {
+      provenance: "model_template",
+      provenance_label: `${orgName} ${roleLabel}`,
+      provenance_detail: `Reusable ${roleLabel.toLowerCase()} inherited from the bound model template; not exact-hull evidence.`,
+      contribution_context: source,
+      contributor_role: "oem",
+      contributed_by_org_role: "oem",
+      authority_state: "official",
+      organization_id: route?.params?.organizationId || template.organization_id || null,
+      contributed_by_org_id: route?.params?.organizationId || template.organization_id || null,
+      contributed_by_org_label: orgName,
+      provided_by_label: orgName,
+      authored_by_label: orgName,
+      template_id: template.id,
+      template_key: template.template_key || templateKey,
+      source_name: `${orgName} ${template.model || "model"}`.trim(),
+      applies_to_type: "model_template",
+      applies_to_id: template.id,
+      role,
+      not_exact_hull_evidence: true,
+    };
+  };
+
+  const modelResourceAiMetadata = (role) => ({
+    role,
+    authority: "official",
+    privacy: "moves_with_asset",
+    ai_scope: "asset",
+    ai_context: ["manual", "warranty", "spec_sheet", "source"].includes(role) ? "primary" : "supporting",
+    applies_to: "model_template",
+  });
+
   const nextTemplateMediaSort = () => (templateAttachmentMedia || []).length + 1;
+  const nextTemplateResourceSort = () => (templateAttachmentResources || []).length + 1;
 
   const createTemplatePlacement = async ({
     attachmentId,
@@ -1375,6 +1600,124 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
     }
   };
 
+  const createTemplateResourcePlacement = async ({
+    attachmentId,
+    title,
+    role = resourceRole,
+    sortOrder = nextTemplateResourceSort(),
+  }) => createTemplatePlacement({
+    attachmentId,
+    title,
+    role,
+    isShowcase: false,
+    sortOrder,
+  });
+
+  const updateTemplateResourceMetadata = async (attachmentId, role) => {
+    if (!attachmentId) return;
+    const { error: updateError } = await supabase
+      .from("attachments")
+      .update({ ai_metadata: modelResourceAiMetadata(role) })
+      .eq("id", attachmentId);
+    if (updateError) throw updateError;
+  };
+
+  const addTemplateResourceUrl = async () => {
+    const raw = resourceLinkUrl.trim();
+    if (!raw) return;
+    const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    setAddingResource(true);
+    try {
+      if (!template?.id) throw new Error("Template is not loaded yet.");
+      const userId = await getTemplateMediaUserId();
+      const role = resourceRole || "source";
+      const title = `${modelResourceRoleLabel(role)} · ${titleFromUrl(url)}`;
+      const created = await createLinkAttachment({
+        userId,
+        assetId: null,
+        url,
+        title,
+        notes: `${modelResourceRoleLabel(role)} for ${modelTemplateLabel(template)}`,
+        sourceContext: {
+          ...templateResourceSourceContext(role, "oem_template_resource_link"),
+          source_url: url,
+        },
+        placements: [
+          {
+            target_type: "model_template",
+            target_id: template.id,
+            role,
+            label: title,
+            sort_order: nextTemplateResourceSort(),
+            is_showcase: false,
+          },
+        ],
+      });
+      await updateTemplateResourceMetadata(created?.attachment?.id, role);
+      setResourceLinkUrl("");
+      await load({ quiet: true });
+    } catch (err) {
+      Alert.alert("Could not add resource", err?.message || "The model resource link could not be saved.");
+    } finally {
+      setAddingResource(false);
+    }
+  };
+
+  const uploadTemplateResourceFile = async () => {
+    setAddingResource(true);
+    try {
+      if (!template?.id) throw new Error("Template is not loaded yet.");
+      const userId = await getTemplateMediaUserId();
+      const role = resourceRole || "source";
+      const result = await DocumentPicker.getDocumentAsync({
+        type: "*/*",
+        multiple: false,
+        copyToCacheDirectory: !IS_WEB,
+      });
+
+      if (result.canceled) return;
+      const picked = result.assets?.[0];
+      if (!picked?.uri) return;
+
+      const title = picked.name || titleFromPickedAsset(picked, `${modelResourceRoleLabel(role)} file`);
+      const uploaded = await uploadAttachmentFromUri({
+        userId,
+        assetId: null,
+        kind: "file",
+        fileUri: picked.uri,
+        fileName: picked.name || title,
+        mimeType: picked.mimeType || "application/octet-stream",
+        sizeBytes: picked.size || null,
+        title,
+        notes: `${modelResourceRoleLabel(role)} for ${modelTemplateLabel(template)}`,
+        sourceContext: templateResourceSourceContext(role, "oem_template_resource_upload"),
+        placements: [
+          {
+            target_type: "model_template",
+            target_id: template.id,
+            role,
+            label: title,
+            sort_order: nextTemplateResourceSort(),
+            is_showcase: false,
+          },
+        ],
+      });
+      await updateTemplateResourceMetadata(uploaded?.attachment?.id, role);
+      if (!uploaded?.placements?.length && uploaded?.attachment?.id) {
+        await createTemplateResourcePlacement({
+          attachmentId: uploaded.attachment.id,
+          title,
+          role,
+        });
+      }
+      await load({ quiet: true });
+    } catch (err) {
+      Alert.alert("Could not upload resource", err?.message || "The model resource file could not be uploaded.");
+    } finally {
+      setAddingResource(false);
+    }
+  };
+
   return (
     <SafeAreaView style={layoutStyles.screen}>
       <ScrollView
@@ -1485,7 +1828,17 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
                 />
               ) : null}
               {tab === "overview" || tab === "resources" ? (
-                <ResourcePanel resources={resources} onOpenResources={openResourcesTab} />
+                <ResourcePanel
+                  resources={resources}
+                  onOpenResources={openResourcesTab}
+                  resourceLinkUrl={resourceLinkUrl}
+                  onResourceLinkUrlChange={setResourceLinkUrl}
+                  onAddResourceUrl={addTemplateResourceUrl}
+                  onUploadResource={uploadTemplateResourceFile}
+                  resourceRole={resourceRole}
+                  onResourceRoleChange={setResourceRole}
+                  addingResource={addingResource}
+                />
               ) : null}
               {visibleGroups.map((group) => (
                 <SectionGroup
@@ -1982,6 +2335,40 @@ const styles = StyleSheet.create({
     color: colors.brandNavy,
     fontSize: 12,
     fontWeight: "900",
+  },
+  modelResourceManager: {
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
+    gap: spacing.sm,
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+  },
+  resourceRoleRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+  },
+  resourceRoleButton: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    justifyContent: "center",
+    minHeight: 32,
+    paddingHorizontal: spacing.sm,
+  },
+  resourceRoleButtonActive: {
+    backgroundColor: colors.brandBlue,
+    borderColor: colors.brandBlue,
+  },
+  resourceRoleText: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  resourceRoleTextActive: {
+    color: colors.onPrimary,
   },
   galleryText: {
     color: colors.textMuted,
