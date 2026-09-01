@@ -555,7 +555,7 @@ export default function KeeprSpaceFleetScreen({ route, navigation }) {
       setHeroUrls((prev) => ({ ...prev, ...cached }));
     }
 
-    fetchAssetHeroUris(boatHeroIds, FLEET_HERO_OPTIONS)
+    fetchAssetHeroUris(boatHeroIds, { ...FLEET_HERO_OPTIONS, organizationId })
       .then(async (urls) => {
         const nextUrls = { ...(urls || {}) };
         await Promise.all(

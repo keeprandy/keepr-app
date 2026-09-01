@@ -129,25 +129,34 @@ test("KAC media writes allow operational asset relationship scopes only", () => 
 
 test("Boat Story resolves one canonical KAC hero without projection-local overrides", () => {
   const source = read("screens/BoatStoryScreen.js");
+  const resolver = read("lib/assetHeroResolver.js");
 
   assert.match(source, /resolveAssetHeroUri\(boat,\s*\{\s*expiresIn: 60 \* 30/);
   assert.doesNotMatch(source, /resolveAssetHeroUri\(boat,\s*\{[\s\S]{0,120}organizationId/);
   assert.match(source, /heroRequestRef/);
   assert.match(source, /heroUriRef/);
   assert.doesNotMatch(source, /\[boat\?\.hero_image_url, boat\?\.hero_placement_id, boat\?\.id, heroUri\]/);
-  assert.match(source, /listAttachmentsForAsset\(boatId\)/);
+  assert.match(source, /listAttachmentsForAsset\(boatId,\s*\{\s*includeInheritedModelMedia: true,/);
   assert.doesNotMatch(source, /listAttachmentsForTarget\("asset", boatId\)/);
+  assert.match(resolver, /async function resolveInheritedModelHero/);
+  assert.match(resolver, /listAttachmentsForAsset\(assetId, \{ includeInheritedModelMedia: true \}\)/);
 });
 
 test("Dealer workspace resolves canonical KAC hero before projection media", () => {
   const detail = read("screens/KeeprProStewardshipViewScreen.js");
   const fleet = read("screens/KeeprSpaceFleetScreen.js");
+  const resolver = read("lib/assetHeroResolver.js");
+  const migration = read("supabase/migrations/20260901123000_canonical_kac_hero_precedence.sql");
 
   assert.match(detail, /fetchAssetHeroUris\(\[heroAssetId\], BOAT_HERO_OPTIONS\)/);
   assert.doesNotMatch(detail, /fetchAssetHeroUris\(\[heroAssetId\],[\s\S]{0,160}organizationId/);
   assert.doesNotMatch(detail, /relationship_hero_placement_id: heroAsset\.relationship_hero_placement_id/);
-  assert.match(fleet, /fetchAssetHeroUris\(boatHeroIds, FLEET_HERO_OPTIONS\)/);
-  assert.doesNotMatch(fleet, /fetchAssetHeroUris\(boatHeroIds,[\s\S]{0,120}organizationId/);
+  assert.match(fleet, /fetchAssetHeroUris\(boatHeroIds, \{ \.\.\.FLEET_HERO_OPTIONS, organizationId \}\)/);
+  assert.match(resolver, /const assetHero = await resolvePlacementHeroUri\(placementId/);
+  assert.match(resolver, /const bestExactAssetHero = await resolveBestAssetAttachmentHero/);
+  assert.match(resolver, /const inheritedModelHero = await resolveInheritedModelHero/);
+  assert.match(migration, /when ap\.id = v_asset\.hero_placement_id then 300/);
+  assert.match(migration, /when ap\.id = v_relationship_hero_placement_id then 110/);
 });
 
 test("Exact build shell uses organization branding instead of Tiara fallback copy", () => {

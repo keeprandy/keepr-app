@@ -585,7 +585,9 @@ useEffect(() => {
 
     // 4) Story attachments / showcase photos
 try {
-  const rows = await listAttachmentsForAsset(boatId);
+  const rows = await listAttachmentsForAsset(boatId, {
+    includeInheritedModelMedia: true,
+  });
   const photos = [];
 
   for (const row of rows || []) {
