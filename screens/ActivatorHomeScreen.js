@@ -39,7 +39,7 @@ import {
   upsertKeeprSpaceOrgServiceOffering,
   upsertKeeprSpaceOrgTeam,
 } from "../lib/keeprspaceApi";
-import { fetchAssetHeroUris } from "../lib/assetHeroResolver";
+import { fetchAssetHeroUris, getCachedKacHeroUris } from "../lib/assetHeroResolver";
 import { listModelTemplateMediaForTemplates } from "../lib/attachmentsApi";
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import { getActionScheduledDueAt, isPlaybookDueDatePending } from "../lib/playbookSchedule";
@@ -493,7 +493,6 @@ function heroUriFromBoat(boat) {
 
   return (
     uriFromHeroMedia(boat?.hero_media) ||
-    uriFromHeroMedia(boat?.relationship_hero_media) ||
     uriFromHeroMedia(boat?.asset?.hero_media) ||
     uriFromHeroMedia(boat?.media?.hero) ||
     uriFromHeroMedia(boat?.metadata?.hero_media) ||
@@ -516,20 +515,7 @@ function heroUriFromBoat(boat) {
 }
 
 function heroSourceForBoat(boat, heroUri = null) {
-  const rowHeroUri = heroUri || heroUriFromBoat(boat);
-  if (rowHeroUri) return { uri: rowHeroUri };
-
-  const model = normalizeModelName(compact([
-    boat?.identity?.make,
-    boat?.identity?.model,
-    boat?.template?.manufacturer,
-    boat?.template?.model,
-    boat?.asset_name,
-  ]));
-
-  if (model.includes("tiara39le")) return SHOWCASE_ASSETS.tiara_39le_hero;
-  if (model.includes("tiara39ls")) return SHOWCASE_ASSETS.tiara_39ls_hero;
-
+  if (heroUri) return { uri: heroUri };
   return null;
 }
 
@@ -1265,9 +1251,8 @@ function fleetFilterMatchesBoat(boat, filter) {
 }
 
 function imageContextLabelForBoat(boat, heroUri) {
-  const rowHeroUri = heroUri || heroUriFromBoat(boat);
-  if (rowHeroUri) return "Asset photo";
-  return "Catalog image";
+  if (heroUri) return "KAC Hero";
+  return "Hero pending";
 }
 
 function FleetFilters({ value, onChange }) {
@@ -3628,7 +3613,6 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
     () => boats.filter((boat) => fleetFilterMatchesBoat(boat, fleetFilter)),
     [boats, fleetFilter]
   );
-  const heroOrganizationId = currentWorkspace?.organization_id || currentWorkspace?.org_id || route?.params?.organizationId || null;
   const heroAssetIds = useMemo(
     () => Array.from(new Set(boats.map(assetIdForBoat).filter(Boolean))),
     [boats]
@@ -3644,10 +3628,13 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
         return;
       }
 
-      const urls = await fetchAssetHeroUris(heroAssetIds, {
-        transform: { width: 900, quality: 80 },
-        organizationId: heroOrganizationId,
-      });
+      const heroOptions = { transform: { width: 900, quality: 80 } };
+      const cached = getCachedKacHeroUris(heroAssetIds, heroOptions, { allowAnySize: true });
+      if (active && Object.keys(cached).length) {
+        setAssetHeroUrls((previous) => ({ ...previous, ...cached }));
+      }
+
+      const urls = await fetchAssetHeroUris(heroAssetIds, heroOptions);
       if (active) setAssetHeroUrls(urls);
     }
 
@@ -3655,7 +3642,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
     return () => {
       active = false;
     };
-  }, [heroAssetIdsKey, heroOrganizationId]);
+  }, [heroAssetIdsKey]);
 
   const refresh = () => {
     setRefreshing(true);

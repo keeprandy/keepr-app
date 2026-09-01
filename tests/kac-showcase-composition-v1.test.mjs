@@ -242,6 +242,7 @@ test("Boat Story resolves one canonical KAC hero without projection-local overri
 test("Dealer workspace resolves canonical KAC hero before projection media", () => {
   const detail = read("screens/KeeprProStewardshipViewScreen.js");
   const fleet = read("screens/KeeprSpaceFleetScreen.js");
+  const activatorFleet = read("screens/ActivatorHomeScreen.js");
   const resolver = read("lib/assetHeroResolver.js");
   const migration = read("supabase/migrations/20260901172000_canonical_kac_hero_contract.sql");
 
@@ -249,9 +250,17 @@ test("Dealer workspace resolves canonical KAC hero before projection media", () 
   assert.doesNotMatch(detail, /fetchAssetHeroUris\(\[heroAssetId\],[\s\S]{0,160}organizationId/);
   assert.doesNotMatch(detail, /relationship_hero_placement_id: heroAsset\.relationship_hero_placement_id/);
   assert.match(fleet, /fetchAssetHeroUris\(boatHeroIds, FLEET_HERO_OPTIONS\)/);
+  assert.match(activatorFleet, /getCachedKacHeroUris\(heroAssetIds, heroOptions, \{ allowAnySize: true \}\)/);
+  assert.match(activatorFleet, /fetchAssetHeroUris\(heroAssetIds, heroOptions\)/);
+  assert.doesNotMatch(activatorFleet, /organizationId: heroOrganizationId/);
+  assert.doesNotMatch(activatorFleet, /relationship_hero_media/);
+  assert.doesNotMatch(activatorFleet, /model\.includes\("tiara39le"\)[\s\S]{0,120}SHOWCASE_ASSETS/);
+  assert.match(activatorFleet, /KAC Hero/);
   assert.match(resolver, /const assetHero = await resolvePlacementHeroUri\(placementId/);
   assert.match(resolver, /const bestExactAssetHero = await resolveBestAssetAttachmentHero/);
   assert.match(resolver, /const inheritedModelHero = await resolveInheritedModelHero/);
+  assert.match(resolver, /resolveKacHeroMediaViaRpc\(assetId, transform, expiresIn\)/);
+  assert.match(resolver, /rpc\("resolve_asset_shared_hero_media"/);
   assert.match(migration, /when ap\.id = v_asset\.hero_placement_id then 300/);
   assert.doesNotMatch(migration, /v_relationship_hero_placement_id/);
 });
@@ -267,7 +276,7 @@ test("Canonical KAC Hero contract has one shared read and write path", () => {
   assert.match(resolver, /export const fetchAssetHeroUris = fetchKacHeroUris/);
   assert.doesNotMatch(resolver, /relationshipHeroPlacementIdFromMetadata/);
   assert.doesNotMatch(resolver, /resolveSharedHeroMediaViaRpc/);
-  assert.doesNotMatch(resolver, /resolve_asset_shared_hero_media/);
+  assert.match(resolver, /resolve_asset_shared_hero_media/);
   assert.doesNotMatch(resolver, /organizationId && assetId/);
 
   assert.match(api, /export async function setKacHero/);
