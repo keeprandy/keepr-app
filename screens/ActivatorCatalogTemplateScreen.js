@@ -45,12 +45,11 @@ const TABS = [
 ];
 
 const MODEL_RESOURCE_ROLES = [
-  { key: "manual", label: "Owner's Manual" },
-  { key: "warranty", label: "Warranty" },
-  { key: "buyer_guide", label: "Buyer Guide" },
-  { key: "spec_sheet", label: "Spec Sheet" },
-  { key: "install_guide", label: "Install Guide" },
-  { key: "source", label: "Source" },
+  { key: "Manual", label: "Manual" },
+  { key: "Warranty", label: "Warranty" },
+  { key: "Spec Sheet", label: "Spec Sheet" },
+  { key: "Install Guide", label: "Install Guide" },
+  { key: "Other", label: "Other" },
 ];
 
 const SECTION_TABS = {
@@ -304,6 +303,16 @@ function modelResourceRoleLabel(role) {
   return MODEL_RESOURCE_ROLES.find((item) => item.key === role)?.label || labelize(role || "Resource");
 }
 
+function normalizeModelResourceRole(role) {
+  const raw = String(role || "").trim();
+  const lower = raw.toLowerCase().replace(/[_-]+/g, " ");
+  if (["manual", "owner manual", "owners manual", "owner's manual"].includes(lower)) return "Manual";
+  if (lower === "warranty") return "Warranty";
+  if (["spec sheet", "specification", "specifications"].includes(lower)) return "Spec Sheet";
+  if (["install guide", "installation guide"].includes(lower)) return "Install Guide";
+  return MODEL_RESOURCE_ROLES.some((item) => item.key === raw) ? raw : "Other";
+}
+
 function mediaFromResource(resource) {
   const metadata = resource?.metadata || {};
   if (resource?.resource_type !== "photo") return null;
@@ -507,7 +516,7 @@ async function hydrateTemplateAttachmentMedia(template) {
 function normalizeTemplateAttachmentResource(row, template = {}) {
   const sourceContext = row?.source_context && typeof row.source_context === "object" ? row.source_context : {};
   const aiMetadata = row?.ai_metadata && typeof row.ai_metadata === "object" ? row.ai_metadata : {};
-  const role = row.role || aiMetadata.role || row.kind || "resource";
+  const role = normalizeModelResourceRole(row.role || aiMetadata.role || row.kind || "Other");
   const url = resourceUrl(row);
   return {
     id: row.attachment_id || row.id,
@@ -622,10 +631,13 @@ function ResourcePanel({
   onUploadResource,
   resourceRole,
   onResourceRoleChange,
+  onChangeResourceRole,
+  onOpenProofBuilder,
   addingResource = false,
 }) {
   const visible = resources.slice(0, 4);
   const canManage = !!(onAddResourceUrl || onUploadResource);
+  const [editingResourceId, setEditingResourceId] = useState(null);
   return (
     <View style={styles.resourcesPanel}>
       <View style={styles.sectionHeader}>
@@ -640,24 +652,77 @@ function ResourcePanel({
           {visible.map((resource) => {
             const url = resourceUrl(resource);
             const resourceType = resourceTypeForRow(resource);
+            const normalizedRole = normalizeModelResourceRole(resource.role || resource.ai_metadata?.role || resource.resource_type);
+            const resourceId = resource.attachment_id || resource.id;
+            const isEditingRole = editingResourceId === resourceId;
             return (
-              <TouchableOpacity
-                key={resource.id || resource.title}
-                activeOpacity={url ? 0.86 : 1}
-                onPress={() => url && Linking.openURL(url)}
-                style={styles.resourceRow}
-              >
-                <View style={styles.resourceIcon}>
-                  <Ionicons name={resourceType === "photo" ? "image-outline" : resourceType === "link" ? "link-outline" : "document-text-outline"} size={16} color={colors.brandBlue} />
-                </View>
-                <View style={styles.resourceCopy}>
-                  <Text style={styles.resourceTitle} numberOfLines={1}>{resource.title || titleFromUrl(url || "Resource")}</Text>
-                  <Text style={styles.resourceMeta} numberOfLines={1}>
-                    {resourceProvenanceText(resource)}
-                  </Text>
-                </View>
-                {url ? <Ionicons name="open-outline" size={15} color={colors.textMuted} /> : null}
-              </TouchableOpacity>
+              <View key={resource.id || resource.title} style={styles.resourceCard}>
+                <TouchableOpacity
+                  activeOpacity={url ? 0.86 : 1}
+                  onPress={() => url && Linking.openURL(url)}
+                  style={styles.resourceRow}
+                >
+                  <View style={styles.resourceIcon}>
+                    <Ionicons name={resourceType === "photo" ? "image-outline" : resourceType === "link" ? "link-outline" : "document-text-outline"} size={16} color={colors.brandBlue} />
+                  </View>
+                  <View style={styles.resourceCopy}>
+                    <Text style={styles.resourceTitle} numberOfLines={1}>{resource.title || titleFromUrl(url || "Resource")}</Text>
+                    <Text style={styles.resourceMeta} numberOfLines={1}>
+                      {resourceProvenanceText(resource)}
+                    </Text>
+                  </View>
+                  <View style={styles.resourceRowActions}>
+                    <Text style={styles.resourceRoleBadge}>{modelResourceRoleLabel(normalizedRole)}</Text>
+                    {canManage && onChangeResourceRole ? (
+                      <TouchableOpacity
+                        activeOpacity={0.86}
+                        style={styles.resourceSmallButton}
+                        onPress={(event) => {
+                          event?.stopPropagation?.();
+                          setEditingResourceId(isEditingRole ? null : resourceId);
+                        }}
+                      >
+                        <Ionicons name="pricetag-outline" size={13} color={colors.brandNavy} />
+                        <Text style={styles.resourceSmallButtonText}>Role</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                    {onOpenProofBuilder ? (
+                      <TouchableOpacity
+                        activeOpacity={0.86}
+                        style={styles.resourceSmallButton}
+                        onPress={(event) => {
+                          event?.stopPropagation?.();
+                          onOpenProofBuilder(resource);
+                        }}
+                      >
+                        <Ionicons name="document-text-outline" size={13} color={colors.brandNavy} />
+                        <Text style={styles.resourceSmallButtonText}>Proof</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                    {url ? <Ionicons name="open-outline" size={15} color={colors.textMuted} /> : null}
+                  </View>
+                </TouchableOpacity>
+                {isEditingRole ? (
+                  <View style={styles.resourceInlineRoles}>
+                    {MODEL_RESOURCE_ROLES.map((role) => (
+                      <TouchableOpacity
+                        key={role.key}
+                        activeOpacity={0.86}
+                        style={[styles.resourceRoleButton, normalizedRole === role.key && styles.resourceRoleButtonActive]}
+                        disabled={addingResource}
+                        onPress={() => {
+                          onChangeResourceRole?.(resource, role.key);
+                          setEditingResourceId(null);
+                        }}
+                      >
+                        <Text style={[styles.resourceRoleText, normalizedRole === role.key && styles.resourceRoleTextActive]}>
+                          {role.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
             );
           })}
         </View>
@@ -1116,7 +1181,7 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
   const [templateAttachmentMedia, setTemplateAttachmentMedia] = useState([]);
   const [templateAttachmentResources, setTemplateAttachmentResources] = useState([]);
   const [resourceLinkUrl, setResourceLinkUrl] = useState("");
-  const [resourceRole, setResourceRole] = useState("manual");
+  const [resourceRole, setResourceRole] = useState("Manual");
   const [addingResource, setAddingResource] = useState(false);
   const [identityModalVisible, setIdentityModalVisible] = useState(false);
   const [identityDraft, setIdentityDraft] = useState({
@@ -1319,7 +1384,8 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
   });
 
   const templateResourceSourceContext = (role, source = "oem_template_resource") => {
-    const roleLabel = modelResourceRoleLabel(role);
+    const normalizedRole = normalizeModelResourceRole(role);
+    const roleLabel = modelResourceRoleLabel(normalizedRole);
     const orgName = template.manufacturer || "OEM";
     return {
       provenance: "model_template",
@@ -1339,17 +1405,17 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
       source_name: `${orgName} ${template.model || "model"}`.trim(),
       applies_to_type: "model_template",
       applies_to_id: template.id,
-      role,
+      role: normalizedRole,
       not_exact_hull_evidence: true,
     };
   };
 
   const modelResourceAiMetadata = (role) => ({
-    role,
+    role: normalizeModelResourceRole(role),
     authority: "official",
     privacy: "moves_with_asset",
     ai_scope: "asset",
-    ai_context: ["manual", "warranty", "spec_sheet", "source"].includes(role) ? "primary" : "supporting",
+    ai_context: ["Manual", "Warranty", "Spec Sheet"].includes(normalizeModelResourceRole(role)) ? "primary" : "supporting",
     applies_to: "model_template",
   });
 
@@ -1613,13 +1679,72 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
     sortOrder,
   });
 
-  const updateTemplateResourceMetadata = async (attachmentId, role) => {
+  const updateTemplateResourceMetadata = async (attachmentId, role, sourceContextPatch = {}) => {
     if (!attachmentId) return;
+    const nextRole = normalizeModelResourceRole(role);
     const { error: updateError } = await supabase
       .from("attachments")
-      .update({ ai_metadata: modelResourceAiMetadata(role) })
+      .update({
+        ai_metadata: modelResourceAiMetadata(nextRole),
+        ...(Object.keys(sourceContextPatch || {}).length ? { source_context: sourceContextPatch } : {}),
+      })
       .eq("id", attachmentId);
     if (updateError) throw updateError;
+  };
+
+  const changeTemplateResourceRole = async (resource, nextRoleRaw) => {
+    setAddingResource(true);
+    try {
+      if (!template?.id) throw new Error("Template is not loaded yet.");
+      await getTemplateMediaUserId();
+      const nextRole = normalizeModelResourceRole(nextRoleRaw);
+      const placementId = resource?.placement_id;
+      const attachmentId = resource?.attachment_id || resource?.id;
+      if (!placementId || !attachmentId) {
+        throw new Error("This model resource is not backed by an editable model placement.");
+      }
+
+      const { error: placementError } = await supabase
+        .from("attachment_placements")
+        .update({ role: nextRole })
+        .eq("id", placementId)
+        .eq("target_type", "model_template")
+        .eq("target_id", template.id);
+      if (placementError) throw placementError;
+
+      const existingContext = resource?.source_context && typeof resource.source_context === "object"
+        ? resource.source_context
+        : {};
+      const nextSourceContext = {
+        ...existingContext,
+        ...templateResourceSourceContext(nextRole, existingContext.contribution_context || "oem_template_resource"),
+      };
+      await updateTemplateResourceMetadata(attachmentId, nextRole, nextSourceContext);
+      await load({ quiet: true });
+    } catch (err) {
+      Alert.alert("Could not change role", err?.message || "The model resource role could not be saved.");
+    } finally {
+      setAddingResource(false);
+    }
+  };
+
+  const openTemplateResourceProofBuilder = (resource) => {
+    const attachmentId = resource?.attachment_id || resource?.id;
+    if (!attachmentId || !template?.id) {
+      Alert.alert("Proof Builder", "This model resource is not ready for Proof Builder yet.");
+      return;
+    }
+    navigation.navigate("ProofBuilder", {
+      attachmentId,
+      role: normalizeModelResourceRole(resource.role || resource.ai_metadata?.role || resource.resource_type),
+      targetType: "model_template",
+      targetId: template.id,
+      assetName: modelTemplateLabel(template),
+      returnRoute: "ActivatorCatalogTemplate",
+      templateKey: template.template_key || templateKey,
+      organizationId: route?.params?.organizationId || null,
+      workspaceId: route?.params?.workspaceId || null,
+    });
   };
 
   const addTemplateResourceUrl = async () => {
@@ -1630,7 +1755,7 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
     try {
       if (!template?.id) throw new Error("Template is not loaded yet.");
       const userId = await getTemplateMediaUserId();
-      const role = resourceRole || "source";
+      const role = normalizeModelResourceRole(resourceRole);
       const title = `${modelResourceRoleLabel(role)} · ${titleFromUrl(url)}`;
       const created = await createLinkAttachment({
         userId,
@@ -1668,7 +1793,7 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
     try {
       if (!template?.id) throw new Error("Template is not loaded yet.");
       const userId = await getTemplateMediaUserId();
-      const role = resourceRole || "source";
+      const role = normalizeModelResourceRole(resourceRole);
       const result = await DocumentPicker.getDocumentAsync({
         type: "*/*",
         multiple: false,
@@ -1837,6 +1962,8 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
                   onUploadResource={uploadTemplateResourceFile}
                   resourceRole={resourceRole}
                   onResourceRoleChange={setResourceRole}
+                  onChangeResourceRole={changeTemplateResourceRole}
+                  onOpenProofBuilder={openTemplateResourceProofBuilder}
                   addingResource={addingResource}
                 />
               ) : null}
@@ -2278,12 +2405,16 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     marginTop: spacing.md,
   },
-  resourceRow: {
-    alignItems: "center",
+  resourceCard: {
     backgroundColor: colors.surfaceSubtle,
     borderColor: colors.border,
     borderRadius: radius.sm,
     borderWidth: 1,
+    overflow: "hidden",
+  },
+  resourceRow: {
+    alignItems: "center",
+    backgroundColor: "transparent",
     flexDirection: "row",
     gap: spacing.md,
     minHeight: 58,
@@ -2311,6 +2442,47 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 16,
     marginTop: 2,
+  },
+  resourceRowActions: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexShrink: 0,
+    gap: spacing.xs,
+  },
+  resourceRoleBadge: {
+    backgroundColor: "#EAF3FF",
+    borderRadius: radius.xs,
+    color: colors.brandBlue,
+    fontSize: 10,
+    fontWeight: "900",
+    overflow: "hidden",
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 4,
+    textTransform: "uppercase",
+  },
+  resourceSmallButton: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.xs,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 4,
+    minHeight: 28,
+    paddingHorizontal: spacing.xs,
+  },
+  resourceSmallButtonText: {
+    color: colors.brandNavy,
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  resourceInlineRoles: {
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    padding: spacing.sm,
   },
   resourceEmpty: {
     color: colors.textMuted,

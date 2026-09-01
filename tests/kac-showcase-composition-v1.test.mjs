@@ -90,6 +90,12 @@ test("Model resources are attachment-backed and inherit to KACs", () => {
   const api = read("lib/attachmentsApi.js");
 
   assert.match(catalog, /MODEL_RESOURCE_ROLES/);
+  assert.match(catalog, /\{ key: "Manual", label: "Manual" \}/);
+  assert.match(catalog, /\{ key: "Warranty", label: "Warranty" \}/);
+  assert.match(catalog, /\{ key: "Spec Sheet", label: "Spec Sheet" \}/);
+  assert.match(catalog, /\{ key: "Install Guide", label: "Install Guide" \}/);
+  assert.match(catalog, /function normalizeModelResourceRole/);
+  assert.match(catalog, /ai_context: \["Manual", "Warranty", "Spec Sheet"\]\.includes/);
   assert.match(catalog, /hydrateTemplateAttachmentResources/);
   assert.match(catalog, /createLinkAttachment/);
   assert.match(catalog, /uploadTemplateResourceFile/);
@@ -101,6 +107,46 @@ test("Model resources are attachment-backed and inherit to KACs", () => {
   assert.match(api, /normalizeTemplateAttachmentPlacement/);
   assert.match(api, /is_inherited_model_attachment: true/);
   assert.match(api, /listAssetAIContextSources[\s\S]*includeInheritedModelAttachments: true/);
+});
+
+test("Model resource roles can be changed using Proof Builder vocabulary", () => {
+  const catalog = read("screens/ActivatorCatalogTemplateScreen.js");
+  const attachments = read("screens/AssetAttachmentsScreen.js");
+
+  assert.match(catalog, /onChangeResourceRole/);
+  assert.match(catalog, /const changeTemplateResourceRole = async/);
+  assert.match(catalog, /\.from\("attachment_placements"\)[\s\S]*\.update\(\{ role: nextRole \}\)/);
+  assert.match(catalog, /updateTemplateResourceMetadata\(attachmentId, nextRole, nextSourceContext\)/);
+  assert.match(catalog, /templateResourceSourceContext\(nextRole/);
+  assert.match(attachments, /\{ id: "manual", label: "Manual" \}/);
+  assert.match(attachments, /owner_manual[\s\S]*return "manual"/);
+});
+
+test("Proof Builder can load dealer-visible attachments through asset projection fallback", () => {
+  const proofBuilder = read("screens/ProofBuilderScreen.js");
+
+  assert.match(proofBuilder, /listAttachmentsForAsset/);
+  assert.match(proofBuilder, /listAttachmentsForTarget/);
+  assert.match(proofBuilder, /includeInheritedModelAttachments: true/);
+  assert.match(proofBuilder, /includeInheritedModelMedia: true/);
+  assert.match(proofBuilder, /visibleAttachments[\s\S]*\.find\(\(row\) => \(row\.attachment_id \|\| row\.id\) === attachmentId\)/);
+  assert.match(proofBuilder, /routeTargetType === "model_template" && routeTargetId/);
+  assert.match(proofBuilder, /visibleTemplateAttachments[\s\S]*\.find\(\(row\) => \(row\.attachment_id \|\| row\.id\) === attachmentId\)/);
+  assert.match(proofBuilder, /safeStr\(route\?\.params\?\.role\)/);
+  assert.match(proofBuilder, /safeStr\(att\?\.asset_role\)/);
+});
+
+test("OEM model resources can open Proof Builder at model-template scope", () => {
+  const catalog = read("screens/ActivatorCatalogTemplateScreen.js");
+  const proofBuilder = read("screens/ProofBuilderScreen.js");
+
+  assert.match(catalog, /const openTemplateResourceProofBuilder = \(resource\) =>/);
+  assert.match(catalog, /navigation\.navigate\("ProofBuilder"[\s\S]*targetType: "model_template"/);
+  assert.match(catalog, /targetId: template\.id/);
+  assert.match(catalog, /returnRoute: "ActivatorCatalogTemplate"/);
+  assert.match(catalog, /templateKey: template\.template_key \|\| templateKey/);
+  assert.match(proofBuilder, /routeTargetType === "model_template"[\s\S]*\.update\(\{ role: roleValue \|\| "Other" \}\)/);
+  assert.match(proofBuilder, /\.eq\("target_type", "model_template"\)/);
 });
 
 test("Workspace-context boat actions use projection-safe edit and hero paths", () => {
@@ -134,6 +180,8 @@ test("Attachment routes keep return context flat on web", () => {
 
   assert.doesNotMatch(workspace, /returnParams:\s*\{/);
   assert.doesNotMatch(attachments, /returnParams:\s*\{\s*assetId,\s*assetName\s*\}/);
+  assert.match(attachments, /const editContextForRow = useCallback/);
+  assert.equal((attachments.match(/navigation\.navigate\("ProofBuilder"/g) || []).length, 1);
   assert.match(attachments, /returnRoute: "AssetAttachments"[\s\S]*assetName,[\s\S]*organizationId,/);
   assert.match(proofBuilder, /typeof route\.params\.returnParams === "object"/);
   assert.match(proofBuilder, /organizationId: route\?\.params\?\.organizationId/);

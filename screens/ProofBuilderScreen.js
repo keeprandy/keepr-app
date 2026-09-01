@@ -26,6 +26,8 @@ import {
   formatAIContextLabel,
   formatAIContextScopeLabel,
   getSignedUrl,
+  listAttachmentsForAsset,
+  listAttachmentsForTarget,
   normalizeAIContext,
   normalizeAIContextScope,
 } from "../lib/attachmentsApi";
@@ -242,6 +244,8 @@ export default function ProofBuilderScreen({ route, navigation }) {
 
   const assetId = route?.params?.assetId || null;
   const attachmentId = route?.params?.attachmentId || null;
+  const routeTargetType = route?.params?.targetType || null;
+  const routeTargetId = route?.params?.targetId || null;
   const returnRoute = route?.params?.returnRoute || null;
   const returnParams = useMemo(() => {
     if (route?.params?.returnParams && typeof route.params.returnParams === "object") {
@@ -256,6 +260,9 @@ export default function ProofBuilderScreen({ route, navigation }) {
       relationshipRole: route?.params?.relationshipRole || undefined,
       teamMemberType: route?.params?.teamMemberType || undefined,
       systemsRole: route?.params?.systemsRole || undefined,
+      targetType: routeTargetType || undefined,
+      targetId: routeTargetId || undefined,
+      templateKey: route?.params?.templateKey || undefined,
       parentRoute: route?.params?.parentRoute || undefined,
     };
   }, [
@@ -268,7 +275,10 @@ export default function ProofBuilderScreen({ route, navigation }) {
     route?.params?.returnParams,
     route?.params?.systemsRole,
     route?.params?.teamMemberType,
+    route?.params?.templateKey,
     route?.params?.workspaceId,
+    routeTargetId,
+    routeTargetType,
   ]);
 
   const [loading, setLoading] = useState(true);
@@ -514,13 +524,34 @@ if (__DEV__) {
     setLoadError("");
 
     try {
-      const { data: att, error: attErr } = await supabase
+      const { data: directAttachment, error: attErr } = await supabase
         .from("attachments")
         .select("*")
         .eq("id", attachmentId)
         .maybeSingle();
 
-      if (attErr || !att) {
+      let att = directAttachment || null;
+      if ((!att || attErr) && assetId) {
+        try {
+          const visibleAttachments = await listAttachmentsForAsset(assetId, {
+            includeInheritedModelAttachments: true,
+            includeInheritedModelMedia: true,
+          });
+          att = (visibleAttachments || []).find((row) => (row.attachment_id || row.id) === attachmentId) || null;
+        } catch (fallbackError) {
+          console.log("ProofBuilder attachment projection fallback failed", fallbackError);
+        }
+      }
+      if ((!att || attErr) && routeTargetType === "model_template" && routeTargetId) {
+        try {
+          const visibleTemplateAttachments = await listAttachmentsForTarget(routeTargetType, routeTargetId);
+          att = (visibleTemplateAttachments || []).find((row) => (row.attachment_id || row.id) === attachmentId) || null;
+        } catch (fallbackError) {
+          console.log("ProofBuilder model attachment fallback failed", fallbackError);
+        }
+      }
+
+      if (!att) {
         setLoadError(attErr?.message || "Could not load attachment");
         setLoading(false);
         return;
@@ -578,6 +609,8 @@ if (__DEV__) {
       const savedRoleRaw =
         safeStr(att?.ai_metadata?.role) ||
         inferRoleFromPlacements(pls) ||
+        safeStr(route?.params?.role) ||
+        safeStr(att?.asset_role) ||
         "proof";
 
       // Resolve asset name from the best available source:
@@ -684,6 +717,9 @@ setWExpires(isoToMDY(safeStr(d.end_date || d.expiration_date)));
   inferRoleFromPlacements,
   loadWarrantyObject,
   resolveOrgId,
+  route?.params?.role,
+  routeTargetId,
+  routeTargetType,
 ]);
 
   useEffect(() => {
@@ -816,7 +852,20 @@ setWExpires(isoToMDY(safeStr(d.end_date || d.expiration_date)));
 
   const syncPlacements = useCallback(
     async () => {
-      if (!attachmentId || !assetId) return;
+      if (!attachmentId) return;
+
+      if (!assetId && routeTargetType === "model_template" && routeTargetId) {
+        const { error: updateErr } = await supabase
+          .from("attachment_placements")
+          .update({ role: roleValue || "Other" })
+          .eq("attachment_id", attachmentId)
+          .eq("target_type", "model_template")
+          .eq("target_id", routeTargetId);
+        if (updateErr) throw new Error(updateErr.message || "Failed to save model resource role");
+        return;
+      }
+
+      if (!assetId) return;
 
       // Asset placement always exists
       const base = {
@@ -852,7 +901,7 @@ setWExpires(isoToMDY(safeStr(d.end_date || d.expiration_date)));
         if (insErr) throw new Error(insErr.message || "Failed to save system links");
       }
     },
-    [attachmentId, assetId, roleValue, privacy, selectedSystemIds]
+    [attachmentId, assetId, roleValue, routeTargetId, routeTargetType, selectedSystemIds]
   );
 
   const upsertWarrantyObject = useCallback(

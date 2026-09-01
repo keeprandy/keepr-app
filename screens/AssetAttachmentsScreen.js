@@ -619,6 +619,7 @@ function AttachmentDetailsPanel({
   assocBusy,
   targetType,
   targetId,
+  onEditContext,
   safeStr,
   roleEditOpen,
   setRoleEditOpen,
@@ -649,13 +650,7 @@ function AttachmentDetailsPanel({
       <View style={styles.sectionBlock}>
         <TouchableOpacity
           style={styles.primaryActionBtn}
-          onPress={() =>
-            navigation.navigate("ProofBuilder", {
-              assetId,
-              attachmentId: selected?.attachment_id || selected?.id,
-              role: selected?.role,
-            })
-          }
+          onPress={onEditContext}
         >
           <Ionicons
             name="document-text-outline"
@@ -1121,6 +1116,7 @@ const isWide = IS_WEB && width >= 980;
       { id: "invoice", label: "Invoice" },
       { id: "estimate_quote", label: "Estimate / Quote" },
       { id: "service_report", label: "Service Report" },
+      { id: "manual", label: "Manual" },
       { id: "owners_manual", label: "Owner's Manual" },
       { id: "inspection", label: "Inspection" },
       { id: "contract_agreement", label: "Contract / Agreement" },
@@ -1144,7 +1140,9 @@ const isWide = IS_WEB && width >= 980;
   const normalizeRoleKey = useCallback((v) => {
     const s = String(v || "").trim().toLowerCase();
     if (!s) return "other";
-    return s.replace(/[\s-]+/g, "_");
+    const normalized = s.replace(/[\s-]+/g, "_");
+    if (normalized === "owner_manual" || normalized === "owners_manual" || normalized === "owner's_manual") return "manual";
+    return normalized;
   }, []);
 
 
@@ -3470,13 +3468,7 @@ return (
                               <>
                                 <TouchableOpacity
                                   style={styles.rowAction}
-                                  onPress={() =>
-                                    navigation.navigate("ProofBuilder", {
-                                      assetId,
-                                      attachmentId: row.attachment_id || row.id,
-                                      role: row.role,
-                                    })
-                                  }
+                                  onPress={() => editContextForRow(row)}
                                   accessibilityLabel="Proof Builder"
                                 >
                                   <Ionicons name="document-text-outline" size={18} color={colors.textSecondary} />
@@ -3551,13 +3543,7 @@ return (
                               {/* Proof Builder */}
                               <TouchableOpacity
                                 style={styles.rowAction}
-                                onPress={() =>
-                                  navigation.navigate("ProofBuilder", {
-                                    assetId,
-                                    attachmentId: row.attachment_id || row.id,
-                                    role: row.role,
-                                  })
-                                }
+                                onPress={() => editContextForRow(row)}
                                 accessibilityLabel="Proof Builder"
                               >
                                 <Ionicons name="document-text-outline" size={18} color={colors.textSecondary} />
@@ -3622,6 +3608,7 @@ return (
                     assocBusy={assocBusy}
                     targetType={targetType}
                     targetId={targetId}
+                    onEditContext={() => editContextForRow(selected)}
                     safeStr={safeStr}
                     removeFromThisAsset={removeFromThisAsset}
                     associationsForSelected={associationsForSelected}
@@ -3641,15 +3628,10 @@ return (
                   <>
                     {/* Block A – Attachment Metadata and Link to Context */}
                     <View style={styles.sectionBlock}>      
-                      <TouchableOpacity
-                      style={styles.primaryActionBtn}
-                      onPress={() =>
-                        navigation.navigate("ProofBuilder", {
-                          assetId,
-                          attachmentId: selected?.attachment_id || selected?.id,
-                        })
-                      }
-                    >
+	                      <TouchableOpacity
+	                      style={styles.primaryActionBtn}
+	                      onPress={() => editContextForRow(selected)}
+	                    >
                       <Ionicons name="document-text-outline" size={18} color="#fff" />
                       <Text style={styles.primaryActionBtnText}>
                         Add Context to the Attachment
@@ -4084,7 +4066,7 @@ return (
                               <>
                                 <TouchableOpacity
                                   style={styles.eyeBtn}
-                                  onPress={() => navigation.navigate("ProofBuilder", { assetId, attachmentId: row.attachment_id || row.id, role: row.role })}
+                                  onPress={() => editContextForRow(row)}
                                   accessibilityLabel="Proof Builder"
                                 >
                                   <Ionicons name="document-text-outline" size={18} color={colors.textSecondary} />
@@ -4148,8 +4130,7 @@ return (
                               {/* Proof Builder */}
                               <TouchableOpacity
                                 style={styles.eyeBtn}
-                                
-                                onPress={() => navigation.navigate("ProofBuilder", { assetId, attachmentId: row.attachment_id || row.id, role: row.role })}
+                                onPress={() => editContextForRow(row)}
                                 accessibilityLabel="Proof Builder"
                               >
                                 <Ionicons name="document-text-outline" size={18} color={colors.textSecondary} />
