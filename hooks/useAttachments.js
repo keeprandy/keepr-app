@@ -9,7 +9,8 @@ import {
  * Generic hook for attachments by target
  * targetType: "asset" | "system" | "record"
  */
-export function useAttachments(targetType, targetId) {
+export function useAttachments(targetType, targetId, options = {}) {
+  const includeInheritedModelMedia = !!options.includeInheritedModelMedia;
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -28,7 +29,7 @@ export function useAttachments(targetType, targetId) {
 
       if (targetType === "asset") {
         // Canonical grouped asset view
-        rows = await listAttachmentsForAsset(targetId);
+        rows = await listAttachmentsForAsset(targetId, { includeInheritedModelMedia });
       } else {
         // System / record / other targets
         rows = await listAttachmentsForTarget(targetType, targetId);
@@ -40,7 +41,7 @@ export function useAttachments(targetType, targetId) {
     } finally {
       setLoading(false);
     }
-  }, [targetType, targetId]);
+  }, [includeInheritedModelMedia, targetType, targetId]);
 
   useEffect(() => {
     refresh();
@@ -53,6 +54,6 @@ export function useAttachments(targetType, targetId) {
  * Explicit asset-only hook
  * Returns canonical asset attachments with placements[]
  */
-export function useAssetAttachments(assetId) {
-  return useAttachments("asset", assetId);
+export function useAssetAttachments(assetId, options = {}) {
+  return useAttachments("asset", assetId, options);
 }

@@ -43,6 +43,10 @@ test("Attachment API already preserves inherited model media provenance", () => 
   const source = read("lib/attachmentsApi.js");
 
   assert.match(source, /async function listInheritedTemplateMediaForAsset/);
+  assert.match(source, /async function listTemplatesFromAssetMetadata/);
+  assert.match(source, /catalog_template_id/);
+  assert.match(source, /catalog_template_key/);
+  assert.match(source, /extra_metadata/);
   assert.match(source, /target_type", "model_template"/);
   assert.match(source, /is_inherited_model_media: true/);
   assert.match(source, /not_exact_hull_media: true/);
@@ -56,6 +60,24 @@ test("General attachment surfaces do not inherit model media by default", () => 
   assert.match(source, /const includeInheritedModelMedia = !!options\.includeInheritedModelMedia/);
   assert.match(source, /return includeInheritedModelMedia \? await listInheritedTemplateMediaForAsset\(assetId\) : \[\]/);
   assert.match(source, /if \(!includeInheritedModelMedia\) return directRows/);
+});
+
+test("Asset attachment screen can filter composed KAC media by contributor lane", () => {
+  const source = read("screens/AssetAttachmentsScreen.js");
+  const hook = read("hooks/useAttachments.js");
+
+  assert.match(source, /const \[sourceFilter, setSourceFilter\] = useState\("all"\)/);
+  assert.match(source, /function sourceLaneForAttachment/);
+  assert.match(source, /is_inherited_model_media[\s\S]*return "oem"/);
+  assert.match(source, /source_lane_label: sourceLaneLabel\(sourceLane\)/);
+  assert.match(source, /const includeInheritedModelMedia = \["all", "photo", "showcase"\]\.includes\(tab\)/);
+  assert.match(source, /useAssetAttachments\(assetId,\s*\{\s*includeInheritedModelMedia,/);
+  assert.match(source, /\["all", "All sources"\]/);
+  assert.match(source, /\["oem", "OEM"\]/);
+  assert.match(source, /\["dealer", "Dealer"\]/);
+  assert.match(source, /\["owner", "Owner"\]/);
+  assert.match(source, /styles\.sourceLanePill/);
+  assert.match(hook, /listAttachmentsForAsset\(targetId, \{ includeInheritedModelMedia \}\)/);
 });
 
 test("Workspace-context boat actions use projection-safe edit and hero paths", () => {

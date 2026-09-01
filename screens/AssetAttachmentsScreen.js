@@ -179,6 +179,26 @@ function isImageMime(m = "") {
   return /^image\//i.test(m || "");
 }
 
+function sourceLaneForAttachment(row, relationshipRole) {
+  if (row?.is_inherited_model_media || row?.source_context?.provenance === "model_template") return "oem";
+
+  const role = safeStr(row?.source_context?.relationship_role || relationshipRole).toLowerCase();
+  const context = safeStr(row?.source_context?.contribution_context).toLowerCase();
+  if (["dealer", "selling_dealer", "assigned_dealer", "servicing_dealer"].includes(role)) return "dealer";
+  if (["owner", "current_owner", "pending_owner"].includes(role)) return "owner";
+  if (["oem", "manufacturer"].includes(role)) return "oem";
+  if (context.includes("owner")) return "owner";
+  if (context.includes("dealer")) return "dealer";
+  return "dealer";
+}
+
+function sourceLaneLabel(value) {
+  if (value === "oem") return "OEM";
+  if (value === "dealer") return "Dealer";
+  if (value === "owner") return "Owner";
+  return "All";
+}
+
 function isPdfMime(m = "") {
   return (m || "").toLowerCase() === "application/pdf";
 }
@@ -1029,6 +1049,7 @@ const isWide = IS_WEB && width >= 980;
     route?.params?.showPreview === "true";
 
   const [tab, setTab] = useState(initialTab);
+  const [sourceFilter, setSourceFilter] = useState("all");
 
   const [busy, setBusy] = useState(false); // reserved if we need global busy
   const [selected, setSelected] = useState(null);
@@ -1056,6 +1077,10 @@ const isWide = IS_WEB && width >= 980;
   useEffect(() => {
     if (wantsPreview) setShowPreview(true);
   }, [wantsPreview]);
+
+  useEffect(() => {
+    if (!["all", "photo", "showcase"].includes(tab)) setSourceFilter("all");
+  }, [tab]);
 
 
   // “no-code” controls
@@ -1195,7 +1220,10 @@ const isWide = IS_WEB && width >= 980;
   const [draftUrl, setDraftUrl] = useState("");
 
   // Attachments hook (must be defined before any callbacks that reference `refresh`)
-  const { items: hookItems, loading, error, refresh } = useAssetAttachments(assetId);
+  const includeInheritedModelMedia = ["all", "photo", "showcase"].includes(tab);
+  const { items: hookItems, loading, error, refresh } = useAssetAttachments(assetId, {
+    includeInheritedModelMedia,
+  });
 
   // Safari/iPad web: use native <input type="file"> instead of Expo pickers (they often fail to open)
   const fileInputRef = useRef(null);
@@ -1489,9 +1517,12 @@ const isWide = IS_WEB && width >= 980;
           : typeof assetPl?.is_showcase === "boolean"
           ? assetPl.is_showcase
           : false;
+      const sourceLane = sourceLaneForAttachment(x, relationshipRole);
 
       return {
         ...x,
+        source_lane: sourceLane,
+        source_lane_label: sourceLaneLabel(sourceLane),
         role: effectiveRole,
         asset_placement_id: assetPlacementId,
         target_type: x.target_type || assetPl?.target_type || "asset",
@@ -1608,7 +1639,12 @@ const isWide = IS_WEB && width >= 980;
       return false;
     };
 
-    let out = (normalized || []).filter((x) => tabOk(x) && roleOk(x) && systemOk(x));
+    const sourceOk = (x) => {
+      if (sourceFilter === "all") return true;
+      return x.source_lane === sourceFilter;
+    };
+
+    let out = (normalized || []).filter((x) => tabOk(x) && roleOk(x) && systemOk(x) && sourceOk(x));
 
     // If we were opened in a scoped context (e.g., a specific System), only show attachments that are already associated to it.
     // NOTE: supports both explicit scope params AND legacy "targetType/targetId" navigation.
@@ -1638,7 +1674,7 @@ const isWide = IS_WEB && width >= 980;
     });
 
     return out;
-  }, [normalized, q, roleFilter, systemFilterId, sort, tab, effectiveScopeType, effectiveScopeId]);
+  }, [normalized, q, roleFilter, sourceFilter, systemFilterId, sort, tab, effectiveScopeType, effectiveScopeId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3223,6 +3259,27 @@ return (
             </TouchableOpacity>
             )}
         </View>
+
+        {["showcase", "photo", "all"].includes(tab) ? (
+          <View style={styles.sourceLaneRow}>
+            {[
+              ["all", "All sources"],
+              ["oem", "OEM"],
+              ["dealer", "Dealer"],
+              ["owner", "Owner"],
+            ].map(([key, label]) => (
+              <TouchableOpacity
+                key={key}
+                onPress={() => setSourceFilter(key)}
+                style={[styles.sourceLanePill, sourceFilter === key && styles.sourceLanePillActive]}
+              >
+                <Text style={[styles.sourceLanePillText, sourceFilter === key && styles.sourceLanePillTextActive]}>
+                  {label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        ) : null}
           {/* 2-column */}
           {isWide ? (
             <View
@@ -3459,6 +3516,7 @@ return (
 
 	                          <View style={styles.rowRight}>
 	                            <Badge text={row.badge} />
+                              <Badge text={row.source_lane_label} />
                               {renderHeroButton(row)}
 
 	                            {/* ✅ Proof Builder and Keepr Intelligence entry point */}
@@ -4055,6 +4113,7 @@ return (
 
 	                          <View style={styles.rowRight}>
 	                            <Badge text={row.badge} />
+                              <Badge text={row.source_lane_label} />
                               {renderHeroButton(row, styles.heroDesignationButtonMobile)}
 
 	                            {/* ✅ Proof Builder and Keepr Intelligence entry point */}
@@ -4588,6 +4647,35 @@ addMenuModal: {
   tabActive: { backgroundColor: colors.primary },
   tabText: { fontWeight: "700", color: colors.textPrimary },
   tabTextActive: { color: "#fff" },
+  sourceLaneRow: {
+    paddingHorizontal: spacing.lg,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginTop: -2,
+    marginBottom: spacing.md,
+  },
+  sourceLanePill: {
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+  },
+  sourceLanePillActive: {
+    backgroundColor: colors.primarySoft,
+    borderColor: colors.primary,
+  },
+  sourceLanePillText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: colors.textSecondary,
+  },
+  sourceLanePillTextActive: {
+    color: colors.primary,
+  },
 
   filtersRow: {
     paddingHorizontal: spacing.lg,
