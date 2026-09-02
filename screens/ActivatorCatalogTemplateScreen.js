@@ -21,6 +21,7 @@ import * as ImagePicker from "expo-image-picker";
 
 import ActivatorBreadcrumb from "../components/ActivatorBreadcrumb";
 import { getCatalogTemplateDetail } from "../lib/activatorApi";
+import { resolveAssetHero, ASSET_HERO_SCOPES } from "../lib/assetHeroResolver";
 import { getSignedUrl, listAttachmentsForTarget, removePlacementById } from "../lib/attachmentsApi";
 import { createLinkAttachment, uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import { projectModelTemplateDetail } from "../lib/modelTemplateProjection";
@@ -178,6 +179,8 @@ function itemEditParams(item, templateKey, routeParams = {}) {
 }
 
 function mediaAsset(media, template = {}) {
+  if (typeof media === "string" && media.trim()) return { uri: media.trim() };
+
   const uri =
     media?.attachment_signed_url ||
     media?.attachment_storage_signed_url ||
@@ -1192,6 +1195,7 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
     className: "",
   });
   const [savingIdentity, setSavingIdentity] = useState(false);
+  const [resolvedTemplateHeroUri, setResolvedTemplateHeroUri] = useState(null);
 
   const load = useCallback(async ({ quiet = false } = {}) => {
     if (!quiet) setLoading(true);
@@ -1240,6 +1244,38 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
   const template = modelProjection.template || {};
   const showcaseMedia = normalizeTemplateMedia(modelProjection, templateAttachmentMedia, modelProjection.template || {});
   const heroMedia = mediaByRole(showcaseMedia, "hero") || modelProjection.media?.hero;
+  const heroSource = resolvedTemplateHeroUri || heroMedia;
+  const templateHeroKey = templateHeroPlacementId(template);
+
+  useEffect(() => {
+    let active = true;
+    const templateId = template?.id || null;
+    if (!templateId) {
+      setResolvedTemplateHeroUri(null);
+      return () => {
+        active = false;
+      };
+    }
+
+    resolveAssetHero({
+      scope: ASSET_HERO_SCOPES.MODEL_DNA,
+      id: templateId,
+      entity: template,
+      transform: { width: 1400, quality: 82 },
+      expiresIn: 60 * 60,
+    })
+      .then((uri) => {
+        if (active) setResolvedTemplateHeroUri(uri || null);
+      })
+      .catch((err) => {
+        console.warn("Could not resolve model DNA hero:", err?.message || err);
+        if (active) setResolvedTemplateHeroUri(null);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [template?.id, templateHeroKey]);
   const visibleGroups = modelProjection.catalog?.chaptersByKey?.[tab] || [];
   const visibleItemIds = useMemo(() => {
     const ids = new Set();
@@ -1865,7 +1901,7 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
           ]}
           current={`${template.model || "Model"} Template`}
         />
-        <ImageBackground source={mediaAsset(heroMedia, template)} resizeMode="cover" style={styles.hero} imageStyle={styles.heroImage}>
+        <ImageBackground source={mediaAsset(heroSource, template)} resizeMode="cover" style={styles.hero} imageStyle={styles.heroImage}>
           <View style={styles.heroOverlay}>
             <View style={styles.heroCopy}>
               <Text style={styles.eyebrow}>{template.manufacturer || "OEM"} Catalog</Text>

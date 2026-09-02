@@ -270,6 +270,12 @@ test("Canonical KAC Hero contract has one shared read and write path", () => {
   const api = read("lib/keeprspaceApi.js");
   const migration = read("supabase/migrations/20260901172000_canonical_kac_hero_contract.sql");
 
+  assert.match(resolver, /export const ASSET_HERO_SCOPES/);
+  assert.match(resolver, /MODEL_DNA: "model_dna"/);
+  assert.match(resolver, /EXACT_KAC: "exact_kac"/);
+  assert.match(resolver, /export async function resolveAssetHero/);
+  assert.match(resolver, /resolveModelDnaHero/);
+  assert.match(resolver, /modelDnaHeroPlacementId/);
   assert.match(resolver, /export async function resolveKacHero/);
   assert.match(resolver, /export async function fetchKacHeroUris/);
   assert.match(resolver, /export const resolveAssetHeroUri = resolveKacHero/);
@@ -294,6 +300,22 @@ test("Canonical KAC Hero contract has one shared read and write path", () => {
   assert.match(migration, /relationship_type in \('assigned_dealer', 'selling_dealer', 'delivery_dealer'\)/);
   assert.match(migration, /drop function if exists public\.set_asset_hero_placement\(uuid, uuid\)/);
   assert.doesNotMatch(migration, /update public\.attachment_placements[\s\S]{0,180}set role/);
+});
+
+test("Model and exact-build screens consume shared asset-like Hero contract", () => {
+  const catalog = read("screens/ActivatorCatalogTemplateScreen.js");
+  const exactBuild = read("screens/ActivatorExactBuildScreen.js");
+
+  assert.match(catalog, /resolveAssetHero, ASSET_HERO_SCOPES/);
+  assert.match(catalog, /scope: ASSET_HERO_SCOPES\.MODEL_DNA/);
+  assert.match(catalog, /const \[resolvedTemplateHeroUri, setResolvedTemplateHeroUri\]/);
+  assert.match(catalog, /const heroSource = resolvedTemplateHeroUri \|\| heroMedia/);
+  assert.match(catalog, /mediaAsset\(heroSource, template\)/);
+
+  assert.match(exactBuild, /resolveAssetHero, ASSET_HERO_SCOPES/);
+  assert.match(exactBuild, /scope: ASSET_HERO_SCOPES\.MODEL_DNA/);
+  assert.match(exactBuild, /const \[resolvedTemplateHeroUri, setResolvedTemplateHeroUri\]/);
+  assert.match(exactBuild, /resolvedTemplateHeroUri[\s\S]{0,120}mediaAsset\(resolvedTemplateHeroUri\)/);
 });
 
 test("Showcase and attachments only mutate explicit KAC Hero pointer", () => {

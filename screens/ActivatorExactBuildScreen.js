@@ -22,6 +22,7 @@ import {
   publishExactBuildDraft,
   upsertExactBuildDraft,
 } from "../lib/activatorApi";
+import { resolveAssetHero, ASSET_HERO_SCOPES } from "../lib/assetHeroResolver";
 import { getSignedUrl, listAttachmentsForTarget } from "../lib/attachmentsApi";
 import { getKeeprSpaceOrgConfig } from "../lib/keeprspaceApi";
 import {
@@ -207,6 +208,8 @@ function templateHeroPlacementId(template = {}) {
 }
 
 function mediaAsset(media) {
+  if (typeof media === "string" && media.trim()) return { uri: media.trim() };
+
   const localAsset = SHOWCASE_ASSETS[media?.local_asset_key] || SHOWCASE_ASSETS[media?.metadata?.local_asset_key];
   if (localAsset) return localAsset;
 
@@ -798,6 +801,7 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
   const [detail, setDetail] = useState(null);
   const [orgConfig, setOrgConfig] = useState(null);
   const [templateAttachmentMedia, setTemplateAttachmentMedia] = useState([]);
+  const [resolvedTemplateHeroUri, setResolvedTemplateHeroUri] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
@@ -964,7 +968,42 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
     mediaByRole(templateAttachmentMedia, "hero") ||
     modelProjection.media?.hero ||
     mediaByRole(showcaseMedia, "hero");
-  const heroSource = heroMedia ? mediaAsset(heroMedia) : imageSourceFromUri(orgBrandContext.headerImageUri, BOAT_HERO);
+  const templateHeroKey = templateHeroPlacementId(template);
+  const heroSource = resolvedTemplateHeroUri
+    ? mediaAsset(resolvedTemplateHeroUri)
+    : heroMedia
+      ? mediaAsset(heroMedia)
+      : imageSourceFromUri(orgBrandContext.headerImageUri, BOAT_HERO);
+
+  useEffect(() => {
+    let active = true;
+    const templateId = template?.id || null;
+    if (!templateId) {
+      setResolvedTemplateHeroUri(null);
+      return () => {
+        active = false;
+      };
+    }
+
+    resolveAssetHero({
+      scope: ASSET_HERO_SCOPES.MODEL_DNA,
+      id: templateId,
+      entity: template,
+      transform: { width: 1400, quality: 82 },
+      expiresIn: 60 * 60,
+    })
+      .then((uri) => {
+        if (active) setResolvedTemplateHeroUri(uri || null);
+      })
+      .catch((err) => {
+        console.warn("Could not resolve exact-build model DNA hero:", err?.message || err);
+        if (active) setResolvedTemplateHeroUri(null);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [template?.id, templateHeroKey]);
   const templateItems = useMemo(() => groupTemplateItems(detail?.items || []), [detail?.items]);
   const standardItems = templateItems.filter((item) => item.applicability?.standard_state === "standard");
   const operationalTemplateItems = standardItems.filter((item) => ["system", "equipment", "resource"].includes(item.item_type));
