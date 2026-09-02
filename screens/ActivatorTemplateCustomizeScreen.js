@@ -27,11 +27,11 @@ import { colors, radius, shadows, spacing } from "../styles/theme";
 const CONFIG_SECTION_KEY = "section.configuration";
 const SPEC_SECTION_KEY = "section.specifications";
 const PRIME_FACTS = [
-  { key: "spec.loa", label: "LOA", placeholder: "43'6\"", unitPlaceholder: "ft" },
-  { key: "spec.beam", label: "Beam", placeholder: "13'0\"", unitPlaceholder: "ft" },
-  { key: "spec.max_horsepower", label: "Max HP", placeholder: "1,200", unitPlaceholder: "HP" },
-  { key: "spec.fuel_capacity", label: "Fuel", placeholder: "400", unitPlaceholder: "gal" },
-  { key: "spec.water_capacity", label: "Water", placeholder: "60", unitPlaceholder: "gal" },
+  { key: "spec.loa", label: "LOA", placeholder: "43'6\"", unitPlaceholder: "ft", aliases: ["loa", "l.o.a."] },
+  { key: "spec.beam", label: "Beam", placeholder: "13'0\"", unitPlaceholder: "ft", aliases: ["beam"] },
+  { key: "spec.max_hp", label: "Max HP", placeholder: "1,200", unitPlaceholder: "HP", aliases: ["maximum horsepower", "max hp", "max horsepower", "spec.max_horsepower"] },
+  { key: "spec.fuel_capacity", label: "Fuel", placeholder: "400", unitPlaceholder: "gal", aliases: ["fuel capacity"] },
+  { key: "spec.water_capacity", label: "Water", placeholder: "60", unitPlaceholder: "gal", aliases: ["water capacity", "fresh water capacity"] },
 ];
 const ITEM_KINDS = ["configuration_item", "choice", "option", "component", "system"];
 const ITEM_STATES = ["standard", "optional", "selected", "unselected", "model_expected"];
@@ -86,6 +86,20 @@ function slugify(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
+}
+
+function normalizeKey(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function factMatchesDefinition(item, definition) {
+  if (!item || !definition) return false;
+  const itemKey = normalizeKey(item.canonical_key);
+  if (itemKey === normalizeKey(definition.key)) return true;
+  const itemLabel = normalizeKey(item.label);
+  return (definition.aliases || []).some((alias) => (
+    itemKey === normalizeKey(alias) || itemLabel === normalizeKey(alias)
+  ));
 }
 
 function jsonText(value, fallback = "{}") {
@@ -357,10 +371,10 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
   const groups = configurationGroups.map(({ group }) => group);
   const specItems = PRIME_FACTS.map((definition) => ({
     definition,
-    item: items.find((item) => item.canonical_key === definition.key) || null,
+    item: items.find((item) => factMatchesDefinition(item, definition)) || null,
   }));
   const editingFactDefinition = PRIME_FACTS.find((definition) => definition.key === editingFactKey) || PRIME_FACTS[0];
-  const editingFactItem = items.find((item) => item.canonical_key === editingFactDefinition.key) || null;
+  const editingFactItem = items.find((item) => factMatchesDefinition(item, editingFactDefinition)) || null;
   const childrenByParent = useMemo(() => {
     return items.reduce((acc, item) => {
       if (!item.parent_item_id) return acc;
@@ -404,7 +418,7 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
   };
 
   const editFact = (definition) => {
-    const item = items.find((candidate) => candidate.canonical_key === definition.key) || null;
+    const item = items.find((candidate) => factMatchesDefinition(candidate, definition)) || null;
     const parsed = splitExpectedValue(item?.expected_value);
     setEditingFactKey(definition.key);
     setFactValue(parsed.value);
@@ -524,6 +538,7 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
     setNotice(null);
     try {
       const section = await ensureSpecSection();
+      const canonicalKey = editingFactItem?.canonical_key || editingFactDefinition.key;
       const expectedValue = {
         value,
         unit: factUnit.trim() || null,
@@ -532,7 +547,7 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
       await upsertCatalogTemplateItem({
         templateId: template.id,
         itemType: "spec",
-        canonicalKey: editingFactDefinition.key,
+        canonicalKey,
         label: editingFactDefinition.label,
         parentItemId: section?.id || null,
         expectedValue,
@@ -783,20 +798,76 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
                   definition={definition}
                   item={item}
                   selected={editingFactKey === definition.key}
-                  onPress={() => {
-                    if (item?.id) {
-                      navigation.navigate("ActivatorTemplateItemEditor", {
-                        templateKey,
-                        itemId: item.id,
-                        organizationId,
-                        workspaceId,
-                      });
-                    } else {
-                      editFact(definition);
-                    }
-                  }}
+                  onPress={() => editFact(definition)}
                 />
               ))}
+            </View>
+            <View style={styles.factEditor}>
+              <View style={styles.panelHeader}>
+                <View>
+                  <Text style={styles.kicker}>Edit Fact</Text>
+                  <Text style={styles.panelTitle}>{editingFactDefinition.label}</Text>
+                </View>
+                {editingFactItem?.id ? (
+                  <TouchableOpacity
+                    activeOpacity={0.86}
+                    onPress={() => navigation.navigate("ActivatorTemplateItemEditor", {
+                      templateKey,
+                      itemId: editingFactItem.id,
+                      organizationId,
+                      workspaceId,
+                    })}
+                    style={styles.secondaryButton}
+                  >
+                    <Text style={styles.secondaryButtonText}>Advanced</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+              <View style={styles.factEditorGrid}>
+                <Field
+                  label="Value"
+                  value={factValue}
+                  onChangeText={setFactValue}
+                  placeholder={editingFactDefinition.placeholder}
+                />
+                <Field
+                  label="Unit"
+                  value={factUnit}
+                  onChangeText={setFactUnit}
+                  placeholder={editingFactDefinition.unitPlaceholder}
+                />
+                <Field
+                  label="Metric"
+                  value={factMetric}
+                  onChangeText={setFactMetric}
+                  placeholder="Optional"
+                />
+              </View>
+              {resources.length ? (
+                <>
+                  <Text style={styles.fieldLabel}>Source</Text>
+                  <View style={styles.buttonWrap}>
+                    {resources.map((resource) => (
+                      <BadgeButton
+                        key={resource.id}
+                        label={resource.title || resource.file_name || "Source"}
+                        active={factSourceResourceId === resource.id}
+                        onPress={() => setFactSourceResourceId(resource.id)}
+                      />
+                    ))}
+                  </View>
+                </>
+              ) : null}
+              <Field
+                label="Provenance note"
+                value={factProvenanceNote}
+                onChangeText={setFactProvenanceNote}
+                placeholder="Listing, brochure, manual page, or source note"
+              />
+              <TouchableOpacity disabled={saving} activeOpacity={0.86} style={styles.primaryButton} onPress={saveFact}>
+                {saving ? <ActivityIndicator color={colors.onPrimary} /> : <Ionicons name="save-outline" size={16} color={colors.onPrimary} />}
+                <Text style={styles.primaryButtonText}>Save Model Fact</Text>
+              </TouchableOpacity>
             </View>
           </View>
         ) : null}
@@ -1167,6 +1238,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 6,
   },
+  factEditor: {
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    gap: spacing.md,
+    padding: spacing.md,
+  },
+  factEditorGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.md,
+  },
   elementsPanel: {
     backgroundColor: colors.surfaceSubtle,
     borderColor: colors.border,
@@ -1324,7 +1408,9 @@ const styles = StyleSheet.create({
     width: 34,
   },
   field: {
+    flex: 1,
     gap: 5,
+    minWidth: 150,
   },
   fieldLabel: {
     color: colors.textSecondary,

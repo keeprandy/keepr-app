@@ -515,8 +515,8 @@ function heroUriFromBoat(boat) {
 }
 
 function heroSourceForBoat(boat, heroUri = null) {
-  if (heroUri) return { uri: heroUri };
-  return null;
+  const uri = heroUri || heroUriFromBoat(boat);
+  return uri ? { uri } : null;
 }
 
 function normalizeModelName(value) {
@@ -1252,6 +1252,7 @@ function fleetFilterMatchesBoat(boat, filter) {
 
 function imageContextLabelForBoat(boat, heroUri) {
   if (heroUri) return "KAC Hero";
+  if (heroUriFromBoat(boat)) return "Stored hero";
   return "Hero pending";
 }
 

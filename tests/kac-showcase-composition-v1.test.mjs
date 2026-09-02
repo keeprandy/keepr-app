@@ -182,8 +182,8 @@ test("Workspace-context boat actions use projection-safe edit and hero paths", (
   const keeprspaceApi = read("lib/keeprspaceApi.js");
 
   assert.match(showcase, /setKeeprSpaceAssetHero/);
-  assert.match(showcase, /if \(routeOrganizationId\) \{[\s\S]*navigation\.navigate\("KeeprSpaceBoat"/);
-  assert.match(story, /if \(organizationId\) \{[\s\S]*navigation\.navigate\("KeeprSpaceBoat"/);
+  assert.match(showcase, /navigation\.navigate\("EditAsset", \{/);
+  assert.match(story, /navigation\.navigate\("EditAsset", \{/);
   assert.match(workspace, /route\?\.params\?\.openEdit/);
   assert.match(workspace, /setShowBoatEdit\(true\)/);
   assert.match(keeprspaceApi, /rpc\("set_asset_hero_placement"/);
@@ -252,12 +252,17 @@ test("Dealer workspace resolves canonical KAC hero before projection media", () 
   assert.match(fleet, /fetchAssetHeroUris\(boatHeroIds, FLEET_HERO_OPTIONS\)/);
   assert.match(activatorFleet, /getCachedKacHeroUris\(heroAssetIds, heroOptions, \{ allowAnySize: true \}\)/);
   assert.match(activatorFleet, /fetchAssetHeroUris\(heroAssetIds, heroOptions\)/);
+  assert.match(activatorFleet, /heroUri \|\| heroUriFromBoat\(boat\)/);
+  assert.match(activatorFleet, /Stored hero/);
   assert.doesNotMatch(activatorFleet, /organizationId: heroOrganizationId/);
   assert.doesNotMatch(activatorFleet, /relationship_hero_media/);
   assert.doesNotMatch(activatorFleet, /model\.includes\("tiara39le"\)[\s\S]{0,120}SHOWCASE_ASSETS/);
   assert.match(activatorFleet, /KAC Hero/);
   assert.match(resolver, /const assetHero = await resolvePlacementHeroUri\(placementId/);
   assert.match(resolver, /const bestExactAssetHero = await resolveBestAssetAttachmentHero/);
+  assert.match(resolver, /async function resolveBoundModelDnaHero/);
+  assert.match(resolver, /asset_template_bindings/);
+  assert.match(resolver, /const boundModelHero = await resolveBoundModelDnaHero/);
   assert.match(resolver, /const inheritedModelHero = await resolveInheritedModelHero/);
   assert.match(resolver, /resolveKacHeroMediaViaRpc\(assetId, transform, expiresIn\)/);
   assert.match(resolver, /rpc\("resolve_asset_shared_hero_media"/);
@@ -333,6 +338,29 @@ test("Showcase and attachments only mutate explicit KAC Hero pointer", () => {
   assert.doesNotMatch(attachments, /relationshipHeroPlacementId/);
   assert.doesNotMatch(attachments, /activeAssetRelationshipId/);
   assert.doesNotMatch(attachments, /workspace Hero/);
+});
+
+test("Boat edit actions route directly to EditAsset with projection context", () => {
+  const story = read("screens/BoatStoryScreen.js");
+  const showcase = read("screens/BoatShowcaseScreen.js");
+
+  assert.match(story, /const goToEditBoat = \(\) => \{/);
+  assert.match(story, /navigation\.navigate\("EditAsset", \{/);
+  assert.doesNotMatch(story, /openEdit: true/);
+
+  assert.match(showcase, /const goToEditBoat = \(\) => \{/);
+  assert.match(showcase, /navigation\.navigate\("EditAsset", \{/);
+  assert.doesNotMatch(showcase, /openEdit: true/);
+});
+
+test("Model prime facts use catalog canonical keys and have an inline editor", () => {
+  const customize = read("screens/ActivatorTemplateCustomizeScreen.js");
+
+  assert.match(customize, /key: "spec\.max_hp"/);
+  assert.doesNotMatch(customize, /key: "spec\.max_horsepower"/);
+  assert.match(customize, /Save Model Fact/);
+  assert.match(customize, /onPress=\{\(\) => editFact\(definition\)\}/);
+  assert.match(customize, /factSourceResourceId === resource\.id/);
 });
 
 test("Exact build shell uses organization branding instead of Tiara fallback copy", () => {

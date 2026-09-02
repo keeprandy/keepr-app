@@ -445,22 +445,14 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
 
   const goToEditBoat = () => {
     if (!currentBoat?.id) return;
-    if (routeOrganizationId) {
-      navigation.navigate("KeeprSpaceBoat", {
-        assetId: currentBoat.id,
-        kac: routeKac || currentBoat.kac_id || currentBoat.kac || null,
-        organizationId: routeOrganizationId,
-        stewardshipId: route?.params?.stewardshipId || null,
-        parentRoute: parentRoute || "KeeprSpaceFleet",
-        workspaceId: routeWorkspaceId || (routeOrganizationId ? `org:${routeOrganizationId}` : null),
-        systemsRole,
-        openEdit: true,
-      });
-      return;
-    }
     navigation.navigate("EditAsset", {
       assetId: currentBoat.id,
-      ...routeContext,
+      kac: routeKac || currentBoat.kac_id || currentBoat.kac || null,
+      organizationId: routeOrganizationId || null,
+      stewardshipId: route?.params?.stewardshipId || null,
+      parentRoute: parentRoute || "BoatShowcase",
+      workspaceId: routeWorkspaceId || (routeOrganizationId ? `org:${routeOrganizationId}` : null),
+      systemsRole,
     });
   };
 
