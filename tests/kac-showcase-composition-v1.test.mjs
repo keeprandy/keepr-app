@@ -266,6 +266,9 @@ test("Dealer workspace resolves canonical KAC hero before projection media", () 
   assert.match(resolver, /const inheritedModelHero = await resolveInheritedModelHero/);
   assert.match(resolver, /resolveKacHeroMediaViaRpc\(assetId, transform, expiresIn\)/);
   assert.match(resolver, /rpc\("resolve_asset_shared_hero_media"/);
+  assert.match(resolver, /function heroCandidatePlacementFilter/);
+  assert.match(resolver, /requireHeroEligible: true/);
+  assert.match(resolver, /if \(requireHeroEligible && !heroCandidatePlacementFilter\(data\)\) return null/);
   assert.match(migration, /when ap\.id = v_asset\.hero_placement_id then 300/);
   assert.doesNotMatch(migration, /v_relationship_hero_placement_id/);
 });
@@ -307,6 +310,33 @@ test("Canonical KAC Hero contract has one shared read and write path", () => {
   assert.doesNotMatch(migration, /update public\.attachment_placements[\s\S]{0,180}set role/);
 });
 
+test("Canonical Hero rejects old non-showcase attachment placements", () => {
+  const resolver = read("lib/assetHeroResolver.js");
+  const migration = read("supabase/migrations/20260902103000_tighten_canonical_hero_eligibility.sql");
+
+  assert.match(migration, /create or replace function public\.kac_hero_placement_is_valid/);
+  assert.match(migration, /ap\.is_showcase = true/);
+  assert.match(migration, /lower\(coalesce\(ap\.role, ''\)\) in \('hero', 'showcase', 'photo'\)/);
+  assert.match(migration, /lower\(coalesce\(ap\.role, ''\)\) = 'primary' and ap\.is_showcase = true/);
+  assert.match(migration, /create or replace function public\.resolve_asset_shared_hero_media/);
+  assert.match(migration, /when ap\.id = v_asset\.hero_placement_id then 300/);
+  assert.doesNotMatch(migration, /ap\.id = v_asset\.hero_placement_id\s+or\s+ap\.is_showcase = true/);
+
+  assert.doesNotMatch(resolver, /return role === "primary" \|\| role === "hero"/);
+  assert.match(resolver, /resolvePlacementHeroUri\(placementId, transform, expiresIn, \{\s*requireHeroEligible: true,/);
+  assert.match(resolver, /resolvePlacementHeroUri\(modelDnaHeroPlacementId\(template\), transform, expiresIn, \{\s*requireHeroEligible: true,/);
+});
+
+test("Hero write helpers invalidate cached KAC hero URLs", () => {
+  const resolver = read("lib/assetHeroResolver.js");
+  const api = read("lib/keeprspaceApi.js");
+
+  assert.match(resolver, /export function invalidateAssetHeroCache/);
+  assert.match(resolver, /heroUriByAssetCache\.delete\(assetId\)/);
+  assert.match(api, /import \{ invalidateAssetHeroCache \} from "\.\/assetHeroResolver"/);
+  assert.equal((api.match(/invalidateAssetHeroCache\(assetId\)/g) || []).length, 2);
+});
+
 test("Model and exact-build screens consume shared asset-like Hero contract", () => {
   const catalog = read("screens/ActivatorCatalogTemplateScreen.js");
   const exactBuild = read("screens/ActivatorExactBuildScreen.js");
@@ -330,6 +360,8 @@ test("Showcase and attachments only mutate explicit KAC Hero pointer", () => {
   assert.match(showcase, /setKacHero/);
   assert.match(showcase, /clearKacHero/);
   assert.doesNotMatch(showcase, /\.from\("assets"\)[\s\S]{0,120}\.update\(\{ hero_placement_id/);
+  assert.doesNotMatch(showcase, /persistLegacySetHeroOnAsset/);
+  assert.doesNotMatch(showcase, /hero_image_url: url/);
   assert.doesNotMatch(showcase, /relationship_hero_placement_id/);
   assert.doesNotMatch(showcase, /workspace Hero/);
 

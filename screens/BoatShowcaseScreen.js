@@ -181,7 +181,8 @@ function showcaseLayerSummary(photos = []) {
     .filter(Boolean);
 }
 
-// Persist legacy delete + hero for fallback items
+// Legacy URL lists may still display during transition, but KAC Hero must be an
+// attachment placement so all projections resolve the same canonical pointer.
 async function persistLegacyRemoveFromAsset(assetId, url) {
   if (!assetId || !url) return;
 
@@ -212,15 +213,6 @@ async function persistLegacyRemoveFromAsset(assetId, url) {
 
   const { error: updErr } = await supabase.from("assets").update(next).eq("id", assetId);
   if (updErr) throw updErr;
-}
-
-async function persistLegacySetHeroOnAsset(assetId, url) {
-  if (!assetId || !url) return;
-  const { error } = await supabase
-    .from("assets")
-    .update({ hero_image_url: url, hero_placement_id: null })
-    .eq("id", assetId);
-  if (error) throw error;
 }
 
 export default function BoatShowcaseScreen({ navigation, route }) {
@@ -720,24 +712,10 @@ const [showcaseLinks, setShowcaseLinks] = useState([]);
         }
       }
 
-      // Legacy fallback: persist hero_image_url (so old assets aren't “stuck”)
-      try {
-        setPhotosLoading(true);
-        await persistLegacySetHeroOnAsset(currentBoat.id, photo.url);
-
-        setHeroPlacementId(null);
-        setPhotos((prev) =>
-          (prev || []).map((p) => ({
-            ...p,
-            isHero: p.url === photo.url,
-          }))
-        );
-      } catch (e) {
-        console.error("Legacy set hero error", e);
-        Alert.alert("Could not set hero", e?.message || "Please try again.");
-      } finally {
-        setPhotosLoading(false);
-      }
+      Alert.alert(
+        "Hero needs an attachment",
+        "This image is legacy media without an attachment placement. Add it to Showcase first, then set it as Hero."
+      );
     },
     [currentBoat]
   );

@@ -41,7 +41,7 @@ import {
   createLinkAttachment,
   uploadAttachmentFromUri,
 } from "../lib/attachmentsUploader";
-import { clearKeeprSpaceAssetHero, setKeeprSpaceAssetHero } from "../lib/keeprspaceApi";
+import { clearKeeprSpaceAssetHero, setKacHero, setKeeprSpaceAssetHero } from "../lib/keeprspaceApi";
 
 import { ensureAssetMediaPlacement, getSignedUrl } from "../lib/attachmentsApi";
 import LinkCoverCard from "../components/LinkCoverCard";
@@ -2633,11 +2633,7 @@ const openAdd = () => {
         });
         setAssetHeroPlacementId(placementId);
       } else {
-        const { error } = await supabase.rpc("set_asset_hero_placement", {
-          p_asset_id: assetId,
-          p_placement_id: placementId,
-        });
-        if (error) throw error;
+        await setKacHero({ assetId, placementId });
         setAssetHeroPlacementId(placementId);
       }
       setSelected((prev) =>
