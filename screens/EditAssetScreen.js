@@ -27,6 +27,7 @@ import {
 } from "../styles/theme";
 import KeeprDateField from "../components/KeeprDateField";
 import { loadMyKeeprProsForPicker } from "../lib/kpcApi";
+import { getKeeprSpacePortfolio, updateKeeprSpaceBoatAsset } from "../lib/keeprspaceApi";
 import { formatMoneyInput, parseMoneyInput } from "../lib/money";
 
 /** ---------- Keepr input wrapper ---------- **/
@@ -100,6 +101,8 @@ function extractAssetKeeprProIds(assetRow) {
 export default function EditAssetScreen({ route, navigation }) {
   const assetId = route.params?.assetId ?? null;
   const assetTypeParam = route.params?.assetType ?? null; // "home", "vehicle", "boat", etc.
+  const routeOrganizationId = route.params?.organizationId || null;
+  const isOrgWorkspaceEdit = !!(assetId && routeOrganizationId);
 
   const { user } = useAuth();
 
@@ -108,7 +111,7 @@ export default function EditAssetScreen({ route, navigation }) {
   const [error, setError] = useState(null);
 
   // Core fields
-  const [type, setType] = useState(assetId ? "home" : assetTypeParam || "home");
+  const [type, setType] = useState(assetId ? assetTypeParam || "home" : assetTypeParam || "home");
   const [name, setName] = useState("");
   const [location, setLocation] = useState("");
   const [notes, setNotes] = useState("");
@@ -171,6 +174,97 @@ export default function EditAssetScreen({ route, navigation }) {
 
   const isTypeLocked = !!(assetTypeParam && !assetId);
   const showTypeField = !(isVehicle || isBoat || isHome);
+
+  const hydrateAssetForm = (row = {}) => {
+    // Core
+    setType(row.type || assetTypeParam || "home");
+    setName(row.name || "");
+    setLocation(row.location || "");
+    setNotes(row.notes || "");
+    setAssetMode(row.asset_mode || "personal");
+    setCommercialEntity(row.commercial_entity || "");
+
+    setPurchasePrice(row.purchase_price != null ? String(row.purchase_price) : "");
+    setEstimatedValue(row.estimated_value != null ? String(row.estimated_value) : "");
+    setPurchaseDate(row.purchase_date || "");
+
+    // Home
+    setPropertyType(row.property_type || "");
+    setYearBuilt(row.year_built != null ? String(row.year_built) : "");
+    setBeds(row.beds != null ? String(row.beds) : "");
+    setBaths(row.baths != null ? String(row.baths) : "");
+    setSquareFeet(row.square_feet != null ? String(row.square_feet) : "");
+    setLotSizeSqft(row.lot_size_sqft != null ? String(row.lot_size_sqft) : "");
+    setParcelNumber(row.parcel_number || "");
+
+    // Vehicle
+    setVehicleSubtype(row.vehicle_subtype || "");
+    setVehicleYear(row.year != null ? String(row.year) : "");
+    setVehicleMake(row.make || "");
+    setVehicleModel(row.model || "");
+    setVehicleTrim(row.trim || "");
+    setVehicleBodyStyle(row.body_style || "");
+    setVehicleEngine(row.engine || "");
+    setVehicleDrivetrain(row.drivetrain || "");
+    setVehicleTransmission(row.transmission || "");
+    setVehicleColor(row.color || "");
+    setVehicleOdometer(row.current_odometer != null ? String(row.current_odometer) : "");
+    setVehicleVin(row.vin || "");
+    setVehiclePlate(row.plate_number || "");
+
+    // Boat
+    setBoatYear(row.year != null ? String(row.year) : "");
+    setBoatMake(row.make || "");
+    setBoatModel(row.model || "");
+    setHullMaterial(row.hull_material || "");
+    setLengthFeet(row.length_feet != null ? String(row.length_feet) : "");
+    setEngineType(row.engine_type || "");
+    setEngineHours(row.engine_hours != null ? String(row.engine_hours) : "");
+    setRegistrationNumber(row.registration_number || "");
+    setAssetMetadata(row.extra_metadata || {});
+    setSelectedProIds(extractAssetKeeprProIds(row));
+  };
+
+  const workspaceAssetRowFromPortfolioItem = (item = {}) => {
+    const identity = item.identity || {};
+    const exactBuild = item.exact_build || {};
+    const asset = item.asset || {};
+    return {
+      id: item.asset_id || asset.id || assetId,
+      name: item.asset_name || asset.name || "",
+      type: item.asset_type || asset.type || "boat",
+      location:
+        asset.location ||
+        identity.location ||
+        item.dealer_relationship?.location_name ||
+        item.service_relationship?.location_name ||
+        null,
+      notes: asset.notes || exactBuild.notes || null,
+      asset_mode: asset.asset_mode || "commercial",
+      commercial_entity: asset.commercial_entity || null,
+      year: identity.year || asset.year || null,
+      make: identity.make || asset.make || null,
+      model: identity.model || asset.model || null,
+      hull_material: asset.hull_material || identity.hull_material || null,
+      length_feet: asset.length_feet || identity.length_feet || null,
+      engine_type: asset.engine_type || identity.engine_type || null,
+      engine_hours: asset.engine_hours || identity.engine_hours || null,
+      registration_number: asset.registration_number || identity.registration_number || null,
+      serial_number: identity.hin || identity.hull_number || exactBuild.hin || exactBuild.hull_number || asset.serial_number || null,
+      extra_metadata: {
+        ...(asset.extra_metadata || {}),
+        exact_build: exactBuild,
+        template: item.template || null,
+        workspace_projection: {
+          organization_id: item.organization_id || routeOrganizationId,
+          relationship_type: item.relationship_type || null,
+          access_scope: item.access_scope || null,
+          asset_relationship_id: item.asset_relationship_id || null,
+          stewardship_id: item.stewardship_id || null,
+        },
+      },
+    };
+  };
 
   // Load existing asset if editing
   useEffect(() => {
@@ -245,71 +339,23 @@ export default function EditAssetScreen({ route, navigation }) {
       }
 
       if (data) {
-        // Core
-        setType(data.type || "home");
-        setName(data.name || "");
-        setLocation(data.location || "");
-        setNotes(data.notes || "");
-        setAssetMode(data.asset_mode || "personal");
-        setCommercialEntity(data.commercial_entity || "");
-
-        setPurchasePrice(
-          data.purchase_price != null ? String(data.purchase_price) : ""
-        );
-        setEstimatedValue(
-          data.estimated_value != null ? String(data.estimated_value) : ""
-        );
-        setPurchaseDate(data.purchase_date || "");
-
-        // Home
-        setPropertyType(data.property_type || "");
-        setYearBuilt(
-          data.year_built != null ? String(data.year_built) : ""
-        );
-        setBeds(data.beds != null ? String(data.beds) : "");
-        setBaths(data.baths != null ? String(data.baths) : "");
-        setSquareFeet(
-          data.square_feet != null ? String(data.square_feet) : ""
-        );
-        setLotSizeSqft(
-          data.lot_size_sqft != null ? String(data.lot_size_sqft) : ""
-        );
-        setParcelNumber(data.parcel_number || "");
-
-        // Vehicle
-        setVehicleSubtype(data.vehicle_subtype || "");
-        setVehicleYear(data.year != null ? String(data.year) : "");
-        setVehicleMake(data.make || "");
-        setVehicleModel(data.model || "");
-        setVehicleTrim(data.trim || "");
-        setVehicleBodyStyle(data.body_style || "");
-        setVehicleEngine(data.engine || "");
-        setVehicleDrivetrain(data.drivetrain || "");
-        setVehicleTransmission(data.transmission || "");
-        setVehicleColor(data.color || "");
-        setVehicleOdometer(
-          data.current_odometer != null
-            ? String(data.current_odometer)
-            : ""
-        );
-        setVehicleVin(data.vin || "");
-        setVehiclePlate(data.plate_number || "");
-
-        // Boat
-        setBoatYear(data.year != null ? String(data.year) : "");
-        setBoatMake(data.make || "");
-        setBoatModel(data.model || "");
-        setHullMaterial(data.hull_material || "");
-        setLengthFeet(
-          data.length_feet != null ? String(data.length_feet) : ""
-        );
-        setEngineType(data.engine_type || "");
-        setEngineHours(
-          data.engine_hours != null ? String(data.engine_hours) : ""
-        );
-        setRegistrationNumber(data.registration_number || "");
-        setAssetMetadata(data.extra_metadata || {});
-        setSelectedProIds(extractAssetKeeprProIds(data));
+        hydrateAssetForm(data);
+      } else if (routeOrganizationId) {
+        try {
+          const portfolio = await getKeeprSpacePortfolio({
+            organizationId: routeOrganizationId,
+            limit: 100,
+          });
+          const item = (portfolio?.boats || []).find((boat) => String(boat?.asset_id || boat?.asset?.id) === String(assetId));
+          if (item) {
+            hydrateAssetForm(workspaceAssetRowFromPortfolioItem(item));
+          } else {
+            setError("This asset is not available to edit from this workspace.");
+          }
+        } catch (portfolioError) {
+          console.error("Error loading workspace asset", portfolioError);
+          setError(portfolioError?.message || "This asset is not available to edit from this workspace.");
+        }
       } else {
         setError("This asset is not available to edit from this account.");
       }
@@ -322,7 +368,7 @@ export default function EditAssetScreen({ route, navigation }) {
     return () => {
       isMounted = false;
     };
-  }, [assetId, assetTypeParam]);
+  }, [assetId, assetTypeParam, routeOrganizationId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -534,12 +580,24 @@ export default function EditAssetScreen({ route, navigation }) {
     try {
       let result;
       if (assetId) {
-        result = await supabase
-          .from("assets")
-          .update(payload)
-          .eq("id", assetId)
-          .select()
-          .maybeSingle();
+        if (isOrgWorkspaceEdit && isBoatType) {
+          const updated = await updateKeeprSpaceBoatAsset({
+            assetId,
+            organizationId: routeOrganizationId,
+            patch: payload,
+          });
+          result = {
+            data: updated?.asset || { id: assetId, ...payload },
+            error: null,
+          };
+        } else {
+          result = await supabase
+            .from("assets")
+            .update(payload)
+            .eq("id", assetId)
+            .select()
+            .maybeSingle();
+        }
       } else {
         result = await supabase
           .from("assets")
@@ -564,7 +622,7 @@ export default function EditAssetScreen({ route, navigation }) {
     }
 
     const syncAssetId = data?.id || assetId;
-    if (syncAssetId) {
+    if (syncAssetId && !isOrgWorkspaceEdit) {
       const { error: syncError } = await supabase.rpc("sync_asset_provider_stewardships", {
         p_asset_id: syncAssetId,
         p_keepr_pro_ids: selectedIds,

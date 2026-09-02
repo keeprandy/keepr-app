@@ -199,6 +199,19 @@ test("Personal EditAsset avoids single-row coercion failures", () => {
   assert.match(source, /Could not reach Keepr to save this asset/);
 });
 
+test("OEM workspace EditAsset loads and saves through org-authorized boat projection", () => {
+  const source = read("screens/EditAssetScreen.js");
+
+  assert.match(source, /routeOrganizationId = route\.params\?\.organizationId/);
+  assert.match(source, /isOrgWorkspaceEdit = !!\(assetId && routeOrganizationId\)/);
+  assert.match(source, /getKeeprSpacePortfolio\(\{\s*organizationId: routeOrganizationId,/);
+  assert.match(source, /workspaceAssetRowFromPortfolioItem/);
+  assert.match(source, /This asset is not available to edit from this workspace/);
+  assert.match(source, /updateKeeprSpaceBoatAsset\(\{\s*assetId,[\s\S]*organizationId: routeOrganizationId,[\s\S]*patch: payload,/);
+  assert.doesNotMatch(source, /if \(syncAssetId\) \{\s*const \{ error: syncError \} = await supabase\.rpc\("sync_asset_provider_stewardships"/);
+  assert.match(source, /if \(syncAssetId && !isOrgWorkspaceEdit\)/);
+});
+
 test("Attachment routes keep return context flat on web", () => {
   const attachments = read("screens/AssetAttachmentsScreen.js");
   const workspace = read("screens/KeeprProStewardshipViewScreen.js");
