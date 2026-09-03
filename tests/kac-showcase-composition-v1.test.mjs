@@ -219,6 +219,62 @@ test("OEM workspace EditAsset loads and saves through org-authorized boat projec
   assert.match(source, /if \(syncAssetId && !isOrgWorkspaceEdit\)/);
 });
 
+test("Template item resources are attachment-backed and Proof Builder editable", () => {
+  const itemEditor = read("screens/ActivatorTemplateItemEditorScreen.js");
+
+  assert.match(itemEditor, /RESOURCE_ROLES/);
+  assert.match(itemEditor, /listAttachmentsForTarget\("model_template", next\.template\.id\)/);
+  assert.match(itemEditor, /function modelItemResourceAiMetadata/);
+  assert.match(itemEditor, /ai_scope: "systems"/);
+  assert.match(itemEditor, /applies_to: "model_template_item"/);
+  assert.match(itemEditor, /function linkedTemplateItemIds/);
+  assert.match(itemEditor, /sourceContext\.linked_template_item_ids/);
+  assert.match(itemEditor, /aiMetadata\.linked_template_item_ids/);
+  assert.match(itemEditor, /createLinkAttachment\(\{/);
+  assert.match(itemEditor, /uploadAttachmentFromUri\(\{/);
+  assert.match(itemEditor, /target_type: "model_template"[\s\S]*target_id: detail\.template\.id/);
+  assert.match(itemEditor, /itemResourceSourceContext\(role, "oem_template_item_resource_link"\)/);
+  assert.match(itemEditor, /itemResourceSourceContext\(role, "oem_template_item_resource_upload"\)/);
+  assert.match(itemEditor, /\.update\(\{ ai_metadata: modelItemResourceAiMetadata\(role, item\) \}\)/);
+  assert.match(itemEditor, /navigation\.navigate\("ProofBuilder"[\s\S]*targetType: "model_template"[\s\S]*itemId: item\?\.id \|\| itemId/);
+  assert.match(itemEditor, /removePlacementById\(resource\.placement_id\)/);
+  assert.doesNotMatch(itemEditor, /\.from\("asset_resources"\)\s*\.insert/);
+  assert.match(itemEditor, /legacyResources\.map/);
+});
+
+test("Proof Builder loads model-template items as systems for template resources", () => {
+  const proofBuilder = read("screens/ProofBuilderScreen.js");
+
+  assert.match(proofBuilder, /routeTemplateItemId = route\?\.params\?\.itemId/);
+  assert.match(proofBuilder, /!assetId && routeTargetType === "model_template" && routeTargetId/);
+  assert.match(proofBuilder, /\.from\("asset_model_template_items"\)/);
+  assert.match(proofBuilder, /\.neq\("item_type", "section"\)/);
+  assert.match(proofBuilder, /mode: "model_template_item"/);
+  assert.match(proofBuilder, /template_item_id: item\.id/);
+  assert.match(proofBuilder, /finalSystemIds = Array\.from\(new Set\(\[\.\.\.\(finalSystemIds \|\| \[\]\), routeTemplateItemId\]\)\)/);
+  assert.match(proofBuilder, /linkedTemplateItemIds = Array\.from\(new Set\(\(selectedSystemIds \|\| \[\]\)\.filter\(Boolean\)\)\)/);
+  assert.match(proofBuilder, /applies_to_type: linkedTemplateItemIds\.length \? "model_template_item" : "model_template"/);
+  assert.match(proofBuilder, /linked_template_item_ids: linkedTemplateItemIds/);
+  assert.match(proofBuilder, /No model systems\/items found for this template/);
+});
+
+test("Exact systems inherit attachment-backed model item resources", () => {
+  const api = read("lib/attachmentsApi.js");
+
+  assert.match(api, /function attachmentLinkedTemplateItemIds/);
+  assert.match(api, /sourceContext\.linked_template_item_ids/);
+  assert.match(api, /aiMetadata\.linked_template_item_ids/);
+  assert.match(api, /function normalizeInheritedSystemAttachmentResource/);
+  assert.match(api, /provenance: "model_template_item"/);
+  assert.match(api, /not_exact_hull_evidence: true/);
+  assert.match(api, /attachment_placements"\)/);
+  assert.match(api, /\.eq\("target_type", "model_template"\)/);
+  assert.match(api, /\.in\("target_id", templateIds\)/);
+  assert.match(api, /if \(isMediaAttachment\(attachment\)\) return false/);
+  assert.match(api, /attachmentLinkedTemplateItemIds\(attachment\)/);
+  assert.match(api, /\[\.\.\.inheritedAttachmentResources, \.\.\.inheritedLegacyResources\]/);
+});
+
 test("Attachment routes keep return context flat on web", () => {
   const attachments = read("screens/AssetAttachmentsScreen.js");
   const workspace = read("screens/KeeprProStewardshipViewScreen.js");

@@ -14,9 +14,12 @@ import { useRoute } from "@react-navigation/native";
 import { useNavigation } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import * as DocumentPicker from "expo-document-picker";
 
 import ActivatorBreadcrumb from "../components/ActivatorBreadcrumb";
 import { getCatalogTemplateDetail, upsertCatalogTemplateItem } from "../lib/activatorApi";
+import { listAttachmentsForTarget, removePlacementById } from "../lib/attachmentsApi";
+import { createLinkAttachment, uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import { supabase } from "../lib/supabaseClient";
 
 const colors = {
@@ -71,6 +74,8 @@ const PROJECTION_KINDS = [
   { value: "playbook", label: "Playbook/Action" },
   { value: "none", label: "Do Not Project" },
 ];
+
+const RESOURCE_ROLES = ["Manual", "Warranty", "Spec Sheet", "Install Guide", "Other"];
 
 function activeItems(items = []) {
   return items.filter((item) => item.authority_state !== "retired" && item.metadata?.retired !== true);
@@ -154,14 +159,54 @@ function defaultProjectionKind(item, isGroup) {
 }
 
 function resourceUrl(resource) {
-  return resource?.url || resource?.source_url || resource?.metadata?.url || resource?.metadata?.source_url || null;
+  return resource?.url || resource?.source_url || resource?.attachment_url || resource?.metadata?.url || resource?.metadata?.source_url || null;
 }
 
 function linkedTemplateItemIds(resource) {
   const metadata = resource?.metadata && typeof resource.metadata === "object" ? resource.metadata : {};
-  const ids = metadata.linked_template_item_ids || metadata.template_item_ids || [];
-  const single = metadata.template_item_id || metadata.linked_template_item_id;
-  return Array.from(new Set([...(Array.isArray(ids) ? ids : []), single].filter(Boolean)));
+  const sourceContext = resource?.source_context && typeof resource.source_context === "object" ? resource.source_context : {};
+  const aiMetadata = resource?.ai_metadata && typeof resource.ai_metadata === "object" ? resource.ai_metadata : {};
+  const ids = [
+    ...(Array.isArray(metadata.linked_template_item_ids) ? metadata.linked_template_item_ids : []),
+    ...(Array.isArray(metadata.template_item_ids) ? metadata.template_item_ids : []),
+    ...(Array.isArray(sourceContext.linked_template_item_ids) ? sourceContext.linked_template_item_ids : []),
+    ...(Array.isArray(sourceContext.template_item_ids) ? sourceContext.template_item_ids : []),
+    ...(Array.isArray(aiMetadata.linked_template_item_ids) ? aiMetadata.linked_template_item_ids : []),
+    ...(Array.isArray(aiMetadata.template_item_ids) ? aiMetadata.template_item_ids : []),
+  ];
+  const singles = [
+    metadata.template_item_id,
+    metadata.linked_template_item_id,
+    sourceContext.template_item_id,
+    sourceContext.linked_template_item_id,
+    aiMetadata.template_item_id,
+    aiMetadata.linked_template_item_id,
+  ];
+  return Array.from(new Set([...ids, ...singles].filter(Boolean)));
+}
+
+function normalizeResourceRole(role) {
+  const raw = String(role || "").trim();
+  const lower = raw.toLowerCase().replace(/[_-]+/g, " ");
+  if (["manual", "owner manual", "owners manual", "owner's manual"].includes(lower)) return "Manual";
+  if (lower === "warranty") return "Warranty";
+  if (["spec sheet", "specification", "specifications"].includes(lower)) return "Spec Sheet";
+  if (["install guide", "installation guide"].includes(lower)) return "Install Guide";
+  return RESOURCE_ROLES.includes(raw) ? raw : "Other";
+}
+
+function modelItemResourceAiMetadata(role, item) {
+  const normalizedRole = normalizeResourceRole(role);
+  return {
+    role: normalizedRole,
+    authority: "official",
+    privacy: "moves_with_asset",
+    ai_scope: "systems",
+    ai_context: ["Manual", "Warranty", "Spec Sheet"].includes(normalizedRole) ? "primary" : "supporting",
+    applies_to: "model_template_item",
+    template_item_id: item?.id || null,
+    linked_template_item_ids: item?.id ? [item.id] : [],
+  };
 }
 
 function parseRapidChildLine(line) {
@@ -266,6 +311,8 @@ export default function ActivatorTemplateItemEditorScreen() {
   const [requirementsText, setRequirementsText] = useState("");
   const [resourceTitle, setResourceTitle] = useState("");
   const [resourceUrlText, setResourceUrlText] = useState("");
+  const [resourceRole, setResourceRole] = useState("Manual");
+  const [templateItemAttachments, setTemplateItemAttachments] = useState([]);
   const [savingResource, setSavingResource] = useState(false);
   const [rapidChildLines, setRapidChildLines] = useState("");
   const [rapidChildKind, setRapidChildKind] = useState("configuration_item");
@@ -280,8 +327,15 @@ export default function ActivatorTemplateItemEditorScreen() {
     try {
       const next = await getCatalogTemplateDetail({ templateKey });
       setDetail(next);
+      if (next?.template?.id) {
+        const placements = await listAttachmentsForTarget("model_template", next.template.id);
+        setTemplateItemAttachments(placements || []);
+      } else {
+        setTemplateItemAttachments([]);
+      }
     } catch (err) {
       setError(err?.message || "Could not load template item.");
+      setTemplateItemAttachments([]);
     } finally {
       setLoading(false);
     }
@@ -300,7 +354,19 @@ export default function ActivatorTemplateItemEditorScreen() {
     () => items.filter((candidate) => candidate.item_type === "configuration_group" && candidate.id !== itemId),
     [itemId, items]
   );
-  const resources = detail?.resources || [];
+  const legacyResources = detail?.resources || [];
+  const attachmentResources = useMemo(
+    () => (templateItemAttachments || []).filter((resource) => linkedTemplateItemIds(resource).includes(itemId)),
+    [itemId, templateItemAttachments]
+  );
+  const resources = useMemo(() => {
+    const byKey = new Map();
+    [...attachmentResources, ...legacyResources].forEach((resource) => {
+      const key = resource?.attachment_id || resource?.id || resource?.url || resource?.source_url;
+      if (key && !byKey.has(key)) byKey.set(key, resource);
+    });
+    return Array.from(byKey.values());
+  }, [attachmentResources, legacyResources]);
   const linkedResources = useMemo(
     () => resources.filter((resource) => linkedTemplateItemIds(resource).includes(itemId) || resource.id === selectedResourceId),
     [itemId, resources, selectedResourceId]
@@ -480,6 +546,34 @@ export default function ActivatorTemplateItemEditorScreen() {
     return userId;
   }, [detail?.template?.id]);
 
+  const itemResourceSourceContext = useCallback((role, contributionContext) => {
+    const normalizedRole = normalizeResourceRole(role);
+    const template = detail?.template || {};
+    return {
+      provenance: "model_template_item",
+      provenance_label: `${template.manufacturer || "OEM"} ${normalizedRole}`,
+      provenance_detail: "Reusable system/item knowledge attached to model DNA; exact KAC systems inherit this context without copying it.",
+      contribution_context: contributionContext,
+      contributor_role: "oem",
+      contributed_by_org_role: "oem",
+      organization_id: organizationId || template.organization_id || null,
+      contributed_by_org_id: organizationId || template.organization_id || null,
+      contributed_by_org_label: template.manufacturer || "OEM",
+      provided_by_label: template.manufacturer || "OEM",
+      authored_by_label: template.manufacturer || "OEM",
+      source_name: `${template.manufacturer || "OEM"} ${item?.label || "model item"}`.trim(),
+      template_id: template.id,
+      template_key: template.template_key || templateKey,
+      template_item_id: item?.id || null,
+      template_item_label: item?.label || null,
+      linked_template_item_ids: item?.id ? [item.id] : [],
+      applies_to_type: "model_template_item",
+      applies_to_id: item?.id || null,
+      role: normalizedRole,
+      not_exact_hull_evidence: true,
+    };
+  }, [detail?.template, item?.id, item?.label, organizationId, templateKey]);
+
   const addLinkedResource = useCallback(async () => {
     if (!item || !detail?.template?.id) return;
     const url = resourceUrlText.trim();
@@ -494,43 +588,136 @@ export default function ActivatorTemplateItemEditorScreen() {
     try {
       const userId = await getTemplateEditorUserId();
       const normalizedUrl = url && !/^https?:\/\//i.test(url) ? `https://${url}` : url || null;
-      const { error: insertError } = await supabase
-        .from("asset_resources")
-        .insert({
-          resource_type: "manual",
-          title: titleValue,
-          url: normalizedUrl,
-          source_name: detail.template.manufacturer || "OEM",
-          source_platform: "Keepr model resource",
+      if (!normalizedUrl) throw new Error("Add a resource URL.");
+      const role = normalizeResourceRole(resourceRole);
+      const created = await createLinkAttachment({
+        userId,
+        assetId: null,
+        url: normalizedUrl,
+        title: titleValue,
+        notes: `${role} for ${item.label}`,
+        sourceContext: {
+          ...itemResourceSourceContext(role, "oem_template_item_resource_link"),
           source_url: normalizedUrl,
-          authority_state: "oem_published",
-          rights_status: "review_permission",
-          applies_to_type: "template",
-          applies_to_id: detail.template.id,
-          created_by: userId,
-          metadata: {
-            resource_scope: "template_item",
-            template_item_id: item.id,
-            linked_template_item_ids: [item.id],
-            template_id: detail.template.id,
-            template_key: detail.template.template_key || templateKey,
-            reusable_model_knowledge: true,
-            not_exact_hull_evidence: true,
-            provenance_label: "Reusable model resource",
-            provenance_detail: "Attached to a model definition; exact boats inherit the reference without copying the file.",
+        },
+        placements: [
+          {
+            target_type: "model_template",
+            target_id: detail.template.id,
+            role,
+            label: titleValue,
+            is_showcase: false,
           },
-        });
-      if (insertError) throw insertError;
+        ],
+      });
+      if (created?.attachment?.id) {
+        await supabase
+          .from("attachments")
+          .update({ ai_metadata: modelItemResourceAiMetadata(role, item) })
+          .eq("id", created.attachment.id);
+      }
       setResourceTitle("");
       setResourceUrlText("");
-      setNotice("Resource linked to this model definition.");
+      setNotice("Attachment-backed resource linked to this model definition.");
       await load();
     } catch (err) {
       setError(err?.message || "Could not add this model resource.");
     } finally {
       setSavingResource(false);
     }
-  }, [detail?.template, getTemplateEditorUserId, item, load, resourceTitle, resourceUrlText, templateKey]);
+  }, [detail?.template, getTemplateEditorUserId, item, itemResourceSourceContext, load, resourceRole, resourceTitle, resourceUrlText]);
+
+  const uploadLinkedResourceFile = useCallback(async () => {
+    if (!item || !detail?.template?.id) return;
+    setSavingResource(true);
+    setError("");
+    setNotice("");
+    try {
+      const userId = await getTemplateEditorUserId();
+      const result = await DocumentPicker.getDocumentAsync({
+        type: "*/*",
+        multiple: false,
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled) return;
+      const picked = result.assets?.[0];
+      if (!picked?.uri) return;
+      const role = normalizeResourceRole(resourceRole);
+      const titleValue = resourceTitle.trim() || picked.name || `${role} for ${item.label}`;
+      const created = await uploadAttachmentFromUri({
+        userId,
+        assetId: null,
+        kind: "file",
+        fileUri: picked.uri,
+        fileName: picked.name || titleValue,
+        mimeType: picked.mimeType || "application/octet-stream",
+        sizeBytes: picked.size || null,
+        title: titleValue,
+        notes: `${role} for ${item.label}`,
+        sourceContext: itemResourceSourceContext(role, "oem_template_item_resource_upload"),
+        placements: [
+          {
+            target_type: "model_template",
+            target_id: detail.template.id,
+            role,
+            label: titleValue,
+            is_showcase: false,
+          },
+        ],
+      });
+      if (created?.attachment?.id) {
+        await supabase
+          .from("attachments")
+          .update({ ai_metadata: modelItemResourceAiMetadata(role, item) })
+          .eq("id", created.attachment.id);
+      }
+      setResourceTitle("");
+      setResourceUrlText("");
+      setNotice("Attachment-backed resource uploaded to this model definition.");
+      await load();
+    } catch (err) {
+      setError(err?.message || "Could not upload this model resource.");
+    } finally {
+      setSavingResource(false);
+    }
+  }, [detail?.template?.id, getTemplateEditorUserId, item, itemResourceSourceContext, load, resourceRole, resourceTitle]);
+
+  const openResourceProofBuilder = useCallback((resource) => {
+    const attachmentId = resource?.attachment_id || resource?.id;
+    if (!attachmentId || !resource?.placement_id || !detail?.template?.id) {
+      Alert.alert("Proof Builder", "Only attachment-backed system/item resources can be edited in Proof Builder.");
+      return;
+    }
+    navigation.navigate("ProofBuilder", {
+      attachmentId,
+      role: normalizeResourceRole(resource.role || resource.ai_metadata?.role),
+      targetType: "model_template",
+      targetId: detail.template.id,
+      assetName: `${detail.template.manufacturer || "OEM"} ${detail.template.model || "model"}`.trim(),
+      returnRoute: "ActivatorTemplateItemEditor",
+      templateKey: detail.template.template_key || templateKey,
+      itemId: item?.id || itemId,
+      organizationId,
+      workspaceId,
+    });
+  }, [detail?.template, item?.id, itemId, navigation, organizationId, templateKey, workspaceId]);
+
+  const removeLinkedResourcePlacement = useCallback(async (resource) => {
+    if (!resource?.placement_id) return;
+    setSavingResource(true);
+    setError("");
+    setNotice("");
+    try {
+      await getTemplateEditorUserId();
+      await removePlacementById(resource.placement_id);
+      setNotice("Resource removed from this model definition.");
+      await load();
+    } catch (err) {
+      setError(err?.message || "Could not remove this model resource.");
+    } finally {
+      setSavingResource(false);
+    }
+  }, [getTemplateEditorUserId, load]);
 
   const addRapidChildren = useCallback(async () => {
     if (!isGroup || !item || !detail?.template?.id) return;
@@ -785,7 +972,7 @@ export default function ActivatorTemplateItemEditorScreen() {
               <Text style={styles.label}>Source/resource reference</Text>
               <View style={styles.choiceWrap}>
                 <ButtonChoice label="No Source" active={!rapidChildSourceId} onPress={() => setRapidChildSourceId("")} />
-                {resources.map((resource) => (
+                {legacyResources.map((resource) => (
                   <ButtonChoice
                     key={resource.id}
                     label={resource.title || resource.url || "Resource"}
@@ -849,36 +1036,68 @@ export default function ActivatorTemplateItemEditorScreen() {
             {linkedResources.length ? (
               <View style={styles.linkedResourceList}>
                 {linkedResources.map((resource) => (
-                  <TouchableOpacity
-                    key={resource.id}
-                    style={styles.linkedResourceRow}
-                    activeOpacity={resourceUrl(resource) ? 0.86 : 1}
-                    onPress={() => {
-                      const url = resourceUrl(resource);
-                      if (url) Linking.openURL(url);
-                    }}
-                  >
-                    <Ionicons name="document-text-outline" size={18} color={colors.blue} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.childTitle}>{resource.title || "Reusable resource"}</Text>
-                      <Text style={styles.childMeta}>Inherited model knowledge - not exact-hull evidence</Text>
-                    </View>
-                  </TouchableOpacity>
+                  <View key={resource.placement_id || resource.id} style={styles.linkedResourceRow}>
+                    <TouchableOpacity
+                      style={styles.linkedResourceMain}
+                      activeOpacity={resourceUrl(resource) ? 0.86 : 1}
+                      onPress={() => {
+                        const url = resourceUrl(resource);
+                        if (url) Linking.openURL(url);
+                      }}
+                    >
+                      <Ionicons name="document-text-outline" size={18} color={colors.blue} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.childTitle}>{resource.title || "Reusable resource"}</Text>
+                        <Text style={styles.childMeta}>
+                          {resource.placement_id ? "Attachment-backed model item resource" : "Legacy model resource"} - inherited by matching exact KAC systems
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                    {resource.placement_id ? (
+                      <View style={styles.resourceActions}>
+                        <TouchableOpacity style={styles.tinyButton} onPress={() => openResourceProofBuilder(resource)}>
+                          <Ionicons name="document-text-outline" size={14} color={colors.blue} />
+                          <Text style={styles.tinyButtonText}>Proof</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.tinyButton} onPress={() => removeLinkedResourcePlacement(resource)}>
+                          <Ionicons name="remove-circle-outline" size={14} color="#dc2626" />
+                          <Text style={[styles.tinyButtonText, styles.dangerText]}>Remove</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : null}
+                  </View>
                 ))}
               </View>
             ) : (
               <Text style={styles.helpText}>No reusable resources are linked to this definition yet.</Text>
             )}
+            <Text style={styles.label}>Resource role</Text>
+            <View style={styles.choiceWrap}>
+              {RESOURCE_ROLES.map((candidate) => (
+                <ButtonChoice
+                  key={candidate}
+                  label={candidate}
+                  active={resourceRole === candidate}
+                  onPress={() => setResourceRole(candidate)}
+                />
+              ))}
+            </View>
             <Field label="Add resource title" value={resourceTitle} onChangeText={setResourceTitle} placeholder="e.g., Mercury V12 600 owner's manual" />
             <Field label="Add resource URL" value={resourceUrlText} onChangeText={setResourceUrlText} placeholder="https://..." />
-            <TouchableOpacity style={[styles.secondaryButton, savingResource && styles.disabledButton]} onPress={addLinkedResource} disabled={savingResource}>
-              <Ionicons name="link-outline" size={17} color={colors.blue} />
-              <Text style={styles.secondaryButtonText}>{savingResource ? "Saving..." : "Add reusable resource"}</Text>
-            </TouchableOpacity>
+            <View style={styles.buttonRow}>
+              <TouchableOpacity style={[styles.secondaryButton, savingResource && styles.disabledButton]} onPress={addLinkedResource} disabled={savingResource}>
+                <Ionicons name="link-outline" size={17} color={colors.blue} />
+                <Text style={styles.secondaryButtonText}>{savingResource ? "Saving..." : "Add resource link"}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.secondaryButton, savingResource && styles.disabledButton]} onPress={uploadLinkedResourceFile} disabled={savingResource}>
+                <Ionicons name="cloud-upload-outline" size={17} color={colors.blue} />
+                <Text style={styles.secondaryButtonText}>{savingResource ? "Saving..." : "Add resource file"}</Text>
+              </TouchableOpacity>
+            </View>
             <Text style={styles.label}>Source/resource reference</Text>
             <View style={styles.choiceWrap}>
               <ButtonChoice label="No Source" active={!selectedResourceId} onPress={() => setSelectedResourceId("")} />
-              {resources.map((resource) => (
+              {legacyResources.map((resource) => (
                 <ButtonChoice
                   key={resource.id}
                   label={resource.title || resource.url || "Resource"}
@@ -927,7 +1146,7 @@ export default function ActivatorTemplateItemEditorScreen() {
                 <Text style={styles.label}>Source/resource reference</Text>
                 <View style={styles.choiceWrap}>
                   <ButtonChoice label="No Source" active={!selectedResourceId} onPress={() => setSelectedResourceId("")} />
-                  {resources.map((resource) => (
+                  {legacyResources.map((resource) => (
                     <ButtonChoice
                       key={resource.id}
                       label={resource.title || resource.url || "Resource"}
@@ -1009,7 +1228,13 @@ const styles = StyleSheet.create({
   childCode: { color: colors.ink, fontWeight: "900", fontSize: 13 },
   childCodeLabel: { color: colors.muted, fontWeight: "900", fontSize: 10, textTransform: "uppercase", marginTop: 4 },
   linkedResourceList: { gap: 8 },
-  linkedResourceRow: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 12, backgroundColor: "#fbfdff" },
+  linkedResourceRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 12, backgroundColor: "#fbfdff" },
+  linkedResourceMain: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10 },
+  resourceActions: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  tinyButton: { minHeight: 30, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 5, backgroundColor: "#fff" },
+  tinyButtonText: { color: colors.blue, fontWeight: "900", fontSize: 12 },
+  buttonRow: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  dangerText: { color: "#dc2626" },
   childTitle: { color: colors.ink, fontWeight: "900", fontSize: 16 },
   childMeta: { color: colors.muted, fontWeight: "700", marginTop: 4 },
   openText: { color: colors.blue, fontWeight: "900" },

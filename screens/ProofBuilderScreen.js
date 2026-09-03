@@ -246,6 +246,7 @@ export default function ProofBuilderScreen({ route, navigation }) {
   const attachmentId = route?.params?.attachmentId || null;
   const routeTargetType = route?.params?.targetType || null;
   const routeTargetId = route?.params?.targetId || null;
+  const routeTemplateItemId = route?.params?.itemId || route?.params?.templateItemId || null;
   const returnRoute = route?.params?.returnRoute || null;
   const returnParams = useMemo(() => {
     if (route?.params?.returnParams && typeof route.params.returnParams === "object") {
@@ -403,6 +404,35 @@ export default function ProofBuilderScreen({ route, navigation }) {
   }, [attachmentId]);
 
   const fetchSystems = useCallback(async () => {
+    if (!assetId && routeTargetType === "model_template" && routeTargetId) {
+      setSystemsLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from("asset_model_template_items")
+          .select("id,label,item_type,canonical_key,metadata,applicability")
+          .eq("template_id", routeTargetId)
+          .neq("item_type", "section")
+          .order("sort_order", { ascending: true })
+          .limit(300);
+
+        if (error) return [];
+        return (data || []).map((item) => ({
+          id: item.id,
+          name: item.label || item.canonical_key || "Model item",
+          mode: "model_template_item",
+          system_type: item.item_type,
+          metadata: {
+            ...(item.metadata || {}),
+            template_item_id: item.id,
+            template_item_label: item.label || null,
+            template_item_type: item.item_type || null,
+          },
+        }));
+      } finally {
+        setSystemsLoading(false);
+      }
+    }
+
     if (!assetId) return [];
     setSystemsLoading(true);
     try {
@@ -418,7 +448,7 @@ export default function ProofBuilderScreen({ route, navigation }) {
     } finally {
       setSystemsLoading(false);
     }
-  }, [assetId]);
+  }, [assetId, routeTargetId, routeTargetType]);
 
 
   const loadWarrantyObject = useCallback(
@@ -684,6 +714,9 @@ if (__DEV__) {
       if (routeTargetType === "system" && routeTargetId) {
         finalSystemIds = Array.from(new Set([...(finalSystemIds || []), routeTargetId]));
       }
+      if (routeTargetType === "model_template" && routeTemplateItemId) {
+        finalSystemIds = Array.from(new Set([...(finalSystemIds || []), routeTemplateItemId]));
+      }
       if (wObj?.id) {
         const linked = await fetchWarrantyLinkedSystemIds(wObj.id);
         finalSystemIds = Array.from(new Set([...(finalSystemIds || []), ...(linked || [])]));
@@ -723,6 +756,7 @@ setWExpires(isoToMDY(safeStr(d.end_date || d.expiration_date)));
   loadWarrantyObject,
   resolveOrgId,
   route?.params?.role,
+  routeTemplateItemId,
   routeTargetId,
   routeTargetType,
 ]);
@@ -860,6 +894,13 @@ setWExpires(isoToMDY(safeStr(d.end_date || d.expiration_date)));
       if (!attachmentId) return;
 
       if (!assetId && routeTargetType === "model_template" && routeTargetId) {
+        const linkedTemplateItemIds = Array.from(new Set((selectedSystemIds || []).filter(Boolean)));
+        const currentSourceContext = attachment?.source_context && typeof attachment.source_context === "object"
+          ? attachment.source_context
+          : {};
+        const currentAiMetadata = attachment?.ai_metadata && typeof attachment.ai_metadata === "object"
+          ? attachment.ai_metadata
+          : {};
         const { error: updateErr } = await supabase
           .from("attachment_placements")
           .update({ role: roleValue || "Other" })
@@ -867,6 +908,36 @@ setWExpires(isoToMDY(safeStr(d.end_date || d.expiration_date)));
           .eq("target_type", "model_template")
           .eq("target_id", routeTargetId);
         if (updateErr) throw new Error(updateErr.message || "Failed to save model resource role");
+
+        const { error: attachmentErr } = await supabase
+          .from("attachments")
+          .update({
+            source_context: {
+              ...currentSourceContext,
+              applies_to_type: linkedTemplateItemIds.length ? "model_template_item" : "model_template",
+              applies_to_id: linkedTemplateItemIds[0] || routeTargetId,
+              template_id: routeTargetId,
+              template_item_id: linkedTemplateItemIds[0] || currentSourceContext.template_item_id || null,
+              linked_template_item_ids: linkedTemplateItemIds,
+              provenance: linkedTemplateItemIds.length ? "model_template_item" : "model_template",
+              not_exact_hull_evidence: true,
+            },
+            ai_metadata: {
+              ...currentAiMetadata,
+              role: roleValue || "Other",
+              privacy,
+              ai_context: normalizeAIContext(aiContext),
+              ai_scope: linkedTemplateItemIds.length
+                ? AI_CONTEXT_SCOPE_VALUES.SYSTEMS
+                : normalizeAIContextScope(aiScope),
+              applies_to: linkedTemplateItemIds.length ? "model_template_item" : "model_template",
+              template_id: routeTargetId,
+              template_item_id: linkedTemplateItemIds[0] || currentAiMetadata.template_item_id || null,
+              linked_template_item_ids: linkedTemplateItemIds,
+            },
+          })
+          .eq("id", attachmentId);
+        if (attachmentErr) throw new Error(attachmentErr.message || "Failed to save model item context");
         return;
       }
 
@@ -906,7 +977,7 @@ setWExpires(isoToMDY(safeStr(d.end_date || d.expiration_date)));
         if (insErr) throw new Error(insErr.message || "Failed to save system links");
       }
     },
-    [attachmentId, assetId, roleValue, routeTargetId, routeTargetType, selectedSystemIds]
+    [attachment, attachmentId, aiContext, aiScope, assetId, privacy, roleValue, routeTargetId, routeTargetType, selectedSystemIds]
   );
 
   const upsertWarrantyObject = useCallback(
@@ -1684,23 +1755,29 @@ const androidPdfViewerUrl =
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>Systems</Text>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              {assetId ? (
               <TouchableOpacity style={styles.smallBtn} onPress={() => setAddSystemOpen(true)}>
                 <Ionicons name="add" size={16} color={colors.textPrimary} />
                 <Text style={styles.smallBtnText}>Quick add</Text>
               </TouchableOpacity>
+              ) : null}
               <Text style={styles.sectionCounter}>{systems.length}</Text>
             </View>
           </View>
 
           <Text style={styles.helperText}>
-            Select the systems this attachment should be associated with.
+            {routeTargetType === "model_template"
+              ? "Select the model systems/items this resource applies to. Exact KAC systems inherit this context through the published template."
+              : "Select the systems this attachment should be associated with."}
             {isWarranty ? " In Warranty mode, these also become the Warranty’s covered systems." : ""}
           </Text>
 
           {systemsLoading ? (
             <Text style={styles.mutedText}>Loading systems…</Text>
           ) : systems.length === 0 ? (
-            <Text style={styles.mutedText}>No systems found for this asset.</Text>
+            <Text style={styles.mutedText}>
+              {routeTargetType === "model_template" ? "No model systems/items found for this template." : "No systems found for this asset."}
+            </Text>
           ) : (
             <View style={styles.systemList}>
               {systems.map((s) => {
