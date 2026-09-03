@@ -97,6 +97,10 @@ test("Model resources are attachment-backed and inherit to KACs", () => {
   assert.match(catalog, /function normalizeModelResourceRole/);
   assert.match(catalog, /ai_context: \["Manual", "Warranty", "Spec Sheet"\]\.includes/);
   assert.match(catalog, /hydrateTemplateAttachmentResources/);
+  assert.match(catalog, /function isModelKnowledgeResource/);
+  assert.match(catalog, /\.filter\(isModelKnowledgeResource\)/);
+  assert.match(catalog, /onRemoveResourcePlacement/);
+  assert.match(catalog, /const removeTemplateResourcePlacement = async/);
   assert.match(catalog, /createLinkAttachment/);
   assert.match(catalog, /uploadTemplateResourceFile/);
   assert.match(catalog, /target_type: "model_template"[\s\S]*role,/);
@@ -104,6 +108,7 @@ test("Model resources are attachment-backed and inherit to KACs", () => {
   assert.match(catalog, /provided_by_label/);
   assert.match(catalog, /authored_by_label/);
   assert.doesNotMatch(catalog, /\.from\("asset_resources"\)\s*\.insert/);
+  assert.doesNotMatch(catalog, /\(modelProjection\.resources \|\| \[\]\)\]\.forEach/);
   assert.match(api, /normalizeTemplateAttachmentPlacement/);
   assert.match(api, /is_inherited_model_attachment: true/);
   assert.match(api, /listAssetAIContextSources[\s\S]*includeInheritedModelAttachments: true/);

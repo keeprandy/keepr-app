@@ -613,6 +613,14 @@ function resourceTypeForRow(resource = {}) {
   return resource.role || resource.ai_metadata?.role || "resource";
 }
 
+function isModelKnowledgeResource(resource = {}) {
+  const type = String(resourceTypeForRow(resource) || "").toLowerCase();
+  const kind = String(resource.kind || "").toLowerCase();
+  const mime = String(resource.mime_type || "").toLowerCase();
+  if (kind === "photo" || mime.startsWith("image/")) return false;
+  return !["photo", "image", "gallery", "showcase", "hero", "model_media"].includes(type);
+}
+
 function resourceProvenanceText(resource = {}) {
   const sourceContext = resource.source_context && typeof resource.source_context === "object"
     ? resource.source_context
@@ -636,6 +644,7 @@ function ResourcePanel({
   onResourceRoleChange,
   onChangeResourceRole,
   onOpenProofBuilder,
+  onRemoveResourcePlacement,
   addingResource = false,
 }) {
   const visible = resources.slice(0, 4);
@@ -703,6 +712,19 @@ function ResourcePanel({
                       </TouchableOpacity>
                     ) : null}
                     {url ? <Ionicons name="open-outline" size={15} color={colors.textMuted} /> : null}
+                    {canManage && onRemoveResourcePlacement && resource.placement_id ? (
+                      <TouchableOpacity
+                        activeOpacity={0.86}
+                        style={styles.resourceSmallButton}
+                        onPress={(event) => {
+                          event?.stopPropagation?.();
+                          onRemoveResourcePlacement(resource);
+                        }}
+                      >
+                        <Ionicons name="remove-circle-outline" size={13} color={colors.danger} />
+                        <Text style={[styles.resourceSmallButtonText, styles.resourceDangerText]}>Remove</Text>
+                      </TouchableOpacity>
+                    ) : null}
                   </View>
                 </TouchableOpacity>
                 {isEditingRole ? (
@@ -1235,7 +1257,10 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
   const items = modelProjection.items || [];
   const resources = useMemo(() => {
     const byId = new Map();
-    [...(templateAttachmentResources || []), ...(modelProjection.resources || [])].forEach((resource) => {
+    [
+      ...(templateAttachmentResources || []),
+      ...((modelProjection.resources || []).filter(isModelKnowledgeResource)),
+    ].forEach((resource) => {
       const key = resource?.attachment_id || resource?.resource_id || resource?.id || resource?.url;
       if (key && !byId.has(key)) byId.set(key, resource);
     });
@@ -1764,6 +1789,21 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
     }
   };
 
+  const removeTemplateResourcePlacement = async (resource) => {
+    setAddingResource(true);
+    try {
+      if (!template?.id) throw new Error("Template is not loaded yet.");
+      if (!resource?.placement_id) throw new Error("This model resource is not backed by an editable model placement.");
+      await getTemplateMediaUserId();
+      await removePlacementById(resource.placement_id);
+      await load({ quiet: true });
+    } catch (err) {
+      Alert.alert("Could not remove resource", err?.message || "The model resource placement could not be removed.");
+    } finally {
+      setAddingResource(false);
+    }
+  };
+
   const openTemplateResourceProofBuilder = (resource) => {
     const attachmentId = resource?.attachment_id || resource?.id;
     if (!attachmentId || !template?.id) {
@@ -2000,6 +2040,7 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
                   onResourceRoleChange={setResourceRole}
                   onChangeResourceRole={changeTemplateResourceRole}
                   onOpenProofBuilder={openTemplateResourceProofBuilder}
+                  onRemoveResourcePlacement={removeTemplateResourcePlacement}
                   addingResource={addingResource}
                 />
               ) : null}
@@ -2511,6 +2552,9 @@ const styles = StyleSheet.create({
     color: colors.brandNavy,
     fontSize: 11,
     fontWeight: "900",
+  },
+  resourceDangerText: {
+    color: colors.danger,
   },
   resourceInlineRoles: {
     borderTopColor: colors.border,
