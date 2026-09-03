@@ -99,6 +99,51 @@ test("KF018 exact-build screen keeps the factory mapping UI without local Tiara 
   assert.doesNotMatch(source, /templateKey = route\?\.params\?\.templateKey \|\| "tiara-2027-39-ls"/);
 });
 
+test("model template projection shows top-level reusable systems as Systems catalog DNA", async () => {
+  const { projectModelTemplateDetail } = await import("../lib/modelTemplateProjection.js");
+  const detail = {
+    template: {
+      id: "template-56ls",
+      template_key: "tiara-2027-56-ls",
+      manufacturer: "Tiara Yachts",
+      model: "56 LS",
+      model_year: 2027,
+    },
+    items: [
+      {
+        id: "generator-system",
+        item_type: "system",
+        label: "Onan 13.5kW Generator",
+        canonical_key: "system.generator.onan_13_5kw",
+        sort_order: 10,
+        authority_state: "active",
+        expected_value: { system_category: "Electrical", quantity: 1 },
+        applicability: { standard_state: "standard", mapping_status: "mapped" },
+        metadata: { projection: { kind: "system", name: "Onan 13.5kW Generator" } },
+      },
+      {
+        id: "macerator-system",
+        item_type: "system",
+        label: "Head Macerator System",
+        canonical_key: "system.sanitation.head_macerator",
+        sort_order: 20,
+        authority_state: "active",
+        expected_value: { system_category: "Waste / Sanitation", quantity: 1 },
+        applicability: { standard_state: "standard", mapping_status: "mapped" },
+        metadata: { projection: { kind: "system", name: "Head Macerator System" } },
+      },
+    ],
+    resources: [],
+  };
+
+  const projection = projectModelTemplateDetail(detail);
+  const systemsGroup = projection.catalog.chaptersByKey.systems.find((group) => group.section.id === "projection-reusable-systems");
+
+  assert.ok(systemsGroup, "top-level reusable systems should render under the Systems tab");
+  assert.deepEqual(systemsGroup.children.map((item) => item.label), ["Onan 13.5kW Generator", "Head Macerator System"]);
+  assert.deepEqual(projection.reusableSystems.map((item) => item.label), ["Onan 13.5kW Generator", "Head Macerator System"]);
+});
+
 test("KF018 fleet routing consumes generic exact-build metadata without local runtime projection", () => {
   const source = read("screens/ActivatorHomeScreen.js");
   const fleetSource = read("screens/KeeprSpaceFleetScreen.js");
