@@ -445,3 +445,15 @@ test("Exact build screen does not use Tiara starter options for non-Tiara templa
   assert.match(source, /const draftTemplate = draftWorkspace\?\.template \|\| null/);
   assert.match(source, /const template = modelProjection\.template \|\| draftTemplate \|\| \{\}/);
 });
+
+test("System-scoped attachment context survives into Proof Builder", () => {
+  const attachments = read("screens/AssetAttachmentsScreen.js");
+  const proofBuilder = read("screens/ProofBuilderScreen.js");
+
+  assert.match(attachments, /targetType: effectiveScopeType \|\| fromTargetType \|\| undefined/);
+  assert.match(attachments, /targetId: effectiveScopeId \|\| fromTargetId \|\| undefined/);
+  assert.match(attachments, /targetRole: fromTargetRole \|\| row\.role \|\| undefined/);
+  assert.match(proofBuilder, /route-scoped system context/);
+  assert.match(proofBuilder, /routeTargetType === "system" && routeTargetId/);
+  assert.match(proofBuilder, /new Set\(\[\.\.\.\(finalSystemIds \|\| \[\]\), routeTargetId\]\)/);
+});

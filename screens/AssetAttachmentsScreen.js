@@ -2698,10 +2698,18 @@ const openAdd = () => {
       teamMemberType,
       systemsRole,
       parentRoute,
+      targetType: effectiveScopeType || fromTargetType || undefined,
+      targetId: effectiveScopeId || fromTargetId || undefined,
+      targetRole: fromTargetRole || row.role || undefined,
     });
   }, [
     assetId,
     assetName,
+    effectiveScopeId,
+    effectiveScopeType,
+    fromTargetId,
+    fromTargetRole,
+    fromTargetType,
     kac,
     navigation,
     organizationId,

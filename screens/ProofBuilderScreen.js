@@ -678,7 +678,12 @@ if (__DEV__) {
       const wObj = await loadWarrantyObject();
 
       // If a Warranty object exists, prefer its covered systems (object_links), and merge with placements.
+      // Also preserve route-scoped system context from Attachments so a contextual edit
+      // lands on the exact system the user came from.
       let finalSystemIds = Array.from(new Set(sysIdsFromPlacements));
+      if (routeTargetType === "system" && routeTargetId) {
+        finalSystemIds = Array.from(new Set([...(finalSystemIds || []), routeTargetId]));
+      }
       if (wObj?.id) {
         const linked = await fetchWarrantyLinkedSystemIds(wObj.id);
         finalSystemIds = Array.from(new Set([...(finalSystemIds || []), ...(linked || [])]));
