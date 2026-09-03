@@ -1588,6 +1588,7 @@ function CatalogPanel({
   loading,
   onOpen,
   onOpenSourceReview,
+  onOpenSystemLibrary,
   query = "",
   canAuthor = false,
   modelDraft,
@@ -1637,9 +1638,19 @@ function CatalogPanel({
           <Text style={styles.sectionKicker}>OEM Catalog</Text>
           <Text style={styles.sectionTitle}>Product lineage</Text>
         </View>
-        <View style={styles.networkCount}>
-          <Text style={styles.networkCountValue}>{visibleTemplates.length}</Text>
-          <Text style={styles.networkCountLabel}>models</Text>
+        <View style={styles.catalogHeaderActions}>
+          <TouchableOpacity
+            activeOpacity={0.86}
+            style={styles.systemLibraryButton}
+            onPress={onOpenSystemLibrary}
+          >
+            <Ionicons name="hardware-chip-outline" size={16} color={colors.brandBlue} />
+            <Text style={styles.systemLibraryButtonText}>System Library</Text>
+          </TouchableOpacity>
+          <View style={styles.networkCount}>
+            <Text style={styles.networkCountValue}>{visibleTemplates.length}</Text>
+            <Text style={styles.networkCountLabel}>models</Text>
+          </View>
         </View>
       </View>
       <Text style={styles.networkText}>
@@ -3653,6 +3664,15 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
     });
   };
 
+  const openSystemLibrary = () => {
+    const params = {
+      organizationId: workspaceOrganizationId(currentWorkspace),
+      workspaceId: currentWorkspace?.workspace_id || null,
+    };
+    if (openActivatorWebPath("/activator/system-library", params)) return;
+    navigation.navigate("SystemLibrary", params);
+  };
+
   const openExactBuild = (template) => {
     if (openActivatorWebPath(`/activator/build/${encodeURIComponent(template.template_key)}`, {
       buildKey: template.buildKey || null,
@@ -4243,6 +4263,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
                 loading={catalogLoading}
                 onOpen={openCatalogTemplate}
                 onOpenSourceReview={openTemplateSourceReview}
+                onOpenSystemLibrary={openSystemLibrary}
                 query={search}
                 canAuthor={canAuthorCatalog}
                 modelDraft={modelDraft}
@@ -5094,6 +5115,29 @@ const styles = StyleSheet.create({
   },
   networkCount: {
     alignItems: "flex-end",
+  },
+  catalogHeaderActions: {
+    alignItems: "flex-end",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    justifyContent: "flex-end",
+  },
+  systemLibraryButton: {
+    alignItems: "center",
+    backgroundColor: "#EFF6FF",
+    borderColor: "#BFDBFE",
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.xs,
+    minHeight: 38,
+    paddingHorizontal: spacing.md,
+  },
+  systemLibraryButtonText: {
+    color: colors.brandBlue,
+    fontSize: 12,
+    fontWeight: "900",
   },
   networkCountValue: {
     color: colors.textPrimary,

@@ -186,6 +186,7 @@ test("System Template promote and link operations are explicit product actions",
   const itemEditorSource = read("screens/ActivatorTemplateItemEditorScreen.js");
 
   assert.match(sql, /create or replace function public\.promote_system_to_system_template/);
+  assert.match(read("supabase/migrations/20260903193000_promote_model_item_to_system_template.sql"), /create or replace function public\.promote_model_item_to_system_template/);
   assert.match(sql, /create or replace function public\.link_model_item_system_template/);
   assert.match(sql, /create or replace function public\.unlink_model_item_system_template/);
   assert.match(sql, /create or replace function public\.list_system_templates/);
@@ -200,15 +201,49 @@ test("System Template promote and link operations are explicit product actions",
   assert.match(activatorApi, /export async function linkModelItemSystemTemplate/);
   assert.match(activatorApi, /export async function unlinkModelItemSystemTemplate/);
   assert.match(activatorApi, /export async function promoteSystemToSystemTemplate/);
+  assert.match(activatorApi, /export async function promoteModelItemToSystemTemplate/);
 
   assert.match(systemStorySource, /Promote \/ Update System Template/);
   assert.match(systemStorySource, /promote_resources: promoteResources/);
   assert.match(systemStorySource, /exact serials, photos, service history/i);
 
   assert.match(itemEditorSource, /Core System Template/);
+  assert.match(itemEditorSource, /Promote to Library/);
+  assert.match(itemEditorSource, /PROMOTABLE_SYSTEM_ITEM_TYPES[\s\S]*choice[\s\S]*option/);
+  assert.match(itemEditorSource, /promoteModelItemToSystemTemplate/);
   assert.match(itemEditorSource, /linkModelItemSystemTemplate/);
   assert.match(itemEditorSource, /unlinkModelItemSystemTemplate/);
   assert.match(itemEditorSource, /Model-specific applicability remains/);
+});
+
+test("System Library is a first-class UI over canonical system_templates", () => {
+  const appSource = read("App.js");
+  const activatorSource = read("screens/ActivatorHomeScreen.js");
+  const librarySource = read("screens/SystemLibraryScreen.js");
+  const activatorApi = read("lib/activatorApi.js");
+  const seedSql = read("supabase/migrations/20260903190000_seed_canonical_system_library_v1.sql");
+
+  assert.match(appSource, /import SystemLibraryScreen from "\.\/screens\/SystemLibraryScreen"/);
+  assert.match(appSource, /SystemLibrary: "activator\/system-library"/);
+  assert.match(appSource, /<RootStack\.Screen name="SystemLibrary" component=\{SystemLibraryScreen\}/);
+
+  assert.match(activatorSource, /System Library/);
+  assert.match(activatorSource, /navigation\.navigate\("SystemLibrary"/);
+  assert.match(librarySource, /listSystemTemplates/);
+  assert.match(librarySource, /upsertSystemTemplate/);
+  assert.match(librarySource, /target_type: "system_template"/);
+  assert.match(librarySource, /System Template: reusable truth/);
+  assert.doesNotMatch(librarySource, /library_items|system_library_items/);
+
+  assert.match(activatorApi, /export async function getSystemTemplate/);
+  assert.match(activatorApi, /export async function upsertSystemTemplate/);
+  assert.match(activatorApi, /\.from\("system_templates"\)/);
+  assert.match(seedSql, /system_template\.mercury\.mercury_600_v12_verado/);
+  assert.match(seedSql, /system_template\.seakeeper\.seakeeper_sk10_5/);
+  assert.match(seedSql, /system_template\.onan\.onan_13_5kw_generator/);
+  assert.match(seedSql, /system_template\.dometic_vacuflush\.sanitation_system/);
+  assert.match(seedSql, /system_template\.starlink\.starlink_marine/);
+  assert.match(seedSql, /on conflict \(canonical_key\) do update/);
 });
 
 test("KF018 fleet routing consumes generic exact-build metadata without local runtime projection", () => {

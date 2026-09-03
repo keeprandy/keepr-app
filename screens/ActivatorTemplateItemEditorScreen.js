@@ -21,6 +21,7 @@ import {
   getCatalogTemplateDetail,
   linkModelItemSystemTemplate,
   listSystemTemplates,
+  promoteModelItemToSystemTemplate,
   unlinkModelItemSystemTemplate,
   upsertCatalogTemplateItem,
 } from "../lib/activatorApi";
@@ -82,6 +83,7 @@ const PROJECTION_KINDS = [
 ];
 
 const RESOURCE_ROLES = ["Manual", "Warranty", "Spec Sheet", "Install Guide", "Other"];
+const PROMOTABLE_SYSTEM_ITEM_TYPES = new Set(["system", "component", "equipment", "configuration_item", "choice", "option"]);
 
 function activeItems(items = []) {
   return items.filter((item) => item.authority_state !== "retired" && item.metadata?.retired !== true);
@@ -160,7 +162,7 @@ function defaultProjectionKind(item, isGroup) {
   if (explicit) return explicit;
   const mapping = itemMappingValue(item);
   if (!["mapped", "partially_mapped"].includes(mapping)) return "none";
-  if (["configuration_item", "component", "system"].includes(item?.item_type)) return "system";
+  if (PROMOTABLE_SYSTEM_ITEM_TYPES.has(item?.item_type)) return "system";
   return "none";
 }
 
@@ -324,6 +326,7 @@ export default function ActivatorTemplateItemEditorScreen() {
   const [systemTemplateResults, setSystemTemplateResults] = useState([]);
   const [systemTemplateLoading, setSystemTemplateLoading] = useState(false);
   const [systemTemplateSaving, setSystemTemplateSaving] = useState(false);
+  const [systemTemplatePromoting, setSystemTemplatePromoting] = useState(false);
   const [rapidChildLines, setRapidChildLines] = useState("");
   const [rapidChildKind, setRapidChildKind] = useState("configuration_item");
   const [rapidChildState, setRapidChildState] = useState("optional");
@@ -358,7 +361,12 @@ export default function ActivatorTemplateItemEditorScreen() {
   const items = useMemo(() => activeItems(detail?.items || []), [detail?.items]);
   const item = useMemo(() => items.find((candidate) => candidate.id === itemId), [itemId, items]);
   const isGroup = item?.item_type === "configuration_group";
-  const isSystemLike = !isGroup && (kind === "system" || projectionKind === "system" || item?.item_type === "system" || item?.metadata?.projection?.kind === "system");
+  const isSystemLike =
+    !isGroup &&
+    (kind === "system" ||
+      projectionKind === "system" ||
+      PROMOTABLE_SYSTEM_ITEM_TYPES.has(item?.item_type) ||
+      item?.metadata?.projection?.kind === "system");
   const linkedSystemTemplateId = item?.system_template_id || item?.metadata?.system_template_id || null;
   const linkedSystemTemplate = useMemo(() => {
     if (!linkedSystemTemplateId) return null;
@@ -472,6 +480,57 @@ export default function ActivatorTemplateItemEditorScreen() {
       setSystemTemplateSaving(false);
     }
   }, [item?.id, load]);
+
+  const promoteModelItemToLibrary = useCallback(async () => {
+    if (!item?.id || !isSystemLike) return;
+    setSystemTemplatePromoting(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await promoteModelItemToSystemTemplate({
+        templateItemId: item.id,
+        payload: {
+          name: label.trim() || item.label,
+          manufacturer: detail?.template?.manufacturer || null,
+          system_category: parent?.label || item?.metadata?.projection?.group || null,
+          description: description.trim() || itemDescription(item) || null,
+          owner_org_id: organizationId || detail?.template?.organization_id || null,
+          promote_resources: true,
+          authority_state: "keepr_curated",
+          metadata: {
+            promotion_ui: "activator_template_item_editor",
+            reusable_fields_selected: ["name", "manufacturer", "system_category", "description"],
+            source_oem_code: code.trim() || itemCode(item) || null,
+          },
+        },
+      });
+      const promoted = result?.system_template || null;
+      const count = result?.promoted_resource_count || 0;
+      setNotice(
+        `Promoted to ${promoted?.name || label || item.label}. ${count} reusable resource${
+          count === 1 ? "" : "s"
+        } referenced by the System Template. Model applicability stayed on this item.`
+      );
+      await load();
+      await searchSystemTemplates(promoted?.name || label || item.label);
+    } catch (err) {
+      setError(err?.message || "Could not promote this model item to the System Library.");
+    } finally {
+      setSystemTemplatePromoting(false);
+    }
+  }, [
+    code,
+    description,
+    detail?.template?.manufacturer,
+    detail?.template?.organization_id,
+    isSystemLike,
+    item,
+    label,
+    load,
+    organizationId,
+    parent?.label,
+    searchSystemTemplates,
+  ]);
 
   const tabs = isGroup
     ? [
@@ -1136,6 +1195,24 @@ export default function ActivatorTemplateItemEditorScreen() {
                 ) : (
                   <Text style={styles.helpText}>No canonical System Template is linked yet.</Text>
                 )}
+                <View style={styles.promotePanel}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.childTitle}>Promote this model item to the System Library</Text>
+                    <Text style={styles.helpText}>
+                      Creates or updates one canonical System Template, links this item back, and promotes non-photo reusable resources by reference.
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.secondaryButton, systemTemplatePromoting && styles.disabledButton]}
+                    onPress={promoteModelItemToLibrary}
+                    disabled={systemTemplatePromoting}
+                  >
+                    <Ionicons name="arrow-up-circle-outline" size={17} color={colors.blue} />
+                    <Text style={styles.secondaryButtonText}>
+                      {systemTemplatePromoting ? "Promoting..." : "Promote to Library"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
                 <View style={styles.buttonRow}>
                   <View style={{ flex: 1, minWidth: 260 }}>
                     <Field
@@ -1152,6 +1229,18 @@ export default function ActivatorTemplateItemEditorScreen() {
                   >
                     <Ionicons name="search-outline" size={17} color={colors.blue} />
                     <Text style={styles.secondaryButtonText}>{systemTemplateLoading ? "Searching..." : "Search"}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.secondaryButton}
+                    onPress={() => navigation.navigate("SystemLibrary", {
+                      organizationId,
+                      workspaceId,
+                      systemTemplateId: linkedSystemTemplateId || undefined,
+                      query: systemTemplateQuery || item?.label || "",
+                    })}
+                  >
+                    <Ionicons name="library-outline" size={17} color={colors.blue} />
+                    <Text style={styles.secondaryButtonText}>Open Library</Text>
                   </TouchableOpacity>
                 </View>
                 {systemTemplateResults.length ? (
@@ -1401,6 +1490,7 @@ const styles = StyleSheet.create({
   linkedResourceList: { gap: 8 },
   linkedResourceRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 12, backgroundColor: "#fbfdff" },
   linkedResourceMain: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10 },
+  promotePanel: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, borderWidth: 1, borderColor: "#bfdbfe", borderRadius: 8, padding: 12, backgroundColor: "#eff6ff" },
   resourceActions: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   tinyButton: { minHeight: 30, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 10, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 5, backgroundColor: "#fff" },
   tinyButtonText: { color: colors.blue, fontWeight: "900", fontSize: 12 },
