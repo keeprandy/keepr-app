@@ -129,6 +129,27 @@ test("Model resource roles can be changed using Proof Builder vocabulary", () =>
   assert.match(attachments, /owner_manual[\s\S]*return "manual"/);
 });
 
+test("Catalog Resources tab rolls up system-level resource associations", () => {
+  const catalog = read("screens/ActivatorCatalogTemplateScreen.js");
+
+  assert.match(catalog, /function resourceLinkedTemplateItemIds/);
+  assert.match(catalog, /sourceContext\.linked_template_item_ids/);
+  assert.match(catalog, /aiMetadata\.linked_template_item_ids/);
+  assert.match(catalog, /metadata\.linked_template_item_ids/);
+  assert.match(catalog, /function resourceAssociationLabels/);
+  assert.match(catalog, /resourceLinkedTemplateItemIds\(resource\)/);
+  assert.match(catalog, /standardLabel\(item\)/);
+  assert.match(catalog, /templateItems = \[\]/);
+  assert.match(catalog, /const visible = expanded \? resources : resources\.slice\(0, 4\)/);
+  assert.match(catalog, /const associationLabels = resourceAssociationLabels\(resource, templateItems\)/);
+  assert.match(catalog, /Applies to/);
+  assert.match(catalog, /hardware-chip-outline/);
+  assert.match(catalog, /Entire model template/);
+  assert.match(catalog, /templateItems=\{items\}/);
+  assert.match(catalog, /expanded=\{tab === "resources"\}/);
+  assert.match(catalog, /styles\.resourceAssociations/);
+});
+
 test("Proof Builder can load dealer-visible attachments through asset projection fallback", () => {
   const proofBuilder = read("screens/ProofBuilderScreen.js");
 

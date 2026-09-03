@@ -647,8 +647,49 @@ function resourceProvenanceText(resource = {}) {
   ]) || resource.provenance_label || resource.attribution || "Model resource";
 }
 
+function resourceLinkedTemplateItemIds(resource = {}) {
+  const sourceContext = resource.source_context && typeof resource.source_context === "object"
+    ? resource.source_context
+    : {};
+  const aiMetadata = resource.ai_metadata && typeof resource.ai_metadata === "object"
+    ? resource.ai_metadata
+    : {};
+  const metadata = resource.metadata && typeof resource.metadata === "object"
+    ? resource.metadata
+    : {};
+  const ids = [
+    sourceContext.template_item_id,
+    sourceContext.model_template_item_id,
+    sourceContext.linked_template_item_id,
+    aiMetadata.template_item_id,
+    aiMetadata.model_template_item_id,
+    aiMetadata.linked_template_item_id,
+    metadata.template_item_id,
+    metadata.model_template_item_id,
+    metadata.linked_template_item_id,
+    ...(Array.isArray(sourceContext.linked_template_item_ids) ? sourceContext.linked_template_item_ids : []),
+    ...(Array.isArray(sourceContext.template_item_ids) ? sourceContext.template_item_ids : []),
+    ...(Array.isArray(aiMetadata.linked_template_item_ids) ? aiMetadata.linked_template_item_ids : []),
+    ...(Array.isArray(aiMetadata.template_item_ids) ? aiMetadata.template_item_ids : []),
+    ...(Array.isArray(metadata.linked_template_item_ids) ? metadata.linked_template_item_ids : []),
+    ...(Array.isArray(metadata.template_item_ids) ? metadata.template_item_ids : []),
+  ];
+  return Array.from(new Set(ids.filter(Boolean)));
+}
+
+function resourceAssociationLabels(resource = {}, templateItems = []) {
+  const byId = new Map((templateItems || []).map((item) => [item.id, item]));
+  const labels = resourceLinkedTemplateItemIds(resource)
+    .map((id) => byId.get(id))
+    .filter(Boolean)
+    .map((item) => compact([item.label || item.canonical_key || "Model item", standardLabel(item)]));
+  return Array.from(new Set(labels));
+}
+
 function ResourcePanel({
   resources,
+  templateItems = [],
+  expanded = false,
   onOpenResources,
   resourceLinkUrl = "",
   onResourceLinkUrlChange,
@@ -661,7 +702,7 @@ function ResourcePanel({
   onRemoveResourcePlacement,
   addingResource = false,
 }) {
-  const visible = resources.slice(0, 4);
+  const visible = expanded ? resources : resources.slice(0, 4);
   const canManage = !!(onAddResourceUrl || onUploadResource);
   const [editingResourceId, setEditingResourceId] = useState(null);
   return (
@@ -682,6 +723,7 @@ function ResourcePanel({
             const resourceId = resource.attachment_id || resource.id;
             const isEditingRole = editingResourceId === resourceId;
             const isEditableAttachmentResource = !!resource.attachment_id && !!resource.placement_id;
+            const associationLabels = resourceAssociationLabels(resource, templateItems);
             return (
               <View key={resource.id || resource.title} style={styles.resourceCard}>
                 <TouchableOpacity
@@ -762,6 +804,27 @@ function ResourcePanel({
                     ))}
                   </View>
                 ) : null}
+                <View style={styles.resourceAssociations}>
+                  <Text style={styles.resourceAssociationLabel}>Applies to</Text>
+                  <View style={styles.resourceAssociationChips}>
+                    {associationLabels.length ? (
+                      associationLabels.slice(0, 8).map((label) => (
+                        <View key={label} style={styles.resourceAssociationChip}>
+                          <Ionicons name="hardware-chip-outline" size={12} color={colors.brandBlue} />
+                          <Text style={styles.resourceAssociationChipText} numberOfLines={1}>{label}</Text>
+                        </View>
+                      ))
+                    ) : (
+                      <View style={styles.resourceAssociationChip}>
+                        <Ionicons name="albums-outline" size={12} color={colors.textMuted} />
+                        <Text style={styles.resourceAssociationChipText}>Entire model template</Text>
+                      </View>
+                    )}
+                    {associationLabels.length > 8 ? (
+                      <Text style={styles.resourceAssociationMore}>+{associationLabels.length - 8} more</Text>
+                    ) : null}
+                  </View>
+                </View>
               </View>
             );
           })}
@@ -2043,6 +2106,8 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
               {tab === "overview" || tab === "resources" ? (
                 <ResourcePanel
                   resources={resources}
+                  templateItems={items}
+                  expanded={tab === "resources"}
                   onOpenResources={openResourcesTab}
                   resourceLinkUrl={resourceLinkUrl}
                   onResourceLinkUrlChange={setResourceLinkUrl}
@@ -2575,6 +2640,47 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: spacing.xs,
     padding: spacing.sm,
+  },
+  resourceAssociations: {
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  resourceAssociationLabel: {
+    color: colors.textMuted,
+    fontSize: 10,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  resourceAssociationChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+  },
+  resourceAssociationChip: {
+    alignItems: "center",
+    backgroundColor: "#F8FAFC",
+    borderColor: colors.border,
+    borderRadius: radius.xs,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 4,
+    maxWidth: 260,
+    minHeight: 26,
+    paddingHorizontal: spacing.xs,
+  },
+  resourceAssociationChipText: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  resourceAssociationMore: {
+    alignSelf: "center",
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: "900",
   },
   resourceEmpty: {
     color: colors.textMuted,
