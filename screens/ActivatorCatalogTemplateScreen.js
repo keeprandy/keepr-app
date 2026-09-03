@@ -295,6 +295,28 @@ function titleFromUrl(url) {
   }
 }
 
+function attachmentNameForType(row = {}) {
+  return [
+    row.file_name,
+    row.title,
+    row.label,
+    row.url,
+    row.attachment_url,
+    row.source_url,
+  ].filter(Boolean).join(" ");
+}
+
+function isImageAttachmentLike(row = {}) {
+  const mime = String(row.mime_type || "").toLowerCase();
+  const kind = String(row.kind || "").toLowerCase();
+  const name = attachmentNameForType(row).toLowerCase().split("?")[0].split("#")[0];
+  return (
+    kind === "photo" ||
+    mime.startsWith("image/") ||
+    /\.(jpe?g|png|webp|gif|heic|heif|avif|svg)$/.test(name)
+  );
+}
+
 function titleFromPickedAsset(asset, fallback = "Model media photo") {
   if (asset?.fileName) return asset.fileName;
   const uri = asset?.uri || "";
@@ -487,10 +509,7 @@ async function hydrateTemplatePhotoResources(detail) {
 async function hydrateTemplateAttachmentMedia(template) {
   if (!template?.id) return [];
   const rows = await listAttachmentsForTarget("model_template", template.id);
-  const mediaRows = (rows || []).filter((row) => {
-    const mime = String(row.mime_type || "").toLowerCase();
-    return row.kind === "photo" || mime.startsWith("image/");
-  });
+  const mediaRows = (rows || []).filter(isImageAttachmentLike);
 
   return Promise.all(
     mediaRows.map(async (row) => {
@@ -562,10 +581,7 @@ function normalizeTemplateAttachmentResource(row, template = {}) {
 async function hydrateTemplateAttachmentResources(template) {
   if (!template?.id) return [];
   const rows = await listAttachmentsForTarget("model_template", template.id);
-  const resourceRows = (rows || []).filter((row) => {
-    const mime = String(row.mime_type || "").toLowerCase();
-    return row.kind !== "photo" && !mime.startsWith("image/");
-  });
+  const resourceRows = (rows || []).filter((row) => !isImageAttachmentLike(row));
 
   return Promise.all(
     resourceRows.map(async (row) => {
@@ -615,9 +631,7 @@ function resourceTypeForRow(resource = {}) {
 
 function isModelKnowledgeResource(resource = {}) {
   const type = String(resourceTypeForRow(resource) || "").toLowerCase();
-  const kind = String(resource.kind || "").toLowerCase();
-  const mime = String(resource.mime_type || "").toLowerCase();
-  if (kind === "photo" || mime.startsWith("image/")) return false;
+  if (isImageAttachmentLike(resource)) return false;
   return !["photo", "image", "gallery", "showcase", "hero", "model_media"].includes(type);
 }
 
@@ -667,6 +681,7 @@ function ResourcePanel({
             const normalizedRole = normalizeModelResourceRole(resource.role || resource.ai_metadata?.role || resource.resource_type);
             const resourceId = resource.attachment_id || resource.id;
             const isEditingRole = editingResourceId === resourceId;
+            const isEditableAttachmentResource = !!resource.attachment_id && !!resource.placement_id;
             return (
               <View key={resource.id || resource.title} style={styles.resourceCard}>
                 <TouchableOpacity
@@ -685,7 +700,7 @@ function ResourcePanel({
                   </View>
                   <View style={styles.resourceRowActions}>
                     <Text style={styles.resourceRoleBadge}>{modelResourceRoleLabel(normalizedRole)}</Text>
-                    {canManage && onChangeResourceRole ? (
+                    {canManage && onChangeResourceRole && isEditableAttachmentResource ? (
                       <TouchableOpacity
                         activeOpacity={0.86}
                         style={styles.resourceSmallButton}
@@ -698,7 +713,7 @@ function ResourcePanel({
                         <Text style={styles.resourceSmallButtonText}>Role</Text>
                       </TouchableOpacity>
                     ) : null}
-                    {onOpenProofBuilder ? (
+                    {onOpenProofBuilder && isEditableAttachmentResource ? (
                       <TouchableOpacity
                         activeOpacity={0.86}
                         style={styles.resourceSmallButton}
@@ -712,7 +727,7 @@ function ResourcePanel({
                       </TouchableOpacity>
                     ) : null}
                     {url ? <Ionicons name="open-outline" size={15} color={colors.textMuted} /> : null}
-                    {canManage && onRemoveResourcePlacement && resource.placement_id ? (
+                    {canManage && onRemoveResourcePlacement && isEditableAttachmentResource ? (
                       <TouchableOpacity
                         activeOpacity={0.86}
                         style={styles.resourceSmallButton}
@@ -1257,10 +1272,7 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
   const items = modelProjection.items || [];
   const resources = useMemo(() => {
     const byId = new Map();
-    [
-      ...(templateAttachmentResources || []),
-      ...((modelProjection.resources || []).filter(isModelKnowledgeResource)),
-    ].forEach((resource) => {
+    (templateAttachmentResources || []).filter(isModelKnowledgeResource).forEach((resource) => {
       const key = resource?.attachment_id || resource?.resource_id || resource?.id || resource?.url;
       if (key && !byId.has(key)) byId.set(key, resource);
     });
@@ -1805,9 +1817,9 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
   };
 
   const openTemplateResourceProofBuilder = (resource) => {
-    const attachmentId = resource?.attachment_id || resource?.id;
-    if (!attachmentId || !template?.id) {
-      Alert.alert("Proof Builder", "This model resource is not ready for Proof Builder yet.");
+    const attachmentId = resource?.attachment_id || null;
+    if (!attachmentId || !resource?.placement_id || !template?.id) {
+      Alert.alert("Proof Builder", "Only attachment-backed model resources can be edited in Proof Builder.");
       return;
     }
     navigation.navigate("ProofBuilder", {
