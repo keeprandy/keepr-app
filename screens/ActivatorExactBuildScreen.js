@@ -18,21 +18,12 @@ import ActivatorBreadcrumb from "../components/ActivatorBreadcrumb";
 import {
   getExactBuildDraft,
   getCatalogTemplateDetail,
-  getTiaraFactoryBuildWorkspace,
   publishExactBuildDraft,
   upsertExactBuildDraft,
 } from "../lib/activatorApi";
 import { resolveAssetHero, ASSET_HERO_SCOPES } from "../lib/assetHeroResolver";
 import { getSignedUrl, listAttachmentsForTarget } from "../lib/attachmentsApi";
 import { getKeeprSpaceOrgConfig } from "../lib/keeprspaceApi";
-import {
-  TIARA_56_LS_TEMPLATE_KEY,
-  TIARA_SYSTEM_CATEGORIES,
-  getDefaultTiaraExactFactoryBuildForTemplate,
-  getTiaraExactFactoryBuild,
-  tiara56LsCatalogTemplate,
-  tiaraKf018FactoryBuild,
-} from "../data/tiaraKf018FactoryBuild";
 import { projectModelTemplateDetail } from "../lib/modelTemplateProjection";
 import { layoutStyles } from "../styles/layout";
 import { colors, radius, shadows, spacing } from "../styles/theme";
@@ -45,121 +36,6 @@ const SHOWCASE_ASSETS = {
   tiara_39ls_cockpit_lounge: require("../assets/boats/tiara/tiara_39ls_cockpit_lounge.jpg"),
   tiara_39ls_hero: require("../assets/boats/tiara/tiara_39ls_hero.jpg"),
 };
-
-const DEMO_FACTORY_OPTIONS = [
-  {
-    key: "propulsion.mercury_600_v12",
-    group: "Propulsion",
-    label: "Twin Mercury 600 V12",
-    mode: "single",
-    selected: true,
-    locked: true,
-    systems: ["Port Mercury V12 Verado", "Starboard Mercury V12 Verado", "Mercury joystick piloting"],
-    resources: ["Tiara 39 LS Twin Mercury 600 Propulsion Manual", "Mercury VesselView guide"],
-    playbooks: ["Engine serial verification", "Mercury break-in checklist"],
-    requirements: ["Port engine serial", "Starboard engine serial"],
-  },
-  {
-    key: "aft.buffet_lounge",
-    group: "Aft Cockpit Module",
-    label: "Buffet Lounge Module",
-    mode: "single",
-    selected: false,
-    systems: ["Electric grill", "Cockpit entertainment module"],
-    resources: ["Buffet Lounge Module owner's notes"],
-    playbooks: ["Aft module delivery check"],
-    requirements: ["Module install photo"],
-  },
-  {
-    key: "aft.adventure",
-    group: "Aft Cockpit Module",
-    label: "Adventure Module",
-    mode: "single",
-    selected: true,
-    systems: ["Livewell", "Electric grill", "Cockpit freezer", "Rod holder package"],
-    resources: ["Adventure Module operation guide"],
-    playbooks: ["Livewell commissioning", "Aft module delivery check"],
-    requirements: ["Livewell pump verification", "Module install photo"],
-  },
-  {
-    key: "mechanical.seakeeper",
-    group: "Mechanical",
-    label: "Seakeeper SK4.5 Gyro",
-    mode: "multi",
-    selected: true,
-    systems: ["Seakeeper SK4.5 stabilization"],
-    resources: ["Seakeeper SK4.5 manual"],
-    playbooks: ["Gyro commissioning", "Seakeeper service interval setup"],
-    requirements: ["Seakeeper serial number"],
-  },
-  {
-    key: "mechanical.electrosea",
-    group: "Mechanical",
-    label: "ElectroSea",
-    mode: "multi",
-    selected: false,
-    systems: ["ElectroSea Clearline system"],
-    resources: ["ElectroSea owner's manual"],
-    playbooks: ["Raw-water protection commissioning"],
-    requirements: ["ElectroSea serial number"],
-  },
-  {
-    key: "mechanical.bow_thruster",
-    group: "Mechanical",
-    label: "Bow Thruster",
-    mode: "multi",
-    selected: true,
-    systems: ["Bow thruster"],
-    resources: ["Bow thruster operation manual"],
-    playbooks: ["Docking-system verification"],
-    requirements: ["Thruster model and serial"],
-  },
-  {
-    key: "electronics.garmin_standard",
-    group: "Electronics",
-    label: "Standard Garmin package",
-    mode: "single",
-    selected: true,
-    locked: true,
-    systems: ["Garmin GPSMAP 9000 display", "Garmin VHF", "Autopilot", "1kW transducer"],
-    resources: ["Garmin GPSMAP 9000 owner's manual", "Garmin VHF quick guide"],
-    playbooks: ["Electronics power-on check", "Navigation baseline setup"],
-    requirements: ["Primary display serial"],
-  },
-  {
-    key: "electronics.fantom_radar",
-    group: "Electronics",
-    label: "Fantom Radar",
-    mode: "multi",
-    selected: true,
-    systems: ["Garmin Fantom radar"],
-    resources: ["Garmin Fantom radar guide"],
-    playbooks: ["Radar sea-trial verification"],
-    requirements: ["Radar serial number"],
-  },
-  {
-    key: "electronics.starlink",
-    group: "Electronics",
-    label: "Starlink",
-    mode: "multi",
-    selected: true,
-    systems: ["Starlink marine internet"],
-    resources: ["Starlink activation guide"],
-    playbooks: ["Connectivity handoff setup"],
-    requirements: ["Starlink kit number"],
-  },
-  {
-    key: "electronics.flir",
-    group: "Electronics",
-    label: "FLIR",
-    mode: "multi",
-    selected: false,
-    systems: ["FLIR thermal camera"],
-    resources: ["FLIR operation manual"],
-    playbooks: ["Night-vision calibration"],
-    requirements: ["FLIR serial number"],
-  },
-];
 
 const FINISH_FIELDS = [
   { key: "hull_color", label: "Exterior color", value: "Pearl White" },
@@ -398,11 +274,6 @@ function normalizeDraftKey(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
-}
-
-function isTiaraTemplateKey(value) {
-  const key = String(value || "").toLowerCase();
-  return key === TIARA_56_LS_TEMPLATE_KEY || key.startsWith("tiara-") || key.includes("tiara");
 }
 
 function optionDraftState(option) {
@@ -790,8 +661,7 @@ function FreshwaterFlowdownPanel({ items }) {
 }
 
 export default function ActivatorExactBuildScreen({ navigation, route }) {
-  const templateKey = route?.params?.templateKey || TIARA_56_LS_TEMPLATE_KEY;
-  const useTiaraFactoryFallback = isTiaraTemplateKey(templateKey);
+  const templateKey = route?.params?.templateKey || webSearchParam("templateKey") || null;
   const exactBuildKey = route?.params?.buildKey || route?.params?.exactBuildKey || webSearchParam("build", "buildKey", "exactBuildKey") || null;
   const hullNumber = route?.params?.hullNumber || route?.params?.hin || webSearchParam("hull", "hullNumber", "hin") || null;
   const organizationId = route?.params?.organizationId || webSearchParam("organizationId") || null;
@@ -809,27 +679,13 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
   const [draftNotice, setDraftNotice] = useState("");
   const [savingDraft, setSavingDraft] = useState(false);
   const [publishingDraft, setPublishingDraft] = useState(false);
-  const [factoryBuild, setFactoryBuild] = useState(() => (
-    useTiaraFactoryFallback
-      ? (
-        getTiaraExactFactoryBuild({ templateKey, buildKey: exactBuildKey, hullNumber })
-        || getDefaultTiaraExactFactoryBuildForTemplate(templateKey)
-      )
-      : null
-  ));
+  const [factoryBuild, setFactoryBuild] = useState(null);
   const [factoryBuildSource, setFactoryBuildSource] = useState("none");
-  const [options, setOptions] = useState(() => useTiaraFactoryFallback ? DEMO_FACTORY_OPTIONS : []);
+  const [options, setOptions] = useState([]);
   const [finish, setFinish] = useState(FINISH_FIELDS);
-  const [selectedFactoryLineId, setSelectedFactoryLineId] = useState(() => (
-    useTiaraFactoryFallback
-      ? (
-        getTiaraExactFactoryBuild({ templateKey, buildKey: exactBuildKey, hullNumber })
-        || getDefaultTiaraExactFactoryBuildForTemplate(templateKey)
-      )
-      : null
-  )?.line_items?.[0]?.id || null);
+  const [selectedFactoryLineId, setSelectedFactoryLineId] = useState(null);
   const [assignmentDraft, setAssignmentDraft] = useState({
-    system_category: TIARA_SYSTEM_CATEGORIES[0],
+    system_category: EXACT_SYSTEM_GROUPS[0],
     target: "existing_system",
     relationship_type: "system",
   });
@@ -853,22 +709,20 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
     if (!quiet) setLoading(true);
     setError(null);
     try {
-      const localBuild = useTiaraFactoryFallback
-        ? (
-          getTiaraExactFactoryBuild({ templateKey, buildKey: exactBuildKey, hullNumber })
-          || (!exactBuildKey && !hullNumber ? getDefaultTiaraExactFactoryBuildForTemplate(templateKey) : null)
-        )
-        : null;
-      const localTemplateFallback = useTiaraFactoryFallback && templateKey === TIARA_56_LS_TEMPLATE_KEY
-        ? { template: tiara56LsCatalogTemplate, resources: [], showcase_media: [], items: [] }
-        : null;
-      const [next, buildWorkspace, exactDraft, organizationConfig] = await Promise.allSettled([
+      if (!templateKey) {
+        setDetail(null);
+        setTemplateAttachmentMedia([]);
+        setDraftWorkspace(null);
+        setFactoryBuild(null);
+        setFactoryBuildSource("none");
+        setSelectedFactoryLineId(null);
+        setOrgConfig(null);
+        setError("This build workspace needs a model template key.");
+        return;
+      }
+
+      const [next, exactDraft, organizationConfig] = await Promise.allSettled([
         getCatalogTemplateDetail({ templateKey }),
-        useTiaraFactoryFallback ? getTiaraFactoryBuildWorkspace({
-          hullNumber: hullNumber || localBuild?.work_order?.hull_number || null,
-          templateKey,
-          buildKey: exactBuildKey || localBuild?.build_key || null,
-        }) : Promise.resolve(null),
         organizationId ? getExactBuildDraft({
           draftId: routeDraftId,
           draftKey: routeDraftKey,
@@ -881,29 +735,15 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
         setDetail(next.value);
         setTemplateAttachmentMedia(await hydrateTemplateAttachmentMedia(next.value?.template));
       }
-      else if (localTemplateFallback) {
-        setDetail(localTemplateFallback);
-        setTemplateAttachmentMedia([]);
-      }
       else {
         console.warn("Activator catalog detail unavailable for exact-build route.", next.reason);
         setDetail(null);
         setTemplateAttachmentMedia([]);
       }
 
-      if (buildWorkspace.status === "fulfilled" && buildWorkspace.value?.line_items?.length) {
-        setFactoryBuild(buildWorkspace.value);
-        setFactoryBuildSource("staging");
-        setSelectedFactoryLineId(buildWorkspace.value.line_items[0]?.id || null);
-      } else if (localBuild) {
-        setFactoryBuild(localBuild);
-        setFactoryBuildSource("local");
-        setSelectedFactoryLineId(localBuild.line_items?.[0]?.id || null);
-      } else {
-        setFactoryBuild(null);
-        setFactoryBuildSource("none");
-        setSelectedFactoryLineId(null);
-      }
+      setFactoryBuild(null);
+      setFactoryBuildSource("none");
+      setSelectedFactoryLineId(null);
 
       if (exactDraft.status === "fulfilled" && exactDraft.value?.draft) {
         setDraftWorkspace(exactDraft.value);
@@ -922,19 +762,14 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
       setDetail(null);
       setOrgConfig(null);
       setTemplateAttachmentMedia([]);
-      const localBuild = useTiaraFactoryFallback
-        ? (
-          getTiaraExactFactoryBuild({ templateKey, buildKey: exactBuildKey, hullNumber })
-          || (!exactBuildKey && !hullNumber ? getDefaultTiaraExactFactoryBuildForTemplate(templateKey) : null)
-        )
-        : null;
-      setFactoryBuild(localBuild);
-      setFactoryBuildSource(localBuild ? "local" : "none");
+      setFactoryBuild(null);
+      setFactoryBuildSource("none");
+      setSelectedFactoryLineId(null);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [exactBuildKey, hullNumber, organizationId, routeDraftId, routeDraftKey, templateKey, useTiaraFactoryFallback]);
+  }, [organizationId, routeDraftId, routeDraftKey, templateKey]);
 
   useEffect(() => {
     load();
@@ -952,6 +787,10 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
   const factoryLines = factoryBuild?.line_items || [];
   const manualQueue = factoryBuild?.manual_queue || [];
   const selectedFactoryLine = factoryLines.find((item) => item.id === selectedFactoryLineId) || factoryLines[0];
+  const systemCategoryOptions = useMemo(() => {
+    const fromFactoryLines = unique(factoryLines.map((item) => item.system_category));
+    return fromFactoryLines.length ? fromFactoryLines : EXACT_SYSTEM_GROUPS;
+  }, [factoryLines]);
   const exactBuildLabel = workOrder?.build_code || exactDraft?.draft_key || exactBuildKey || "Exact build";
   const modelLabel = catalogTemplate?.model || template?.model || "model";
   const modelYearLabel = catalogTemplate?.model_year || template?.model_year || "2027";
@@ -961,7 +800,7 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
   const modelBrandLabel = catalogTemplate?.manufacturer || template?.manufacturer || orgBrandContext.name;
   const hasFactoryBuild = Boolean(factoryBuild && factoryLines.length);
   const digitalTwinAssetId = workOrder?.asset_id || factoryBuild?.asset_id || null;
-  const digitalTwinKac = workOrder?.kac_id || factoryBuild?.kac_id || (workOrder?.build_code ? `KAC-TIARA-56LS-${String(workOrder.build_code).toUpperCase()}` : null);
+  const digitalTwinKac = workOrder?.kac_id || factoryBuild?.kac_id || exactDraft?.metadata?.published_kac || null;
   const projectedMedia = modelProjection.media?.items?.length ? modelProjection.media.items : detail?.showcase_media || [];
   const showcaseMedia = templateAttachmentMedia.length ? templateAttachmentMedia : projectedMedia;
   const heroMedia =
@@ -1154,7 +993,7 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
     const canonicalId = metadata.canonical_system_id || (canonicalIds.length === 1 ? canonicalIds[0] : null);
     const canOpenSystem = ["system", "component"].includes(item.relationship_type);
     setAssignmentDraft({
-      system_category: item.system_category || TIARA_SYSTEM_CATEGORIES[0],
+      system_category: item.system_category || systemCategoryOptions[0] || EXACT_SYSTEM_GROUPS[0],
       target: item.relationship_type === "build_only" ? "build_only" : canonicalId || item.system_id ? "existing_system" : "new_system",
       relationship_type: item.relationship_type || "system",
     });
@@ -1454,7 +1293,7 @@ export default function ActivatorExactBuildScreen({ navigation, route }) {
                         <View style={styles.assignmentControl}>
                           <Text style={styles.inputLabel}>System category</Text>
                           <View style={styles.segmentWrap}>
-                            {TIARA_SYSTEM_CATEGORIES.map((category) => (
+                            {systemCategoryOptions.map((category) => (
                               <TouchableOpacity
                                 key={category}
                                 activeOpacity={0.82}

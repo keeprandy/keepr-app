@@ -44,11 +44,6 @@ import { listModelTemplateMediaForTemplates } from "../lib/attachmentsApi";
 import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import { getActionScheduledDueAt, isPlaybookDueDatePending } from "../lib/playbookSchedule";
 import { supabase } from "../lib/supabaseClient";
-import {
-  TIARA_56_LS_TEMPLATE_KEY,
-  TIARA_KF018_BUILD_KEY,
-  tiaraKf018FactoryBuild,
-} from "../data/tiaraKf018FactoryBuild";
 import { layoutStyles } from "../styles/layout";
 import { colors, radius, shadows, spacing } from "../styles/theme";
 
@@ -58,7 +53,6 @@ const SHOWCASE_ASSETS = {
   tiara_39le_hero: require("../assets/boats/tiara/tiara_39le_hero.jpg"),
   tiara_39ls_hero: require("../assets/boats/tiara/tiara_39ls_hero.jpg"),
 };
-const ENABLE_KF018_LOCAL_FLEET_FALLBACK = process.env.EXPO_PUBLIC_ENABLE_KF018_LOCAL_FLEET_FALLBACK === "1";
 
 function navSectionForActivatorMode(nextMode) {
   return (
@@ -718,108 +712,6 @@ function normalizeFilters({ workspace, search }) {
   if (kind === "oem" && orgId) filters.oem_org_id = orgId;
   if (kind === "dealer" && orgId) filters.dealer_org_id = orgId;
   return filters;
-}
-
-function kf018FleetProjection() {
-  const workOrder = tiaraKf018FactoryBuild.work_order || {};
-  const catalog = tiaraKf018FactoryBuild.catalog_template || {};
-  return {
-    id: "factory-build-kf018",
-    asset_id: "factory-build-kf018",
-    source_type: "factory_build_workspace",
-    asset_name: "KF018 · 2027 Tiara 56 LS",
-    kac_id: "KAC-TIARA-56LS-KF018",
-    owner_state: "OEM Build",
-    organization_id: null,
-    template: {
-      template_key: TIARA_56_LS_TEMPLATE_KEY,
-      manufacturer: catalog.manufacturer || "Tiara Yachts",
-      model: catalog.model || "56 LS",
-      model_year: catalog.model_year || 2027,
-    },
-    identity: {
-      year: String(catalog.model_year || 2027),
-      make: catalog.manufacturer || "Tiara Yachts",
-      model: catalog.model || "56 LS",
-      hin: workOrder.hin,
-      hull_number: workOrder.hull_number,
-      build_code: workOrder.build_code,
-      order_number: workOrder.order_number,
-    },
-    activation: {
-      status: "OEM Build",
-      stage: "factory_build",
-    },
-    verification: {
-      percent: 70,
-      status: "factory_confirmed",
-    },
-    oem_relationship: {
-      organization_name: "Tiara Yachts",
-      relationship_type: "builder",
-      relationship_purpose: "Factory build",
-      status: "Active",
-    },
-    dealer_relationship: {
-      organization_name: workOrder.dealer || "Ocean Blue Yachts",
-      relationship_type: "dealer",
-      relationship_purpose: "Delivery",
-      status: "Pending",
-      location_name: "Stuart, FL",
-    },
-    exact_build: {
-      template_key: TIARA_56_LS_TEMPLATE_KEY,
-      build_key: TIARA_KF018_BUILD_KEY,
-      hull_number: workOrder.hull_number,
-      source_type: workOrder.source_type,
-      source_document: workOrder.source_document,
-    },
-  };
-}
-
-function withKf018FleetProjection(data, workspace, search) {
-  if (!ENABLE_KF018_LOCAL_FLEET_FALLBACK) return data;
-  if (workspaceKind(workspace) !== "oem") return data;
-
-  const query = String(search || "").trim().toLowerCase();
-  const projection = kf018FleetProjection();
-  const searchable = [
-    projection.asset_name,
-    projection.kac_id,
-    projection.identity?.hin,
-    projection.identity?.hull_number,
-    projection.identity?.build_code,
-    projection.identity?.order_number,
-    projection.template?.model,
-    projection.template?.manufacturer,
-  ].filter(Boolean).join(" ").toLowerCase();
-
-  if (query && !searchable.includes(query)) return data;
-
-  const currentBoats = Array.isArray(data?.boats) ? data.boats : [];
-  const alreadyPresent = currentBoats.some((boat) => {
-    const haystack = [boat.asset_id, boat.id, boat.kac_id, boat.identity?.hin, boat.identity?.hull_number, boat.asset_name]
-      .filter(Boolean)
-      .map((value) => String(value).toLowerCase());
-    return haystack.includes("factory-build-kf018")
-      || haystack.includes("kac-tiara-56ls-kf018")
-      || haystack.includes("ssukf018h627")
-      || haystack.some((value) => value.includes("kf018"));
-  });
-
-  if (alreadyPresent) return data;
-
-  const nextBoats = [projection, ...currentBoats];
-  const counts = data?.counts || {};
-  return {
-    ...(data || {}),
-    boats: nextBoats,
-    counts: {
-      ...counts,
-      visible_boats: Math.max(Number(counts.visible_boats || 0), nextBoats.length),
-      filtered_boats: Math.max(Number(counts.filtered_boats || 0), nextBoats.length),
-    },
-  };
 }
 
 function workAreasForWorkspace(workspace) {
@@ -3544,7 +3436,6 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
       } else {
         const nextFilters = normalizeFilters({ workspace: currentWorkspace, search });
         nextData = await getActivatorBoatBrowser(nextFilters);
-        nextData = withKf018FleetProjection(nextData, currentWorkspace, search);
       }
       setData(nextData);
 
@@ -3655,7 +3546,9 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
     const resolvedOrgId = boat?.organization_id || currentWorkspace?.organization_id || currentWorkspace?.org_id || null;
 
     if (mode === "builds" && (boat?.source_type === "factory_build_workspace" || boat?.exact_build?.build_key)) {
-      if (openActivatorWebPath(`/activator/build/${encodeURIComponent(boat?.exact_build?.template_key || boat?.template?.template_key || TIARA_56_LS_TEMPLATE_KEY)}`, {
+      const exactTemplateKey = boat?.exact_build?.template_key || boat?.template?.template_key || null;
+      if (!exactTemplateKey) return;
+      if (openActivatorWebPath(`/activator/build/${encodeURIComponent(exactTemplateKey)}`, {
         buildKey: boat?.exact_build?.build_key || null,
         hullNumber: boat?.exact_build?.hull_number || boat?.identity?.hull_number || boat?.identity?.hin || null,
         parentRoute: fixedMode ? "KeeprSpaceFleet" : "ActivatorHome",
@@ -3664,7 +3557,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
       })) return;
 
       navigation.navigate("ActivatorExactBuild", {
-        templateKey: boat?.exact_build?.template_key || boat?.template?.template_key || TIARA_56_LS_TEMPLATE_KEY,
+        templateKey: exactTemplateKey,
         buildKey: boat?.exact_build?.build_key || null,
         hullNumber: boat?.exact_build?.hull_number || boat?.identity?.hull_number || boat?.identity?.hin || null,
         parentRoute: fixedMode ? "KeeprSpaceFleet" : "ActivatorHome",

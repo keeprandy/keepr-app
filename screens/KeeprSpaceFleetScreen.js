@@ -23,11 +23,6 @@ import { fetchAssetHeroUris, getCachedAssetHeroUris } from "../lib/assetHeroReso
 import { getKeeprSpacePortfolio, removeKeeprSpaceBoatRelationship } from "../lib/keeprspaceApi";
 import { assetProjectionSemantics } from "../lib/assetProjectionSemantics";
 import { supabase } from "../lib/supabaseClient";
-import {
-  TIARA_56_LS_TEMPLATE_KEY,
-  TIARA_KF018_BUILD_KEY,
-  tiaraKf018FactoryBuild,
-} from "../data/tiaraKf018FactoryBuild";
 import { colors, radius, shadows, spacing } from "../styles/theme";
 
 const FALLBACK_HERO = require("../assets/boats/tiara/tiara_39ls_hero.jpg");
@@ -42,7 +37,6 @@ const APP_ASSET_HERO_MAP = {
   "app://assets/boats/tiara/tiara_39ls_hero.jpg": FALLBACK_HERO,
   "app://assets/boats/tiara/tiara_39le_hero.jpg": require("../assets/boats/tiara/tiara_39le_hero.jpg"),
 };
-const ENABLE_KF018_LOCAL_FLEET_FALLBACK = process.env.EXPO_PUBLIC_ENABLE_KF018_LOCAL_FLEET_FALLBACK === "1";
 
 function compact(parts) {
   return parts.filter(Boolean).join(" • ");
@@ -164,7 +158,6 @@ function workspaceConnectionLabel(boat) {
 }
 
 function hasFactoryBuildLayer(boat) {
-  const kac = String(boat?.kac_id || "").toUpperCase();
   const source = String(boat?.source_type || boat?.data_source || boat?.relationship_source || "").toLowerCase();
   const identity = boat?.identity || {};
   return Boolean(
@@ -173,9 +166,7 @@ function hasFactoryBuildLayer(boat) {
       || identity.build_code
       || identity.hull_number
       || source.includes("factory_build")
-      || source.includes("tiara_factory_build")
-      || kac === "KAC-TIARA-56LS-KF018"
-      || kac.includes("56LS-KF")
+      || source.includes("exact_build")
   );
 }
 
@@ -183,107 +174,10 @@ function factoryBuildParamsForBoat(boat) {
   const identity = boat?.identity || {};
   const exact = boat?.exact_build || {};
   const buildCode = exact.build_key || exact.build_code || identity.build_code;
-  const kac = String(boat?.kac_id || "").toUpperCase();
   return {
-    templateKey: exact.template_key || boat?.template?.template_key || (kac.includes("56LS") ? TIARA_56_LS_TEMPLATE_KEY : TIARA_56_LS_TEMPLATE_KEY),
-    buildKey: buildCode ? String(buildCode).toLowerCase() : kac.includes("KF018") ? TIARA_KF018_BUILD_KEY : null,
+    templateKey: exact.template_key || boat?.template?.template_key || null,
+    buildKey: buildCode ? String(buildCode).toLowerCase() : null,
     hullNumber: exact.hull_number || exact.hin || identity.hull_number || identity.hin || boat?.hin || null,
-  };
-}
-
-function kf018FleetProjection() {
-  const workOrder = tiaraKf018FactoryBuild.work_order || {};
-  const catalog = tiaraKf018FactoryBuild.catalog_template || {};
-  return {
-    id: "factory-build-kf018",
-    asset_id: "factory-build-kf018",
-    source_type: "factory_build_workspace",
-    asset_name: "KF018 · 2027 Tiara 56 LS",
-    kac_id: "KAC-TIARA-56LS-KF018",
-    owner_state: "OEM Build",
-    identity: {
-      year: String(catalog.model_year || 2027),
-      make: catalog.manufacturer || "Tiara Yachts",
-      model: catalog.model || "56 LS",
-      hin: workOrder.hin,
-      hull_number: workOrder.hull_number,
-      build_code: workOrder.build_code,
-      order_number: workOrder.order_number,
-    },
-    activation: {
-      status: "OEM Build",
-      stage: "factory_build",
-    },
-    verification: {
-      percent: 70,
-      status: "factory_confirmed",
-    },
-    oem_relationship: {
-      organization_name: "Tiara Yachts",
-      relationship_type: "builder",
-      relationship_purpose: "Factory build",
-      status: "Active",
-    },
-    exact_build: {
-      template_key: TIARA_56_LS_TEMPLATE_KEY,
-      build_key: TIARA_KF018_BUILD_KEY,
-      hull_number: workOrder.hull_number,
-      source_type: workOrder.source_type,
-      source_document: workOrder.source_document,
-    },
-  };
-}
-
-function withKf018FleetProjection(portfolio, workspace, search) {
-  if (!ENABLE_KF018_LOCAL_FLEET_FALLBACK) return portfolio;
-  if (workspace?.workspace_type !== "keeproem") return portfolio;
-
-  const query = String(search || "").trim().toLowerCase();
-  const projection = kf018FleetProjection();
-  const searchable = [
-    projection.asset_name,
-    projection.kac_id,
-    projection.identity?.hin,
-    projection.identity?.hull_number,
-    projection.identity?.build_code,
-    projection.identity?.order_number,
-    projection.identity?.model,
-    projection.identity?.make,
-  ].filter(Boolean).join(" ").toLowerCase();
-
-  if (query && !searchable.includes(query)) return portfolio;
-
-  const currentBoats = Array.isArray(portfolio?.boats) ? portfolio.boats : [];
-  const alreadyPresent = currentBoats.some((boat) => {
-    const haystack = [
-      boat.asset_id,
-      boat.id,
-      boat.kac_id,
-      boat.identity?.hin,
-      boat.identity?.hull_number,
-      boat.asset_name,
-      boat.name,
-    ]
-      .filter(Boolean)
-      .map((value) => String(value).toLowerCase());
-    return haystack.includes("factory-build-kf018")
-      || haystack.includes("kac-tiara-56ls-kf018")
-      || haystack.includes("ssukf018h627")
-      || haystack.some((value) => value.includes("kf018"));
-  });
-
-  if (alreadyPresent) return portfolio;
-
-  const nextBoats = [projection, ...currentBoats];
-  const counts = portfolio?.counts || {};
-  return {
-    ...(portfolio || {}),
-    boats: nextBoats,
-    counts: {
-      ...counts,
-      visible_boats: Math.max(Number(counts.visible_boats || 0), nextBoats.length),
-      filtered_boats: Math.max(Number(counts.filtered_boats || 0), nextBoats.length),
-    },
   };
 }
 
@@ -493,7 +387,7 @@ export default function KeeprSpaceFleetScreen({ route, navigation }) {
         limit: 50,
         offset: 0,
       });
-      setPortfolio(withKf018FleetProjection(next, currentWorkspace, search));
+      setPortfolio(next);
     } catch (err) {
       setError(err?.message || "Could not load fleet.");
       setPortfolio(null);
@@ -656,7 +550,7 @@ export default function KeeprSpaceFleetScreen({ route, navigation }) {
             limit: 50,
             offset: 0,
           });
-          setPortfolio(withKf018FleetProjection(next, currentWorkspace, search));
+          setPortfolio(next);
         } catch (refreshErr) {
           setActionMessage({
             tone: "warning",

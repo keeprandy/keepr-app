@@ -82,24 +82,28 @@ test("KF018 question answers return evidence from factory lines", () => {
   assert.ok(electronicsAnswer.evidence.some((item) => /FLIR|STARLINK|ANTENNAS/i.test(item.factory_description)));
 });
 
-test("KF018 exact-build screen exposes Factory Build, manual queue, and public model context", () => {
+test("KF018 exact-build screen keeps the factory mapping UI without local Tiara fallbacks", () => {
   const source = read("screens/ActivatorExactBuildScreen.js");
 
   assert.match(source, /Factory Build/);
-  assert.match(source, /Tiara work-order ingestion/);
+  assert.match(source, /Mapping Assignment/);
   assert.match(source, /Missing Source Queue/);
   assert.match(source, /Public Model Context/);
-  assert.match(source, /getTiaraFactoryBuildWorkspace/);
-  assert.match(source, /getDefaultTiaraExactFactoryBuildForTemplate/);
+  assert.match(source, /getCatalogTemplateDetail\(\{ templateKey \}\)/);
+  assert.match(source, /getExactBuildDraft/);
+  assert.doesNotMatch(source, /getTiaraFactoryBuildWorkspace/);
+  assert.doesNotMatch(source, /getDefaultTiaraExactFactoryBuildForTemplate/);
+  assert.doesNotMatch(source, /DEMO_FACTORY_OPTIONS/);
   assert.match(source, /factory_item_code/);
   assert.match(source, /factory_description/);
   assert.doesNotMatch(source, /templateKey = route\?\.params\?\.templateKey \|\| "tiara-2027-39-ls"/);
 });
 
-test("KF018 fleet routing consumes database-backed exact-build metadata without replacing the 39 LS template", () => {
+test("KF018 fleet routing consumes generic exact-build metadata without local runtime projection", () => {
   const source = read("screens/ActivatorHomeScreen.js");
   const fleetSource = read("screens/KeeprSpaceFleetScreen.js");
   const materializerSql = read("supabase/migrations/20260824143000_materialize_tiara_factory_build_asset.sql");
+  const genericKf018Sql = read("supabase/migrations/20260903150000_productize_tiara_56ls_kf018_generic_build.sql");
   const portfolioSql = read("supabase/migrations/20260824143500_keeprspace_portfolio_exact_build_metadata.sql");
   const graphSql = read("supabase/migrations/20260824144000_asset_graph_projection.sql");
   const systemsExperienceSql = read("supabase/migrations/20260824144500_canonical_asset_systems_experience.sql");
@@ -107,29 +111,37 @@ test("KF018 fleet routing consumes database-backed exact-build metadata without 
   const graphScript = read("scripts/project-kf018-asset-graph-staging.mjs");
   const exportScript = read("scripts/export-kf018-package.mjs");
 
-  assert.match(source, /ENABLE_KF018_LOCAL_FLEET_FALLBACK/);
-  assert.match(source, /withKf018FleetProjection/);
-  assert.match(source, /source_type:\s*"factory_build_workspace"/);
-  assert.match(source, /asset_name:\s*"KF018 · 2027 Tiara 56 LS"/);
-  assert.match(source, /kac_id:\s*"KAC-TIARA-56LS-KF018"/);
-  assert.match(source, /template_key:\s*TIARA_56_LS_TEMPLATE_KEY/);
-  assert.match(source, /build_key:\s*TIARA_KF018_BUILD_KEY/);
+  assert.doesNotMatch(source, /ENABLE_KF018_LOCAL_FLEET_FALLBACK/);
+  assert.doesNotMatch(source, /withKf018FleetProjection/);
+  assert.doesNotMatch(source, /source_type:\s*"factory_build_workspace"/);
+  assert.doesNotMatch(source, /asset_name:\s*"KF018 · 2027 Tiara 56 LS"/);
+  assert.doesNotMatch(source, /kac_id:\s*"KAC-TIARA-56LS-KF018"/);
+  assert.doesNotMatch(source, /template_key:\s*TIARA_56_LS_TEMPLATE_KEY/);
+  assert.doesNotMatch(source, /build_key:\s*TIARA_KF018_BUILD_KEY/);
   assert.match(source, /navigation\.navigate\("ActivatorExactBuild"/);
-  assert.match(source, /buildKey:\s*boat\?\.exact_build\?\.build_key/);
-  assert.match(source, /templateKey:\s*template\.template_key/);
+  assert.match(source, /exactTemplateKey = boat\?\.exact_build\?\.template_key/);
+  assert.match(source, /templateKey:\s*exactTemplateKey/);
   assert.match(source, /buildKey:\s*template\.buildKey \|\| null/);
   assert.doesNotMatch(source, /tiara-2027-39-ls[\s\S]{0,80}KF018/);
 
-  assert.match(fleetSource, /ENABLE_KF018_LOCAL_FLEET_FALLBACK/);
-  assert.match(fleetSource, /withKf018FleetProjection/);
-  assert.match(fleetSource, /if \(!ENABLE_KF018_LOCAL_FLEET_FALLBACK\) return portfolio/);
-  assert.match(fleetSource, /asset_name:\s*"KF018 · 2027 Tiara 56 LS"/);
+  assert.doesNotMatch(fleetSource, /ENABLE_KF018_LOCAL_FLEET_FALLBACK/);
+  assert.doesNotMatch(fleetSource, /withKf018FleetProjection/);
+  assert.doesNotMatch(fleetSource, /asset_name:\s*"KF018 · 2027 Tiara 56 LS"/);
   assert.match(fleetSource, /navigation\.navigate\("ActivatorExactBuild"/);
   assert.match(fleetSource, /function hasFactoryBuildLayer/);
   assert.match(fleetSource, /function factoryBuildParamsForBoat/);
   assert.match(fleetSource, /Open Factory Build/);
-  assert.match(fleetSource, /buildKey:\s*buildCode \? String\(buildCode\)\.toLowerCase\(\) : kac\.includes\("KF018"\) \? TIARA_KF018_BUILD_KEY : null/);
-  assert.match(fleetSource, /setPortfolio\(withKf018FleetProjection\(next, currentWorkspace, search\)\)/);
+  assert.match(fleetSource, /templateKey:\s*exact\.template_key \|\| boat\?\.template\?\.template_key \|\| null/);
+  assert.match(fleetSource, /buildKey:\s*buildCode \? String\(buildCode\)\.toLowerCase\(\) : null/);
+  assert.match(fleetSource, /setPortfolio\(next\)/);
+
+  assert.match(genericKf018Sql, /tiara-2027-56-ls/);
+  assert.match(genericKf018Sql, /KAC-TIARA-56LS-KF018/);
+  assert.match(genericKf018Sql, /exact_build_drafts/);
+  assert.match(genericKf018Sql, /exact_build_draft_items/);
+  assert.match(genericKf018Sql, /asset_template_bindings/);
+  assert.match(genericKf018Sql, /reusable_model_dna/);
+  assert.match(genericKf018Sql, /exact_kf018_truth/);
 
   assert.match(materializerSql, /materialize_tiara_factory_build_asset/);
   assert.match(materializerSql, /insert into public\.assets/);
