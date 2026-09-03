@@ -179,6 +179,38 @@ test("System Template reference migration keeps reusable system truth separate f
   assert.match(proofBuilderSource, /select\("id,label,item_type,canonical_key,metadata,applicability,system_template_id"\)/);
 });
 
+test("System Template promote and link operations are explicit product actions", () => {
+  const sql = read("supabase/migrations/20260903172000_system_template_promote_link_ops.sql");
+  const activatorApi = read("lib/activatorApi.js");
+  const systemStorySource = read("screens/BoatSystemStoryScreen.js");
+  const itemEditorSource = read("screens/ActivatorTemplateItemEditorScreen.js");
+
+  assert.match(sql, /create or replace function public\.promote_system_to_system_template/);
+  assert.match(sql, /create or replace function public\.link_model_item_system_template/);
+  assert.match(sql, /create or replace function public\.unlink_model_item_system_template/);
+  assert.match(sql, /create or replace function public\.list_system_templates/);
+  assert.match(sql, /activator_user_can_manage_asset\(auth\.uid\(\), v_system\.asset_id\)/);
+  assert.match(sql, /activator_user_can_manage_template\(auth\.uid\(\), v_item\.template_id\)/);
+  assert.match(sql, /promote_resources/);
+  assert.match(sql, /coalesce\(att\.kind, ''\) <> 'photo'/);
+  assert.match(sql, /exact_truth_excluded/);
+  assert.doesNotMatch(sql, /KAC-TIARA-56LS-KF018|tiara-2027-56-ls|Onan 13\.5kW Generator|Seakeeper SK10\.5/);
+
+  assert.match(activatorApi, /export async function listSystemTemplates/);
+  assert.match(activatorApi, /export async function linkModelItemSystemTemplate/);
+  assert.match(activatorApi, /export async function unlinkModelItemSystemTemplate/);
+  assert.match(activatorApi, /export async function promoteSystemToSystemTemplate/);
+
+  assert.match(systemStorySource, /Promote \/ Update System Template/);
+  assert.match(systemStorySource, /promote_resources: promoteResources/);
+  assert.match(systemStorySource, /exact serials, photos, service history/i);
+
+  assert.match(itemEditorSource, /Core System Template/);
+  assert.match(itemEditorSource, /linkModelItemSystemTemplate/);
+  assert.match(itemEditorSource, /unlinkModelItemSystemTemplate/);
+  assert.match(itemEditorSource, /Model-specific applicability remains/);
+});
+
 test("KF018 fleet routing consumes generic exact-build metadata without local runtime projection", () => {
   const source = read("screens/ActivatorHomeScreen.js");
   const fleetSource = read("screens/KeeprSpaceFleetScreen.js");

@@ -17,7 +17,13 @@ import { Ionicons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
 
 import ActivatorBreadcrumb from "../components/ActivatorBreadcrumb";
-import { getCatalogTemplateDetail, upsertCatalogTemplateItem } from "../lib/activatorApi";
+import {
+  getCatalogTemplateDetail,
+  linkModelItemSystemTemplate,
+  listSystemTemplates,
+  unlinkModelItemSystemTemplate,
+  upsertCatalogTemplateItem,
+} from "../lib/activatorApi";
 import { listAttachmentsForTarget, removePlacementById } from "../lib/attachmentsApi";
 import { createLinkAttachment, uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import { supabase } from "../lib/supabaseClient";
@@ -314,6 +320,10 @@ export default function ActivatorTemplateItemEditorScreen() {
   const [resourceRole, setResourceRole] = useState("Manual");
   const [templateItemAttachments, setTemplateItemAttachments] = useState([]);
   const [savingResource, setSavingResource] = useState(false);
+  const [systemTemplateQuery, setSystemTemplateQuery] = useState("");
+  const [systemTemplateResults, setSystemTemplateResults] = useState([]);
+  const [systemTemplateLoading, setSystemTemplateLoading] = useState(false);
+  const [systemTemplateSaving, setSystemTemplateSaving] = useState(false);
   const [rapidChildLines, setRapidChildLines] = useState("");
   const [rapidChildKind, setRapidChildKind] = useState("configuration_item");
   const [rapidChildState, setRapidChildState] = useState("optional");
@@ -348,6 +358,18 @@ export default function ActivatorTemplateItemEditorScreen() {
   const items = useMemo(() => activeItems(detail?.items || []), [detail?.items]);
   const item = useMemo(() => items.find((candidate) => candidate.id === itemId), [itemId, items]);
   const isGroup = item?.item_type === "configuration_group";
+  const isSystemLike = !isGroup && (kind === "system" || projectionKind === "system" || item?.item_type === "system" || item?.metadata?.projection?.kind === "system");
+  const linkedSystemTemplateId = item?.system_template_id || item?.metadata?.system_template_id || null;
+  const linkedSystemTemplate = useMemo(() => {
+    if (!linkedSystemTemplateId) return null;
+    return (
+      systemTemplateResults.find((candidate) => candidate.id === linkedSystemTemplateId) || {
+        id: linkedSystemTemplateId,
+        name: item?.metadata?.system_template_name || "Linked System Template",
+        canonical_key: item?.metadata?.system_template_key || null,
+      }
+    );
+  }, [item?.metadata?.system_template_key, item?.metadata?.system_template_name, linkedSystemTemplateId, systemTemplateResults]);
   const parent = useMemo(() => (item?.parent_item_id ? items.find((candidate) => candidate.id === item.parent_item_id) : null), [item, items]);
   const children = useMemo(() => items.filter((candidate) => candidate.parent_item_id === itemId), [itemId, items]);
   const groups = useMemo(
@@ -392,7 +414,64 @@ export default function ActivatorTemplateItemEditorScreen() {
     setResourcesText(arrayToLines(itemElementList(item, "resources")));
     setPlaybooksText(arrayToLines(itemElementList(item, "playbooks")));
     setRequirementsText(arrayToLines(itemElementList(item, "requirements")));
+    setSystemTemplateQuery(item.label || "");
   }, [isGroup, item]);
+
+  const searchSystemTemplates = useCallback(async (queryOverride = null) => {
+    const query = queryOverride == null ? systemTemplateQuery : queryOverride;
+    setSystemTemplateLoading(true);
+    setError("");
+    try {
+      const results = await listSystemTemplates({ query, limit: 12 });
+      setSystemTemplateResults(results || []);
+    } catch (err) {
+      setError(err?.message || "Could not search System Templates.");
+      setSystemTemplateResults([]);
+    } finally {
+      setSystemTemplateLoading(false);
+    }
+  }, [systemTemplateQuery]);
+
+  useEffect(() => {
+    if (!item || !isSystemLike) return;
+    searchSystemTemplates(item.label || "");
+  }, [isSystemLike, item?.id]);
+
+  const linkSystemTemplate = useCallback(async (systemTemplate) => {
+    if (!item?.id || !systemTemplate?.id) return;
+    setSystemTemplateSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      await linkModelItemSystemTemplate({
+        templateItemId: item.id,
+        systemTemplateId: systemTemplate.id,
+      });
+      setNotice("Linked to canonical System Template. Model-specific applicability remains on this item.");
+      await load();
+      await searchSystemTemplates(systemTemplate.name || systemTemplateQuery);
+    } catch (err) {
+      setError(err?.message || "Could not link this System Template.");
+    } finally {
+      setSystemTemplateSaving(false);
+    }
+  }, [item?.id, load, searchSystemTemplates, systemTemplateQuery]);
+
+  const unlinkSystemTemplate = useCallback(async () => {
+    if (!item?.id) return;
+    setSystemTemplateSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      await unlinkModelItemSystemTemplate(item.id);
+      setNotice("System Template link removed. The model item still works as unresolved model data.");
+      await load();
+    } catch (err) {
+      setError(err?.message || "Could not unlink this System Template.");
+    } finally {
+      setSystemTemplateSaving(false);
+    }
+  }, [item?.id, load]);
 
   const tabs = isGroup
     ? [
@@ -1018,6 +1097,97 @@ export default function ActivatorTemplateItemEditorScreen() {
 
         {tab === "knowledge" && !isGroup ? (
           <Section title="Knowledge" eyebrow="Reusable meaning" iconName="star-outline">
+            {isSystemLike ? (
+              <View style={styles.systemTemplatePanel}>
+                <View style={styles.rapidHeader}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.label}>Core System Template</Text>
+                    <Text style={styles.helpText}>
+                      Link reusable system truth here; keep Tiara/model applicability on this item.
+                    </Text>
+                  </View>
+                  {linkedSystemTemplate ? (
+                    <TouchableOpacity
+                      style={[styles.tinyButton, systemTemplateSaving && styles.disabledButton]}
+                      onPress={unlinkSystemTemplate}
+                      disabled={systemTemplateSaving}
+                    >
+                      <Ionicons name="unlink-outline" size={14} color="#dc2626" />
+                      <Text style={[styles.tinyButtonText, styles.dangerText]}>Unlink</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+                {linkedSystemTemplate ? (
+                  <View style={styles.linkedResourceRow}>
+                    <View style={styles.linkedResourceMain}>
+                      <Ionicons name="hardware-chip-outline" size={18} color={colors.blue} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.childTitle}>{linkedSystemTemplate.name}</Text>
+                        <Text style={styles.childMeta}>
+                          {[
+                            linkedSystemTemplate.manufacturer,
+                            linkedSystemTemplate.system_category,
+                            linkedSystemTemplate.canonical_key,
+                          ].filter(Boolean).join(" - ") || "Canonical reusable system truth"}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                ) : (
+                  <Text style={styles.helpText}>No canonical System Template is linked yet.</Text>
+                )}
+                <View style={styles.buttonRow}>
+                  <View style={{ flex: 1, minWidth: 260 }}>
+                    <Field
+                      label="Find System Template"
+                      value={systemTemplateQuery}
+                      onChangeText={setSystemTemplateQuery}
+                      placeholder="Search Onan, Seakeeper, Mercury..."
+                    />
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.secondaryButton, systemTemplateLoading && styles.disabledButton]}
+                    onPress={() => searchSystemTemplates()}
+                    disabled={systemTemplateLoading}
+                  >
+                    <Ionicons name="search-outline" size={17} color={colors.blue} />
+                    <Text style={styles.secondaryButtonText}>{systemTemplateLoading ? "Searching..." : "Search"}</Text>
+                  </TouchableOpacity>
+                </View>
+                {systemTemplateResults.length ? (
+                  <View style={styles.linkedResourceList}>
+                    {systemTemplateResults.map((candidate) => {
+                      const alreadyLinked = candidate.id === linkedSystemTemplateId;
+                      return (
+                        <View key={candidate.id} style={styles.linkedResourceRow}>
+                          <View style={styles.linkedResourceMain}>
+                            <Ionicons name="hardware-chip-outline" size={18} color={colors.blue} />
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.childTitle}>{candidate.name}</Text>
+                              <Text style={styles.childMeta}>
+                                {[
+                                  candidate.manufacturer,
+                                  candidate.system_category,
+                                  `${candidate.resource_count || 0} reusable resources`,
+                                ].filter(Boolean).join(" - ")}
+                              </Text>
+                            </View>
+                          </View>
+                          <TouchableOpacity
+                            style={[styles.tinyButton, (alreadyLinked || systemTemplateSaving) && styles.disabledButton]}
+                            onPress={() => linkSystemTemplate(candidate)}
+                            disabled={alreadyLinked || systemTemplateSaving}
+                          >
+                            <Ionicons name={alreadyLinked ? "checkmark-circle-outline" : "link-outline"} size={14} color={colors.blue} />
+                            <Text style={styles.tinyButtonText}>{alreadyLinked ? "Linked" : "Link"}</Text>
+                          </TouchableOpacity>
+                        </View>
+                      );
+                    })}
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
             <Text style={styles.label}>Selection mode</Text>
             <View style={styles.choiceWrap}>
               {SELECTION_MODES.map((candidate) => (
@@ -1218,6 +1388,7 @@ const styles = StyleSheet.create({
   notice: { color: colors.greenInk, backgroundColor: colors.green, borderRadius: 8, padding: 10, fontWeight: "800" },
   error: { color: "#991b1b", backgroundColor: "#fee2e2", borderRadius: 8, padding: 10, fontWeight: "800" },
   rapidPanel: { borderWidth: 1, borderColor: "#bfdbfe", borderRadius: 8, backgroundColor: "#f8fbff", padding: 14, gap: 12 },
+  systemTemplatePanel: { borderWidth: 1, borderColor: "#bfdbfe", borderRadius: 8, backgroundColor: "#f8fbff", padding: 14, gap: 12 },
   rapidHeader: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12 },
   rapidTitle: { color: colors.ink, fontWeight: "900", fontSize: 18 },
   rapidColumns: { flexDirection: "row", gap: 10, paddingHorizontal: 2 },

@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  TextInput,
   useWindowDimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -26,6 +27,7 @@ import { supabase } from "../lib/supabaseClient";
 import { buildServiceActionRouteParams } from "../lib/serviceActionPrefill";
 import { buildPrivateKeeprProActionPrefill } from "../lib/keeprProEngagement";
 import { buildMessagesNavigationParams } from "../lib/messagesService";
+import { promoteSystemToSystemTemplate } from "../lib/activatorApi";
 
 import { useAttachments } from "../hooks/useAttachments";
 import {
@@ -213,6 +215,7 @@ export default function BoatSystemStoryScreen(props) {
   const systemId = route?.params?.systemId ?? route?.params?.system_id ?? null;
   const graphNodeKey = route?.params?.graphNodeKey ?? null;
   const systemsRole = route?.params?.systemsRole || route?.params?.relationshipRole || "owner";
+  const organizationId = route?.params?.organizationId || route?.params?.organization_id || null;
 
   const assetIdFromRoute =
     route?.params?.assetId ?? route?.params?.boatId ?? currentBoat?.id ?? null;
@@ -253,6 +256,16 @@ export default function BoatSystemStoryScreen(props) {
 
   const [attachmentPreview, setAttachmentPreview] = useState([]);
   const [inheritedSystemResources, setInheritedSystemResources] = useState([]);
+  const [promoteOpen, setPromoteOpen] = useState(false);
+  const [promoteName, setPromoteName] = useState("");
+  const [promoteManufacturer, setPromoteManufacturer] = useState("");
+  const [promoteCategory, setPromoteCategory] = useState("");
+  const [promoteDescription, setPromoteDescription] = useState("");
+  const [promoteResources, setPromoteResources] = useState(false);
+  const [promotingSystem, setPromotingSystem] = useState(false);
+  const [promoteNotice, setPromoteNotice] = useState("");
+  const [promoteError, setPromoteError] = useState("");
+  const [linkedSystemTemplate, setLinkedSystemTemplate] = useState(null);
 
   // viewer state
   const [viewerVisible, setViewerVisible] = useState(false);
@@ -261,6 +274,25 @@ export default function BoatSystemStoryScreen(props) {
   // thumbnail error tracking (prevents grey/blank tiles)
   const [thumbErrorByKey, setThumbErrorByKey] = useState({});
   const [recordThumbErrorByUrl, setRecordThumbErrorByUrl] = useState({});
+
+  useEffect(() => {
+    if (!system) return;
+    const standard = getStandardMeta(system);
+    setPromoteName(system.name || "");
+    setPromoteManufacturer(
+      standard.identity?.manufacturer ||
+        system.metadata?.identity?.manufacturer ||
+        system.manufacturer ||
+        ""
+    );
+    setPromoteCategory(system.system_type || "");
+    setPromoteDescription(
+      standard.story?.description ||
+        system.metadata?.description ||
+        system.description ||
+        ""
+    );
+  }, [system?.id]);
 
   const markThumbFailed = useCallback((key) => {
     if (!key) return;
@@ -316,6 +348,17 @@ export default function BoatSystemStoryScreen(props) {
 
       if (!resolvedSystem) throw new Error("System not found.");
       setSystem(resolvedSystem);
+      if (resolvedSystem.system_template_id) {
+        const { data: systemTemplateRow, error: systemTemplateErr } = await supabase
+          .from("system_templates")
+          .select("id,canonical_key,name,manufacturer,system_category,authority_state")
+          .eq("id", resolvedSystem.system_template_id)
+          .maybeSingle();
+        if (systemTemplateErr) throw systemTemplateErr;
+        setLinkedSystemTemplate(systemTemplateRow || null);
+      } else {
+        setLinkedSystemTemplate(null);
+      }
 
       try {
         const inheritedResources = await listInheritedTemplateResourcesForSystem(assetId, resolvedSystem);
@@ -822,6 +865,61 @@ const handleRequestServiceFromKeeprPro = useCallback(async (pro) => {
     [systemId]
   );
 
+  const handlePromoteSystemTemplate = useCallback(async () => {
+    if (!systemId || !system) return;
+    const name = String(promoteName || "").trim();
+    if (!name) {
+      Alert.alert("Missing system name", "Add a reusable System Template name before promoting.");
+      return;
+    }
+
+    setPromotingSystem(true);
+    setPromoteNotice("");
+    setPromoteError("");
+    try {
+      const result = await promoteSystemToSystemTemplate({
+        systemId,
+        payload: {
+          name,
+          manufacturer: String(promoteManufacturer || "").trim() || null,
+          system_category: String(promoteCategory || "").trim() || null,
+          description: String(promoteDescription || "").trim() || null,
+          owner_org_id: organizationId || null,
+          promote_resources: promoteResources,
+          link_system: true,
+          authority_state: "oem_verified",
+          metadata: {
+            promotion_ui: "boat_system_story",
+            reusable_fields_selected: ["name", "manufacturer", "system_category", "description"],
+          },
+        },
+      });
+      const nextSystem = result?.system || null;
+      if (nextSystem) setSystem(nextSystem);
+      const count = result?.promoted_resource_count || 0;
+      setPromoteNotice(
+        `Promoted and linked to ${result?.system_template?.name || name}. ${count} reusable resource${
+          count === 1 ? "" : "s"
+        } referenced.`
+      );
+      await loadAll();
+    } catch (e) {
+      setPromoteError(e?.message || "Could not promote this system.");
+    } finally {
+      setPromotingSystem(false);
+    }
+  }, [
+    loadAll,
+    organizationId,
+    promoteCategory,
+    promoteDescription,
+    promoteManufacturer,
+    promoteName,
+    promoteResources,
+    system,
+    systemId,
+  ]);
+
   const openViewerAt = useCallback(
     (idx) => {
       if (!viewerCollection.length) return;
@@ -1002,6 +1100,18 @@ const handleRequestServiceFromKeeprPro = useCallback(async (pro) => {
               style={{ marginRight: 6 }}
             />
             <Text style={styles.chipLabel}>Messages</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.chip} onPress={() => setPromoteOpen((prev) => !prev)}>
+            <Ionicons
+              name="hardware-chip-outline"
+              size={14}
+              color={colors.textSecondary}
+              style={{ marginRight: 6 }}
+            />
+            <Text style={styles.chipLabel}>
+              {system?.system_template_id ? "System Template" : "Promote Template"}
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -1234,6 +1344,87 @@ const handleRequestServiceFromKeeprPro = useCallback(async (pro) => {
               </View>
             ) : null}
           </View>
+
+          {promoteOpen ? (
+            <View style={styles.sectionCard}>
+              <View style={styles.detailHeaderRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.sectionTitle}>Core System Template</Text>
+                  <Text style={styles.sectionSubtitle}>
+                    Promote reusable knowledge from this exact system. Exact serials, photos, service history,
+                    condition, and KF018 evidence stay on this installed system.
+                  </Text>
+                </View>
+                {system?.system_template_id ? (
+                  <View style={[styles.statusPill, styles.status_healthy]}>
+                    <Text style={styles.statusText}>Linked</Text>
+                  </View>
+                ) : null}
+              </View>
+              {system?.system_template_id ? (
+                <Text style={styles.recordNotes}>
+                  Linked System Template:{" "}
+                  {[
+                    linkedSystemTemplate?.name || system?.metadata?.system_template_name || system.system_template_id,
+                    linkedSystemTemplate?.manufacturer,
+                    linkedSystemTemplate?.system_category,
+                  ].filter(Boolean).join(" - ")}
+                </Text>
+              ) : null}
+              {!!promoteNotice && <Text style={styles.noticeText}>{promoteNotice}</Text>}
+              {!!promoteError && <Text style={styles.errorText}>{promoteError}</Text>}
+              <View style={styles.promoteGrid}>
+                <View style={styles.promoteField}>
+                  <Text style={styles.fieldLabel}>Reusable name</Text>
+                  <TextInput value={promoteName} onChangeText={setPromoteName} style={styles.textInput} />
+                </View>
+                <View style={styles.promoteField}>
+                  <Text style={styles.fieldLabel}>Manufacturer / supplier</Text>
+                  <TextInput value={promoteManufacturer} onChangeText={setPromoteManufacturer} style={styles.textInput} />
+                </View>
+                <View style={styles.promoteField}>
+                  <Text style={styles.fieldLabel}>Category</Text>
+                  <TextInput value={promoteCategory} onChangeText={setPromoteCategory} style={styles.textInput} />
+                </View>
+              </View>
+              <View style={styles.promoteField}>
+                <Text style={styles.fieldLabel}>Reusable description</Text>
+                <TextInput
+                  value={promoteDescription}
+                  onChangeText={setPromoteDescription}
+                  style={[styles.textInput, styles.textArea]}
+                  multiline
+                />
+              </View>
+              <Pressable
+                style={styles.promoteToggleRow}
+                onPress={() => setPromoteResources((prev) => !prev)}
+              >
+                <Ionicons
+                  name={promoteResources ? "checkbox-outline" : "square-outline"}
+                  size={20}
+                  color={colors.brandBlue}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.detailTitle}>Promote non-photo resources by reference</Text>
+                  <Text style={styles.recordNotes}>
+                    Manuals, support links, and reusable documents can be referenced by the System Template.
+                    Photos and exact evidence remain on this system.
+                  </Text>
+                </View>
+              </Pressable>
+              <TouchableOpacity
+                style={[styles.primaryAction, promotingSystem && { opacity: 0.55 }]}
+                onPress={handlePromoteSystemTemplate}
+                disabled={promotingSystem}
+              >
+                <Ionicons name="arrow-up-circle-outline" size={16} color={colors.brandWhite} style={{ marginRight: 8 }} />
+                <Text style={styles.primaryActionText}>
+                  {promotingSystem ? "Promoting..." : "Promote / Update System Template"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
 
           {/* Mobile details (below hero) */}
           {!isWide ? (
@@ -2020,6 +2211,57 @@ const styles = StyleSheet.create({
   recordTitle: { flex: 1, fontSize: 13, fontWeight: "700", color: colors.textPrimary, marginRight: spacing.sm },
   recordDate: { fontSize: 12, color: colors.textSecondary },
   recordNotes: { marginTop: spacing.xs, fontSize: 12, color: colors.textSecondary, lineHeight: 16 },
+  noticeText: {
+    marginTop: spacing.sm,
+    padding: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: "#DCFCE7",
+    color: "#166534",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  errorText: {
+    marginTop: spacing.sm,
+    padding: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: "#FEE2E2",
+    color: "#991B1B",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  promoteGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.md },
+  promoteField: { flex: 1, minWidth: 220, marginTop: spacing.sm },
+  fieldLabel: {
+    marginBottom: 6,
+    fontSize: 11,
+    fontWeight: "800",
+    color: colors.textSecondary,
+    textTransform: "uppercase",
+    letterSpacing: 0,
+  },
+  textInput: {
+    minHeight: 42,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 8,
+    color: colors.textPrimary,
+    fontSize: 13,
+  },
+  textArea: { minHeight: 86, textAlignVertical: "top" },
+  promoteToggleRow: {
+    marginTop: spacing.md,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    backgroundColor: colors.surfaceSubtle,
+    borderRadius: radius.md,
+    padding: spacing.sm,
+  },
 
   thumb: { width: 64, height: 48, borderRadius: radius.md, marginRight: spacing.xs, backgroundColor: colors.surfaceSubtle },
   thumbImage: { width: "100%", height: "100%" },
