@@ -293,7 +293,7 @@ test("Exact systems inherit attachment-backed model item resources", () => {
   assert.match(api, /\.in\("target_id", templateIds\)/);
   assert.match(api, /if \(isMediaAttachment\(attachment\)\) return false/);
   assert.match(api, /attachmentLinkedTemplateItemIds\(attachment\)/);
-  assert.match(api, /\[\.\.\.inheritedAttachmentResources, \.\.\.inheritedLegacyResources\]/);
+  assert.match(api, /\[\.\.\.inheritedSystemTemplateResources, \.\.\.inheritedAttachmentResources, \.\.\.inheritedLegacyResources\]/);
 });
 
 test("Attachment routes keep return context flat on web", () => {

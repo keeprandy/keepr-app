@@ -113,6 +113,7 @@ test("model template projection shows top-level reusable systems as Systems cata
       {
         id: "generator-system",
         item_type: "system",
+        system_template_id: "11111111-1111-4111-8111-111111111111",
         label: "Onan 13.5kW Generator",
         canonical_key: "system.generator.onan_13_5kw",
         sort_order: 10,
@@ -141,7 +142,41 @@ test("model template projection shows top-level reusable systems as Systems cata
 
   assert.ok(systemsGroup, "top-level reusable systems should render under the Systems tab");
   assert.deepEqual(systemsGroup.children.map((item) => item.label), ["Onan 13.5kW Generator", "Head Macerator System"]);
+  assert.equal(systemsGroup.children[0].metadata.projection.system_template_id, "11111111-1111-4111-8111-111111111111");
+  assert.equal(projection.configuration.buildEligibleItems[0].system_template_id, "11111111-1111-4111-8111-111111111111");
   assert.deepEqual(projection.reusableSystems.map((item) => item.label), ["Onan 13.5kW Generator", "Head Macerator System"]);
+});
+
+test("System Template reference migration keeps reusable system truth separate from item applicability and exact instance state", () => {
+  const sql = read("supabase/migrations/20260903164000_system_template_references_v1.sql");
+  const attachmentsApi = read("lib/attachmentsApi.js");
+  const projectionSource = read("lib/modelTemplateProjection.js");
+  const proofBuilderSource = read("screens/ProofBuilderScreen.js");
+
+  assert.match(sql, /create table if not exists public\.system_templates/);
+  assert.match(sql, /alter table public\.asset_model_template_items[\s\S]*system_template_id uuid references public\.system_templates/);
+  assert.match(sql, /alter table public\.systems[\s\S]*system_template_id uuid references public\.system_templates/);
+  assert.match(sql, /target_type = any[\s\S]*'system_template'::text/);
+  assert.match(sql, /create trigger systems_apply_system_template_reference/);
+  assert.match(sql, /exact_build_template_item_id/);
+  assert.match(sql, /system_template\.onan\.13_5kw_generator/);
+  assert.match(sql, /system_template\.seakeeper\.sk10_5/);
+  assert.match(sql, /system\.generator\.onan_13_5kw/);
+  assert.match(sql, /system\.stabilization\.seakeeper_sk10_5/);
+  assert.match(sql, /Reusable system-template knowledge inherited by model items and exact systems by reference/);
+
+  assert.match(attachmentsApi, /function canonicalSystemTemplateIds/);
+  assert.match(attachmentsApi, /\.from\("system_templates"\)/);
+  assert.match(attachmentsApi, /\.eq\("target_type", "system_template"\)/);
+  assert.match(attachmentsApi, /normalizeInheritedSystemTemplateResource/);
+  assert.match(attachmentsApi, /provenance: "system_template"/);
+
+  assert.match(projectionSource, /function systemTemplateIdForItem/);
+  assert.match(projectionSource, /system_template_id: explicit\.system_template_id \|\| systemTemplateId/);
+  assert.match(projectionSource, /systemTemplateId: projection\.system_template_id/);
+
+  assert.match(proofBuilderSource, /system_template_id/);
+  assert.match(proofBuilderSource, /select\("id,label,item_type,canonical_key,metadata,applicability,system_template_id"\)/);
 });
 
 test("KF018 fleet routing consumes generic exact-build metadata without local runtime projection", () => {

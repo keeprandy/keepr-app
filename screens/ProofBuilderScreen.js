@@ -409,7 +409,7 @@ export default function ProofBuilderScreen({ route, navigation }) {
       try {
         const { data, error } = await supabase
           .from("asset_model_template_items")
-          .select("id,label,item_type,canonical_key,metadata,applicability")
+          .select("id,label,item_type,canonical_key,metadata,applicability,system_template_id")
           .eq("template_id", routeTargetId)
           .neq("item_type", "section")
           .order("sort_order", { ascending: true })
@@ -423,6 +423,7 @@ export default function ProofBuilderScreen({ route, navigation }) {
           system_type: item.item_type,
           metadata: {
             ...(item.metadata || {}),
+            system_template_id: item.system_template_id || item.metadata?.system_template_id || null,
             template_item_id: item.id,
             template_item_label: item.label || null,
             template_item_type: item.item_type || null,
@@ -438,7 +439,7 @@ export default function ProofBuilderScreen({ route, navigation }) {
     try {
       const { data, error } = await supabase
         .from("systems")
-        .select("id,name,system_type,ksc_code,mode,ai_metadata,playbook")
+        .select("id,name,system_type,ksc_code,mode,ai_metadata,playbook,system_template_id,metadata")
         .eq("asset_id", assetId)
         .order("name", { ascending: true })
         .limit(250);
