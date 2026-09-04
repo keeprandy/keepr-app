@@ -2,6 +2,8 @@
 -- Shared/supplier catalog browsing should be explicit, not mixed into an OEM's
 -- owned standard systems by default.
 
+drop function if exists public.list_system_templates(text, integer);
+
 create or replace function public.list_system_templates(
   p_query text default null,
   p_limit integer default 25,
