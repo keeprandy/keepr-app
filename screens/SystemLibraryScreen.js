@@ -85,7 +85,7 @@ function metadataFromDraft(draft) {
   };
 }
 
-function draftFromTemplate(template, ownerOrgId) {
+function draftFromTemplate(template) {
   const metadata = template?.metadata || {};
   return {
     id: template?.id || null,
@@ -95,7 +95,7 @@ function draftFromTemplate(template, ownerOrgId) {
     systemCategory: template?.system_category || "",
     description: template?.description || "",
     authorityState: template?.authority_state || "draft",
-    ownerOrgId: template?.owner_org_id || ownerOrgId || null,
+    ownerOrgId: template?.owner_org_id || null,
     metadata,
     reusableSpecs: metadata.reusable_specs_text || "",
     warrantyGuidance: metadata.warranty_guidance || "",
@@ -126,6 +126,23 @@ function Chip({ active, label, onPress }) {
     <TouchableOpacity activeOpacity={0.82} onPress={onPress} style={[styles.chip, active && styles.chipActive]}>
       <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
     </TouchableOpacity>
+  );
+}
+
+function OwnershipChoice({ activeOrgId, ownerOrgId, onChange }) {
+  return (
+    <View style={styles.ownerChoice}>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.label}>System Template owner</Text>
+        <Text style={styles.panelHint}>
+          Shared or supplier-owned systems can be reused across OEMs. OEM-owned systems stay specific to that organization's standard build.
+        </Text>
+      </View>
+      <View style={styles.chipRow}>
+        <Chip active={!ownerOrgId} label="Shared / supplier" onPress={() => onChange(null)} />
+        {activeOrgId ? <Chip active={ownerOrgId === activeOrgId} label="Active OEM" onPress={() => onChange(activeOrgId)} /> : null}
+      </View>
+    </View>
   );
 }
 
@@ -160,7 +177,7 @@ export default function SystemLibraryScreen() {
   const [query, setQuery] = useState(route?.params?.query || "");
   const [templates, setTemplates] = useState([]);
   const [selected, setSelected] = useState(null);
-  const [draft, setDraft] = useState({ ...EMPTY_DRAFT, ownerOrgId: organizationId });
+  const [draft, setDraft] = useState({ ...EMPTY_DRAFT, ownerOrgId: null });
   const [resources, setResources] = useState([]);
   const [resourceDraft, setResourceDraft] = useState({ title: "", url: "", role: "manual" });
   const [loading, setLoading] = useState(false);
@@ -202,9 +219,9 @@ export default function SystemLibraryScreen() {
     setError("");
     const next = template?.id ? await getSystemTemplate(template.id) : template;
     const fullTemplate = next || template;
-    setDraft(draftFromTemplate(fullTemplate, organizationId));
+    setDraft(draftFromTemplate(fullTemplate));
     await loadResources(fullTemplate?.id);
-  }, [loadResources, organizationId]);
+  }, [loadResources]);
 
   useEffect(() => {
     loadList();
@@ -246,7 +263,7 @@ export default function SystemLibraryScreen() {
     setResources([]);
     setNotice("");
     setError("");
-    setDraft({ ...EMPTY_DRAFT, ownerOrgId: organizationId, canonicalKey: canonicalKeyFor({}) });
+    setDraft({ ...EMPTY_DRAFT, ownerOrgId: null, canonicalKey: canonicalKeyFor({}) });
   };
 
   const save = async () => {
@@ -259,14 +276,14 @@ export default function SystemLibraryScreen() {
         name: draft.name.trim(),
         canonicalKey: draft.canonicalKey.trim(),
         manufacturer: draft.manufacturer.trim(),
-        ownerOrgId: draft.ownerOrgId || organizationId,
+        ownerOrgId: draft.ownerOrgId || null,
         systemCategory: draft.systemCategory.trim(),
         description: draft.description.trim(),
         authorityState: draft.authorityState,
         metadata: metadataFromDraft(draft),
       });
       setSelected(saved);
-      setDraft(draftFromTemplate(saved, organizationId));
+      setDraft(draftFromTemplate(saved));
       setNotice("System Template saved. Reusable truth remains separate from applicability and exact installed evidence.");
       await loadList(query);
       await loadResources(saved.id);
@@ -414,6 +431,11 @@ export default function SystemLibraryScreen() {
             <Field label="Canonical key" value={draft.canonicalKey} onChangeText={(value) => updateDraft("canonicalKey", value)} placeholder="system_template.mercury.mercury_600_v12_verado" />
             <Field label="Category" value={draft.systemCategory} onChangeText={(value) => updateDraft("systemCategory", value)} placeholder="Propulsion" />
           </View>
+          <OwnershipChoice
+            activeOrgId={organizationId}
+            ownerOrgId={draft.ownerOrgId}
+            onChange={(value) => updateDraft("ownerOrgId", value)}
+          />
           <View style={styles.chipRow}>
             {AUTHORITY_STATES.map((state) => (
               <Chip
@@ -501,6 +523,7 @@ const styles = StyleSheet.create({
   saveButtonText: { color: "#fff", fontWeight: "900" },
   disabledButton: { opacity: 0.55 },
   formGrid: { flexDirection: "row", gap: spacing.sm, flexWrap: "wrap" },
+  ownerChoice: { backgroundColor: "#f8fafc", borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, gap: spacing.sm, padding: spacing.md },
   field: { flex: 1, minWidth: 220, gap: 5 },
   label: { fontSize: 12, color: colors.textMuted, fontWeight: "900" },
   input: { borderWidth: 1, borderColor: "#dfe5ec", borderRadius: radius.md, paddingHorizontal: 12, paddingVertical: 10, color: colors.text, fontWeight: "700", backgroundColor: "#fff" },

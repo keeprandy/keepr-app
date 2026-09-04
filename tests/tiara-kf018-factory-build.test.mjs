@@ -233,6 +233,9 @@ test("System Library is a first-class UI over canonical system_templates", () =>
   assert.match(librarySource, /upsertSystemTemplate/);
   assert.match(librarySource, /target_type: "system_template"/);
   assert.match(librarySource, /System Template: reusable truth/);
+  assert.match(librarySource, /System Template owner/);
+  assert.match(librarySource, /ownerOrgId: null/);
+  assert.match(librarySource, /Shared \/ supplier/);
   assert.doesNotMatch(librarySource, /library_items|system_library_items/);
 
   assert.match(activatorApi, /export async function getSystemTemplate/);
