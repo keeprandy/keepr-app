@@ -15,9 +15,12 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 
 import ActivatorBreadcrumb from "../components/ActivatorBreadcrumb";
+import CoreAIContextSurface from "../components/CoreAIContextSurface";
+import SignInMethodsCard from "../components/SignInMethodsCard";
 import { useWorkspace } from "../context/WorkspaceContext";
 import {
   getActivatorBoatBrowser,
@@ -32,6 +35,7 @@ import {
   getKeeprSpacePortfolio,
   resolveKeeprSpaceKac,
   updateKeeprSpaceServiceProfile,
+  searchKeeprSpaceOrganizations,
   upsertKeeprSpaceOrgLocation,
   upsertKeeprSpaceOrgMemberAssignment,
   upsertKeeprSpaceOrgProfile,
@@ -41,7 +45,8 @@ import {
 } from "../lib/keeprspaceApi";
 import { fetchAssetHeroUris, getCachedKacHeroUris } from "../lib/assetHeroResolver";
 import { listModelTemplateMediaForTemplates } from "../lib/attachmentsApi";
-import { uploadAttachmentFromUri } from "../lib/attachmentsUploader";
+import { createLinkAttachment, uploadAttachmentFromUri } from "../lib/attachmentsUploader";
+import { getOrgBrandMediaFallback } from "../lib/orgBrandFallbacks";
 import { getActionScheduledDueAt, isPlaybookDueDatePending } from "../lib/playbookSchedule";
 import { supabase } from "../lib/supabaseClient";
 import { layoutStyles } from "../styles/layout";
@@ -52,6 +57,22 @@ const BOAT_HERO = require("../assets/boats/tiara/tiara_39ls_hero.jpg");
 const SHOWCASE_ASSETS = {
   tiara_39le_hero: require("../assets/boats/tiara/tiara_39le_hero.jpg"),
   tiara_39ls_hero: require("../assets/boats/tiara/tiara_39ls_hero.jpg"),
+};
+
+const ORG_RESOURCE_ROLE_OPTIONS = ["Catalog", "Manual", "Warranty", "Buyer Guide", "Spec Sheet", "Web Page"];
+const ORG_RESOURCE_AI_OPTIONS = [
+  { key: "primary", label: "Primary" },
+  { key: "supporting", label: "Supporting" },
+];
+
+const EMPTY_ORG_RESOURCE_DRAFT = {
+  title: "",
+  url: "",
+  role: "Catalog",
+  aiContext: "supporting",
+  scope: "organization",
+  privacy: "public_safe",
+  attachmentId: null,
 };
 
 function navSectionForActivatorMode(nextMode) {
@@ -96,6 +117,15 @@ function openActivatorWebPath(path, params = {}) {
   if (currentUrl === nextUrl) return true;
   window.location.assign(nextUrl);
   return true;
+}
+
+function webActivatorParam(key) {
+  if (Platform.OS !== "web" || typeof window === "undefined") return null;
+  try {
+    return new URLSearchParams(window.location.search || "").get(key);
+  } catch (_) {
+    return null;
+  }
 }
 
 const KEEPRSPACE_ADMIN_TABS = [
@@ -370,6 +400,93 @@ function labelize(value) {
   return String(value || "").replace(/_/g, " ");
 }
 
+function titleFromResourceUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    const tail = segments.length ? decodeURIComponent(segments[segments.length - 1]) : "";
+    const readableTail = tail
+      .replace(/\.[a-z0-9]{2,6}$/i, "")
+      .replace(/[_-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!readableTail) return parsed.hostname.replace(/^www\./, "") || url;
+    return readableTail
+      .split(" ")
+      .map((word) => {
+        if (/^MY\d{4}$/i.test(word)) return word.toUpperCase();
+        if (/^[A-Z0-9]{2,5}$/.test(word)) return word;
+        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+      })
+      .join(" ");
+  } catch {
+    return url;
+  }
+}
+
+function orgResourceAiMetadata(draft = {}) {
+  return {
+    role: draft.role || "Resource",
+    authority: "official",
+    privacy: draft.privacy || "public_safe",
+    ai_scope: draft.scope || "organization",
+    ai_context: draft.aiContext || "supporting",
+    applies_to: "organization",
+    review_state: draft.reviewState || "active",
+  };
+}
+
+function resourceUrlFromProjection(resource = {}) {
+  return (
+    resource.url ||
+    resource.source_url ||
+    resource.source_artifact?.canonical_url ||
+    resource.source_artifact?.canonical_source_url ||
+    ""
+  );
+}
+
+function draftFromOrgResource(resource = {}) {
+  return {
+    title: resource.title || "",
+    url: resourceUrlFromProjection(resource),
+    role: resource.role || resource.resource_type || "Catalog",
+    aiContext: resource.ai_context_role || resource.ai_context || "supporting",
+    scope: resource.scope || "organization",
+    privacy: resource.privacy || "public_safe",
+    reviewState: resource.review_state || "active",
+    attachmentId: resource.attachment_id || resource.source_artifact?.attachment_id || null,
+  };
+}
+
+function legacyAssetResourceId(resource = {}) {
+  const id = typeof resource?.id === "string" ? resource.id.trim() : "";
+  if (!id || id.startsWith("attachment:")) return "";
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id) ? id : "";
+}
+
+function orgResourceSourceContext({ draft = {}, orgId = null, orgName = "" } = {}) {
+  return {
+    contribution_context: "oem_org_resource",
+    authority_state: "oem_published",
+    source_name: orgName || null,
+    contributed_by_org_id: orgId,
+    contributed_by_org_label: orgName || null,
+    provided_by_label: orgName || null,
+    applies_to_type: "org",
+    applies_to_id: orgId,
+    role: draft.role || "Resource",
+    scope: draft.scope || "organization",
+    visibility: draft.privacy || "public_safe",
+    ai_context: draft.aiContext || "supporting",
+    review_state: draft.reviewState || "active",
+    source_url: draft.url || null,
+    provenance: "organization_resource",
+    provenance_label: `${orgName || "OEM"} organization-wide resource`,
+    provenance_detail: "Reusable organization-level knowledge that can apply across models unless narrowed later.",
+  };
+}
+
 export function listFromValue(value) {
   if (Array.isArray(value)) return value.filter(Boolean);
   if (!value) return [];
@@ -537,6 +654,19 @@ function workspaceOrganizationId(workspace) {
 function organizationIdFromWorkspaceId(workspaceId) {
   const id = String(workspaceId || "");
   return id.startsWith("org:") ? id.slice(4) : null;
+}
+
+function keeprLinkAddressFromOrgIdentity(...candidates) {
+  const raw = candidates
+    .map((value) => String(value || "").trim())
+    .find(Boolean);
+  if (!raw) return "";
+  return raw
+    .replace(/^\/?k\//i, "")
+    .replace(/^https?:\/\/[^/]+\/k\//i, "")
+    .replace(/[^\w\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-");
 }
 
 function workspaceMatchesOrganization(workspace, organizationId) {
@@ -743,16 +873,19 @@ export function defaultBrandProfile(workspace) {
     null;
   const organizationId = workspace?.organization_id || workspace?.org_id || null;
   const slug = workspace?.slug || workspace?.organization_slug || workspace?.display?.slug || "";
+  const fallbackMedia = kind === "oem"
+    ? getOrgBrandMediaFallback(workspace)
+    : { logoUri: null, headerImageUri: null };
   const logoUri =
     workspace?.display?.logo_url ||
     workspace?.display?.photo_url ||
     workspace?.photo_url ||
-    null;
+    fallbackMedia.logoUri;
   const headerImageUri =
     workspace?.display?.header_image_url ||
     workspace?.display?.team_photo_url ||
     workspace?.team_photo_url ||
-    null;
+    fallbackMedia.headerImageUri;
   if (kind === "pro") {
     return {
       displayName: workspaceName || "Wilson Marine",
@@ -817,21 +950,22 @@ export function defaultBrandProfile(workspace) {
 
 export function brandProfileFromKeeprSpaceContext(context, workspace) {
   if (!context) return defaultBrandProfile(workspace);
+  const fallback = defaultBrandProfile(workspace);
   return {
-    displayName: context.display_name || context.organization_name || defaultBrandProfile(workspace).displayName,
-    location: context.location || defaultBrandProfile(workspace).location,
+    displayName: context.display_name || context.organization_name || fallback.displayName,
+    location: context.location || fallback.location,
     profileStatus: context.publish_status || context.profile_status || "draft",
-    shortDescription: context.short_description || defaultBrandProfile(workspace).shortDescription,
-    publicDescription: context.public_description || defaultBrandProfile(workspace).publicDescription,
-    website: context.website || defaultBrandProfile(workspace).website,
+    shortDescription: context.short_description || fallback.shortDescription,
+    publicDescription: context.public_description || fallback.publicDescription,
+    website: context.website || fallback.website,
     phone: context.phone || "",
     email: context.email || "",
     serviceOfferings: Array.isArray(context.service_offerings)
       ? context.service_offerings.filter(Boolean).join(", ")
       : "",
     packages: Array.isArray(context.packages) ? context.packages.filter(Boolean).join(", ") : "",
-    logoUri: context.logo_url || context.photo_url || null,
-    headerImageUri: context.header_image_url || context.team_photo_url || null,
+    logoUri: context.logo_url || context.photo_url || fallback.logoUri,
+    headerImageUri: context.header_image_url || context.team_photo_url || fallback.headerImageUri,
     keeprProId: context.keepr_pro_id || null,
     organizationId: context.organization_id || null,
     slug: context.keepr_pro_slug || context.organization_slug || "",
@@ -1434,12 +1568,25 @@ function BoatCard({ boat, onPress, view = "default", heroUri = null }) {
   );
 }
 
-function NetworkPanel({ data, copy, workspace }) {
+function NetworkPanel({ data, copy, workspace, config, onManageRelationships }) {
   const kind = workspaceKind(workspace);
   const oemDealers = data?.oem_lens?.dealer_network || [];
   const dealerOems = data?.dealer_lens?.represented_oems || [];
   const locations = data?.dealer_lens?.locations || [];
-  const items = kind === "dealer" ? dealerOems : oemDealers;
+  const relationshipItems = (config?.brand_relationships || []).map((relationship) => ({
+    relationship_id: relationship.id || relationship.to_org_id || relationship.to_org_name,
+    dealer_name: relationship.org?.name || relationship.to_org_name || relationship.related_org_name || relationship.to_org_id,
+    oem_name: relationship.org?.name || relationship.to_org_name || relationship.related_org_name || relationship.to_org_id,
+    relationship_type: relationship.relationship_type,
+    authority_state: relationship.authority_state,
+    evidence_state: relationship.evidence_state,
+    status: relationship.status || "source_reported",
+    source_url: relationship.source_url,
+  }));
+  const items = kind === "dealer"
+    ? dealerOems.length ? dealerOems : relationshipItems
+    : oemDealers.length ? oemDealers : relationshipItems;
+  const count = kind === "dealer" ? items.length + locations.length : items.length;
 
   return (
     <View style={styles.networkPanel}>
@@ -1449,22 +1596,38 @@ function NetworkPanel({ data, copy, workspace }) {
           <Text style={styles.sectionTitle}>{copy.networkTitle}</Text>
         </View>
         <View style={styles.networkCount}>
-          <Text style={styles.networkCountValue}>{kind === "dealer" ? dealerOems.length + locations.length : oemDealers.length}</Text>
+          <Text style={styles.networkCountValue}>{count}</Text>
           <Text style={styles.networkCountLabel}>connected</Text>
         </View>
       </View>
       <Text style={styles.networkText}>{copy.networkBody}</Text>
+      {onManageRelationships ? (
+        <TouchableOpacity style={styles.networkManageButton} activeOpacity={0.86} onPress={onManageRelationships}>
+          <Ionicons name="settings-outline" size={15} color={colors.brandBlue} />
+          <Text style={styles.networkManageButtonText}>Manage relationships</Text>
+        </TouchableOpacity>
+      ) : null}
       <View style={styles.inlineChips}>
-        {items.slice(0, 10).map((item) => (
-          <View key={item.relationship_id} style={styles.smallChip}>
-            <Text style={styles.smallChipText} numberOfLines={1}>
-              {item.dealer_name || item.oem_name}
-            </Text>
-            <Text style={styles.smallChipMeta} numberOfLines={1}>
-              {item.csi_recognition || labelize(item.status)}
-            </Text>
-          </View>
-        ))}
+        {items.length ? items.slice(0, 36).map((item) => {
+          const meta = [
+            item.csi_recognition,
+            labelize(item.relationship_type),
+            labelize(item.authority_state),
+            labelize(item.status),
+          ].filter(Boolean).join(" · ");
+          return (
+            <View key={item.relationship_id || item.dealer_name || item.oem_name} style={styles.smallChip}>
+              <Text style={styles.smallChipText} numberOfLines={1}>
+                {item.dealer_name || item.oem_name || "Connected organization"}
+              </Text>
+              <Text style={styles.smallChipMeta} numberOfLines={1}>
+                {meta || "Relationship"}
+              </Text>
+            </View>
+          );
+        }) : (
+          <Text style={styles.mutedTextLeft}>No dealer relationships are connected yet.</Text>
+        )}
         {kind === "dealer" ? locations.slice(0, 6).map((location) => (
           <View key={location.id} style={styles.smallChip}>
             <Text style={styles.smallChipText} numberOfLines={1}>{location.name}</Text>
@@ -1595,7 +1758,44 @@ function CatalogPanel({
   onModelDraftChange,
   onCreateModel,
   creatingModel = false,
+  navSection = "ActivatorTemplates",
 }) {
+  const isAiContextView = navSection === "ActivatorAiContext";
+  const isResourcesView = navSection === "ActivatorResources";
+  const viewCopy = isAiContextView
+    ? {
+        kicker: "KeeprLINK",
+        title: "AI context readiness",
+        body: "Review the model templates that can contribute authorized context to KeeprLINK. Open a model to manage attachments, source links, media, systems, and proof metadata.",
+        action: "System Library",
+        countLabel: "models",
+        cards: [
+          ["Canonical object", "Model templates remain the source object behind every public context path."],
+          ["Authorized context", "Attachments and links must be intentionally marked before AI context can use them."],
+          ["Resolver path", "KeeprLINK can expand from organization to model, system, exact asset, and installed system."],
+        ],
+      }
+    : isResourcesView
+    ? {
+        kicker: "Resources",
+        title: "Knowledge attached to models",
+        body: "Manage the documents, links, photos, media, and proof sources that travel with reusable OEM model templates.",
+        action: "System Library",
+        countLabel: "models",
+        cards: [
+          ["Documents", "Manuals, buyer guides, spec sheets, warranty, and care references."],
+          ["Media", "Hero images, gallery photos, videos, and source attribution."],
+          ["Systems", "Reusable model systems that can carry their own documents and proof."],
+        ],
+      }
+    : {
+        kicker: "OEM Catalog",
+        title: "Product lineage",
+        body: "Current, previous, and retired model years live here as reusable OEM model pages. Open a model to review it, edit its Keepr definition, or build an exact boat from it.",
+        action: "System Library",
+        countLabel: "models",
+        cards: null,
+      };
   const normalizedQuery = String(query || "").trim().toLowerCase();
   const matchesModelQuery = (template) => {
     if (!normalizedQuery) return true;
@@ -1633,10 +1833,10 @@ function CatalogPanel({
 
   return (
     <View style={styles.catalogPanel}>
-      <View style={styles.networkHeader}>
+      <View style={styles.catalogSurfaceHeader}>
         <View>
-          <Text style={styles.sectionKicker}>OEM Catalog</Text>
-          <Text style={styles.sectionTitle}>Product lineage</Text>
+          <Text style={styles.sectionKicker}>{viewCopy.kicker}</Text>
+          <Text style={styles.sectionTitle}>{viewCopy.title}</Text>
         </View>
         <View style={styles.catalogHeaderActions}>
           <TouchableOpacity
@@ -1645,17 +1845,27 @@ function CatalogPanel({
             onPress={onOpenSystemLibrary}
           >
             <Ionicons name="hardware-chip-outline" size={16} color={colors.brandBlue} />
-            <Text style={styles.systemLibraryButtonText}>System Library</Text>
+            <Text style={styles.systemLibraryButtonText}>{viewCopy.action}</Text>
           </TouchableOpacity>
           <View style={styles.networkCount}>
             <Text style={styles.networkCountValue}>{visibleTemplates.length}</Text>
-            <Text style={styles.networkCountLabel}>models</Text>
+            <Text style={styles.networkCountLabel}>{viewCopy.countLabel}</Text>
           </View>
         </View>
       </View>
       <Text style={styles.networkText}>
-        Current, previous, and retired model years live here as reusable OEM model pages. Open a model to review it, edit its Keepr definition, or build an exact boat from it.
+        {viewCopy.body}
       </Text>
+      {viewCopy.cards ? (
+        <View style={styles.contextSummaryGrid}>
+          {viewCopy.cards.map(([title, body]) => (
+            <View key={title} style={styles.contextSummaryTile}>
+              <Text style={styles.contextSummaryTitle}>{title}</Text>
+              <Text style={styles.contextSummaryText}>{body}</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
       {canAuthor ? (
         <View style={styles.createModelPanel}>
           <View>
@@ -2021,6 +2231,120 @@ function ProductionBuildsPanel({ templates, loading, drafts = [], onBuild, onOpe
   );
 }
 
+function OrgResolutionPanel({ draft, onChange, fromOrgId }) {
+  const [query, setQuery] = useState(draft?.to_org_name || "");
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const selectedOrgId = draft?.to_org_id || null;
+
+  const runSearch = useCallback(async () => {
+    const term = String(query || "").trim();
+    if (term.length < 2) {
+      setResults([]);
+      return;
+    }
+    setSearching(true);
+    try {
+      const data = await searchKeeprSpaceOrganizations(term);
+      const organizations = Array.isArray(data?.organizations) ? data.organizations : [];
+      setResults(organizations.filter((org) => org.id !== fromOrgId).slice(0, 8));
+    } catch (err) {
+      Alert.alert("Organization lookup failed", err?.message || "Could not search Keepr organizations.");
+    } finally {
+      setSearching(false);
+    }
+  }, [fromOrgId, query]);
+
+  const selectOrg = (org) => {
+    onChange?.({
+      ...draft,
+      to_org_id: org.id,
+      to_org_name: org.display_name || org.name || "",
+      relationship_type: draft.relationship_type || "authorized_dealer_for",
+      status: draft.status || "source_reported",
+      authority_state: draft.authority_state || "source_reported",
+      evidence_state: draft.evidence_state || "source_reported",
+      source_name: draft.source_name || "Keepr organization lookup",
+      source_url: draft.source_url || org.website || "",
+    });
+    setQuery(org.display_name || org.name || "");
+  };
+
+  const clearSelection = () => {
+    onChange?.({ ...draft, to_org_id: null });
+  };
+
+  return (
+    <View style={styles.orgResolutionPanel}>
+      <View style={styles.networkHeader}>
+        <View>
+          <Text style={styles.sectionKicker}>Resolve First</Text>
+          <Text style={styles.sectionTitle}>Find existing organization</Text>
+        </View>
+        {selectedOrgId ? (
+          <View style={styles.networkCount}>
+            <Text style={styles.networkCountValue}>1</Text>
+            <Text style={styles.networkCountLabel}>selected</Text>
+          </View>
+        ) : null}
+      </View>
+      <Text style={styles.networkText}>
+        Search Keepr before creating a new relationship target. This keeps dealers, suppliers, OEMs, and service orgs as one canonical identity.
+      </Text>
+      <View style={styles.orgLookupRow}>
+        <View style={styles.orgLookupInputWrap}>
+          <Ionicons name="search-outline" size={17} color={colors.textMuted} />
+          <TextInput
+            value={query}
+            onChangeText={(value) => {
+              setQuery(value);
+              onChange?.({ ...draft, to_org_name: value, to_org_id: null });
+            }}
+            onSubmitEditing={runSearch}
+            placeholder="Search by organization, website, city, or brand"
+            placeholderTextColor={colors.textMuted}
+            style={styles.orgLookupInput}
+            returnKeyType="search"
+          />
+        </View>
+        <TouchableOpacity style={styles.networkManageButton} activeOpacity={0.86} onPress={runSearch} disabled={searching}>
+          {searching ? <ActivityIndicator size="small" color={colors.brandBlue} /> : <Ionicons name="search-outline" size={15} color={colors.brandBlue} />}
+          <Text style={styles.networkManageButtonText}>{searching ? "Searching" : "Lookup"}</Text>
+        </TouchableOpacity>
+      </View>
+      {selectedOrgId ? (
+        <View style={styles.selectedOrgBanner}>
+          <Ionicons name="checkmark-circle-outline" size={17} color={colors.accentGreen} />
+          <Text style={styles.selectedOrgText} numberOfLines={1}>
+            Connecting existing org: {draft.to_org_name || selectedOrgId}
+          </Text>
+          <TouchableOpacity onPress={clearSelection} activeOpacity={0.8}>
+            <Text style={styles.adminResetText}>Clear</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+      {results.length ? (
+        <View style={styles.orgResultList}>
+          {results.map((org) => (
+            <TouchableOpacity key={org.id} style={styles.orgResultRow} activeOpacity={0.86} onPress={() => selectOrg(org)}>
+              <View style={styles.orgResultIcon}>
+                <Ionicons name={org.workspace_type === "keeproem" ? "business-outline" : org.workspace_type === "keeprdealer" ? "storefront-outline" : "people-outline"} size={17} color={colors.brandBlue} />
+              </View>
+              <View style={styles.orgResultCopy}>
+                <Text style={styles.adminRowTitle} numberOfLines={1}>{org.display_name || org.name}</Text>
+                <Text style={styles.adminRowMeta} numberOfLines={1}>
+                  {[labelize(org.workspace_type), org.location, org.website].filter(Boolean).join(" · ")}
+                </Text>
+              </View>
+              <Text style={styles.catalogFooterText}>Select</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 function BrandProfilePanel({
   profile,
   kind,
@@ -2230,6 +2554,7 @@ export function KeeprSpaceAdminPanel({
     status: "active",
   });
   const [brandDraft, setBrandDraft] = useState({
+    to_org_id: null,
     to_org_name: "",
     relationship_type: "represented_brand",
     status: "source_reported",
@@ -2291,6 +2616,7 @@ export function KeeprSpaceAdminPanel({
   });
   const editBrand = (relationship) => setBrandDraft({
     ...relationship,
+    to_org_id: relationship.to_org_id || null,
     to_org_name: relationship.to_org_name || relationship.org?.name || relationship.related_org_name || relationship.to_org_id || "",
     relationship_type: relationship.relationship_type || "represented_brand",
     status: relationship.status || "source_reported",
@@ -2380,6 +2706,7 @@ export function KeeprSpaceAdminPanel({
     supported_asset_types: "boat",
   });
   const resetBrand = () => setBrandDraft({
+    to_org_id: null,
     to_org_name: "",
     relationship_type: "represented_brand",
     status: "source_reported",
@@ -2620,8 +2947,13 @@ export function KeeprSpaceAdminPanel({
               </View>
             ))}
           </View>
+          <OrgResolutionPanel
+            draft={brandDraft}
+            onChange={setBrandDraft}
+            fromOrgId={config?.organization?.id}
+          />
           <ConfigForm
-            title="Add represented brand / OEM"
+            title={brandDraft.to_org_id ? "Connect selected organization" : "Create or connect organization relationship"}
             fields={[
               ["to_org_name", "Brand or organization name"],
               ["relationship_type", "Relationship type"],
@@ -2693,6 +3025,95 @@ function ConfigForm({ title, fields, draft, onChange, onSave, onReset, saving })
         })}
       </View>
       <AdminSaveButton label="Save" onPress={onSave} saving={saving} />
+    </View>
+  );
+}
+
+function OrgResourceComposer({
+  draft,
+  onChange,
+  onAddLink,
+  onCancelEdit,
+  onUploadFile,
+  saving,
+  message = "",
+  error = "",
+}) {
+  const isEditing = !!draft.attachmentId;
+  return (
+    <View style={styles.orgResourceComposer}>
+      <View style={styles.adminFormHeader}>
+        <View>
+          <Text style={styles.adminFormTitle}>{isEditing ? "Edit organization-wide resource" : "Add organization-wide resource"}</Text>
+          <Text style={styles.adminHelpText}>
+            For fleet-wide manuals, warranty, catalogs, and OEM knowledge that applies across models.
+          </Text>
+        </View>
+        {isEditing ? (
+          <TouchableOpacity onPress={onCancelEdit} activeOpacity={0.86}>
+            <Text style={styles.adminResetText}>Cancel</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+      <View style={styles.oemFormGrid}>
+        <View style={styles.oemField}>
+          <Text style={styles.oemFieldLabel}>Title</Text>
+          <TextInput
+            value={draft.title}
+            onChangeText={(value) => onChange({ ...draft, title: value })}
+            style={styles.oemInput}
+            placeholder="Bennington Luxury Performance Boats Catalog 2025"
+            placeholderTextColor={colors.textMuted}
+          />
+        </View>
+        <View style={styles.oemField}>
+          <Text style={styles.oemFieldLabel}>Public URL</Text>
+          <TextInput
+            value={draft.url}
+            onChangeText={(value) => onChange({ ...draft, url: value })}
+            style={styles.oemInput}
+            placeholder="https://..."
+            placeholderTextColor={colors.textMuted}
+            autoCapitalize="none"
+          />
+        </View>
+      </View>
+      <View style={styles.adminChipWrap}>
+        {ORG_RESOURCE_ROLE_OPTIONS.map((role) => (
+          <OptionChip
+            key={role}
+            label={role}
+            selected={draft.role === role}
+            onPress={() => onChange({ ...draft, role })}
+          />
+        ))}
+      </View>
+      <View style={styles.adminChipWrap}>
+        {ORG_RESOURCE_AI_OPTIONS.map((option) => (
+          <OptionChip
+            key={option.key}
+            label={option.label}
+            selected={draft.aiContext === option.key}
+            onPress={() => onChange({ ...draft, aiContext: option.key })}
+          />
+        ))}
+      </View>
+      <View style={styles.orgResourceActions}>
+        <AdminSaveButton label={isEditing ? "Save changes" : "Add link"} onPress={onAddLink} saving={saving === "link"} />
+        {!isEditing ? (
+          <TouchableOpacity
+            style={styles.adminSecondaryButton}
+            onPress={onUploadFile}
+            activeOpacity={0.86}
+            disabled={!!saving}
+          >
+            <Ionicons name="cloud-upload-outline" size={16} color={colors.brandBlue} />
+            <Text style={styles.adminSecondaryButtonText}>{saving === "file" ? "Uploading..." : "Upload file"}</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+      {message ? <Text style={styles.orgResourceSuccessText}>{message}</Text> : null}
+      {error ? <Text style={styles.orgResourceErrorText}>{error}</Text> : null}
     </View>
   );
 }
@@ -3179,9 +3600,226 @@ function FoundationPending({ error }) {
   );
 }
 
+function PersonIdentityPanel({ navigation, workspaceName }) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const [userEmail, setUserEmail] = useState("");
+  const [profileId, setProfileId] = useState(null);
+  const [draft, setDraft] = useState({
+    full_name: "",
+    display_name: "",
+    preferred_contact_email: "",
+    phone: "",
+    inbox_name: "",
+  });
+
+  const loadPersonProfile = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError) throw authError;
+      const user = authData?.user;
+      if (!user?.id) throw new Error("Not signed in.");
+      setProfileId(user.id);
+      setUserEmail(user.email || "");
+
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id,full_name,display_name,preferred_contact_email,email,phone,inbox_name")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (error) throw error;
+      setDraft({
+        full_name: data?.full_name || "",
+        display_name: data?.display_name || data?.full_name || user.email?.split("@")[0] || "",
+        preferred_contact_email: data?.preferred_contact_email || data?.email || user.email || "",
+        phone: data?.phone || "",
+        inbox_name: data?.inbox_name || "",
+      });
+    } catch (err) {
+      Alert.alert("Profile unavailable", err?.message || "Could not load your personal profile.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadPersonProfile();
+  }, [loadPersonProfile]);
+
+  const updateDraft = (key, value) => {
+    setDraft((current) => ({ ...current, [key]: value }));
+  };
+
+  const savePersonProfile = async () => {
+    if (!profileId) return;
+    setSaving(true);
+    try {
+      const cleanInbox = String(draft.inbox_name || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9._-]/g, "")
+        .replace(/^\.+|\.+$/g, "");
+      const { error } = await supabase
+        .from("profiles")
+        .update({
+          full_name: draft.full_name || null,
+          display_name: draft.display_name || null,
+          preferred_contact_email: draft.preferred_contact_email || null,
+          phone: draft.phone || null,
+          inbox_name: cleanInbox || null,
+        })
+        .eq("id", profileId);
+      if (error) throw error;
+      setDraft((current) => ({ ...current, inbox_name: cleanInbox }));
+      Alert.alert("Profile saved", "Your personal Keepr identity is up to date.");
+    } catch (err) {
+      Alert.alert("Save failed", err?.message || "Could not save your profile.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const signOut = async () => {
+    setSigningOut(true);
+    try {
+      await supabase.auth.signOut({ scope: "local" });
+      if (Platform.OS === "web" && typeof window !== "undefined") {
+        window.location.assign("/auth");
+        return;
+      }
+      navigation?.reset?.({ index: 0, routes: [{ name: "Auth" }] });
+    } catch (err) {
+      Alert.alert("Sign out failed", err?.message || "Could not sign out.");
+    } finally {
+      setSigningOut(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.identityPanel}>
+        <View style={styles.centeredSmall}>
+          <ActivityIndicator />
+          <Text style={styles.mutedTextLeft}>Loading your Keepr identity...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  const displayName = draft.display_name || draft.full_name || userEmail || "Keepr member";
+  const initials = initialsForName(displayName);
+  const inboxAddress = draft.inbox_name ? `${draft.inbox_name}@inbox.keeprhome.com` : "Not set";
+
+  return (
+    <View style={styles.identityPanel}>
+      <View style={styles.personHero}>
+        <View style={styles.personAvatar}>
+          <Text style={styles.personAvatarText}>{initials}</Text>
+        </View>
+        <View style={styles.personHeroCopy}>
+          <Text style={styles.sectionKicker}>Person Identity</Text>
+          <Text style={styles.personTitle}>{displayName}</Text>
+          <Text style={styles.personSubtitle}>
+            Signed in as {userEmail || "this Keepr user"} inside {workspaceName || "this organization"}.
+          </Text>
+        </View>
+        <TouchableOpacity
+          style={[styles.signOutButton, signingOut && styles.profileSaveButtonDisabled]}
+          activeOpacity={0.86}
+          onPress={signOut}
+          disabled={signingOut}
+        >
+          {signingOut ? <ActivityIndicator size="small" color={colors.onPrimary} /> : <Ionicons name="log-out-outline" size={16} color={colors.onPrimary} />}
+          <Text style={styles.signOutButtonText}>{signingOut ? "Signing out" : "Sign out"}</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.identityGrid}>
+        <View style={styles.oemField}>
+          <Text style={styles.oemFieldLabel}>Full name</Text>
+          <TextInput
+            value={draft.full_name}
+            onChangeText={(value) => updateDraft("full_name", value)}
+            placeholder="Full name"
+            placeholderTextColor={colors.textMuted}
+            style={styles.oemInput}
+          />
+        </View>
+        <View style={styles.oemField}>
+          <Text style={styles.oemFieldLabel}>Display name</Text>
+          <TextInput
+            value={draft.display_name}
+            onChangeText={(value) => updateDraft("display_name", value)}
+            placeholder="Display name"
+            placeholderTextColor={colors.textMuted}
+            style={styles.oemInput}
+          />
+        </View>
+        <View style={styles.oemField}>
+          <Text style={styles.oemFieldLabel}>Contact email</Text>
+          <TextInput
+            value={draft.preferred_contact_email}
+            onChangeText={(value) => updateDraft("preferred_contact_email", value)}
+            placeholder={userEmail || "Email"}
+            placeholderTextColor={colors.textMuted}
+            style={styles.oemInput}
+            autoCapitalize="none"
+            keyboardType="email-address"
+          />
+        </View>
+        <View style={styles.oemField}>
+          <Text style={styles.oemFieldLabel}>Phone</Text>
+          <TextInput
+            value={draft.phone}
+            onChangeText={(value) => updateDraft("phone", value)}
+            placeholder="Phone"
+            placeholderTextColor={colors.textMuted}
+            style={styles.oemInput}
+            keyboardType="phone-pad"
+          />
+        </View>
+        <View style={styles.oemField}>
+          <Text style={styles.oemFieldLabel}>Keepr inbox</Text>
+          <TextInput
+            value={draft.inbox_name}
+            onChangeText={(value) => updateDraft("inbox_name", value)}
+            placeholder="inbox-name"
+            placeholderTextColor={colors.textMuted}
+            style={styles.oemInput}
+            autoCapitalize="none"
+          />
+          <Text style={styles.identityHint}>{inboxAddress}</Text>
+        </View>
+      </View>
+
+      <TouchableOpacity
+        style={[styles.profileSaveButton, saving && styles.profileSaveButtonDisabled]}
+        activeOpacity={0.86}
+        disabled={saving}
+        onPress={savePersonProfile}
+      >
+        {saving ? <ActivityIndicator size="small" color={colors.onPrimary} /> : <Ionicons name="save-outline" size={16} color={colors.onPrimary} />}
+        <Text style={styles.profileSaveButtonText}>{saving ? "Saving..." : "Save Personal Profile"}</Text>
+      </TouchableOpacity>
+
+      <View style={styles.identitySecurity}>
+        <Text style={styles.sectionKicker}>Sign-In Methods</Text>
+        <SignInMethodsCard />
+      </View>
+    </View>
+  );
+}
+
 export default function ActivatorHomeScreen({ navigation, route, fixedMode = null }) {
   const { currentWorkspace, setCurrentWorkspaceId, workspaces } = useWorkspace();
-  const initialMode = fixedMode || route?.params?.initialMode || "fleet";
+  const routeInitialMode = webActivatorParam("initialMode") || route?.params?.initialMode || null;
+  const routeWorkspaceId = webActivatorParam("workspaceId") || route?.params?.workspaceId || null;
+  const routeOrganizationId = webActivatorParam("organizationId") || route?.params?.organizationId || null;
+  const routeNavSection = webActivatorParam("navSection") || route?.params?.navSection || null;
+  const initialMode = fixedMode || routeInitialMode || "fleet";
   const [modeState, setModeState] = useState(initialMode);
   const [projectionMode, setProjectionMode] = useState(defaultWorkspaceProjection(currentWorkspace) || "service");
   const [search, setSearch] = useState("");
@@ -3195,6 +3833,11 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [modelDraft, setModelDraft] = useState({ manufacturer: "", model: "", modelYear: "2027" });
   const [creatingModel, setCreatingModel] = useState(false);
+  const [orgResourceDraft, setOrgResourceDraft] = useState(EMPTY_ORG_RESOURCE_DRAFT);
+  const [savingOrgResource, setSavingOrgResource] = useState(null);
+  const [orgResourceMessage, setOrgResourceMessage] = useState("");
+  const [orgResourceError, setOrgResourceError] = useState("");
+  const [orgResourceRefreshKey, setOrgResourceRefreshKey] = useState(0);
   const [orgConfig, setOrgConfig] = useState(null);
   const [orgConfigLoading, setOrgConfigLoading] = useState(false);
   const [adminTab, setAdminTab] = useState("profile");
@@ -3225,17 +3868,14 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   const isPersonalKeepr = currentKind === "owner";
   const workAreas = useMemo(() => workAreasForProjection(currentWorkspace, activeProjection), [currentWorkspace, activeProjection]);
   const mode = fixedMode || modeState;
-  const routeInitialMode = route?.params?.initialMode || null;
-  const routeWorkspaceId = route?.params?.workspaceId || null;
-  const routeNavSection = route?.params?.navSection || null;
   const syncModeRoute = useCallback((nextMode) => {
     if (fixedMode) return;
 
     const navSection = navSectionForActivatorMode(nextMode);
-    const routeOrganizationId = route?.params?.organizationId || organizationIdFromWorkspaceId(routeWorkspaceId);
-    const routeOrgWorkspace = routeOrganizationId
+    const routeOrgId = routeOrganizationId || organizationIdFromWorkspaceId(routeWorkspaceId);
+    const routeOrgWorkspace = routeOrgId
       ? workspaces.find((workspace) =>
-          workspaceMatchesOrganization(workspace, routeOrganizationId) &&
+          workspaceMatchesOrganization(workspace, routeOrgId) &&
           workspace.workspace_type &&
           workspace.workspace_type !== "keepr"
         )
@@ -3246,7 +3886,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
     const workspaceId = activeWorkspace?.workspace_type === "keepr"
       ? routeWorkspaceId || null
       : activeWorkspace?.workspace_id || routeWorkspaceId || null;
-    const organizationId = workspaceOrganizationId(activeWorkspace) || routeOrganizationId || null;
+    const organizationId = workspaceOrganizationId(activeWorkspace) || routeOrgId || null;
     if (
       routeInitialMode === nextMode &&
       routeNavSection === navSection &&
@@ -3269,7 +3909,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
     currentWorkspace?.workspace_type,
     fixedMode,
     navigation,
-    route?.params?.organizationId,
+    routeOrganizationId,
     routeInitialMode,
     routeNavSection,
     routeWorkspaceId,
@@ -3320,8 +3960,8 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   }, [navigation]);
 
   useEffect(() => {
-    const requestedWorkspaceId = route?.params?.workspaceId;
-    const requestedOrganizationId = route?.params?.organizationId || organizationIdFromWorkspaceId(requestedWorkspaceId);
+    const requestedWorkspaceId = routeWorkspaceId;
+    const requestedOrganizationId = routeOrganizationId || organizationIdFromWorkspaceId(requestedWorkspaceId);
     if (
       isPersonalFallbackWorkspaceId(requestedWorkspaceId) &&
       requestedOrganizationId
@@ -3354,7 +3994,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
     ) {
       setCurrentWorkspaceId(requestedWorkspaceId);
     }
-  }, [currentWorkspace?.workspace_id, route?.params?.organizationId, route?.params?.workspaceId, setCurrentWorkspaceId, workspaces]);
+  }, [currentWorkspace?.workspace_id, routeOrganizationId, routeWorkspaceId, setCurrentWorkspaceId, workspaces]);
 
   useEffect(() => {
     setBrandProfile(defaultBrandProfile(currentWorkspace));
@@ -3395,8 +4035,8 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
     if (fixedMode) return;
     if (
       currentWorkspace?.workspace_type === "keepr" &&
-      route?.params?.organizationId &&
-      route?.params?.workspaceId?.startsWith?.("org:")
+      routeOrganizationId &&
+      routeWorkspaceId?.startsWith?.("org:")
     ) {
       return;
     }
@@ -3408,16 +4048,16 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
     if (!workAreas.some((area) => area.key === mode)) {
       setMode(workAreas[0]?.key || "fleet");
     }
-  }, [currentKind, fixedMode, mode, routeInitialMode, setMode, workAreas]);
+  }, [currentKind, fixedMode, mode, routeInitialMode, routeOrganizationId, routeWorkspaceId, setMode, workAreas]);
 
   useEffect(() => {
     if (!isPersonalKeepr) return;
-    if (route?.params?.workspaceId) return;
+    if (routeWorkspaceId) return;
     navigation.navigate("PersonalModule", {
       screen: "PersonalTabs",
       params: { screen: "Boats" },
     });
-  }, [isPersonalKeepr, navigation, route?.params?.workspaceId]);
+  }, [isPersonalKeepr, navigation, routeWorkspaceId]);
 
   const load = useCallback(async ({ quiet = false } = {}) => {
     if (isPersonalKeepr) {
@@ -3472,6 +4112,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
       try {
         const nextTemplates = await getCatalogTemplates(kind === "oem" ? orgId : null);
         setCatalogTemplates(nextTemplates);
+        setCatalogLoading(false);
         try {
           setCatalogTemplateMediaById(await listModelTemplateMediaForTemplates(nextTemplates));
         } catch (mediaErr) {
@@ -3482,6 +4123,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
         console.warn("Activator catalog templates unavailable:", catalogErr?.message || catalogErr);
         setCatalogTemplates([]);
         setCatalogTemplateMediaById({});
+        setCatalogLoading(false);
       }
 
       if (kind === "oem" && orgId) {
@@ -3728,6 +4370,266 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
       Alert.alert("Could not create model", err?.message || "Please try again.");
     } finally {
       setCreatingModel(false);
+    }
+  };
+
+  const saveOrgResourceMetadata = async (attachmentId, draft) => {
+    if (!attachmentId) return;
+    const { error: updateError } = await supabase
+      .from("attachments")
+      .update({
+        ai_metadata: orgResourceAiMetadata(draft),
+        title: draft.title || null,
+        ...(draft.url ? { url: draft.url } : {}),
+        source_context: orgResourceSourceContext({
+          draft,
+          orgId: workspaceOrganizationId(currentWorkspace),
+          orgName: copy.name,
+        }),
+      })
+      .eq("id", attachmentId);
+    if (updateError) throw updateError;
+  };
+
+  const addOrgResourceLink = async () => {
+    const organizationId = workspaceOrganizationId(currentWorkspace);
+    const rawUrl = orgResourceDraft.url.trim();
+    const isEditing = !!orgResourceDraft.attachmentId;
+    const url = rawUrl ? (/^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`) : "";
+    setOrgResourceMessage("");
+    setOrgResourceError("");
+    if (!organizationId) {
+      Alert.alert("Missing organization", "Open an organization workspace before adding org-wide resources.");
+      setOrgResourceError("Open an organization workspace before adding org-wide resources.");
+      return;
+    }
+    if (!canAuthorCatalog) {
+      Alert.alert("Not authorized", "Only org owners, admins, and managers can add OEM resources.");
+      setOrgResourceError("Only org owners, admins, and managers can add OEM resources.");
+      return;
+    }
+    if (!rawUrl && !isEditing) {
+      Alert.alert("URL required", "Paste a public resource URL first.");
+      setOrgResourceError("Paste a public resource URL first.");
+      return;
+    }
+
+    setSavingOrgResource("link");
+    try {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError) throw authError;
+      const userId = authData?.user?.id;
+      if (!userId) throw new Error("Sign in is required to add resources.");
+      const title = orgResourceDraft.title.trim() || (url ? titleFromResourceUrl(url) : "Organization resource");
+      const resourceDraft = { ...orgResourceDraft, title, url };
+      if (resourceDraft.attachmentId) {
+        await saveOrgResourceMetadata(resourceDraft.attachmentId, resourceDraft);
+        setOrgResourceDraft(EMPTY_ORG_RESOURCE_DRAFT);
+        setOrgResourceMessage(`Updated ${title}`);
+        setOrgResourceRefreshKey((value) => value + 1);
+        return;
+      }
+      const created = await createLinkAttachment({
+        userId,
+        assetId: null,
+        url,
+        title,
+        notes: `${resourceDraft.role} for ${copy.name}`,
+        sourceContext: orgResourceSourceContext({
+          draft: resourceDraft,
+          orgId: organizationId,
+          orgName: copy.name,
+        }),
+        placements: [
+          {
+            target_type: "org",
+            target_id: organizationId,
+            role: resourceDraft.role,
+            label: title,
+            sort_order: null,
+            is_showcase: false,
+          },
+        ],
+      });
+      await saveOrgResourceMetadata(created?.attachment?.id, resourceDraft);
+      setOrgResourceDraft(EMPTY_ORG_RESOURCE_DRAFT);
+      setOrgResourceMessage(`Added ${title}`);
+      setOrgResourceRefreshKey((value) => value + 1);
+    } catch (err) {
+      setOrgResourceError(err?.message || "The organization resource link could not be saved.");
+      Alert.alert("Could not add resource", err?.message || "The organization resource link could not be saved.");
+    } finally {
+      setSavingOrgResource(null);
+    }
+  };
+
+  const editOrgResource = (resource) => {
+    const draft = draftFromOrgResource(resource);
+    if (!draft.attachmentId) {
+      setOrgResourceError("This resource cannot be edited from here because the attachment reference is missing.");
+      return;
+    }
+    setOrgResourceMessage("");
+    setOrgResourceError("");
+    setOrgResourceDraft(draft);
+  };
+
+  const cancelOrgResourceEdit = () => {
+    setOrgResourceDraft(EMPTY_ORG_RESOURCE_DRAFT);
+    setOrgResourceMessage("");
+    setOrgResourceError("");
+  };
+
+  const updateOrgResourceLifecycle = async (resource, patch, message) => {
+    const attachmentId = resource?.attachment_id || resource?.source_artifact?.attachment_id || null;
+    if (!attachmentId) {
+      setOrgResourceError("This resource cannot be updated because the attachment reference is missing.");
+      return;
+    }
+    setSavingOrgResource("link");
+    setOrgResourceMessage("");
+    setOrgResourceError("");
+    try {
+      const draft = {
+        ...draftFromOrgResource(resource),
+        ...patch,
+      };
+      await saveOrgResourceMetadata(attachmentId, draft);
+      setOrgResourceDraft(EMPTY_ORG_RESOURCE_DRAFT);
+      setOrgResourceMessage(message || "Resource updated.");
+      setOrgResourceRefreshKey((value) => value + 1);
+    } catch (err) {
+      setOrgResourceError(err?.message || "The organization resource could not be updated.");
+      Alert.alert("Could not update resource", err?.message || "The organization resource could not be updated.");
+    } finally {
+      setSavingOrgResource(null);
+    }
+  };
+
+  const supersedeOrgResource = (resource) => updateOrgResourceLifecycle(
+    resource,
+    { aiContext: "off", reviewState: "superseded", privacy: resource?.privacy || "public_safe" },
+    `Marked ${resource?.title || "resource"} as superseded.`
+  );
+
+  const disableOrgResourceAI = (resource) => updateOrgResourceLifecycle(
+    resource,
+    { aiContext: "off", reviewState: "active", privacy: resource?.privacy || "public_safe" },
+    `Removed ${resource?.title || "resource"} from AI context.`
+  );
+
+  const deleteOrgResource = async (resource) => {
+    const attachmentId = resource?.attachment_id || resource?.source_artifact?.attachment_id || null;
+    const assetResourceId = legacyAssetResourceId(resource);
+    const organizationId = workspaceOrganizationId(currentWorkspace);
+    if ((!attachmentId && !assetResourceId) || !organizationId) {
+      setOrgResourceError("This resource cannot be deleted because its resource reference is missing.");
+      return;
+    }
+    if (Platform.OS === "web" && typeof window !== "undefined" && !window.confirm("Delete this organization-wide resource?")) {
+      return;
+    }
+    setSavingOrgResource("link");
+    setOrgResourceMessage("");
+    setOrgResourceError("");
+    try {
+      if (attachmentId) {
+        const { error: attachmentError } = await supabase
+          .from("attachments")
+          .update({ deleted_at: new Date().toISOString() })
+          .eq("id", attachmentId);
+        if (attachmentError) throw attachmentError;
+        const { error: placementError } = await supabase
+          .from("attachment_placements")
+          .delete()
+          .eq("attachment_id", attachmentId)
+          .eq("target_type", "org")
+          .eq("target_id", organizationId);
+        if (placementError) throw placementError;
+      } else {
+        const { error: resourceError } = await supabase
+          .from("asset_resources")
+          .delete()
+          .eq("id", assetResourceId);
+        if (resourceError) throw resourceError;
+      }
+      setOrgResourceDraft(EMPTY_ORG_RESOURCE_DRAFT);
+      setOrgResourceMessage(`Deleted ${resource?.title || "resource"}.`);
+      setOrgResourceRefreshKey((value) => value + 1);
+    } catch (err) {
+      setOrgResourceError(err?.message || "The organization resource could not be deleted.");
+      Alert.alert("Could not delete resource", err?.message || "The organization resource could not be deleted.");
+    } finally {
+      setSavingOrgResource(null);
+    }
+  };
+
+  const uploadOrgResourceFile = async () => {
+    const organizationId = workspaceOrganizationId(currentWorkspace);
+    setOrgResourceMessage("");
+    setOrgResourceError("");
+    if (!organizationId) {
+      Alert.alert("Missing organization", "Open an organization workspace before uploading org-wide resources.");
+      setOrgResourceError("Open an organization workspace before uploading org-wide resources.");
+      return;
+    }
+    if (!canAuthorCatalog) {
+      Alert.alert("Not authorized", "Only org owners, admins, and managers can add OEM resources.");
+      setOrgResourceError("Only org owners, admins, and managers can add OEM resources.");
+      return;
+    }
+
+    setSavingOrgResource("file");
+    try {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError) throw authError;
+      const userId = authData?.user?.id;
+      if (!userId) throw new Error("Sign in is required to add resources.");
+      const result = await DocumentPicker.getDocumentAsync({
+        type: "*/*",
+        multiple: false,
+        copyToCacheDirectory: Platform.OS !== "web",
+      });
+      if (result.canceled) return;
+      const picked = result.assets?.[0];
+      if (!picked?.uri) return;
+      const title = orgResourceDraft.title.trim() || picked.name || "Organization resource";
+      const resourceDraft = { ...orgResourceDraft, title, url: "" };
+      const uploaded = await uploadAttachmentFromUri({
+        userId,
+        assetId: null,
+        kind: "file",
+        fileUri: picked.uri,
+        fileName: picked.name || title,
+        mimeType: picked.mimeType || "application/octet-stream",
+        sizeBytes: picked.size || null,
+        title,
+        notes: `${resourceDraft.role} for ${copy.name}`,
+        sourceContext: orgResourceSourceContext({
+          draft: resourceDraft,
+          orgId: organizationId,
+          orgName: copy.name,
+        }),
+        placements: [
+          {
+            target_type: "org",
+            target_id: organizationId,
+            role: resourceDraft.role,
+            label: title,
+            sort_order: null,
+            is_showcase: false,
+          },
+        ],
+      });
+      await saveOrgResourceMetadata(uploaded?.attachment?.id, resourceDraft);
+      setOrgResourceDraft(EMPTY_ORG_RESOURCE_DRAFT);
+      setOrgResourceMessage(`Uploaded ${title}`);
+      setOrgResourceRefreshKey((value) => value + 1);
+    } catch (err) {
+      setOrgResourceError(err?.message || "The organization resource file could not be saved.");
+      Alert.alert("Could not upload resource", err?.message || "The organization resource file could not be saved.");
+    } finally {
+      setSavingOrgResource(null);
     }
   };
 
@@ -4038,14 +4940,58 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   const buildsTitle = isDealerSalesMode ? "Delivery Prep" : "Work Queue";
   const buildsMetricLabel = isDealerSalesMode ? "Brand paths" : "Work items";
   const buildsMetricValue = isDealerSalesMode ? String(WILSON_REPRESENTED_BRANDS.length) : String(catalogTemplates.length + exactBuildDrafts.length);
+  const templateSubview =
+    routeNavSection === "ActivatorAiContext" ? "aiContext" :
+    routeNavSection === "ActivatorResources" ? "resources" :
+    "catalog";
+  const isDealerNetworkView = routeNavSection === "ActivatorDealerNetwork";
+  const templateSubviewCopy =
+    templateSubview === "aiContext"
+      ? {
+          breadcrumb: "AI Context / KeeprLINK",
+          eyebrow: "KeeprLINK",
+          title: `${copy.name} AI context`,
+          subtitle: "Canonical model templates, source links, resources, systems, and proof metadata prepared for authorized context resolution.",
+          kicker: "Context",
+          commandTitle: "AI Context / KeeprLINK",
+          search: "Search models, systems, sources, context...",
+        }
+      : templateSubview === "resources"
+      ? {
+          breadcrumb: "Resources / Knowledge",
+          eyebrow: "Resources",
+          title: `${copy.name} knowledge library`,
+          subtitle: "Documents, links, photos, media, and proof sources attached to reusable OEM model templates.",
+          kicker: "Knowledge",
+          commandTitle: "Resources / Knowledge",
+          search: "Search models, documents, links, media...",
+        }
+      : {
+          breadcrumb: "Model Catalog",
+          eyebrow: "OEM Catalog",
+          title: `${copy.name} product lineage`,
+          subtitle: "Current, previous, and retired model years. Open a model, edit its reusable definition, or build an exact boat from it.",
+          kicker: "Reference",
+          commandTitle: "Model Catalog",
+          search: "Search models, years, series...",
+        };
+  const keeprLinkAddress = keeprLinkAddressFromOrgIdentity(
+    brandProfile.slug,
+    orgConfig?.organization?.slug,
+    currentWorkspace?.organization_slug,
+    currentWorkspace?.slug,
+    copy.name
+  );
   const breadcrumbCurrent =
     mode === "fleet" ? "Find" :
     mode === "builds" ? buildsTitle :
     mode === "needs" ? "Recent / Needs Attention" :
     mode === "messages" ? "Messages" :
+    mode === "connect" && isDealerNetworkView ? "Dealer Network" :
     mode === "addBoat" ? "Add / Connect" :
-    mode === "templates" ? "Model Catalog" :
-    mode === "profile" ? (projectionSwitchable ? `${projectionLabel(activeProjection)} Profile` : currentKind === "oem" ? "OEM Profile" : "Profile") :
+    mode === "templates" ? templateSubviewCopy.breadcrumb :
+    mode === "profile" && routeNavSection === "OrgIdentity" ? "Profile / Identity" :
+    mode === "profile" ? (projectionSwitchable ? `${projectionLabel(activeProjection)} Profile` : currentKind === "oem" ? "OEM Settings" : "Settings") :
     "Dealer Network";
   const heroSource =
     brandProfile.headerImageUri
@@ -4056,10 +5002,18 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   const shouldShowHeroLogo = ["oem", "dealer", "pro"].includes(currentKind);
   const heroLogo = brandProfile.logoUri ? { uri: brandProfile.logoUri } : null;
   const modeHeroCopy = mode === "templates"
+    ? templateSubviewCopy
+    : mode === "connect" && isDealerNetworkView
     ? {
-        eyebrow: "OEM Catalog",
-        title: `${copy.name} product lineage`,
-        subtitle: "Current, previous, and retired model years. Open a model, edit its reusable definition, or build an exact boat from it.",
+        eyebrow: "Dealer Network",
+        title: `${copy.name} dealer network`,
+        subtitle: "Connected dealer relationships, authority states, and source-reported network context for this organization.",
+      }
+    : mode === "profile" && routeNavSection === "OrgIdentity"
+    ? {
+        eyebrow: "Person Identity",
+        title: `${copy.name} account access`,
+        subtitle: "Manage the signed-in Keepr person, sign-in methods, inbox identity, and logout from inside this organization shell.",
       }
     : {
         eyebrow: copy.eyebrow,
@@ -4159,10 +5113,10 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
               <View style={styles.commandHeader}>
                 <View>
                   <Text style={styles.commandKicker}>
-                    {mode === "fleet" ? "Find" : mode === "builds" ? buildsKicker : mode === "templates" ? "Reference" : mode === "profile" ? "Admin" : mode === "needs" ? "Needs Attention" : mode === "messages" ? "Engage" : mode === "addBoat" ? "Add / Connect" : "Network"}
+                    {mode === "fleet" ? "Find" : mode === "builds" ? buildsKicker : mode === "templates" ? templateSubviewCopy.kicker : mode === "connect" && isDealerNetworkView ? "Network" : mode === "profile" && routeNavSection === "OrgIdentity" ? "Identity" : mode === "profile" ? "Admin" : mode === "needs" ? "Needs Attention" : mode === "messages" ? "Engage" : mode === "addBoat" ? "Add / Connect" : "Network"}
                   </Text>
                   <Text style={styles.commandTitle}>
-                    {mode === "fleet" ? "Find a Boat / Owner" : mode === "builds" ? buildsTitle : mode === "templates" ? "Model Catalog" : mode === "profile" ? `${copy.modeMetric} Profile` : mode === "needs" ? "Recent / Needs Attention" : mode === "messages" ? "Messages" : mode === "addBoat" ? "Add Boat or Connect Owner" : copy.networkTitle}
+                    {mode === "fleet" ? "Find a Boat / Owner" : mode === "builds" ? buildsTitle : mode === "templates" ? templateSubviewCopy.commandTitle : mode === "connect" && isDealerNetworkView ? "Dealer Network" : mode === "profile" && routeNavSection === "OrgIdentity" ? "Profile / Identity" : mode === "profile" ? `${copy.modeMetric} Settings` : mode === "needs" ? "Recent / Needs Attention" : mode === "messages" ? "Messages" : mode === "addBoat" ? "Add Boat or Connect Owner" : copy.networkTitle}
                   </Text>
                 </View>
                 <View style={styles.commandBadge}>
@@ -4185,7 +5139,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
                 <TextInput
                   value={search}
                   onChangeText={setSearch}
-                  placeholder={mode === "templates" ? "Search models, years, series..." : copy.search}
+                  placeholder={mode === "templates" ? templateSubviewCopy.search : copy.search}
                   placeholderTextColor={colors.textMuted}
                   style={styles.searchInput}
                   returnKeyType="search"
@@ -4204,7 +5158,9 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
               </View>
             ) : null}
 
-            {mode === "profile" ? (
+            {mode === "profile" && routeNavSection === "OrgIdentity" ? (
+              <PersonIdentityPanel navigation={navigation} workspaceName={copy.name} />
+            ) : mode === "profile" ? (
               <KeeprSpaceAdminPanel
                 profile={brandProfile}
                 kind={currentKind}
@@ -4231,6 +5187,18 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
               <NeedsAttentionPanel data={data} onOpenAsset={openBoat} />
             ) : mode === "messages" ? (
               <MessagesPanel data={data} onOpenAsset={openBoat} />
+            ) : mode === "connect" && isDealerNetworkView ? (
+              <NetworkPanel
+                data={data}
+                copy={copy}
+                workspace={currentWorkspace}
+                config={orgConfig}
+                projectionMode={activeProjection}
+                onManageRelationships={() => {
+                  setAdminTab("brands");
+                  setMode("profile");
+                }}
+              />
             ) : mode === "addBoat" || mode === "connect" ? (
               <AddBoatPanel
                 mode={mode === "connect" ? "find" : addBoatMode}
@@ -4256,6 +5224,34 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
                 creating={creatingBoat}
                 organizationName={copy.name}
               />
+            ) : mode === "templates" && (templateSubview === "aiContext" || templateSubview === "resources") ? (
+              <CoreAIContextSurface
+                address={keeprLinkAddress}
+                label={copy.name}
+                purpose="keepr_enablement"
+                copyPurpose="llm_context"
+                onOpenModel={openCatalogTemplate}
+                view={templateSubview === "resources" ? "resources" : "aiContext"}
+                refreshKey={orgResourceRefreshKey}
+                organizationResourceComposer={templateSubview === "resources" && canAuthorCatalog ? (
+                  <OrgResourceComposer
+                    draft={orgResourceDraft}
+                    onChange={setOrgResourceDraft}
+                    onAddLink={addOrgResourceLink}
+                    onUploadFile={uploadOrgResourceFile}
+                    saving={savingOrgResource}
+                    message={orgResourceMessage}
+                    error={orgResourceError}
+                    onCancelEdit={cancelOrgResourceEdit}
+                  />
+                ) : null}
+                organizationResourceActions={templateSubview === "resources" && canAuthorCatalog ? {
+                  onEdit: editOrgResource,
+                  onSupersede: supersedeOrgResource,
+                  onDisable: disableOrgResourceAI,
+                  onDelete: deleteOrgResource,
+                } : null}
+              />
             ) : mode === "templates" ? (
               <CatalogPanel
                 templates={catalogTemplates}
@@ -4270,6 +5266,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
                 onModelDraftChange={setModelDraft}
                 onCreateModel={createCatalogModel}
                 creatingModel={creatingModel}
+                navSection={routeNavSection}
               />
             ) : mode === "builds" ? (
               <ProductionBuildsPanel
@@ -4283,7 +5280,17 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
                 onAddBoat={() => setMode("addBoat")}
               />
             ) : mode === "network" ? (
-              <NetworkPanel data={data} copy={copy} workspace={currentWorkspace} projectionMode={activeProjection} />
+              <NetworkPanel
+                data={data}
+                copy={copy}
+                workspace={currentWorkspace}
+                config={orgConfig}
+                projectionMode={activeProjection}
+                onManageRelationships={() => {
+                  setAdminTab("brands");
+                  setMode("profile");
+                }}
+              />
             ) : loading ? (
               <View style={styles.centered}>
                 <ActivityIndicator color={colors.brandBlue} />
@@ -5094,6 +6101,15 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     paddingTop: spacing.sm,
   },
+  catalogSurfaceHeader: {
+    alignItems: "flex-start",
+    borderBottomColor: colors.border,
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    gap: spacing.lg,
+    justifyContent: "space-between",
+    paddingBottom: spacing.md,
+  },
   networkHeader: {
     alignItems: "flex-start",
     flexDirection: "row",
@@ -5156,11 +6172,139 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     maxWidth: 760,
   },
+  networkManageButton: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: "#EFF6FF",
+    borderColor: "#BFDBFE",
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginTop: spacing.md,
+    minHeight: 38,
+    paddingHorizontal: spacing.md,
+  },
+  networkManageButtonText: {
+    color: colors.brandBlue,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  orgResolutionPanel: {
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    gap: spacing.md,
+    marginTop: spacing.lg,
+    padding: spacing.md,
+  },
+  orgLookupRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  orgLookupInputWrap: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flex: 1,
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 42,
+    minWidth: 260,
+    paddingHorizontal: spacing.md,
+  },
+  orgLookupInput: {
+    color: colors.textPrimary,
+    flex: 1,
+    fontSize: 13,
+    minHeight: 40,
+    outlineStyle: "none",
+  },
+  selectedOrgBanner: {
+    alignItems: "center",
+    backgroundColor: "#ECFDF5",
+    borderColor: "#BBF7D0",
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 38,
+    paddingHorizontal: spacing.md,
+  },
+  selectedOrgText: {
+    color: colors.textPrimary,
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  orgResultList: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    overflow: "hidden",
+  },
+  orgResultRow: {
+    alignItems: "center",
+    borderBottomColor: colors.border,
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    gap: spacing.md,
+    minHeight: 58,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  orgResultIcon: {
+    alignItems: "center",
+    backgroundColor: "#EFF6FF",
+    borderRadius: radius.sm,
+    height: 34,
+    justifyContent: "center",
+    width: 34,
+  },
+  orgResultCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
   inlineChips: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: spacing.sm,
     marginTop: spacing.lg,
+  },
+  contextSummaryGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.md,
+    marginTop: spacing.lg,
+  },
+  contextSummaryTile: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexBasis: "31%",
+    flexGrow: 1,
+    minHeight: 104,
+    minWidth: 220,
+    padding: spacing.md,
+    ...shadows.sm,
+  },
+  contextSummaryTitle: {
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  contextSummaryText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: spacing.xs,
   },
   catalogGrid: {
     flexDirection: "row",
@@ -6458,6 +7602,31 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     padding: spacing.md,
   },
+  orgResourceComposer: {
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: "#BFDBFE",
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    gap: spacing.md,
+    marginBottom: spacing.md,
+    padding: spacing.md,
+  },
+  orgResourceActions: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  orgResourceSuccessText: {
+    color: "#047857",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  orgResourceErrorText: {
+    color: colors.danger,
+    fontSize: 12,
+    fontWeight: "800",
+  },
   adminFormHeader: {
     alignItems: "center",
     flexDirection: "row",
@@ -6473,6 +7642,29 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "800",
     marginTop: 2,
+  },
+  adminHelpText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 18,
+    marginTop: 4,
+  },
+  adminSecondaryButton: {
+    alignItems: "center",
+    backgroundColor: "#EFF6FF",
+    borderColor: "#BFDBFE",
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.xs,
+    minHeight: 44,
+    paddingHorizontal: spacing.lg,
+  },
+  adminSecondaryButtonText: {
+    color: colors.brandBlue,
+    fontSize: 13,
+    fontWeight: "900",
   },
   adminResetText: {
     color: colors.brandBlue,
@@ -6581,5 +7773,83 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     maxWidth: 720,
     textAlign: "center",
+  },
+  identityPanel: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    gap: spacing.lg,
+    padding: spacing.lg,
+    ...shadows.sm,
+  },
+  personHero: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.md,
+    padding: spacing.lg,
+  },
+  personAvatar: {
+    alignItems: "center",
+    backgroundColor: colors.brandNavy,
+    borderRadius: radius.sm,
+    height: 58,
+    justifyContent: "center",
+    width: 58,
+  },
+  personAvatarText: {
+    color: colors.onPrimary,
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  personHeroCopy: {
+    flex: 1,
+    minWidth: 220,
+  },
+  personTitle: {
+    color: colors.textPrimary,
+    fontSize: 22,
+    fontWeight: "900",
+    letterSpacing: 0,
+    marginTop: 2,
+  },
+  personSubtitle: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: spacing.xs,
+  },
+  signOutButton: {
+    alignItems: "center",
+    backgroundColor: colors.brandNavy,
+    borderRadius: radius.sm,
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: 42,
+    paddingHorizontal: spacing.lg,
+  },
+  signOutButtonText: {
+    color: colors.onPrimary,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  identityGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.md,
+  },
+  identityHint: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: spacing.xs,
+  },
+  identitySecurity: {
+    gap: spacing.sm,
   },
 });

@@ -40,19 +40,31 @@ const SUPER_ITEMS = [
 
 const WORKSPACE_NAV_CONFIG = {
   keeproem: [
-    { key: "ActivatorHome", label: "Home", icon: "home-outline", initialMode: "needs", navSection: "ActivatorHome" },
-    { key: "ActivatorWork", label: "Work", icon: "construct-outline", initialMode: "builds", navSection: "ActivatorWork" },
-    { key: "ActivatorFind", label: "Fleet", icon: "boat-outline", initialMode: "fleet", navSection: "ActivatorFind" },
-    { key: "ActivatorTemplates", label: "Models", icon: "library-outline", initialMode: "templates", navSection: "ActivatorTemplates" },
-    { key: "ActivatorConnect", label: "Relationships", icon: "people-outline", initialMode: "connect", navSection: "ActivatorConnect" },
+    { key: "ActivatorOverview", label: "Overview", icon: "home-outline", initialMode: "needs", navSection: "ActivatorOverview" },
+    { key: "ActivatorTemplates", label: "Product Catalog", icon: "library-outline", initialMode: "templates", navSection: "ActivatorTemplates" },
+    { key: "SystemLibrary", label: "System Library", icon: "albums-outline", navSection: "ActivatorSystemLibrary" },
+    { key: "ActivatorFind", label: "Fleet / Installed Base", icon: "boat-outline", initialMode: "fleet", navSection: "ActivatorFind" },
+    { key: "ActivatorDealerNetwork", label: "Dealer Network", icon: "people-outline", initialMode: "connect", navSection: "ActivatorDealerNetwork" },
+    { key: "ActivatorSuppliers", label: "Suppliers", icon: "git-network-outline", initialMode: "connect", navSection: "ActivatorSuppliers" },
+    { key: "ActivatorResources", label: "Resources / Knowledge", icon: "documents-outline", initialMode: "templates", navSection: "ActivatorResources" },
+    { key: "ActivatorWarranty", label: "Warranty / Programs", icon: "shield-checkmark-outline", initialMode: "builds", navSection: "ActivatorWarranty" },
+    { key: "ActivatorAiContext", label: "AI Context / KeeprLINK", icon: "sparkles-outline", initialMode: "templates", navSection: "ActivatorAiContext" },
+    { key: "ActivatorIntelligence", label: "Intelligence", icon: "analytics-outline", initialMode: "messages", navSection: "ActivatorIntelligence" },
+    { key: "OrgIdentity", label: "Profile / Identity", icon: "person-circle-outline", initialMode: "profile", navSection: "OrgIdentity", secondary: true },
     { key: "KeeprSpaceAdmin", label: "Settings", icon: "settings-outline", initialMode: "profile", navSection: "KeeprSpaceAdmin", secondary: true },
   ],
   keeprdealer: [
-    { key: "KeeprSpaceHome", label: "Home", icon: "storefront-outline" },
-    { key: "KeeprSpaceFleet", label: "Fleet", icon: "boat-outline" },
-    { key: "KeeprSpaceMessages", label: "Messages", icon: "chatbubbles-outline" },
-    { key: "KeeprSpacePlaybooks", label: "Playbooks", icon: "list-outline" },
-    { key: "KeeprSpaceActivator", label: "Sales", icon: "pricetag-outline" },
+    { key: "KeeprSpaceHome", label: "Overview", icon: "storefront-outline" },
+    { key: "KeeprSpaceFleet", label: "Inventory / Boats", icon: "boat-outline" },
+    { key: "DealerCustomers", label: "Customers", icon: "people-outline" },
+    { key: "DealerService", label: "Service", icon: "construct-outline" },
+    { key: "DealerStorage", label: "Storage", icon: "archive-outline" },
+    { key: "KeeprSpaceActivator", label: "Brands", icon: "pricetag-outline" },
+    { key: "DealerSystemsResources", label: "Systems / Resources", icon: "albums-outline" },
+    { key: "KeeprSpacePlaybooks", label: "Actions", icon: "list-outline" },
+    { key: "DealerAiContext", label: "AI Context / KeeprLINK", icon: "sparkles-outline" },
+    { key: "DealerIntelligence", label: "Intelligence", icon: "analytics-outline" },
+    { key: "OrgIdentity", label: "Profile / Identity", icon: "person-circle-outline", secondary: true },
     { key: "KeeprSpaceAdmin", label: "Settings", icon: "settings-outline", secondary: true },
   ],
   keeprpro: [
@@ -172,6 +184,12 @@ function activatorModeForSidebarKey(key, workspace) {
   const configItem = WORKSPACE_NAV_CONFIG[workspace?.workspace_type]?.find((item) => item.key === key);
   if (configItem?.initialMode) return configItem.initialMode;
 
+  if (key === "ActivatorOverview") return "needs";
+  if (key === "ActivatorDealerNetwork" || key === "ActivatorSuppliers") return "connect";
+  if (key === "ActivatorResources" || key === "ActivatorAiContext") return "templates";
+  if (key === "ActivatorWarranty") return "builds";
+  if (key === "ActivatorIntelligence") return "messages";
+  if (key === "OrgIdentity") return "profile";
   if (key === "KeeprSpaceAdmin" || key === "WilsonAdmin") return "profile";
   if (key === "KeeprSpaceMessages" || key === "WilsonMessages") return "messages";
   if (key === "KeeprSpaceFleet" || key === "WilsonFleet") return "fleet";
@@ -190,19 +208,27 @@ function activatorModeForSidebarKey(key, workspace) {
   if (key === "ActivatorBuilds") return "builds";
   if (key === "ActivatorTemplates") return "templates";
   if (key === "ActivatorHome") return workspace?.workspace_type === "keeprpro" ? "needs" : "fleet";
+  if (key === "DealerCustomers" || key === "DealerService" || key === "DealerStorage") return "fleet";
+  if (key === "DealerSystemsResources" || key === "DealerAiContext") return "fleet";
+  if (key === "DealerIntelligence") return "messages";
   return "fleet";
 }
 
 function activatorNavSectionForSidebarKey(key) {
-  const configItem = WORKSPACE_NAV_CONFIG.keeproem.find((item) => item.key === key);
+  const configItem = Object.values(WORKSPACE_NAV_CONFIG)
+    .flat()
+    .find((item) => item.key === key);
   if (configItem?.navSection) return configItem.navSection;
 
+  if (key === "ActivatorOverview") return "ActivatorOverview";
   if (key === "ActivatorFind") return "ActivatorFind";
   if (key === "ActivatorAdd") return "ActivatorAdd";
   if (key === "ActivatorConnect") return "ActivatorConnect";
   if (key === "ActivatorWork") return "ActivatorWork";
   if (key === "ActivatorEngage") return "ActivatorEngage";
   if (key === "ActivatorTemplates") return "ActivatorTemplates";
+  if (key === "SystemLibrary") return "ActivatorSystemLibrary";
+  if (key === "OrgIdentity") return "OrgIdentity";
   if (key === "KeeprSpaceAdmin") return "KeeprSpaceAdmin";
   return null;
 }
@@ -251,6 +277,14 @@ function activatorHrefForSidebarKey(key, workspace) {
   const orgId = workspaceOrganizationId(routeWorkspace);
   if (!workspaceId) return null;
 
+  if (key === "SystemLibrary") {
+    const params = new URLSearchParams();
+    params.set("workspaceId", workspaceId);
+    if (orgId) params.set("organizationId", orgId);
+    params.set("navSection", "ActivatorSystemLibrary");
+    return `/activator/system-library?${params.toString()}`;
+  }
+
   if (key === "ActivatorAdd") {
     const params = new URLSearchParams();
     params.set("workspaceId", workspaceId);
@@ -270,6 +304,14 @@ function activatorHrefForSidebarKey(key, workspace) {
     key === "ActivatorMessages" ||
     key === "ActivatorBuilds" ||
     key === "ActivatorTemplates" ||
+    key === "ActivatorOverview" ||
+    key === "ActivatorDealerNetwork" ||
+    key === "ActivatorSuppliers" ||
+    key === "ActivatorResources" ||
+    key === "ActivatorWarranty" ||
+    key === "ActivatorAiContext" ||
+    key === "ActivatorIntelligence" ||
+    key === "OrgIdentity" ||
     key === "KeeprSpaceAdmin"
   ) {
     const params = new URLSearchParams();
@@ -432,15 +474,13 @@ if (routeName === "KeeprProStewardshipView" || routeName === "KeeprProActionDeta
   return "ActivatorFleet";
 }
 
-if (
-  routeName === "ActivatorHome" ||
-  routeName === "ActivatorBoatWorkspace" ||
-  routeName === "ActivatorCatalogTemplate" ||
-  routeName === "ActivatorExactBuild" ||
-  routeName === "ActivatorTemplateCustomize"
-) {
-  return "ActivatorHome";
+if (routeName === "ActivatorHome") return normalizeActivatorToSection(routeName, params);
+if (routeName === "ActivatorBoatWorkspace") return "ActivatorFind";
+if (routeName === "ActivatorCatalogTemplate" || routeName === "ActivatorTemplateCustomize") {
+  return "ActivatorTemplates";
 }
+if (routeName === "ActivatorExactBuild") return "ActivatorWork";
+if (routeName === "SystemLibrary") return "SystemLibrary";
 
   if (
     routeName === "MyHome" ||
@@ -637,7 +677,7 @@ useEffect(() => {
   return () => {
     active = false;
   };
-}, [userId]);
+}, [user, userId, userRole]);
 
   const [leafRouteName, setLeafRouteName] = useState(null);
   const [leafRouteParams, setLeafRouteParams] = useState({});
@@ -778,19 +818,7 @@ const navItems = useMemo(() => {
 
   const workspaceItems = navItemsForWorkspace(sidebarWorkspace);
   if (workspaceItems) {
-    const personal = personalWorkspace(workspaces);
-    const items = personal?.workspace_id && sidebarWorkspace?.workspace_type !== "keepr"
-      ? [
-          ...workspaceItems,
-          {
-            key: "PersonalKeepr",
-            label: "Personal Keepr",
-            icon: "person-outline",
-            workspace: personal,
-          },
-        ]
-      : workspaceItems;
-    return withInternalAdminMode(items);
+    return withInternalAdminMode(workspaceItems);
   }
 
   if (inSuperKeepr) return withInternalAdminMode(SUPER_ITEMS);
@@ -1078,7 +1106,15 @@ const navItems = useMemo(() => {
       key === "ActivatorFleet" ||
       key === "ActivatorMessages" ||
       key === "ActivatorBuilds" ||
-      key === "ActivatorTemplates"
+      key === "ActivatorTemplates" ||
+      key === "ActivatorOverview" ||
+      key === "ActivatorDealerNetwork" ||
+      key === "ActivatorSuppliers" ||
+      key === "ActivatorResources" ||
+      key === "ActivatorWarranty" ||
+      key === "ActivatorAiContext" ||
+      key === "ActivatorIntelligence" ||
+      key === "OrgIdentity"
     ) {
       if (isOrgWorkspace) {
         if (key === "ActivatorAdd") {
@@ -1101,6 +1137,28 @@ const navItems = useMemo(() => {
       return;
     }
 
+    if (key === "SystemLibrary") {
+      if (isOrgWorkspace) {
+        const params = {
+          workspaceId: sidebarWorkspace?.workspace_id || null,
+          organizationId: workspaceOrganizationId(sidebarWorkspace),
+          navSection: "ActivatorSystemLibrary",
+        };
+        if (Platform.OS === "web" && typeof window !== "undefined") {
+          const href = activatorHrefForSidebarKey(key, sidebarWorkspace);
+          if (href) {
+            window.location.assign(href);
+            return;
+          }
+        }
+        navigationRef.dispatch(CommonActions.reset({
+          index: 0,
+          routes: [{ name: "SystemLibrary", params }],
+        }));
+      }
+      return;
+    }
+
     if (key === "Messages") {
       if (isOrgWorkspace) {
         resetToKeeprSpaceModule("KeeprSpaceMessages", {
@@ -1114,6 +1172,30 @@ const navItems = useMemo(() => {
         screen: "PersonalTabs",
         params: { screen: "Messages", params: { scope: "global" } },
       });
+      return;
+    }
+
+    if (
+      key === "DealerCustomers" ||
+      key === "DealerService" ||
+      key === "DealerStorage" ||
+      key === "DealerSystemsResources" ||
+      key === "DealerAiContext" ||
+      key === "DealerIntelligence"
+    ) {
+      if (isOrgWorkspace) {
+        const screen =
+          key === "DealerIntelligence"
+            ? "KeeprSpaceMessages"
+            : key === "DealerAiContext" || key === "DealerSystemsResources"
+            ? "KeeprSpacePlaybooks"
+            : "KeeprSpaceFleet";
+        resetToKeeprSpaceModule(screen, {
+          workspaceId: sidebarWorkspace?.workspace_id || null,
+          organizationId: workspaceOrganizationId(sidebarWorkspace),
+          navSection: key,
+        });
+      }
       return;
     }
 
@@ -1183,6 +1265,88 @@ if (key === "MyHubs") {
 };
 
 if (isPublicFlow) return null;
+  const renderNavItem = (item) => {
+    const isActive = item.key === activeKey;
+    const navHref = activatorHrefForSidebarKey(item.key, sidebarWorkspace);
+    const navItemStyle = [
+      styles.navItem,
+      isActive && styles.navItemActive,
+      isCollapsed && styles.navItemCollapsed,
+    ];
+    const iconColor = isActive ? "#E5E7EB" : "#9CA3AF";
+    const handleNavPress = () => {
+      if (item.key === "KeeprAdminHome" && Platform.OS === "web" && typeof window !== "undefined") {
+        window.location.assign("/keepr-admin");
+        return;
+      }
+      if (navHref && Platform.OS === "web" && typeof window !== "undefined") {
+        window.location.assign(navHref);
+        return;
+      }
+      go(item.key);
+    };
+    const navContent = (
+      <>
+        <View style={[styles.navIcon, isCollapsed && styles.navIconCollapsed]}>
+          <Ionicons name={item.icon} size={18} color={iconColor} />
+        </View>
+
+        {!isCollapsed ? (
+          <Text
+            style={[
+              styles.navLabel,
+              isActive && styles.navLabelActive,
+            ]}
+            numberOfLines={1}
+          >
+            {item.label}
+          </Text>
+        ) : null}
+
+        {item.key === "Notifications" && badgeText ? (
+          isCollapsed ? (
+            <View style={styles.badgeDot}>
+              <Text style={styles.badgeDotText}>{badgeText}</Text>
+            </View>
+          ) : (
+            <View style={styles.badgePill}>
+              <Text style={styles.badgeText}>{badgeText}</Text>
+            </View>
+          )
+        ) : null}
+      </>
+    );
+
+    if (Platform.OS === "web" && navHref) {
+      return (
+        <a
+          key={item.key}
+          href={navHref}
+          style={StyleSheet.flatten([navItemStyle, styles.webNavLink])}
+          aria-current={isActive ? "page" : undefined}
+          onClick={(event) => {
+            event.preventDefault();
+            if (typeof window !== "undefined") window.location.assign(navHref);
+          }}
+        >
+          {navContent}
+        </a>
+      );
+    }
+
+    return (
+      <TouchableOpacity
+        key={item.key}
+        style={navItemStyle}
+        onPress={handleNavPress}
+        activeOpacity={0.85}
+        accessibilityRole="button"
+      >
+        {navContent}
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <View
       style={[styles.shell, isCollapsed && styles.shellCollapsed]}
@@ -1221,57 +1385,44 @@ if (isPublicFlow) return null;
       </View>
 
       <View style={styles.navList}>
-        {navItems.map((item) => {
-          const isActive = item.key === activeKey;
-          const handleNavPress = () => {
-            if (item.key === "KeeprAdminHome" && Platform.OS === "web" && typeof window !== "undefined") {
-              window.location.assign("/keepr-admin");
-              return;
-            }
-            const navHref = activatorHrefForSidebarKey(item.key, sidebarWorkspace);
-            if (navHref && Platform.OS === "web" && typeof window !== "undefined") {
-              window.location.assign(navHref);
-              return;
-            }
-            go(item.key);
-          };
-
-          return (
-            <TouchableOpacity
-              key={item.key}
-              style={[styles.navItem, isActive && styles.navItemActive, isCollapsed && styles.navItemCollapsed]}
-              onPress={handleNavPress}
-              activeOpacity={0.85}
-              accessibilityRole="button"
-            >
-              <View style={[styles.navIcon, isCollapsed && styles.navIconCollapsed]}>
-                <Ionicons name={item.icon} size={18} color={isActive ? "#E5E7EB" : "#9CA3AF"} />
-              </View>
-
-              {!isCollapsed ? (
-                <Text style={[styles.navLabel, isActive && styles.navLabelActive]} numberOfLines={1}>
-                  {item.label}
-                </Text>
-              ) : null}
-
-              {item.key === "Notifications" && badgeText ? (
-                isCollapsed ? (
-                  <View style={styles.badgeDot}>
-                    <Text style={styles.badgeDotText}>{badgeText}</Text>
-                  </View>
-                ) : (
-                  <View style={styles.badgePill}>
-                    <Text style={styles.badgeText}>{badgeText}</Text>
-                  </View>
-                )
-              ) : null}
-            </TouchableOpacity>
-          );
-        })}
+        {navItems.map(renderNavItem)}
       </View>
 
       <View style={styles.footer}>
-        {isInternalAdmin ? (
+        {isInternalAdmin && Platform.OS === "web" ? (
+          <a
+            href="/keepr-admin"
+            style={StyleSheet.flatten([
+              styles.modeChoice,
+              activeKey === "KeeprAdminHome" && styles.modeChoiceActive,
+              isCollapsed && styles.modeChoiceCollapsed,
+              styles.webNavLink,
+            ])}
+            aria-current={activeKey === "KeeprAdminHome" ? "page" : undefined}
+            aria-label="Open Keepr Admin"
+            onClick={(event) => {
+              event.preventDefault();
+              if (typeof window !== "undefined") window.location.assign("/keepr-admin");
+            }}
+          >
+            <Ionicons
+              name="shield-checkmark-outline"
+              size={18}
+              color={activeKey === "KeeprAdminHome" ? "#E5E7EB" : "#9CA3AF"}
+            />
+            {!isCollapsed ? (
+              <Text
+                style={[
+                  styles.modeChoiceText,
+                  activeKey === "KeeprAdminHome" && styles.modeChoiceTextActive,
+                ]}
+                numberOfLines={1}
+              >
+                Keepr Admin
+              </Text>
+            ) : null}
+          </a>
+        ) : isInternalAdmin ? (
           <TouchableOpacity
             style={[
               styles.modeChoice,
@@ -1365,18 +1516,41 @@ const styles = StyleSheet.create({
   navItem: {
     flexDirection: "row",
     alignItems: "center",
+    minHeight: 42,
     paddingVertical: 12,
     paddingHorizontal: 12,
     borderRadius: radius.md,
     marginBottom: 6,
+    width: "100%",
   },
   navItemActive: {
     backgroundColor: "#365aaaff",
     borderWidth: 1,
     borderColor: "#1F2937",
   },
-  navIcon: { width: 26, alignItems: "center", marginRight: spacing.sm },
-  navLabel: { flex: 1, fontSize: 14, color: "#dcdfe4ff", fontWeight: "600" },
+  webNavLink: {
+    display: "flex",
+    boxSizing: "border-box",
+    alignItems: "center",
+    width: "100%",
+    textDecorationLine: "none",
+    cursor: "pointer",
+  },
+  navIcon: {
+    alignItems: "center",
+    flexShrink: 0,
+    justifyContent: "center",
+    marginRight: spacing.sm,
+    width: 26,
+  },
+  navLabel: {
+    color: "#dcdfe4ff",
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "600",
+    lineHeight: 18,
+    minWidth: 0,
+  },
   navLabelActive: { color: "#E5E7EB" },
   badgePill: {
     minWidth: 22,
@@ -1433,7 +1607,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
 
-  footer: { paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: "#0F172A" },
+  footer: {
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: "#0F172A",
+  },
   modeChoice: {
     flexDirection: "row",
     alignItems: "center",

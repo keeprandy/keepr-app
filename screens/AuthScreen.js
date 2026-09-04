@@ -112,12 +112,40 @@ function getWebAuthRedirectToForIntent(oauthIntent = "signin") {
   try {
     const url = new URL(redirectTo);
     url.searchParams.set("oauth_intent", oauthIntent === "signup" ? "signup" : "signin");
+    const protectedReturnTo = getProtectedReturnTo();
+    if (protectedReturnTo) url.searchParams.set("returnTo", protectedReturnTo);
     const returnTo = window.sessionStorage?.getItem("keepr.auth.activationIntent.v1") ||
       window.localStorage?.getItem("keepr.auth.activationIntent.v1");
-    if (returnTo) url.searchParams.set("returnTo", "hub_activation");
+    if (returnTo && !protectedReturnTo) url.searchParams.set("returnTo", "hub_activation");
     return url.toString();
   } catch (_) {
     return redirectTo;
+  }
+}
+
+function getProtectedReturnTo(routeParams = null) {
+  if (Platform.OS !== "web" || typeof window === "undefined") return null;
+  try {
+    const params = new URLSearchParams(window.location.search || "");
+    const raw = routeParams?.returnTo || params.get("returnTo");
+    if (!raw || raw === "hub_activation") return null;
+    const decoded = raw.startsWith("/") ? raw : decodeURIComponent(raw);
+    if (!decoded.startsWith("/")) return null;
+    if (decoded.startsWith("//")) return null;
+    return decoded;
+  } catch (_) {
+    return null;
+  }
+}
+
+function continueProtectedReturnTo(returnToOverride = null) {
+  const returnTo = returnToOverride || getProtectedReturnTo();
+  if (!returnTo) return false;
+  try {
+    window.location.assign(returnTo);
+    return true;
+  } catch (_) {
+    return false;
   }
 }
 
@@ -360,8 +388,10 @@ export default function AuthScreen({ navigation, route }) {
           email: authUser.email,
         });
       }
+      const protectedReturnTo = getProtectedReturnTo(route?.params || null);
       cleanAuthUrl();
-      await continueActivationJourney();
+      if (await continueActivationJourney()) return true;
+      if (continueProtectedReturnTo(protectedReturnTo)) return true;
       return true;
     };
 
@@ -835,6 +865,7 @@ const continueActivationJourney = async () => {
 
         const continued = await continueActivationJourney();
         if (continued) return;
+        if (continueProtectedReturnTo(route?.params?.returnTo || null)) return;
       }
       
     } catch (e) {

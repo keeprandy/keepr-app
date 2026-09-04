@@ -47,6 +47,8 @@ const TABS = [
 
 const MODEL_RESOURCE_ROLES = [
   { key: "Manual", label: "Manual" },
+  { key: "Buyer Guide", label: "Buyer Guide" },
+  { key: "Web Page", label: "Web Page" },
   { key: "Warranty", label: "Warranty" },
   { key: "Spec Sheet", label: "Spec Sheet" },
   { key: "Install Guide", label: "Install Guide" },
@@ -289,6 +291,23 @@ function normalizeTemplateAttachmentMedia(row, template = {}) {
 function titleFromUrl(url) {
   try {
     const parsed = new URL(url);
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    const tail = segments.length ? decodeURIComponent(segments[segments.length - 1]) : "";
+    const withoutExtension = tail.replace(/\.[a-z0-9]{2,6}$/i, "");
+    const readableTail = withoutExtension
+      .replace(/[_-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (readableTail && readableTail.split(" ").length > 1) {
+      return readableTail
+        .split(" ")
+        .map((word) => {
+          if (/^MY\d{4}$/i.test(word)) return word.toUpperCase();
+          if (/^[A-Z0-9]{2,4}$/.test(word)) return word;
+          return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+        })
+        .join(" ");
+    }
     return parsed.hostname.replace(/^www\./, "") || url;
   } catch {
     return url;
@@ -332,10 +351,24 @@ function normalizeModelResourceRole(role) {
   const raw = String(role || "").trim();
   const lower = raw.toLowerCase().replace(/[_-]+/g, " ");
   if (["manual", "owner manual", "owners manual", "owner's manual"].includes(lower)) return "Manual";
+  if (["buyer guide", "buyers guide", "buyer's guide", "brochure"].includes(lower)) return "Buyer Guide";
+  if (["web page", "webpage", "website", "page"].includes(lower)) return "Web Page";
   if (lower === "warranty") return "Warranty";
   if (["spec sheet", "specification", "specifications"].includes(lower)) return "Spec Sheet";
   if (["install guide", "installation guide"].includes(lower)) return "Install Guide";
   return MODEL_RESOURCE_ROLES.some((item) => item.key === raw) ? raw : "Other";
+}
+
+function inferModelResourceRoleFromUrl(url, fallbackRole = "Other") {
+  const fallback = normalizeModelResourceRole(fallbackRole);
+  if (fallback !== "Other") return fallback;
+  const text = String(url || "").toLowerCase().replace(/[_-]+/g, " ");
+  if (/\b(owner'?s?\s*)?manual\b/.test(text)) return "Manual";
+  if (/\bwarranty\b/.test(text)) return "Warranty";
+  if (/\b(spec|specs|specification|specifications)\b/.test(text)) return "Spec Sheet";
+  if (/\b(install|installation)\b/.test(text)) return "Install Guide";
+  if (/\b(buyer'?s?\s*guide|brochure)\b/.test(text)) return "Buyer Guide";
+  return "Web Page";
 }
 
 function mediaFromResource(resource) {
@@ -1284,7 +1317,7 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
   const [templateAttachmentMedia, setTemplateAttachmentMedia] = useState([]);
   const [templateAttachmentResources, setTemplateAttachmentResources] = useState([]);
   const [resourceLinkUrl, setResourceLinkUrl] = useState("");
-  const [resourceRole, setResourceRole] = useState("Manual");
+  const [resourceRole, setResourceRole] = useState("Other");
   const [addingResource, setAddingResource] = useState(false);
   const [identityModalVisible, setIdentityModalVisible] = useState(false);
   const [identityDraft, setIdentityDraft] = useState({
@@ -1551,7 +1584,7 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
     authority: "official",
     privacy: "moves_with_asset",
     ai_scope: "asset",
-    ai_context: ["Manual", "Warranty", "Spec Sheet"].includes(normalizeModelResourceRole(role)) ? "primary" : "supporting",
+    ai_context: ["Manual", "Buyer Guide", "Warranty", "Spec Sheet"].includes(normalizeModelResourceRole(role)) ? "primary" : "supporting",
     applies_to: "model_template",
   });
 
@@ -1906,8 +1939,11 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
     try {
       if (!template?.id) throw new Error("Template is not loaded yet.");
       const userId = await getTemplateMediaUserId();
-      const role = normalizeModelResourceRole(resourceRole);
-      const title = `${modelResourceRoleLabel(role)} · ${titleFromUrl(url)}`;
+      const role = inferModelResourceRoleFromUrl(url, resourceRole);
+      const titleBase = titleFromUrl(url);
+      const title = ["Other", "Web Page"].includes(role)
+        ? titleBase
+        : `${modelResourceRoleLabel(role)} · ${titleBase}`;
       const created = await createLinkAttachment({
         userId,
         assetId: null,

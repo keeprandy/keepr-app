@@ -53,7 +53,7 @@ const ROLE_GROUPS = [
   },
   {
     group: "Reference",
-    items: ["Manual", "Spec Sheet", "Install Guide"],
+    items: ["Manual", "Buyer Guide", "Spec Sheet", "Install Guide", "Web Page"],
   },
   {
     group: "Evidence",
@@ -902,9 +902,10 @@ setWExpires(isoToMDY(safeStr(d.end_date || d.expiration_date)));
         const currentAiMetadata = attachment?.ai_metadata && typeof attachment.ai_metadata === "object"
           ? attachment.ai_metadata
           : {};
+        const placementLabel = (title || inferName(attachment) || "").trim() || null;
         const { error: updateErr } = await supabase
           .from("attachment_placements")
-          .update({ role: roleValue || "Other" })
+          .update({ role: roleValue || "Other", label: placementLabel })
           .eq("attachment_id", attachmentId)
           .eq("target_type", "model_template")
           .eq("target_id", routeTargetId);
@@ -915,6 +916,7 @@ setWExpires(isoToMDY(safeStr(d.end_date || d.expiration_date)));
           .update({
             source_context: {
               ...currentSourceContext,
+              role: roleValue || "Other",
               applies_to_type: linkedTemplateItemIds.length ? "model_template_item" : "model_template",
               applies_to_id: linkedTemplateItemIds[0] || routeTargetId,
               template_id: routeTargetId,

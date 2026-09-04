@@ -88,14 +88,25 @@ test("Asset attachment screen can filter composed KAC media by contributor lane"
 test("Model resources are attachment-backed and inherit to KACs", () => {
   const catalog = read("screens/ActivatorCatalogTemplateScreen.js");
   const api = read("lib/attachmentsApi.js");
+  const migration = read("supabase/migrations/20260904100000_model_template_attachment_manager_updates.sql");
 
   assert.match(catalog, /MODEL_RESOURCE_ROLES/);
   assert.match(catalog, /\{ key: "Manual", label: "Manual" \}/);
+  assert.match(catalog, /\{ key: "Buyer Guide", label: "Buyer Guide" \}/);
+  assert.match(catalog, /\{ key: "Web Page", label: "Web Page" \}/);
   assert.match(catalog, /\{ key: "Warranty", label: "Warranty" \}/);
   assert.match(catalog, /\{ key: "Spec Sheet", label: "Spec Sheet" \}/);
   assert.match(catalog, /\{ key: "Install Guide", label: "Install Guide" \}/);
+  assert.match(catalog, /function titleFromUrl/);
+  assert.match(catalog, /decodeURIComponent\(segments\[segments\.length - 1\]\)/);
+  assert.match(catalog, /\.replace\(\/\[_-\]\+\/g, " "\)/);
+  assert.match(catalog, /\^MY\\d\{4\}\$/);
   assert.match(catalog, /function normalizeModelResourceRole/);
-  assert.match(catalog, /ai_context: \["Manual", "Warranty", "Spec Sheet"\]\.includes/);
+  assert.match(catalog, /function inferModelResourceRoleFromUrl/);
+  assert.match(catalog, /const \[resourceRole, setResourceRole\] = useState\("Other"\)/);
+  assert.match(catalog, /return "Buyer Guide"/);
+  assert.match(catalog, /return "Web Page"/);
+  assert.match(catalog, /ai_context: \["Manual", "Buyer Guide", "Warranty", "Spec Sheet"\]\.includes/);
   assert.match(catalog, /hydrateTemplateAttachmentResources/);
   assert.match(catalog, /function isModelKnowledgeResource/);
   assert.match(catalog, /function isImageAttachmentLike/);
@@ -114,6 +125,13 @@ test("Model resources are attachment-backed and inherit to KACs", () => {
   assert.match(api, /normalizeTemplateAttachmentPlacement/);
   assert.match(api, /is_inherited_model_attachment: true/);
   assert.match(api, /listAssetAIContextSources[\s\S]*includeInheritedModelAttachments: true/);
+  assert.match(migration, /create unique index if not exists attachment_placements_unique_triplet/);
+  assert.match(migration, /on public\.attachment_placements \(attachment_id, target_type, target_id\)/);
+  assert.match(migration, /create or replace function public\.keepr_attachment_owned_by_user/);
+  assert.match(migration, /set row_security = off/);
+  assert.match(migration, /public\.keepr_attachment_owned_by_user\(auth\.uid\(\), attachment_id\)/);
+  assert.doesNotMatch(migration, /create policy "Template managers create model template attachment placements"[\s\S]*join public\.attachments/);
+  assert.doesNotMatch(migration, /create policy "Owner org creates system template attachment placements"[\s\S]*join public\.attachments/);
 });
 
 test("Model resource roles can be changed using Proof Builder vocabulary", () => {
@@ -173,7 +191,10 @@ test("OEM model resources can open Proof Builder at model-template scope", () =>
   assert.match(catalog, /targetId: template\.id/);
   assert.match(catalog, /returnRoute: "ActivatorCatalogTemplate"/);
   assert.match(catalog, /templateKey: template\.template_key \|\| templateKey/);
-  assert.match(proofBuilder, /routeTargetType === "model_template"[\s\S]*\.update\(\{ role: roleValue \|\| "Other" \}\)/);
+  assert.match(proofBuilder, /items: \["Manual", "Buyer Guide", "Spec Sheet", "Install Guide", "Web Page"\]/);
+  assert.match(proofBuilder, /const placementLabel = \(title \|\| inferName\(attachment\) \|\| ""\)\.trim\(\) \|\| null/);
+  assert.match(proofBuilder, /routeTargetType === "model_template"[\s\S]*\.update\(\{ role: roleValue \|\| "Other", label: placementLabel \}\)/);
+  assert.match(proofBuilder, /source_context: \{[\s\S]*role: roleValue \|\| "Other"/);
   assert.match(proofBuilder, /\.eq\("target_type", "model_template"\)/);
 });
 
@@ -244,9 +265,14 @@ test("Template item resources are attachment-backed and Proof Builder editable",
   const itemEditor = read("screens/ActivatorTemplateItemEditorScreen.js");
 
   assert.match(itemEditor, /RESOURCE_ROLES/);
+  assert.match(itemEditor, /\["Manual", "Buyer Guide", "Warranty", "Spec Sheet", "Install Guide", "Web Page", "Other"\]/);
+  assert.match(itemEditor, /const \[resourceRole, setResourceRole\] = useState\("Other"\)/);
+  assert.match(itemEditor, /return "Buyer Guide"/);
+  assert.match(itemEditor, /return "Web Page"/);
   assert.match(itemEditor, /listAttachmentsForTarget\("model_template", next\.template\.id\)/);
   assert.match(itemEditor, /function modelItemResourceAiMetadata/);
   assert.match(itemEditor, /ai_scope: "systems"/);
+  assert.match(itemEditor, /ai_context: \["Manual", "Buyer Guide", "Warranty", "Spec Sheet"\]\.includes\(normalizedRole\)/);
   assert.match(itemEditor, /applies_to: "model_template_item"/);
   assert.match(itemEditor, /function linkedTemplateItemIds/);
   assert.match(itemEditor, /sourceContext\.linked_template_item_ids/);
@@ -542,4 +568,103 @@ test("System-scoped attachment context survives into Proof Builder", () => {
   assert.match(proofBuilder, /route-scoped system context/);
   assert.match(proofBuilder, /routeTargetType === "system" && routeTargetId/);
   assert.match(proofBuilder, /new Set\(\[\.\.\.\(finalSystemIds \|\| \[\]\), routeTargetId\]\)/);
+});
+
+test("Model catalog renders templates before hydrating media heroes", () => {
+  const activator = read("screens/ActivatorHomeScreen.js");
+  const attachmentsApi = read("lib/attachmentsApi.js");
+  const rowPushIndex = attachmentsApi.indexOf("byTemplateId[placement.target_id].media.push(row);");
+  const hydrateHeroIndex = attachmentsApi.indexOf("const hydrateHero = async (row) =>");
+  const assignHeroIndex = attachmentsApi.indexOf("entry.hero = await hydrateHero(entry.hero);");
+
+  assert.match(activator, /setCatalogTemplates\(nextTemplates\);\s*setCatalogLoading\(false\);/);
+  assert.match(activator, /setCatalogTemplateMediaById\(await listModelTemplateMediaForTemplates\(nextTemplates\)\)/);
+  assert.ok(rowPushIndex > -1);
+  assert.ok(hydrateHeroIndex > rowPushIndex);
+  assert.ok(assignHeroIndex > hydrateHeroIndex);
+  assert.match(attachmentsApi, /const hydrateHero = async \(row\) =>/);
+  assert.match(attachmentsApi, /await Promise\.all\(Object\.values\(byTemplateId\)\.map\(async \(entry\) =>/);
+});
+
+test("Activator direct web URLs preserve requested shell mode", () => {
+  const activator = read("screens/ActivatorHomeScreen.js");
+  const splash = read("screens/SplashIntroScreen.js");
+
+  assert.match(activator, /function webActivatorParam\(key\)/);
+  assert.match(activator, /webActivatorParam\("initialMode"\) \|\| route\?\.params\?\.initialMode/);
+  assert.match(activator, /webActivatorParam\("workspaceId"\) \|\| route\?\.params\?\.workspaceId/);
+  assert.match(activator, /webActivatorParam\("organizationId"\) \|\| route\?\.params\?\.organizationId/);
+  assert.match(activator, /webActivatorParam\("navSection"\) \|\| route\?\.params\?\.navSection/);
+  assert.match(activator, /const initialMode = fixedMode \|\| routeInitialMode \|\| "fleet"/);
+  assert.match(activator, /if \(requestedMode && workAreas\.some\(\(area\) => area\.key === requestedMode\)\)/);
+  assert.doesNotMatch(activator, /const routeInitialMode = route\?\.params\?\.initialMode \|\| null/);
+  assert.match(splash, /const path = window\.location\.pathname \|\| "\/"/);
+  assert.match(splash, /if \(path !== "\/" && path !== ""\) return undefined/);
+  assert.match(splash, /routes: \[\{ name: "RootTabs" \}\]/);
+});
+
+test("Protected web deep links require auth before preserving direct routes", () => {
+  const app = read("App.js");
+  const auth = read("screens/AuthScreen.js");
+
+  const signedInWebRouteIndex = app.indexOf('if (Platform.OS === "web" && webRoute) return webRoute;');
+  const loadingSplashIndex = app.indexOf('if ((loadingRole && role === null) || loadingWorkspaces) return "SplashIntro";');
+  const initialWebRouteIndex = app.indexOf('Platform.OS === "web" && currentWebPathRoute');
+  const initialBootLoadingIndex = app.indexOf('isBootLoading\n  ? "SplashIntro"');
+  const initializingIndex = app.indexOf('if (initializing) return Platform.OS === "web" && webRoute ? null : "SplashIntro";');
+
+  assert.ok(initializingIndex > -1);
+  assert.ok(signedInWebRouteIndex > -1);
+  assert.ok(loadingSplashIndex > signedInWebRouteIndex);
+  assert.ok(initialWebRouteIndex > -1);
+  assert.ok(initialBootLoadingIndex > initialWebRouteIndex);
+  assert.match(app, /const isPublicWebDeepLink =/);
+  assert.match(app, /const isAuthenticatedWebDeepLink =/);
+  assert.match(app, /path === "\/activator"/);
+  assert.match(app, /path\.startsWith\("\/activator\/"\)/);
+  assert.match(app, /authReturnParams = \{ returnTo \}/);
+  assert.match(app, /authUrl\.searchParams\.set\("returnTo", returnTo\)/);
+  assert.match(app, /routes: \[\{ name: targetRoute, params: targetRoute === "Auth" \? authReturnParams : undefined \}\]/);
+  assert.match(app, /isPublicWebDeepLink \|\| \(user\?\.id && isAuthenticatedWebDeepLink\)/);
+  assert.doesNotMatch(app, /if \(\s*path\.startsWith\("\/k\/"\)[\s\S]*path === "\/activator"[\s\S]*\) \{\s*didInitialNavResolve\.current = true;\s*return;\s*\}/);
+  assert.match(auth, /function getProtectedReturnTo\(routeParams = null\)/);
+  assert.match(auth, /const raw = routeParams\?\.returnTo \|\| params\.get\("returnTo"\)/);
+  assert.match(auth, /if \(!decoded\.startsWith\("\/"\)\) return null/);
+  assert.match(auth, /if \(decoded\.startsWith\("\/\/"\)\) return null/);
+  assert.match(auth, /if \(continueProtectedReturnTo\(route\?\.params\?\.returnTo \|\| null\)\) return/);
+  assert.match(auth, /const protectedReturnTo = getProtectedReturnTo\(route\?\.params \|\| null\);[\s\S]*cleanAuthUrl\(\);[\s\S]*continueProtectedReturnTo\(protectedReturnTo\)/);
+});
+
+test("Enterprise sidebar uses role-specific navigation over shared object surfaces", () => {
+  const sidebar = read("components/SidebarNav.js");
+  const app = read("App.js");
+
+  assert.match(sidebar, /keeproem: \[/);
+  assert.match(sidebar, /label: "Product Catalog"/);
+  assert.match(sidebar, /label: "System Library"/);
+  assert.match(sidebar, /label: "Fleet \/ Installed Base"/);
+  assert.match(sidebar, /label: "Dealer Network"/);
+  assert.match(sidebar, /label: "AI Context \/ KeeprLINK"/);
+  assert.match(sidebar, /label: "Profile \/ Identity"/);
+  assert.match(sidebar, /keeprdealer: \[/);
+  assert.match(sidebar, /label: "Inventory \/ Boats"/);
+  assert.match(sidebar, /label: "Customers"/);
+  assert.match(sidebar, /label: "Service"/);
+  assert.match(sidebar, /label: "Storage"/);
+  assert.match(sidebar, /label: "Brands"/);
+  assert.doesNotMatch(sidebar, /key: "PersonalKeepr"[\s\S]{0,120}label: "Personal Keepr"/);
+  assert.match(sidebar, /supabase\.rpc\("is_keepr_internal_admin"/);
+  assert.match(sidebar, /p_user_id: userId/);
+  assert.match(sidebar, /setIsInternalAdmin\(!error && data === true\)/);
+  assert.doesNotMatch(sidebar, /const KEEPR_INTERNAL_EMAILS = new Set\(\[/);
+  assert.doesNotMatch(sidebar, /hasClientAdminHint/);
+  assert.match(sidebar, /href="\/keepr-admin"/);
+  assert.match(sidebar, /key === "SystemLibrary"[\s\S]*routes: \[\{ name: "SystemLibrary", params \}\]/);
+  assert.match(sidebar, /key === "DealerCustomers"[\s\S]*"KeeprSpaceFleet"/);
+  assert.match(sidebar, /key === "DealerIntelligence"[\s\S]*"KeeprSpaceMessages"/);
+  assert.match(sidebar, /Platform\.OS === "web" && navHref/);
+  assert.match(sidebar, /<a[\s\S]*href=\{navHref\}/);
+  assert.match(sidebar, /window\.location\.assign\(navHref\)/);
+  assert.match(sidebar, /StyleSheet\.flatten\(\[navItemStyle, styles\.webNavLink\]\)/);
+  assert.match(app, /path\.startsWith\("\/activator\/system-library"\)/);
 });

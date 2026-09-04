@@ -82,7 +82,7 @@ const PROJECTION_KINDS = [
   { value: "none", label: "Do Not Project" },
 ];
 
-const RESOURCE_ROLES = ["Manual", "Warranty", "Spec Sheet", "Install Guide", "Other"];
+const RESOURCE_ROLES = ["Manual", "Buyer Guide", "Warranty", "Spec Sheet", "Install Guide", "Web Page", "Other"];
 const PROMOTABLE_SYSTEM_ITEM_TYPES = new Set(["system", "component", "equipment", "configuration_item", "choice", "option"]);
 
 function activeItems(items = []) {
@@ -197,9 +197,11 @@ function normalizeResourceRole(role) {
   const raw = String(role || "").trim();
   const lower = raw.toLowerCase().replace(/[_-]+/g, " ");
   if (["manual", "owner manual", "owners manual", "owner's manual"].includes(lower)) return "Manual";
+  if (["buyer guide", "buyers guide", "buyer's guide", "brochure"].includes(lower)) return "Buyer Guide";
   if (lower === "warranty") return "Warranty";
   if (["spec sheet", "specification", "specifications"].includes(lower)) return "Spec Sheet";
   if (["install guide", "installation guide"].includes(lower)) return "Install Guide";
+  if (["web page", "webpage", "website", "page"].includes(lower)) return "Web Page";
   return RESOURCE_ROLES.includes(raw) ? raw : "Other";
 }
 
@@ -210,7 +212,7 @@ function modelItemResourceAiMetadata(role, item) {
     authority: "official",
     privacy: "moves_with_asset",
     ai_scope: "systems",
-    ai_context: ["Manual", "Warranty", "Spec Sheet"].includes(normalizedRole) ? "primary" : "supporting",
+    ai_context: ["Manual", "Buyer Guide", "Warranty", "Spec Sheet"].includes(normalizedRole) ? "primary" : "supporting",
     applies_to: "model_template_item",
     template_item_id: item?.id || null,
     linked_template_item_ids: item?.id ? [item.id] : [],
@@ -319,7 +321,7 @@ export default function ActivatorTemplateItemEditorScreen() {
   const [requirementsText, setRequirementsText] = useState("");
   const [resourceTitle, setResourceTitle] = useState("");
   const [resourceUrlText, setResourceUrlText] = useState("");
-  const [resourceRole, setResourceRole] = useState("Manual");
+  const [resourceRole, setResourceRole] = useState("Other");
   const [templateItemAttachments, setTemplateItemAttachments] = useState([]);
   const [savingResource, setSavingResource] = useState(false);
   const [systemTemplateQuery, setSystemTemplateQuery] = useState("");

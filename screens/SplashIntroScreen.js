@@ -33,6 +33,13 @@ export default function SplashIntroScreen({ navigation }) {
       }),
     ]).start();
 
+    if (Platform.OS === "web") {
+      try {
+        const path = window.location.pathname || "/";
+        if (path !== "/" && path !== "") return undefined;
+      } catch (_) {}
+    }
+
     const timer = setTimeout(() => {
       navigation?.reset?.({
         index: 0,

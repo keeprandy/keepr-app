@@ -328,6 +328,7 @@ function routeForCurrentWebPath() {
     if (path === "/super" || path.startsWith("/super/")) return "SuperKeeprStack";
     if (path === "/workspace" || path.startsWith("/workspace/")) return "KeeprSpaceModule";
     if (path === "/wilson" || path.startsWith("/wilson/")) return "KeeprSpaceLegacyModule";
+    if (path.startsWith("/activator/system-library")) return "SystemLibrary";
     if (path.startsWith("/activator/build/")) return "ActivatorExactBuild";
     if (path.startsWith("/activator/catalog/") && path.endsWith("/customize")) return "ActivatorTemplateCustomize";
     if (path.startsWith("/activator/catalog/")) return "ActivatorCatalogTemplate";
@@ -2034,6 +2035,7 @@ function Root({ onRouteChange, setCurrentRouteName, currentRouteName }) {
   const { initializing, user } = useAuth();
   const {
     currentWorkspace,
+    workspaces,
     loading: loadingWorkspaces,
     legacyProfileRole,
   } = useWorkspace();
@@ -2358,7 +2360,10 @@ identifyCurrentUser();
   !isOnboardingDismissed;
   const isOrgWorkspaceActive =
     currentWorkspace?.workspace_type && currentWorkspace.workspace_type !== "keepr";
-  const shouldRouteToOnboarding = shouldShowOnboarding && !isOrgWorkspaceActive;
+  const hasOrgWorkspace =
+    Array.isArray(workspaces) &&
+    workspaces.some((workspace) => workspace?.workspace_type && workspace.workspace_type !== "keepr");
+  const shouldRouteToOnboarding = shouldShowOnboarding && !isOrgWorkspaceActive && !hasOrgWorkspace;
 
   const isResetLink = React.useMemo(() => {
   if (passwordRecoveryUrl) return true;
@@ -2384,18 +2389,18 @@ identifyCurrentUser();
 
   // Force correct landing route after profile gate resolves (web/state can be "sticky")
   const targetRoute = React.useMemo(() => {
-    if (initializing) return "SplashIntro";
+    const webRoute = routeForCurrentWebPath();
+    if (initializing) return Platform.OS === "web" && webRoute ? null : "SplashIntro";
     if (!user) return isResetLink ? "ResetPassword" : "Auth";
+    if (webRoute === "KeeprAdminHome" || webRoute === "KeeprAdminOrgDetail") return webRoute;
+    if (Platform.OS === "web" && webRoute) return webRoute;
     if ((loadingRole && role === null) || loadingWorkspaces) return "SplashIntro";
     if (!role || onboardingState === null) return null;
-    const webRoute = routeForCurrentWebPath();
-    if (webRoute === "KeeprAdminHome" || webRoute === "KeeprAdminOrgDetail") return webRoute;
-    if (webRoute && isOrgWorkspaceActive) return webRoute;
 
     return shouldRouteToOnboarding
       ? "OnboardingStack"
       : routeForWorkspace(currentWorkspace, legacyProfileRole || role);
-  }, [initializing, user, isResetLink, loadingRole, role, loadingWorkspaces, onboardingState, assetCount, isOrgWorkspaceActive, shouldRouteToOnboarding, currentWorkspace, legacyProfileRole]);
+  }, [initializing, user, isResetLink, loadingRole, role, loadingWorkspaces, onboardingState, assetCount, isOrgWorkspaceActive, hasOrgWorkspace, shouldRouteToOnboarding, currentWorkspace, legacyProfileRole]);
 
   const didInitialNavResolve = React.useRef(false);
   const lastResetRouteRef = React.useRef(null);
@@ -2404,6 +2409,7 @@ React.useEffect(() => {
   if (!targetRoute) return;
   if (!navigationRef?.isReady?.()) return;
   if (isResetLink) return;
+  let authReturnParams;
 
   if (activeTrigger?.type === "hub_invite") {
   didInitialNavResolve.current = true;
@@ -2414,7 +2420,7 @@ React.useEffect(() => {
     const path = window.location.pathname || "";
     const workspaceBoatParams = workspaceBoatRouteFromWebLocation();
 
-    if (workspaceBoatParams) {
+    if (user?.id && workspaceBoatParams) {
       navigationRef.reset({
         index: 0,
         routes: [
@@ -2437,25 +2443,37 @@ React.useEffect(() => {
       return;
     }
 
-if (
-  path.startsWith("/k/") ||
-  path.startsWith("/h/") ||
-  path.startsWith("/hub/") ||
-  path.startsWith("/story/") ||
-  path.startsWith("/boat/") ||
-  path.startsWith("/invite/") ||
-  path.startsWith("/resolve/") ||
-  path.startsWith("/inbox") ||
-  path.startsWith("/super") ||
-  path.startsWith("/keepr-admin") ||
-  path.startsWith("/CreateReminder") ||
-  path.startsWith("/Notifications") ||
-  (isOrgWorkspaceActive && isKeeprSpaceWebPath(path)) ||
-  path === "/activator" ||
-  path.startsWith("/activator/") ||
-  path.startsWith("/KeeprHubInternal") ||
-  path.startsWith("/KeeprStoryInternal")
-) {
+    const isPublicWebDeepLink =
+      path.startsWith("/k/") ||
+      path.startsWith("/h/") ||
+      path.startsWith("/hub/") ||
+      path.startsWith("/story/") ||
+      path.startsWith("/boat/") ||
+      path.startsWith("/invite/") ||
+      path.startsWith("/resolve/");
+    const isAuthenticatedWebDeepLink =
+      path.startsWith("/inbox") ||
+      path.startsWith("/super") ||
+      path.startsWith("/keepr-admin") ||
+      path.startsWith("/CreateReminder") ||
+      path.startsWith("/Notifications") ||
+      (isOrgWorkspaceActive && isKeeprSpaceWebPath(path)) ||
+      path === "/activator" ||
+      path.startsWith("/activator/") ||
+      path.startsWith("/KeeprHubInternal") ||
+      path.startsWith("/KeeprStoryInternal");
+
+    if (!user?.id && isAuthenticatedWebDeepLink) {
+      try {
+        const returnTo = `${window.location.pathname || ""}${window.location.search || ""}${window.location.hash || ""}`;
+        const authUrl = new URL("/auth", window.location.origin);
+        authUrl.searchParams.set("returnTo", returnTo);
+        authReturnParams = { returnTo };
+        window.history.replaceState(window.history.state, "", authUrl.toString());
+      } catch (_) {}
+    }
+
+if (isPublicWebDeepLink || (user?.id && isAuthenticatedWebDeepLink)) {
       didInitialNavResolve.current = true;
       return;
     }
@@ -2471,7 +2489,7 @@ if (
   if (current !== targetRoute) {
     navigationRef.reset({
       index: 0,
-      routes: [{ name: targetRoute }],
+      routes: [{ name: targetRoute, params: targetRoute === "Auth" ? authReturnParams : undefined }],
     });
   }
 
@@ -2638,17 +2656,20 @@ const isBootLoading =
 const currentWebPathRoute = routeForCurrentWebPath();
 const isKeeprAdminWebPathRoute =
   currentWebPathRoute === "KeeprAdminHome" || currentWebPathRoute === "KeeprAdminOrgDetail";
+const isOrgWorkspaceWebPathRoute = isOrgWorkspaceActive && currentWebPathRoute;
 
-const initialRouteName = isBootLoading
-  ? "SplashIntro"
-  : isResetLink
+const initialRouteName = isResetLink
   ? "ResetPassword"
-  : !user
-  ? "Auth"
   : isKeeprAdminWebPathRoute
   ? currentWebPathRoute
-  : isOrgWorkspaceActive && currentWebPathRoute
+  : Platform.OS === "web" && isOrgWorkspaceWebPathRoute
   ? currentWebPathRoute
+  : Platform.OS === "web" && currentWebPathRoute
+  ? currentWebPathRoute
+  : !user
+  ? "Auth"
+  : isBootLoading
+  ? "SplashIntro"
   : shouldRouteToOnboarding
   ? "OnboardingStack"
   : routeForWorkspace(currentWorkspace, legacyProfileRole || role);
