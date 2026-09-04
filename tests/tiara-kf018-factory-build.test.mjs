@@ -236,10 +236,13 @@ test("System Library is a first-class UI over canonical system_templates", () =>
   assert.match(librarySource, /System Template owner/);
   assert.match(librarySource, /ownerOrgId: null/);
   assert.match(librarySource, /Shared \/ supplier/);
+  assert.match(librarySource, /scope: organizationId \? "owned" : "all"/);
   assert.doesNotMatch(librarySource, /library_items|system_library_items/);
 
   assert.match(activatorApi, /export async function getSystemTemplate/);
   assert.match(activatorApi, /export async function upsertSystemTemplate/);
+  assert.match(activatorApi, /p_organization_id: organizationId/);
+  assert.match(activatorApi, /p_scope: scope/);
   assert.match(activatorApi, /\.from\("system_templates"\)/);
   assert.match(seedSql, /system_template\.mercury\.mercury_600_v12_verado/);
   assert.match(seedSql, /system_template\.seakeeper\.seakeeper_sk10_5/);
@@ -247,6 +250,12 @@ test("System Library is a first-class UI over canonical system_templates", () =>
   assert.match(seedSql, /system_template\.dometic_vacuflush\.sanitation_system/);
   assert.match(seedSql, /system_template\.starlink\.starlink_marine/);
   assert.match(seedSql, /on conflict \(canonical_key\) do update/);
+
+  const scopedSql = read("supabase/migrations/20260903201000_scope_system_library_to_active_org.sql");
+  assert.match(scopedSql, /p_organization_id uuid default null/);
+  assert.match(scopedSql, /p_scope text default 'all'/);
+  assert.match(scopedSql, /activator_user_can_act_for_org\(auth\.uid\(\), p_organization_id\)/);
+  assert.match(scopedSql, /st\.owner_org_id = p_organization_id/);
 });
 
 test("KF018 fleet routing consumes generic exact-build metadata without local runtime projection", () => {

@@ -190,7 +190,7 @@ export default function SystemLibraryScreen() {
     setLoading(true);
     setError("");
     try {
-      const rows = await listSystemTemplates({ query: queryOverride, limit: 50 });
+      const rows = await listSystemTemplates({ query: queryOverride, limit: 50, organizationId, scope: organizationId ? "owned" : "all" });
       setTemplates(rows || []);
     } catch (err) {
       setError(err?.message || "Could not load System Library.");
@@ -198,7 +198,7 @@ export default function SystemLibraryScreen() {
     } finally {
       setLoading(false);
     }
-  }, [query]);
+  }, [organizationId, query]);
 
   const loadResources = useCallback(async (templateId) => {
     if (!templateId) {
@@ -387,7 +387,11 @@ export default function SystemLibraryScreen() {
               {loading ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="search-outline" size={17} color="#fff" />}
             </TouchableOpacity>
           </View>
-          <Text style={styles.panelHint}>System Template = reusable truth. It is never another exact system record.</Text>
+          <Text style={styles.panelHint}>
+            {organizationId
+              ? "Showing this OEM's System Library. Shared supplier catalog browsing is separate from OEM-owned standard systems."
+              : "System Template = reusable truth. It is never another exact system record."}
+          </Text>
           {visibleTemplates.map((template) => {
             const active = template.id === selectedId;
             return (
