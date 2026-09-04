@@ -340,7 +340,7 @@ execute function public.apply_system_template_reference_from_metadata();
 grant execute on function public.keeprlink_normalize_address(text) to anon, authenticated;
 grant execute on function public.keeprlink_compact_address(text) to anon, authenticated;
 grant execute on function public.keeprlink_purpose(text) to anon, authenticated;
-grant execute on function public.keeprlink_resource_projection(text, uuid[], boolean) to anon, authenticated, service_role;
+grant execute on function public.keeprlink_resource_projection(text, uuid[], boolean) to anon, authenticated;
 grant execute on function public.search_keeprspace_organizations(text, text) to authenticated;
 grant execute on function public.resolve_keeprlink_context(text, text, uuid, boolean) to anon, authenticated;
 
