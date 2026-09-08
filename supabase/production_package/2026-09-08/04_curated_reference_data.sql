@@ -236,7 +236,7 @@ select
 from launch_templates lt
 join public.orgs o on o.slug = lt.org_slug
 join public.brands b on b.slug = lt.brand_slug
-on conflict (template_key, version) do update set
+on conflict (lower(template_key), version) do update set
   organization_id = excluded.organization_id,
   brand_id = excluded.brand_id,
   manufacturer = excluded.manufacturer,
@@ -250,13 +250,50 @@ on conflict (template_key, version) do update set
 with tiara as (select id from public.orgs where slug = 'tiara-yachts' limit 1),
 bennington as (select id from public.orgs where slug = 'bennington' limit 1),
 resources(org_id, resource_type, title, url, source_name, authority_state, rights_status, applies_to_type, metadata) as (
-  select id, 'oem_website', 'Tiara Main Website', 'https://www.tiarayachts.com/', 'Tiara Yachts', 'oem_published', 'public_ok', 'org',
+  select id, 'other', 'Tiara Main Website', 'https://www.tiarayachts.com/', 'Tiara Yachts', 'oem_published', 'public_ok', 'org',
     jsonb_build_object('ai_context', jsonb_build_object('role', 'supporting', 'scope', 'organization', 'privacy', 'public_safe', 'review_state', 'public_source_ok'))
   from tiara
   union all
   select id, 'oem_catalog', 'Bennington 2025 Catalog', 'https://www.macsportandmarine.com/portals/macsportandmarine/Bennington-Luxury-Performance-Boats-Catalog-2025%20-%20Flip%20PDF%20_%20FlipBuilder_4_1.pdf', 'Bennington', 'oem_published', 'public_ok', 'org',
     jsonb_build_object('ai_context', jsonb_build_object('role', 'supporting', 'scope', 'organization', 'privacy', 'public_safe', 'review_state', 'public_source_ok'))
   from bennington
+),
+normalized_resources as (
+  select
+    org_id,
+    resource_type,
+    title,
+    url,
+    source_name,
+    authority_state,
+    rights_status,
+    applies_to_type,
+    metadata || jsonb_build_object('promoted_by', 'production_convergence_2026_09_04') as metadata,
+    'Catalog'::text as role,
+    true as public_url_allowed,
+    true as public_link_allowed
+  from resources
+),
+updated_resources as (
+  update public.asset_resources ar
+  set
+    resource_type = nr.resource_type,
+    url = nr.url,
+    source_name = nr.source_name,
+    source_url = nr.url,
+    authority_state = nr.authority_state,
+    rights_status = nr.rights_status,
+    metadata = coalesce(ar.metadata, '{}'::jsonb) || nr.metadata,
+    role = nr.role,
+    public_url_allowed = nr.public_url_allowed,
+    public_link_allowed = nr.public_link_allowed,
+    updated_at = now()
+  from normalized_resources nr
+  where ar.applies_to_type = nr.applies_to_type
+    and ar.applies_to_id = nr.org_id
+    and lower(coalesce(ar.title, '')) = lower(nr.title)
+    and coalesce(nullif(ar.source_url, ''), nullif(ar.url, ''), '') = nr.url
+  returning ar.id
 )
 insert into public.asset_resources(
   resource_type,
@@ -274,21 +311,28 @@ insert into public.asset_resources(
   public_link_allowed
 )
 select
-  resource_type,
-  title,
-  url,
-  source_name,
-  url,
-  authority_state,
-  rights_status,
-  applies_to_type,
-  org_id,
-  metadata || jsonb_build_object('promoted_by', 'production_convergence_2026_09_04'),
-  'Catalog',
-  true,
-  true
-from resources
-on conflict do nothing;
+  nr.resource_type,
+  nr.title,
+  nr.url,
+  nr.source_name,
+  nr.url,
+  nr.authority_state,
+  nr.rights_status,
+  nr.applies_to_type,
+  nr.org_id,
+  nr.metadata,
+  nr.role,
+  nr.public_url_allowed,
+  nr.public_link_allowed
+from normalized_resources nr
+where not exists (
+  select 1
+  from public.asset_resources ar
+  where ar.applies_to_type = nr.applies_to_type
+    and ar.applies_to_id = nr.org_id
+    and lower(coalesce(ar.title, '')) = lower(nr.title)
+    and coalesce(nullif(ar.source_url, ''), nullif(ar.url, ''), '') = nr.url
+);
 
 with link_targets as (
   select '/k/Tiara' as address, 'organization' as object_type, id as object_id, false as canonical
@@ -364,6 +408,16 @@ select
 from bennington, wilson
 where bennington.id is not null and wilson.id is not null
 on conflict do nothing;
+
+grant usage on schema public to keepr_prod_audit_ro;
+grant select on
+  public.brands,
+  public.organization_brand_relationships,
+  public.system_templates,
+  public.keepr_links,
+  public.exact_build_drafts,
+  public.exact_build_draft_items
+to keepr_prod_audit_ro;
 
 \echo '== after: curated launch data aggregate counts =='
 select 'brands' as table_name, count(*) as rows from public.brands

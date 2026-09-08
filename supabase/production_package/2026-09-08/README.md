@@ -22,6 +22,36 @@ Executable SQL order:
 Checksums for the final executable SQL files are recorded in
 `CHECKSUMS.sha256`.
 
+## 2026-09-08 Forward-Fix Resume Point
+
+Current production state after the stopped apply:
+
+- `01_schema_reconciliation.sql`: applied successfully.
+- `02_functions_reconciliation.sql`: applied successfully.
+- `03_compatibility_backfills.sql`: applied successfully.
+- `04_curated_reference_data.sql`: failed before commit and rolled back completely.
+- `06_supplier_asset_enablement_delta.sql`: not executed.
+- Application code: not deployed.
+- Protected owner counts remained preserved at `175` assets, `566` systems,
+  `1016` attachments, and `1237` attachment placements.
+
+Do not replay files `01`, `02`, or `03` during the forward-fix resume unless a
+new preflight proves production has been manually changed and Andy explicitly
+approves a broader recovery. Resume from the corrected `04`, then run `06`,
+then validate with read-only `05`.
+
+The corrected `04_curated_reference_data.sql` keeps the same curated reference
+scope and fixes only:
+
+- `asset_model_templates` upsert target now matches the actual production
+  expression unique index on `lower(template_key), version`.
+- Org-level resource promotion is idempotent without depending on a missing
+  logical unique constraint on `asset_resources`.
+- Tiara's website resource uses the existing allowed `asset_resources`
+  `resource_type = 'other'` instead of invalid `oem_website`.
+- `keepr_prod_audit_ro` receives only read-only SELECT visibility on the new
+  release-created tables needed by `05_post_apply_smoke_readonly.sql`.
+
 ## Production Owner/Admin Apply Procedure
 
 The temporary production apply connection must be separate from
@@ -183,19 +213,17 @@ No migration is `ALREADY PRESENT` in production by ledger or object inspection f
    `production-apply.env`.
 5. Confirm production identity and that `current_user` and `session_user` are
    both `postgres`; stop if not.
-6. Apply `01_schema_reconciliation.sql`.
-7. Apply `02_functions_reconciliation.sql`.
-8. Apply `03_compatibility_backfills.sql`.
-9. Apply `04_curated_reference_data.sql`.
-10. Apply `06_supplier_asset_enablement_delta.sql`.
-11. Disconnect the owner/admin apply session.
-12. Reconnect with `keepr_prod_audit_ro`.
-13. Run `05_post_apply_smoke_readonly.sql`.
-14. Confirm release-created object ownership check returns zero rows.
-15. Delete `.local-env/production-apply.env` after successful audit.
-16. Deploy the combined RC application code only after DB GO and explicit
+6. Current forward-fix resume only: apply corrected
+   `04_curated_reference_data.sql`.
+7. Apply `06_supplier_asset_enablement_delta.sql`.
+8. Disconnect the owner/admin apply session.
+9. Reconnect with `keepr_prod_audit_ro`.
+10. Run `05_post_apply_smoke_readonly.sql`.
+11. Confirm release-created object ownership check returns zero rows.
+12. Delete `.local-env/production-apply.env` after successful audit.
+13. Deploy the combined RC application code only after DB GO and explicit
     approval.
-17. Run browser/API smoke.
+14. Run browser/API smoke.
 
 ## Expected Production Row Changes
 
