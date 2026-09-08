@@ -89,3 +89,22 @@ test("System Library links templates to supplier Organizations without replacing
   assert.match(systemLibrary, /navSection: "ActivatorSuppliers"/);
   assert.match(api, /supplier_org_id: input\.supplierOrgId \|\| null/);
 });
+
+test("System Library can apply generic System Templates into model-specific applicability", () => {
+  const systemLibrary = read("screens/SystemLibraryScreen.js");
+
+  assert.match(systemLibrary, /getCatalogTemplates/);
+  assert.match(systemLibrary, /upsertCatalogTemplateItem/);
+  assert.match(systemLibrary, /linkModelItemSystemTemplate/);
+  assert.match(systemLibrary, /Apply to Model/);
+  assert.match(systemLibrary, /Apply Reusable System/);
+  assert.match(systemLibrary, /Creates or updates a model-template item linked to this canonical System Template/);
+  assert.match(systemLibrary, /canonicalKey: "section\.configuration"/);
+  assert.match(systemLibrary, /configuration_group/);
+  assert.match(systemLibrary, /itemType: "system"/);
+  assert.match(systemLibrary, /standard_state: applyState/);
+  assert.match(systemLibrary, /mapping_status: "mapped"/);
+  assert.match(systemLibrary, /system_template_reference_source: "system_library_apply"/);
+  assert.match(systemLibrary, /inherits_system_template_intelligence: true/);
+  assert.match(systemLibrary, /keeprlink_context: true/);
+});

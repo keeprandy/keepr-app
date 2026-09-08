@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -16,7 +17,7 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import ActivatorBreadcrumb from "../components/ActivatorBreadcrumb";
 import { createLinkAttachment } from "../lib/attachmentsUploader";
 import { listAttachmentsForTarget, removePlacementById } from "../lib/attachmentsApi";
-import { getSystemTemplate, listSupplierNetwork, listSystemTemplates, upsertSystemTemplate } from "../lib/activatorApi";
+import { getCatalogTemplates, getSystemTemplate, listSupplierNetwork, listSystemTemplates, linkModelItemSystemTemplate, upsertCatalogTemplateItem, upsertSystemTemplate } from "../lib/activatorApi";
 import { searchKeeprSpaceOrganizations, upsertKeeprSpaceOrgRelationship } from "../lib/keeprspaceApi";
 import { supabase } from "../lib/supabaseClient";
 import { colors, radius, shadows, spacing } from "../styles/theme";
@@ -30,6 +31,7 @@ const AUTHORITY_STATES = [
 ];
 
 const RESOURCE_ROLES = ["manual", "warranty", "spec_sheet", "install_guide", "support_link", "proof_expectation"];
+const APPLY_STATES = ["standard", "optional", "model_expected"];
 const EMPTY_RESOURCE_DRAFT = {
   title: "",
   url: "",
@@ -200,6 +202,13 @@ export default function SystemLibraryScreen() {
   const [supplierMatches, setSupplierMatches] = useState([]);
   const [supplierLookupLoading, setSupplierLookupLoading] = useState(false);
   const [supplierConnectSaving, setSupplierConnectSaving] = useState(false);
+  const [applyModalOpen, setApplyModalOpen] = useState(false);
+  const [catalogTemplates, setCatalogTemplates] = useState([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [selectedCatalogTemplateId, setSelectedCatalogTemplateId] = useState(null);
+  const [applyState, setApplyState] = useState("optional");
+  const [applyLabel, setApplyLabel] = useState("");
+  const [applySaving, setApplySaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -300,6 +309,7 @@ export default function SystemLibraryScreen() {
   const canSave = draft.name.trim() && draft.canonicalKey.trim();
   const visibleTemplates = useMemo(() => templates || [], [templates]);
   const selectedSupplier = suppliers.find((supplier) => supplier.organization_id === draft.supplierOrgId) || null;
+  const selectedCatalogTemplate = catalogTemplates.find((template) => template.id === selectedCatalogTemplateId) || null;
 
   const refreshSuppliers = useCallback(async () => {
     if (!organizationId) {
@@ -403,6 +413,142 @@ export default function SystemLibraryScreen() {
       setError(err?.message || "Could not connect supplier Organization.");
     } finally {
       setSupplierConnectSaving(false);
+    }
+  };
+
+  const openApplyModal = async () => {
+    if (!selectedId) {
+      Alert.alert("Save first", "Save the System Template before applying it to a model.");
+      return;
+    }
+    setApplyModalOpen(true);
+    setApplyLabel(draft.name || "");
+    setCatalogLoading(true);
+    setError("");
+    try {
+      const rows = await getCatalogTemplates(organizationId);
+      setCatalogTemplates(rows || []);
+      setSelectedCatalogTemplateId((current) => current || rows?.[0]?.id || null);
+    } catch (err) {
+      setError(err?.message || "Could not load model templates.");
+      setCatalogTemplates([]);
+    } finally {
+      setCatalogLoading(false);
+    }
+  };
+
+  const applySystemTemplateToModel = async () => {
+    if (!selectedId || !selectedCatalogTemplate?.id) {
+      Alert.alert("Choose model", "Choose a model template before applying this reusable system.");
+      return;
+    }
+    const label = applyLabel.trim() || draft.name.trim();
+    if (!label) {
+      Alert.alert("Label required", "Add the model-facing system label.");
+      return;
+    }
+    setApplySaving(true);
+    setError("");
+    setNotice("");
+    try {
+      const section = await upsertCatalogTemplateItem({
+        templateId: selectedCatalogTemplate.id,
+        itemType: "section",
+        canonicalKey: "section.configuration",
+        label: "Configuration",
+        expectedValue: {},
+        applicability: { standard_state: "model_expected" },
+        metadata: {
+          source: "system_library_apply",
+          purpose: "source_backed_oem_configuration",
+        },
+        sortOrder: 30,
+      });
+      const groupKey = `configuration_group.${slugify(draft.systemCategory || draft.manufacturer || "systems")}`;
+      const group = await upsertCatalogTemplateItem({
+        templateId: selectedCatalogTemplate.id,
+        itemType: "configuration_group",
+        canonicalKey: groupKey,
+        label: draft.systemCategory || draft.manufacturer || "Systems",
+        parentItemId: section?.item?.id || null,
+        expectedValue: {
+          oem_group_name: draft.systemCategory || draft.manufacturer || "Systems",
+        },
+        applicability: { standard_state: "model_expected" },
+        metadata: {
+          source: "system_library_apply",
+          oem_group_name: draft.systemCategory || draft.manufacturer || "Systems",
+          oem_vocabulary_preserved: true,
+        },
+        sortOrder: 31,
+      });
+      const itemKey = `system.${slugify(draft.canonicalKey || draft.name)}`;
+      const result = await upsertCatalogTemplateItem({
+        templateId: selectedCatalogTemplate.id,
+        itemType: "system",
+        canonicalKey: itemKey,
+        label,
+        parentItemId: group?.item?.id || null,
+        expectedValue: {
+          description: draft.description || null,
+          quantity: 1,
+          selection_state: applyState,
+        },
+        applicability: {
+          standard_state: applyState,
+          mapping_status: "mapped",
+        },
+        metadata: {
+          source: "system_library_apply",
+          projection: {
+            kind: "system",
+            source: "system_library_apply",
+            system_template_id: selectedId,
+            system_template_key: draft.canonicalKey,
+            system_template_name: draft.name,
+            system_template_manufacturer: draft.manufacturer || null,
+            system_template_category: draft.systemCategory || null,
+          },
+          system_template_id: selectedId,
+          system_template_key: draft.canonicalKey,
+          system_template_name: draft.name,
+          system_template_reference_source: "system_library_apply",
+          inherits_system_template_intelligence: true,
+          inherited_intelligence: {
+            supplier: !!draft.supplierOrgId,
+            resources: true,
+            playbooks: true,
+            proof_expectations: true,
+            keeprlink_context: true,
+          },
+          oem_item_name: label,
+          oem_description: draft.description || null,
+          mapping_status: "mapped",
+          downstream_elements: {
+            systems: [draft.name].filter(Boolean),
+            resources: [],
+            playbooks: linesToArray(draft.playbooks),
+            requirements: linesToArray(draft.proofExpectations),
+          },
+          systems: [draft.name].filter(Boolean),
+          playbooks: linesToArray(draft.playbooks),
+          requirements: linesToArray(draft.proofExpectations),
+          oem_vocabulary_preserved: true,
+        },
+        sortOrder: 40,
+      });
+      if (result?.item?.id) {
+        await linkModelItemSystemTemplate({
+          templateItemId: result.item.id,
+          systemTemplateId: selectedId,
+        });
+      }
+      setApplyModalOpen(false);
+      setNotice(`Applied ${draft.name} to ${selectedCatalogTemplate.model || selectedCatalogTemplate.template_name || selectedCatalogTemplate.template_key}.`);
+    } catch (err) {
+      setError(err?.message || "Could not apply this System Template to the model.");
+    } finally {
+      setApplySaving(false);
     }
   };
 
@@ -598,6 +744,10 @@ export default function SystemLibraryScreen() {
               <Text style={styles.saveButtonText}>{saving ? "Saving" : "Save"}</Text>
             </TouchableOpacity>
           </View>
+          <TouchableOpacity style={[styles.applyButton, !selectedId && styles.disabledButton]} onPress={openApplyModal} disabled={!selectedId}>
+            <Ionicons name="arrow-redo-circle-outline" size={17} color={colors.primary} />
+            <Text style={styles.secondaryButtonText}>Apply to Model</Text>
+          </TouchableOpacity>
 
           <View style={styles.formGrid}>
             <Field label="Name" value={draft.name} onChangeText={(value) => updateDraft("name", value)} placeholder="Mercury 600 V12 Verado" />
@@ -773,6 +923,74 @@ export default function SystemLibraryScreen() {
           </View>
         </View>
       </View>
+
+      <Modal visible={applyModalOpen} transparent animationType="fade" onRequestClose={() => setApplyModalOpen(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalPanel}>
+            <View style={styles.sectionHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.sectionEyebrow}>Apply Reusable System</Text>
+                <Text style={styles.sectionTitle}>{draft.name || "System Template"}</Text>
+                <Text style={styles.panelHint}>
+                  Creates or updates a model-template item linked to this canonical System Template. Applicability stays on the model.
+                </Text>
+              </View>
+              <TouchableOpacity style={styles.iconButton} onPress={() => setApplyModalOpen(false)}>
+                <Ionicons name="close" size={16} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+            {catalogLoading ? (
+              <View style={styles.loadingRow}>
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text style={styles.panelHint}>Loading model templates...</Text>
+              </View>
+            ) : (
+              <>
+                <Text style={styles.label}>Model template</Text>
+                <View style={styles.modelApplyList}>
+                  {catalogTemplates.map((template) => (
+                    <TouchableOpacity
+                      key={template.id}
+                      activeOpacity={0.86}
+                      style={[styles.modelApplyRow, selectedCatalogTemplateId === template.id && styles.modelApplyRowActive]}
+                      onPress={() => setSelectedCatalogTemplateId(template.id)}
+                    >
+                      <Ionicons name="boat-outline" size={16} color={colors.primary} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.matchTitle}>
+                          {[template.manufacturer, template.model || template.template_name || template.name].filter(Boolean).join(" ")}
+                        </Text>
+                        <Text style={styles.matchMeta}>{template.template_key}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                  {!catalogTemplates.length ? <Text style={styles.emptyText}>No model templates are available for this organization.</Text> : null}
+                </View>
+                <Field label="Model-facing label" value={applyLabel} onChangeText={setApplyLabel} placeholder={draft.name || "Dometic VacuFlush"} />
+                <Text style={styles.label}>Applicability</Text>
+                <View style={styles.chipRow}>
+                  {APPLY_STATES.map((state) => (
+                    <Chip
+                      key={state}
+                      label={state.replace(/_/g, " ")}
+                      active={applyState === state}
+                      onPress={() => setApplyState(state)}
+                    />
+                  ))}
+                </View>
+              </>
+            )}
+            <TouchableOpacity
+              style={[styles.primaryButton, (applySaving || catalogLoading || !selectedCatalogTemplateId) && styles.disabledButton]}
+              onPress={applySystemTemplateToModel}
+              disabled={applySaving || catalogLoading || !selectedCatalogTemplateId}
+            >
+              {applySaving ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="arrow-redo-outline" size={17} color="#fff" />}
+              <Text style={styles.primaryButtonText}>{applySaving ? "Applying..." : "Apply to Model"}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -812,6 +1030,7 @@ const styles = StyleSheet.create({
   saveButton: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.primary, paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.md },
   saveButtonText: { color: "#fff", fontWeight: "900" },
   disabledButton: { opacity: 0.55 },
+  applyButton: { alignItems: "center", alignSelf: "flex-start", backgroundColor: "#fff", borderColor: "#bfdbfe", borderRadius: radius.md, borderWidth: 1, flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingVertical: 9 },
   formGrid: { flexDirection: "row", gap: spacing.sm, flexWrap: "wrap" },
   supplierPicker: { backgroundColor: "#f8fbff", borderColor: "#dfe5ec", borderRadius: radius.md, borderWidth: 1, gap: spacing.sm, padding: spacing.md },
   ownerChoice: { backgroundColor: "#f8fafc", borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, gap: spacing.sm, padding: spacing.md },
@@ -835,6 +1054,12 @@ const styles = StyleSheet.create({
   secondaryButton: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderWidth: 1, borderColor: "#bfdbfe", borderRadius: radius.md, paddingVertical: 11 },
   secondaryButtonCompact: { alignItems: "center", alignSelf: "flex-start", backgroundColor: "#fff", borderColor: "#bfdbfe", borderRadius: radius.md, borderWidth: 1, flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingVertical: 8 },
   secondaryButtonText: { color: colors.primary, fontWeight: "900" },
+  modalBackdrop: { alignItems: "center", backgroundColor: "rgba(15, 23, 42, 0.48)", bottom: 0, justifyContent: "center", left: 0, padding: spacing.lg, position: "absolute", right: 0, top: 0 },
+  modalPanel: { backgroundColor: "#fff", borderColor: "#dfe5ec", borderRadius: radius.lg, borderWidth: 1, gap: spacing.md, maxHeight: "86%", maxWidth: 680, padding: spacing.lg, width: "100%", ...shadows.lg },
+  loadingRow: { alignItems: "center", flexDirection: "row", gap: spacing.sm },
+  modelApplyList: { borderColor: "#dfe5ec", borderRadius: radius.md, borderWidth: 1, maxHeight: 280, overflow: "hidden" },
+  modelApplyRow: { alignItems: "center", backgroundColor: "#fff", borderBottomColor: "#eef2f7", borderBottomWidth: 1, flexDirection: "row", gap: spacing.sm, padding: spacing.sm },
+  modelApplyRowActive: { backgroundColor: "#eaf3ff", borderColor: colors.primary },
   countBadge: { color: colors.primary, fontWeight: "900", backgroundColor: "#eaf3ff", paddingHorizontal: 10, paddingVertical: 5, borderRadius: radius.full },
   ontologyPanel: { borderWidth: 1, borderColor: "#dfe5ec", backgroundColor: "#f8fafc", borderRadius: radius.md, padding: spacing.md, gap: 5 },
   ontologyLine: { color: colors.text, fontWeight: "700" },
