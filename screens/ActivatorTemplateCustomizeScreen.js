@@ -17,7 +17,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import ActivatorBreadcrumb from "../components/ActivatorBreadcrumb";
 import {
   getCatalogTemplateDetail,
+  linkModelItemSystemTemplate,
+  listSystemTemplates,
   retireCatalogTemplateItem,
+  unlinkModelItemSystemTemplate,
   upsertCatalogTemplateItem,
 } from "../lib/activatorApi";
 import { projectModelTemplateDetail } from "../lib/modelTemplateProjection";
@@ -326,6 +329,10 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
   const [resourcesText, setResourcesText] = useState("");
   const [playbooksText, setPlaybooksText] = useState("");
   const [requirementsText, setRequirementsText] = useState("");
+  const [systemTemplateQuery, setSystemTemplateQuery] = useState("");
+  const [systemTemplateResults, setSystemTemplateResults] = useState([]);
+  const [selectedSystemTemplate, setSelectedSystemTemplate] = useState(null);
+  const [systemTemplateLoading, setSystemTemplateLoading] = useState(false);
   const [editingFactKey, setEditingFactKey] = useState(route?.params?.focusCanonicalKey || PRIME_FACTS[0].key);
   const [factValue, setFactValue] = useState("");
   const [factUnit, setFactUnit] = useState("");
@@ -459,6 +466,9 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
     setResourcesText("");
     setPlaybooksText("");
     setRequirementsText("");
+    setSystemTemplateQuery("");
+    setSystemTemplateResults([]);
+    setSelectedSystemTemplate(null);
   };
 
   const editItem = (item) => {
@@ -479,6 +489,14 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
     setResourcesText(arrayToLines(itemElementList(item, "resources")));
     setPlaybooksText(arrayToLines(itemElementList(item, "playbooks")));
     setRequirementsText(arrayToLines(itemElementList(item, "requirements")));
+    setSelectedSystemTemplate(item.system_template_id ? {
+      id: item.system_template_id,
+      name: item.metadata?.system_template_name || item.label || "Linked System Template",
+      canonical_key: item.metadata?.system_template_key || null,
+      manufacturer: item.metadata?.system_template_manufacturer || null,
+      system_category: item.metadata?.system_template_category || null,
+    } : null);
+    setSystemTemplateQuery(item.metadata?.system_template_name || item.label || "");
   };
 
   const editGroup = (group) => {
@@ -621,6 +639,41 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
     }
   };
 
+  const searchSystemTemplates = async (queryOverride = null) => {
+    const term = (queryOverride == null ? systemTemplateQuery : queryOverride).trim();
+    if (!term) {
+      setSystemTemplateResults([]);
+      return;
+    }
+    setSystemTemplateLoading(true);
+    setNotice(null);
+    try {
+      const results = await listSystemTemplates({
+        query: term,
+        limit: 8,
+        organizationId,
+        scope: "all",
+      });
+      setSystemTemplateResults(results || []);
+    } catch (err) {
+      setNotice({ type: "error", message: err?.message || "Could not search System Library." });
+      setSystemTemplateResults([]);
+    } finally {
+      setSystemTemplateLoading(false);
+    }
+  };
+
+  const chooseSystemTemplate = (systemTemplate) => {
+    if (!systemTemplate?.id) return;
+    setSelectedSystemTemplate(systemTemplate);
+    setItemKind("system");
+    setMappingStatus("mapped");
+    setItemLabel((current) => current.trim() ? current : systemTemplate.name || "");
+    setItemDescription((current) => current.trim() ? current : systemTemplate.description || "");
+    setSystemsText((current) => current.trim() ? current : systemTemplate.name || "");
+    setSystemTemplateQuery(systemTemplate.name || "");
+  };
+
   const saveItem = async () => {
     if (!template?.id) return;
     const label = itemLabel.trim();
@@ -640,7 +693,9 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
       const parsedValue = parseJsonField(valueText, "Value");
       const itemKey = editingItem?.canonical_key || `${parent.canonical_key}.${slugify(itemCode || label)}`;
       const downstreamElements = {
-        systems: linesToArray(systemsText),
+        systems: selectedSystemTemplate?.name
+          ? Array.from(new Set([selectedSystemTemplate.name, ...linesToArray(systemsText)]))
+          : linesToArray(systemsText),
         resources: linesToArray(resourcesText),
         playbooks: linesToArray(playbooksText),
         requirements: linesToArray(requirementsText),
@@ -678,12 +733,33 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
           requirements: downstreamElements.requirements,
           downstream_elements: downstreamElements,
           mapping_status: mappingStatus,
+          projection: {
+            kind: selectedSystemTemplate ? "system" : itemKind,
+            system_template_id: selectedSystemTemplate?.id || null,
+            system_template_key: selectedSystemTemplate?.canonical_key || null,
+            system_template_name: selectedSystemTemplate?.name || null,
+            system_template_manufacturer: selectedSystemTemplate?.manufacturer || null,
+            system_template_category: selectedSystemTemplate?.system_category || null,
+            source: selectedSystemTemplate ? "system_library_picker" : "template_configuration_workbench",
+          },
+          system_template_id: selectedSystemTemplate?.id || null,
+          system_template_key: selectedSystemTemplate?.canonical_key || null,
+          system_template_name: selectedSystemTemplate?.name || null,
+          system_template_reference_source: selectedSystemTemplate ? "system_library_picker" : null,
           provenance_note: provenanceNote.trim() || null,
           can_remain_unmapped: true,
           oem_vocabulary_preserved: true,
         },
         sortOrder: editingItem?.sort_order || 40 + (childrenByParent[parent.id]?.length || 0),
       });
+      if (result?.item?.id && selectedSystemTemplate?.id) {
+        await linkModelItemSystemTemplate({
+          templateItemId: result.item.id,
+          systemTemplateId: selectedSystemTemplate.id,
+        });
+      } else if (result?.item?.id && editingItem?.system_template_id && !selectedSystemTemplate) {
+        await unlinkModelItemSystemTemplate(result.item.id);
+      }
       await load({ quiet: true });
       if (result?.item) {
         setEditingItem(result.item);
@@ -1044,6 +1120,89 @@ export default function ActivatorTemplateCustomizeScreen({ navigation, route }) 
                   {ITEM_KINDS.map((kind) => (
                     <BadgeButton key={kind} label={kind.replace(/_/g, " ")} active={itemKind === kind} onPress={() => setItemKind(kind)} />
                   ))}
+                </View>
+                <View style={styles.systemLibraryPicker}>
+                  <View style={styles.panelHeader}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.kicker}>System Library</Text>
+                      <Text style={styles.panelTitle}>Choose reusable system truth</Text>
+                      <Text style={styles.panelText}>
+                        This links the model item to a canonical System Template while leaving standard/optional applicability on this model.
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      activeOpacity={0.86}
+                      onPress={() => navigation.navigate("SystemLibrary", {
+                        organizationId,
+                        workspaceId,
+                        navSection: "ActivatorSystemLibrary",
+                      })}
+                      style={styles.secondaryButton}
+                    >
+                      <Text style={styles.secondaryButtonText}>Open Library</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={styles.lookupRow}>
+                    <TextInput
+                      value={systemTemplateQuery}
+                      onChangeText={setSystemTemplateQuery}
+                      placeholder="Search Dometic, Mercury, Seakeeper..."
+                      placeholderTextColor="#A8B1C1"
+                      style={styles.lookupInput}
+                      onSubmitEditing={() => searchSystemTemplates()}
+                    />
+                    <TouchableOpacity
+                      activeOpacity={0.86}
+                      disabled={systemTemplateLoading}
+                      onPress={() => searchSystemTemplates()}
+                      style={styles.lookupButton}
+                    >
+                      {systemTemplateLoading ? (
+                        <ActivityIndicator size="small" color={colors.onPrimary} />
+                      ) : (
+                        <Ionicons name="search-outline" size={16} color={colors.onPrimary} />
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                  {selectedSystemTemplate ? (
+                    <View style={styles.selectedSystemTemplate}>
+                      <Ionicons name="hardware-chip-outline" size={16} color={colors.brandBlue} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.selectedSystemTitle}>{selectedSystemTemplate.name}</Text>
+                        <Text style={styles.selectedSystemMeta}>
+                          {[selectedSystemTemplate.manufacturer, selectedSystemTemplate.system_category, selectedSystemTemplate.canonical_key].filter(Boolean).join(" · ")}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        activeOpacity={0.86}
+                        onPress={() => setSelectedSystemTemplate(null)}
+                        style={styles.iconButton}
+                      >
+                        <Ionicons name="close" size={16} color={colors.textMuted} />
+                      </TouchableOpacity>
+                    </View>
+                  ) : null}
+                  {systemTemplateResults.length ? (
+                    <View style={styles.systemTemplateResults}>
+                      {systemTemplateResults.map((systemTemplate) => (
+                        <TouchableOpacity
+                          key={systemTemplate.id}
+                          activeOpacity={0.86}
+                          onPress={() => chooseSystemTemplate(systemTemplate)}
+                          style={styles.systemTemplateResult}
+                        >
+                          <Ionicons name="hardware-chip-outline" size={16} color={colors.brandBlue} />
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.systemTemplateTitle}>{systemTemplate.name}</Text>
+                            <Text style={styles.systemTemplateMeta}>
+                              {[systemTemplate.manufacturer, systemTemplate.system_category, systemTemplate.authority_state].filter(Boolean).join(" · ")}
+                            </Text>
+                          </View>
+                          <Ionicons name="chevron-forward-outline" size={16} color={colors.textMuted} />
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  ) : null}
                 </View>
                 <Text style={styles.fieldLabel}>State</Text>
                 <View style={styles.buttonWrap}>
@@ -1436,6 +1595,86 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: spacing.sm,
+  },
+  systemLibraryPicker: {
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    gap: spacing.md,
+    padding: spacing.md,
+  },
+  lookupRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  lookupInput: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    color: colors.textPrimary,
+    flex: 1,
+    fontSize: 14,
+    minHeight: 40,
+    minWidth: 180,
+    paddingHorizontal: spacing.md,
+  },
+  lookupButton: {
+    alignItems: "center",
+    backgroundColor: colors.brandBlue,
+    borderRadius: radius.sm,
+    height: 40,
+    justifyContent: "center",
+    width: 42,
+  },
+  selectedSystemTemplate: {
+    alignItems: "center",
+    backgroundColor: "#EFF6FF",
+    borderColor: "#BFDBFE",
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.sm,
+    padding: spacing.sm,
+  },
+  selectedSystemTitle: {
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  selectedSystemMeta: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 2,
+  },
+  systemTemplateResults: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    overflow: "hidden",
+  },
+  systemTemplateResult: {
+    alignItems: "center",
+    borderBottomColor: colors.border,
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    gap: spacing.sm,
+    padding: spacing.sm,
+  },
+  systemTemplateTitle: {
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  systemTemplateMeta: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 2,
   },
   badgeButton: {
     backgroundColor: colors.surfaceSubtle,

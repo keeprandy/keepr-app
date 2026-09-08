@@ -258,6 +258,20 @@ test("System Library is a first-class UI over canonical system_templates", () =>
   assert.match(scopedSql, /st\.owner_org_id = p_organization_id/);
 });
 
+test("model template workbench can choose canonical System Library nodes while preserving applicability", () => {
+  const customizeSource = read("screens/ActivatorTemplateCustomizeScreen.js");
+
+  assert.match(customizeSource, /listSystemTemplates/);
+  assert.match(customizeSource, /linkModelItemSystemTemplate/);
+  assert.match(customizeSource, /unlinkModelItemSystemTemplate/);
+  assert.match(customizeSource, /System Library/);
+  assert.match(customizeSource, /Choose reusable system truth/);
+  assert.match(customizeSource, /Search Dometic, Mercury, Seakeeper/);
+  assert.match(customizeSource, /source: selectedSystemTemplate \? "system_library_picker"/);
+  assert.match(customizeSource, /system_template_id: selectedSystemTemplate\?\.id \|\| null/);
+  assert.match(customizeSource, /standard\/optional applicability on this model/);
+});
+
 test("KF018 fleet routing consumes generic exact-build metadata without local runtime projection", () => {
   const source = read("screens/ActivatorHomeScreen.js");
   const fleetSource = read("screens/KeeprSpaceFleetScreen.js");
