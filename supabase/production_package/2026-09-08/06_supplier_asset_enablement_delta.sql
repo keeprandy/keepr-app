@@ -32,6 +32,63 @@ from public.assets
 where deleted_at is null
   and nullif(btrim(coalesce(kac_id, '')), '') is not null;
 
+begin;
+
+\echo '== reconciling prerequisite helper functions for 2026-09-08 delta =='
+-- Prerequisite from supabase/migrations/20260904100000_model_template_attachment_manager_updates.sql.
+-- The supplier/org placement policies below depend on the same attachment ownership contract:
+-- authenticated users may only place attachments they own, and deleted attachments are excluded.
+create or replace function public.keepr_attachment_owned_by_user(
+  p_user_id uuid,
+  p_attachment_id uuid
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+set row_security = off
+as $$
+  select p_user_id is not null
+    and p_attachment_id is not null
+    and exists (
+      select 1
+      from public.attachments attachment
+      where attachment.id = p_attachment_id
+        and attachment.owner_user_id = p_user_id
+        and attachment.deleted_at is null
+    );
+$$;
+
+grant execute on function public.keepr_attachment_owned_by_user(uuid, uuid) to authenticated;
+
+-- Prerequisite from supabase/migrations/20260903172000_system_template_promote_link_ops.sql.
+-- The exact-system promotion function below uses this existing canonical-key contract.
+create or replace function public.system_template_canonical_key(
+  p_name text,
+  p_manufacturer text default null
+) returns text
+language sql
+immutable
+as $$
+  select 'system_template.' ||
+    trim(both '_' from regexp_replace(
+      lower(coalesce(nullif(p_manufacturer, ''), 'generic')),
+      '[^a-z0-9]+',
+      '_',
+      'g'
+    )) ||
+    '.' ||
+    trim(both '_' from regexp_replace(
+      lower(coalesce(nullif(p_name, ''), 'system')),
+      '[^a-z0-9]+',
+      '_',
+      'g'
+    ));
+$$;
+
+grant execute on function public.system_template_canonical_key(text, text) to authenticated;
+
 \echo '== applying Supplier V1 graph projection =='
 -- BEGIN INLINED FROM supabase/migrations/20260908100000_supplier_graph_projection_v1.sql
 -- Supplier V1: project suppliers through the canonical Ownership Graph.
@@ -837,6 +894,8 @@ comment on function public.promote_system_to_system_template(uuid, jsonb) is
 
 select pg_notify('pgrst', 'reload schema');
 -- END INLINED FROM supabase/migrations/20260908124500_promote_system_updates_linked_template.sql
+
+commit;
 
 \echo '== after 2026-09-08 delta: protected production counts =='
 select 'assets' as table_name, count(*) as rows from public.assets

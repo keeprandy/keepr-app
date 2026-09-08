@@ -29,16 +29,27 @@ Current production state after the stopped apply:
 - `01_schema_reconciliation.sql`: applied successfully.
 - `02_functions_reconciliation.sql`: applied successfully.
 - `03_compatibility_backfills.sql`: applied successfully.
-- `04_curated_reference_data.sql`: failed before commit and rolled back completely.
-- `06_supplier_asset_enablement_delta.sql`: not executed.
+- `04_curated_reference_data.sql`: corrected and applied successfully.
+- `06_supplier_asset_enablement_delta.sql`: partially applied, then stopped at the missing
+  prerequisite helper `public.keepr_attachment_owned_by_user(uuid, uuid)`.
 - Application code: not deployed.
 - Protected owner counts remained preserved at `175` assets, `566` systems,
   `1016` attachments, and `1237` attachment placements.
 
-Do not replay files `01`, `02`, or `03` during the forward-fix resume unless a
+Do not replay files `01`, `02`, `03`, or `04` during the forward-fix resume unless a
 new preflight proves production has been manually changed and Andy explicitly
-approves a broader recovery. Resume from the corrected `04`, then run `06`,
-then validate with read-only `05`.
+approves a broader recovery. Resume by running read-only `00`, then the
+corrected `06`, then validate with read-only `05`.
+
+The corrected `06_supplier_asset_enablement_delta.sql` keeps the same Supplier
+V1 and Asset Enablement scope and fixes only:
+
+- Inlines the existing attachment ownership helper contract from
+  `20260904100000_model_template_attachment_manager_updates.sql`.
+- Inlines the existing System Template canonical-key helper contract from
+  `20260903172000_system_template_promote_link_ops.sql`.
+- Wraps the idempotent modifying delta in a transaction so a later unexpected
+  failure does not create a second partial apply state.
 
 The corrected `04_curated_reference_data.sql` keeps the same curated reference
 scope and fixes only:
@@ -214,8 +225,7 @@ No migration is `ALREADY PRESENT` in production by ledger or object inspection f
 5. Confirm production identity and that `current_user` and `session_user` are
    both `postgres`; stop if not.
 6. Current forward-fix resume only: apply corrected
-   `04_curated_reference_data.sql`.
-7. Apply `06_supplier_asset_enablement_delta.sql`.
+   `06_supplier_asset_enablement_delta.sql`.
 8. Disconnect the owner/admin apply session.
 9. Reconnect with `keepr_prod_audit_ro`.
 10. Run `05_post_apply_smoke_readonly.sql`.
