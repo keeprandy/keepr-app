@@ -1889,8 +1889,12 @@ function modelDefinitionStatus(template) {
 function CatalogCard({ template, templateMedia, onPress, draft, sourceReview, onOpenDraft, onOpenSourceReview }) {
   const stats = template?.metadata?.hero_specs || {};
   const fallbackStats = fallbackTemplateStats(template);
-  const heroMedia = templateMedia?.hero || heroMediaFromTemplate(template);
-  const imageSource = mediaAsset(heroMedia);
+  const asyncHeroMedia = templateMedia?.hero || null;
+  const asyncImageSource = mediaAsset(asyncHeroMedia);
+  const fallbackHeroMedia = heroMediaFromTemplate(template);
+  const fallbackImageSource = mediaAsset(fallbackHeroMedia);
+  const heroMedia = asyncImageSource ? asyncHeroMedia : fallbackHeroMedia;
+  const imageSource = asyncImageSource || fallbackImageSource;
   const imageLabel = heroMedia ? "Model media" : "Needs model hero";
   const lifecycle = modelLifecycleStatus(template);
   const definitionStatus = modelDefinitionStatus(template);
