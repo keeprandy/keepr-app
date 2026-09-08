@@ -6,8 +6,9 @@ Review artifact only. Do not run against production until Andy explicitly approv
 
 - Base frozen RC: `c6bcf3be823c8cfeaa90c60ed9511897d93f11bd`
 - Combined RC branch: `codex/production-rc-supplier-asset-enablement-20260908`
-- Combined RC head before preview smoke: `64c71c9`
+- Combined RC head before final preview smoke: `12a6299958fa4ef4f0eb3744b89383bb5b9f675c`
 - Added today, and only today: Supplier V1 organization graph, System Library supplier/resource/application controls, asset KAC identity sync, Asset Enablement V1, linked System Template promotion fix.
+- Release-blocker fix included on this RC line: legacy `/api/k/:kac/source` public manifest strips signed/private Supabase storage URLs and reports `source_urls_include_private` truthfully.
 
 ## Actual Production Baseline Found
 
@@ -173,5 +174,5 @@ Current status before staging preview smoke: NO-GO.
 Reasons:
 
 - Updated combined package requires review.
-- New combined RC preview and locked smoke are not complete yet.
+- Final combined RC preview and locked smoke are not complete yet.
 - Production SQL has not been approved and must not be run yet.

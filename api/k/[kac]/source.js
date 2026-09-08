@@ -151,6 +151,34 @@ function firstPresent(...values) {
   return null;
 }
 
+function isSignedSupabaseStorageUrl(value) {
+  const url = safeString(value);
+  if (!url) return false;
+  return /\.supabase\.co\/storage\/v1\/object\/sign\//i.test(url) || /[?&]token=/i.test(url);
+}
+
+function isPrivateStorageUrl(value) {
+  const url = safeString(value);
+  if (!url) return false;
+  return /\.supabase\.co\/storage\/v1\/object\//i.test(url) || isSignedSupabaseStorageUrl(url);
+}
+
+function safeExternalSourceUrl(value) {
+  const url = safeString(value);
+  if (!/^https?:\/\//i.test(url)) return null;
+  if (isPrivateStorageUrl(url)) return null;
+  return url;
+}
+
+function safeAttachmentTitle(attachment) {
+  return (
+    safeString(attachment?.title) ||
+    safeString(attachment?.file_name) ||
+    safeExternalSourceUrl(attachment?.url) ||
+    "Attachment"
+  );
+}
+
 function contributionMetadata(attachment) {
   return {
     ...asObject(attachment?.source_context),
@@ -250,7 +278,8 @@ async function urlForSource(supabase, attachment, { isAuthenticated, privacy, ba
 
   if (!isAuthenticated) {
     if (isPrivatePrivacy(normalizedPrivacy)) return null;
-    if (/^https?:\/\//i.test(safeString(attachment.url))) return attachment.url;
+    const safeUrl = safeExternalSourceUrl(attachment.url);
+    if (safeUrl) return safeUrl;
     if (attachment.bucket && attachment.storage_path) {
       return sourceFileUrl(baseUrl, {
         kac,
@@ -261,7 +290,8 @@ async function urlForSource(supabase, attachment, { isAuthenticated, privacy, ba
     return null;
   }
 
-  if (/^https?:\/\//i.test(safeString(attachment.url))) return attachment.url;
+  const safeUrl = safeExternalSourceUrl(attachment.url);
+  if (safeUrl) return safeUrl;
   if (!attachment.bucket || !attachment.storage_path) return null;
 
   const { data, error } = await supabase.storage
@@ -397,7 +427,7 @@ async function listAuthorizedAISources(supabase, asset, { isAuthenticated, baseU
 
     const sourceContext = asObject(attachment.source_context);
     const source = {
-      title: attachment.title || attachment.file_name || attachment.url || "Attachment",
+      title: safeAttachmentTitle(attachment),
       attachment_id: row.attachment_id,
       role,
       ai_context: aiContext,
@@ -476,7 +506,7 @@ export default async function handler(req, res) {
       generated_at: new Date().toISOString(),
       access: {
         authenticated: isAuthenticated,
-        source_urls_include_private: isAuthenticated,
+        source_urls_include_private: isAuthenticated && sources.some((source) => isPrivateStorageUrl(source?.url)),
       },
       asset: {
         id: asset.id,

@@ -185,6 +185,19 @@ test("KeeprLINK resource projection bridges attachment-backed model resources", 
   assert.doesNotMatch(sql, /signed_url/i);
 });
 
+test("legacy public KAC source manifest strips signed Supabase storage URLs", () => {
+  const sourceRoute = read("api/k/[kac]/source.js");
+
+  assert.match(sourceRoute, /function isSignedSupabaseStorageUrl/);
+  assert.match(sourceRoute, /\/storage\\\/v1\\\/object\\\/sign\\\//);
+  assert.match(sourceRoute, /function safeExternalSourceUrl/);
+  assert.match(sourceRoute, /if \(isPrivateStorageUrl\(url\)\) return null/);
+  assert.match(sourceRoute, /const safeUrl = safeExternalSourceUrl\(attachment\.url\)/);
+  assert.match(sourceRoute, /title: safeAttachmentTitle\(attachment\)/);
+  assert.doesNotMatch(sourceRoute, /attachment\.title \|\| attachment\.file_name \|\| attachment\.url/);
+  assert.match(sourceRoute, /source_urls_include_private: isAuthenticated && sources\.some/);
+});
+
 test("organization-wide resources can be placed on org targets", () => {
   const sql = read("supabase/migrations/20260904133500_org_attachment_placements.sql");
   const policies = read("supabase/migrations/20260904134500_org_resource_attachment_policies.sql");
