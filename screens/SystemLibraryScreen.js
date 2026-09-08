@@ -17,6 +17,7 @@ import ActivatorBreadcrumb from "../components/ActivatorBreadcrumb";
 import { createLinkAttachment } from "../lib/attachmentsUploader";
 import { listAttachmentsForTarget, removePlacementById } from "../lib/attachmentsApi";
 import { getSystemTemplate, listSupplierNetwork, listSystemTemplates, upsertSystemTemplate } from "../lib/activatorApi";
+import { searchKeeprSpaceOrganizations, upsertKeeprSpaceOrgRelationship } from "../lib/keeprspaceApi";
 import { supabase } from "../lib/supabaseClient";
 import { colors, radius, shadows, spacing } from "../styles/theme";
 
@@ -195,6 +196,10 @@ export default function SystemLibraryScreen() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [resourceSaving, setResourceSaving] = useState(false);
+  const [supplierQuery, setSupplierQuery] = useState("");
+  const [supplierMatches, setSupplierMatches] = useState([]);
+  const [supplierLookupLoading, setSupplierLookupLoading] = useState(false);
+  const [supplierConnectSaving, setSupplierConnectSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -296,6 +301,17 @@ export default function SystemLibraryScreen() {
   const visibleTemplates = useMemo(() => templates || [], [templates]);
   const selectedSupplier = suppliers.find((supplier) => supplier.organization_id === draft.supplierOrgId) || null;
 
+  const refreshSuppliers = useCallback(async () => {
+    if (!organizationId) {
+      setSuppliers([]);
+      return [];
+    }
+    const result = await listSupplierNetwork({ organizationId, limit: 50 });
+    const rows = result?.suppliers || [];
+    setSuppliers(rows);
+    return rows;
+  }, [organizationId]);
+
   const updateDraft = (key, value) => {
     setDraft((current) => {
       const next = { ...current, [key]: value };
@@ -322,6 +338,72 @@ export default function SystemLibraryScreen() {
       organizationId,
       workspaceId: organizationId ? `org:${organizationId}` : null,
     });
+  };
+
+  const searchSuppliers = async () => {
+    const term = supplierQuery.trim();
+    if (!term) {
+      setSupplierMatches([]);
+      return;
+    }
+    setSupplierLookupLoading(true);
+    setError("");
+    try {
+      const result = await searchKeeprSpaceOrganizations(term, {});
+      setSupplierMatches(result?.organizations || []);
+    } catch (err) {
+      setError(err?.message || "Could not search organizations.");
+      setSupplierMatches([]);
+    } finally {
+      setSupplierLookupLoading(false);
+    }
+  };
+
+  const connectSupplierOrganization = async (match = null) => {
+    const supplierName = match?.display_name || match?.name || supplierQuery.trim();
+    if (!organizationId || !supplierName) {
+      Alert.alert("Supplier required", "Search for or enter a supplier Organization first.");
+      return;
+    }
+    setSupplierConnectSaving(true);
+    setError("");
+    try {
+      await upsertKeeprSpaceOrgRelationship({
+        fromOrgId: organizationId,
+        toOrgId: match?.organization_id || match?.id || null,
+        toOrgName: supplierName,
+        relationshipType: "supplier",
+        payload: {
+          relationship_type: "supplier",
+          status: "source_reported",
+          authority_state: "public_source_reported",
+          evidence_state: "org_reported",
+          source_name: "System Library supplier picker",
+          metadata: {
+            supplier_v1: true,
+            relationship_basis: "system_library_supplier_picker",
+          },
+        },
+      });
+      const rows = await refreshSuppliers();
+      const connected =
+        rows.find((supplier) => supplier.organization_id === (match?.organization_id || match?.id)) ||
+        rows.find((supplier) => supplier.name?.toLowerCase?.() === supplierName.toLowerCase()) ||
+        rows.find((supplier) => supplier.name?.toLowerCase?.().includes(supplierName.toLowerCase())) ||
+        null;
+      setDraft((current) => ({
+        ...current,
+        supplierOrgId: connected?.organization_id || current.supplierOrgId,
+        manufacturer: current.manufacturer.trim() ? current.manufacturer : supplierName,
+      }));
+      setSupplierQuery("");
+      setSupplierMatches([]);
+      setNotice(`Connected ${supplierName} as a supplier.`);
+    } catch (err) {
+      setError(err?.message || "Could not connect supplier Organization.");
+    } finally {
+      setSupplierConnectSaving(false);
+    }
   };
 
   const save = async () => {
@@ -532,8 +614,53 @@ export default function SystemLibraryScreen() {
             </View>
             <TouchableOpacity style={styles.secondaryButtonCompact} onPress={openSupplierNetwork}>
               <Ionicons name="git-network-outline" size={15} color={colors.primary} />
-              <Text style={styles.secondaryButtonText}>Add Supplier</Text>
+              <Text style={styles.secondaryButtonText}>Supplier Network</Text>
             </TouchableOpacity>
+            <View style={styles.lookupRow}>
+              <TextInput
+                value={supplierQuery}
+                onChangeText={setSupplierQuery}
+                placeholder="Search Dometic, Garmin, Seakeeper..."
+                placeholderTextColor={colors.textMuted}
+                style={styles.lookupInput}
+                onSubmitEditing={searchSuppliers}
+              />
+              <TouchableOpacity style={styles.lookupButton} onPress={searchSuppliers} disabled={supplierLookupLoading}>
+                {supplierLookupLoading ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="search-outline" size={16} color="#fff" />}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.secondaryButtonCompact, (!supplierQuery.trim() || supplierConnectSaving) && styles.disabledButton]}
+                onPress={() => connectSupplierOrganization(null)}
+                disabled={!supplierQuery.trim() || supplierConnectSaving}
+              >
+                <Ionicons name="add-circle-outline" size={15} color={colors.primary} />
+                <Text style={styles.secondaryButtonText}>Quick Add</Text>
+              </TouchableOpacity>
+            </View>
+            {supplierMatches.length ? (
+              <View style={styles.matchList}>
+                {supplierMatches.slice(0, 5).map((match) => {
+                  const matchId = match.organization_id || match.id;
+                  const matchName = match.display_name || match.name || "Organization";
+                  return (
+                    <TouchableOpacity
+                      key={matchId || matchName}
+                      style={styles.matchRow}
+                      activeOpacity={0.86}
+                      onPress={() => connectSupplierOrganization(match)}
+                      disabled={supplierConnectSaving}
+                    >
+                      <Ionicons name="business-outline" size={15} color={colors.primary} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.matchTitle}>{matchName}</Text>
+                        <Text style={styles.matchMeta}>{[match.slug, match.organization_type || match.org_type, match.status].filter(Boolean).join(" · ")}</Text>
+                      </View>
+                      <Ionicons name="chevron-forward-outline" size={16} color={colors.textMuted} />
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ) : null}
             <View style={styles.chipRow}>
               <Chip
                 active={!draft.supplierOrgId}
@@ -666,6 +793,13 @@ const styles = StyleSheet.create({
   searchRow: { flexDirection: "row", gap: spacing.sm },
   searchInput: { flex: 1, borderWidth: 1, borderColor: "#dfe5ec", borderRadius: radius.md, paddingHorizontal: 12, paddingVertical: 10, fontWeight: "700", color: colors.text },
   searchButton: { width: 44, borderRadius: radius.md, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" },
+  lookupRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, alignItems: "center" },
+  lookupInput: { flex: 1, minWidth: 220, borderWidth: 1, borderColor: "#dfe5ec", borderRadius: radius.md, paddingHorizontal: 12, paddingVertical: 9, fontWeight: "700", color: colors.text, backgroundColor: "#fff" },
+  lookupButton: { width: 40, height: 40, borderRadius: radius.md, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" },
+  matchList: { borderWidth: 1, borderColor: "#dfe5ec", borderRadius: radius.md, backgroundColor: "#fff", overflow: "hidden" },
+  matchRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#eef2f7" },
+  matchTitle: { color: colors.text, fontWeight: "900" },
+  matchMeta: { color: colors.textMuted, fontWeight: "700", fontSize: 12, marginTop: 2 },
   panelHint: { color: colors.textMuted, fontSize: 12, lineHeight: 17 },
   templateRow: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderColor: "#e6ebf2", borderRadius: radius.md, padding: 12 },
   templateRowActive: { borderColor: colors.primary, backgroundColor: "#eaf3ff" },
@@ -697,6 +831,7 @@ const styles = StyleSheet.create({
   resourceMeta: { color: colors.textMuted, fontSize: 12, fontWeight: "700", marginTop: 3 },
   iconButton: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#fee2e2" },
   resourceForm: { gap: spacing.sm, marginTop: spacing.sm },
+  placementPicker: { borderWidth: 1, borderColor: "#dfe5ec", backgroundColor: "#f8fafc", borderRadius: radius.md, padding: spacing.md, gap: spacing.sm },
   secondaryButton: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderWidth: 1, borderColor: "#bfdbfe", borderRadius: radius.md, paddingVertical: 11 },
   secondaryButtonCompact: { alignItems: "center", alignSelf: "flex-start", backgroundColor: "#fff", borderColor: "#bfdbfe", borderRadius: radius.md, borderWidth: 1, flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingVertical: 8 },
   secondaryButtonText: { color: colors.primary, fontWeight: "900" },

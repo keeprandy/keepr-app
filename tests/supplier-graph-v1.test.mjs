@@ -70,7 +70,13 @@ test("System Library links templates to supplier Organizations without replacing
   assert.match(systemLibrary, /supplierOrgId: null/);
   assert.match(systemLibrary, /template\?\.supplier_org_id/);
   assert.match(systemLibrary, /listSupplierNetwork/);
+  assert.match(systemLibrary, /searchKeeprSpaceOrganizations/);
+  assert.match(systemLibrary, /upsertKeeprSpaceOrgRelationship/);
   assert.match(systemLibrary, /Canonical supplier Organization/);
+  assert.match(systemLibrary, /Search Dometic, Garmin, Seakeeper/);
+  assert.match(systemLibrary, /Quick Add/);
+  assert.match(systemLibrary, /relationship_basis: "system_library_supplier_picker"/);
+  assert.match(systemLibrary, /Supplier Network/);
   assert.match(systemLibrary, /Attach to/);
   assert.match(systemLibrary, /placeOnSystemTemplate/);
   assert.match(systemLibrary, /placeOnSupplier/);
