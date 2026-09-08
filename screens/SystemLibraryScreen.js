@@ -29,6 +29,14 @@ const AUTHORITY_STATES = [
 ];
 
 const RESOURCE_ROLES = ["manual", "warranty", "spec_sheet", "install_guide", "support_link", "proof_expectation"];
+const EMPTY_RESOURCE_DRAFT = {
+  title: "",
+  url: "",
+  role: "manual",
+  placeOnSystemTemplate: true,
+  placeOnSupplier: false,
+  placeOnOem: false,
+};
 
 const EMPTY_DRAFT = {
   id: null,
@@ -150,6 +158,7 @@ function OwnershipChoice({ activeOrgId, ownerOrgId, onChange }) {
 
 function ResourceRow({ resource, onRemove }) {
   const title = resource?.title || resource?.label || resource?.url || resource?.file_name || "Resource";
+  const targetLabel = resource?.target_label || resource?.target_type?.replace(/_/g, " ") || "Resource";
   return (
     <View style={styles.resourceRow}>
       <TouchableOpacity
@@ -161,7 +170,7 @@ function ResourceRow({ resource, onRemove }) {
         <Ionicons name="document-text-outline" size={18} color={colors.primary} />
         <View style={{ flex: 1 }}>
           <Text style={styles.resourceTitle}>{title}</Text>
-          <Text style={styles.resourceMeta}>{[resource?.role, resource?.url].filter(Boolean).join(" - ") || "System Template resource"}</Text>
+          <Text style={styles.resourceMeta}>{[targetLabel, resource?.role, resource?.url].filter(Boolean).join(" - ") || "System Template resource"}</Text>
         </View>
       </TouchableOpacity>
       <TouchableOpacity style={styles.iconButton} onPress={onRemove}>
@@ -182,7 +191,7 @@ export default function SystemLibraryScreen() {
   const [selected, setSelected] = useState(null);
   const [draft, setDraft] = useState({ ...EMPTY_DRAFT, ownerOrgId: null });
   const [resources, setResources] = useState([]);
-  const [resourceDraft, setResourceDraft] = useState({ title: "", url: "", role: "manual" });
+  const [resourceDraft, setResourceDraft] = useState(EMPTY_RESOURCE_DRAFT);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [resourceSaving, setResourceSaving] = useState(false);
@@ -203,18 +212,29 @@ export default function SystemLibraryScreen() {
     }
   }, [organizationId, query]);
 
-  const loadResources = useCallback(async (templateId) => {
+  const loadResources = useCallback(async ({ templateId, supplierOrgId = null, activeOrgId = organizationId } = {}) => {
     if (!templateId) {
       setResources([]);
       return;
     }
     try {
-      setResources(await listAttachmentsForTarget("system_template", templateId));
+      const targetRequests = [
+        ["system_template", templateId, "System Template"],
+        supplierOrgId ? ["org", supplierOrgId, "Supplier KB"] : null,
+        activeOrgId ? ["org", activeOrgId, "OEM KB"] : null,
+      ].filter(Boolean);
+      const nested = await Promise.all(
+        targetRequests.map(async ([targetType, targetId, targetLabel]) => {
+          const rows = await listAttachmentsForTarget(targetType, targetId);
+          return rows.map((row) => ({ ...row, target_label: targetLabel }));
+        })
+      );
+      setResources(nested.flat());
     } catch (err) {
       setError(err?.message || "Could not load reusable resources.");
       setResources([]);
     }
-  }, []);
+  }, [organizationId]);
 
   const selectTemplate = useCallback(async (template) => {
     setSelected(template);
@@ -223,7 +243,11 @@ export default function SystemLibraryScreen() {
     const next = template?.id ? await getSystemTemplate(template.id) : template;
     const fullTemplate = next || template;
     setDraft(draftFromTemplate(fullTemplate));
-    await loadResources(fullTemplate?.id);
+    await loadResources({
+      templateId: fullTemplate?.id,
+      supplierOrgId: fullTemplate?.supplier_org_id || null,
+      activeOrgId: organizationId,
+    });
   }, [loadResources]);
 
   useEffect(() => {
@@ -287,6 +311,7 @@ export default function SystemLibraryScreen() {
     setResources([]);
     setNotice("");
     setError("");
+    setResourceDraft({ ...EMPTY_RESOURCE_DRAFT });
     setDraft({ ...EMPTY_DRAFT, ownerOrgId: null, canonicalKey: canonicalKeyFor({}) });
   };
 
@@ -320,7 +345,7 @@ export default function SystemLibraryScreen() {
       setDraft(draftFromTemplate(saved));
       setNotice("System Template saved. Reusable truth remains separate from applicability and exact installed evidence.");
       await loadList(query);
-      await loadResources(saved.id);
+      await loadResources({ templateId: saved.id, supplierOrgId: saved.supplier_org_id || null, activeOrgId: organizationId });
     } catch (err) {
       setError(err?.message || "Could not save System Template.");
     } finally {
@@ -337,6 +362,27 @@ export default function SystemLibraryScreen() {
       Alert.alert("Resource URL required", "Add a manual, spec, warranty, or support URL.");
       return;
     }
+    const placementTargets = [
+      resourceDraft.placeOnSystemTemplate ? {
+        target_type: "system_template",
+        target_id: selectedId,
+        target_label: "System Template",
+      } : null,
+      resourceDraft.placeOnSupplier && draft.supplierOrgId ? {
+        target_type: "org",
+        target_id: draft.supplierOrgId,
+        target_label: "Supplier KB",
+      } : null,
+      resourceDraft.placeOnOem && organizationId ? {
+        target_type: "org",
+        target_id: organizationId,
+        target_label: "OEM KB",
+      } : null,
+    ].filter(Boolean);
+    if (!placementTargets.length) {
+      Alert.alert("Choose placement", "Choose at least one place for this resource.");
+      return;
+    }
     setResourceSaving(true);
     setError("");
     try {
@@ -351,16 +397,24 @@ export default function SystemLibraryScreen() {
           provenance_label: "System Template resource",
           system_template_id: selectedId,
           system_template_name: draft.name,
+          supplier_org_id: draft.supplierOrgId || null,
+          supplier_name: selectedSupplier?.name || draft.manufacturer || null,
+          organization_id: organizationId || null,
+          placement_targets: placementTargets.map((target) => ({
+            target_type: target.target_type,
+            target_id: target.target_id,
+            target_label: target.target_label,
+          })),
         },
-        placements: [{
-          target_type: "system_template",
-          target_id: selectedId,
+        placements: placementTargets.map((target) => ({
+          target_type: target.target_type,
+          target_id: target.target_id,
           role: resourceDraft.role,
           label: resourceDraft.title.trim() || resourceDraft.role,
-        }],
+        })),
       });
-      setResourceDraft({ title: "", url: "", role: "manual" });
-      await loadResources(selectedId);
+      setResourceDraft({ ...EMPTY_RESOURCE_DRAFT });
+      await loadResources({ templateId: selectedId, supplierOrgId: draft.supplierOrgId || null, activeOrgId: organizationId });
     } catch (err) {
       setError(err?.message || "Could not add reusable resource.");
     } finally {
@@ -371,7 +425,7 @@ export default function SystemLibraryScreen() {
   const removeResource = async (resource) => {
     try {
       await removePlacementById(resource.placement_id);
-      await loadResources(selectedId);
+      await loadResources({ templateId: selectedId, supplierOrgId: draft.supplierOrgId || null, activeOrgId: organizationId });
     } catch (err) {
       Alert.alert("Could not remove resource", err?.message || "Please try again.");
     }
@@ -550,6 +604,32 @@ export default function SystemLibraryScreen() {
                 {RESOURCE_ROLES.map((role) => (
                   <Chip key={role} label={role.replace(/_/g, " ")} active={resourceDraft.role === role} onPress={() => setResourceDraft((current) => ({ ...current, role }))} />
                 ))}
+              </View>
+              <View style={styles.placementPicker}>
+                <Text style={styles.label}>Attach to</Text>
+                <Text style={styles.panelHint}>
+                  One attachment can participate in supplier knowledge, OEM knowledge, and reusable system truth without creating duplicate files.
+                </Text>
+                <View style={styles.chipRow}>
+                  <Chip
+                    label="System Template"
+                    active={resourceDraft.placeOnSystemTemplate}
+                    onPress={() => setResourceDraft((current) => ({ ...current, placeOnSystemTemplate: !current.placeOnSystemTemplate }))}
+                  />
+                  <Chip
+                    label={selectedSupplier ? `${selectedSupplier.name} KB` : "Supplier KB"}
+                    active={resourceDraft.placeOnSupplier}
+                    onPress={() => setResourceDraft((current) => ({ ...current, placeOnSupplier: !current.placeOnSupplier }))}
+                  />
+                  <Chip
+                    label="OEM KB"
+                    active={resourceDraft.placeOnOem}
+                    onPress={() => setResourceDraft((current) => ({ ...current, placeOnOem: !current.placeOnOem }))}
+                  />
+                </View>
+                {!draft.supplierOrgId && resourceDraft.placeOnSupplier ? (
+                  <Text style={styles.errorText}>Choose a canonical supplier Organization before attaching supplier KB.</Text>
+                ) : null}
               </View>
               <TouchableOpacity style={[styles.secondaryButton, resourceSaving && styles.disabledButton]} onPress={addResource} disabled={resourceSaving}>
                 <Ionicons name="attach-outline" size={17} color={colors.primary} />
