@@ -41,6 +41,34 @@ test("KeeprLINK V1 productizes existing /k links into purpose-scoped ontology co
   assert.match(sql, /r\.url ~\* '\^https\?:\/\//);
 });
 
+test("asset KAC identity materializes a canonical KeeprLINK address for every future asset", async () => {
+  const identity = await import("../lib/assetIdentity.js");
+  const migration = read("supabase/migrations/20260908113000_asset_kac_keeprlink_identity_normalization.sql");
+  const activator = read("screens/ActivatorHomeScreen.js");
+  const fleet = read("screens/KeeprSpaceFleetScreen.js");
+
+  assert.equal(identity.assetKacId({ kac_id: "KAC-TIARA-56LS-KF018" }), "KAC-TIARA-56LS-KF018");
+  assert.equal(identity.assetKacId({ exact_build: { published_kac: "KAC-BUILD-1" } }), "KAC-BUILD-1");
+  assert.equal(identity.assetHin({ serial_number: "SSUKF018H627" }), "SSUKF018H627");
+  assert.equal(identity.assetHin({ extra_metadata: { work_order: { hin: "HIN-WORK-ORDER" } } }), "HIN-WORK-ORDER");
+
+  assert.match(migration, /create or replace function public\.ensure_asset_keepr_link\(p_asset_id uuid\)/);
+  assert.match(migration, /v_address := '\/k\/' \|\| btrim\(v_asset\.kac_id\)/);
+  assert.match(migration, /public\.keeprlink_normalize_address\(v_address\)/);
+  assert.match(migration, /object_type = 'asset'/);
+  assert.match(migration, /object_id = v_asset\.id/);
+  assert.match(migration, /create trigger sync_asset_keepr_link_after_write/);
+  assert.match(migration, /after insert or update of kac_id, name, type, serial_number, deleted_at/);
+  assert.match(migration, /select public\.ensure_asset_keepr_link\(id\)/);
+  assert.doesNotMatch(migration, /KAC-TIARA-56LS-KF018/);
+
+  assert.match(activator, /import \{ assetHin, assetKacId \}/);
+  assert.match(activator, /const resolvedKac = assetKacId\(boat\)/);
+  assert.match(activator, /const resolvedHin = assetHin\(boat\)/);
+  assert.match(fleet, /import \{ assetBuildCode, assetHin, assetKacId \}/);
+  assert.match(fleet, /const kac = assetKacId\(boat\)/);
+});
+
 test("public LLM projection strips private owner and storage fields while keeping provenance", async () => {
   const { decorateKeeprLinkProjection } = await import("../lib/keeprLinkContext.js");
 

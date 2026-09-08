@@ -45,6 +45,7 @@ import {
   upsertKeeprSpaceOrgTeam,
 } from "../lib/keeprspaceApi";
 import { fetchAssetHeroUris, getCachedKacHeroUris } from "../lib/assetHeroResolver";
+import { assetHin, assetKacId } from "../lib/assetIdentity";
 import { listModelTemplateMediaForTemplates } from "../lib/attachmentsApi";
 import { createLinkAttachment, uploadAttachmentFromUri } from "../lib/attachmentsUploader";
 import { getOrgBrandMediaFallback } from "../lib/orgBrandFallbacks";
@@ -1252,9 +1253,8 @@ const FLEET_FILTERS = [
 function boatSearchText(boat) {
   return [
     boat?.asset_name,
-    boat?.kac_id,
-    boat?.identity?.hin,
-    boat?.identity?.hull_number,
+    assetKacId(boat),
+    assetHin(boat),
     boat?.identity?.year,
     boat?.identity?.make,
     boat?.identity?.model,
@@ -1313,6 +1313,8 @@ function BoatResultRow({ boat, onPress, heroUri = null }) {
   const tone = statusTone(state);
   const heroSource = heroSourceForBoat(boat, heroUri);
   const imageLabel = imageContextLabelForBoat(boat, heroUri);
+  const kac = assetKacId(boat);
+  const hin = assetHin(boat);
 
   return (
     <TouchableOpacity
@@ -1342,11 +1344,11 @@ function BoatResultRow({ boat, onPress, heroUri = null }) {
         <View style={styles.resultMetaGrid}>
           <View style={styles.resultMetaCell}>
             <Text style={styles.relationshipLabel}>Keepr Code</Text>
-            <Text style={styles.relationshipValue} numberOfLines={1}>{boat?.kac_id || "Pending"}</Text>
+            <Text style={styles.relationshipValue} numberOfLines={1}>{kac || "Pending"}</Text>
           </View>
           <View style={styles.resultMetaCell}>
             <Text style={styles.relationshipLabel}>HIN</Text>
-            <Text style={styles.relationshipValue} numberOfLines={1}>{boat?.identity?.hin || boat?.identity?.hull_number || "Not set"}</Text>
+            <Text style={styles.relationshipValue} numberOfLines={1}>{hin || "Not set"}</Text>
           </View>
           <View style={styles.resultMetaCell}>
             <Text style={styles.relationshipLabel}>Dealer</Text>
@@ -1460,6 +1462,7 @@ function BoatCard({ boat, onPress, view = "default", heroUri = null }) {
   const serviceStatus = dealer?.status || activation.status || boat?.owner_state || "Active";
   const heroSource = heroSourceForBoat(boat, heroUri);
   const imageLabel = imageContextLabelForBoat(boat, heroUri);
+  const kac = assetKacId(boat);
 
   return (
     <View style={styles.boatCard}>
@@ -1536,7 +1539,7 @@ function BoatCard({ boat, onPress, view = "default", heroUri = null }) {
             >
               <View>
                 <Text style={styles.stripLabel}>Keepr Code</Text>
-                <Text style={styles.stripValue} numberOfLines={1}>{boat?.kac_id || "Pending"}</Text>
+                <Text style={styles.stripValue} numberOfLines={1}>{kac || "Pending"}</Text>
               </View>
               <Text style={styles.openTwinText}>Open Digital Twin</Text>
               <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
@@ -3521,7 +3524,7 @@ function NeedsAttentionPanel({ data, onOpenAsset }) {
             key={`${item.item_type}-${item.id || item.thread_id || item.asset_id || "item"}-${index}`}
             style={styles.serviceRow}
             activeOpacity={0.86}
-            onPress={() => item.asset_id && onOpenAsset({ asset_id: item.asset_id, kac_id: item.kac_id, organization_id: item.organization_id })}
+            onPress={() => item.asset_id && onOpenAsset({ ...item, id: item.asset_id })}
           >
             <View style={styles.serviceRowIcon}>
               <Ionicons
@@ -3534,7 +3537,7 @@ function NeedsAttentionPanel({ data, onOpenAsset }) {
               <Text style={styles.serviceRowKicker}>{item.label}</Text>
               <Text style={styles.serviceRowTitle} numberOfLines={1}>{item.title || item.subject || item.asset_name || "Service item"}</Text>
               <Text style={styles.serviceRowMeta} numberOfLines={1}>
-                {compact([item.asset_name, item.kac_id, item.status || item.queue_label || item.relationship_type])}
+                {compact([item.asset_name, assetKacId(item), item.status || item.queue_label || item.relationship_type])}
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
@@ -3573,7 +3576,7 @@ function MessagesPanel({ data, onOpenAsset }) {
             key={`message-${message.id || message.thread_id || message.asset_id || "thread"}-${index}`}
             style={styles.serviceRow}
             activeOpacity={0.86}
-            onPress={() => message.asset_id && onOpenAsset({ asset_id: message.asset_id, kac_id: message.kac_id, organization_id: message.organization_id })}
+            onPress={() => message.asset_id && onOpenAsset({ ...message, id: message.asset_id })}
           >
             <View style={styles.serviceRowIcon}>
               <Ionicons name="chatbubble-ellipses-outline" size={17} color={colors.brandBlue} />
@@ -3717,7 +3720,7 @@ function AddBoatPanel({
             <View style={styles.serviceRowBody}>
               <Text style={styles.serviceRowKicker}>{asset.already_connected ? "Already connected" : "Existing canonical asset"}</Text>
               <Text style={styles.serviceRowTitle}>{asset.asset_name || "Untitled boat"}</Text>
-              <Text style={styles.serviceRowMeta}>{compact([asset.kac_id, asset.year, asset.make, asset.model, asset.hin])}</Text>
+              <Text style={styles.serviceRowMeta}>{compact([assetKacId(asset), asset.year, asset.make, asset.model, assetHin(asset)])}</Text>
             </View>
             <TouchableOpacity
               style={[styles.addKacButton, asset.already_connected && styles.addKacButtonSecondary]}
@@ -4438,13 +4441,15 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   const openBoat = (boat) => {
     const resolvedAssetId = boat?.asset_id || boat?.id || null;
     const resolvedOrgId = boat?.organization_id || currentWorkspace?.organization_id || currentWorkspace?.org_id || null;
+    const resolvedKac = assetKacId(boat);
+    const resolvedHin = assetHin(boat);
 
     if (mode === "builds" && (boat?.source_type === "factory_build_workspace" || boat?.exact_build?.build_key)) {
       const exactTemplateKey = boat?.exact_build?.template_key || boat?.template?.template_key || null;
       if (!exactTemplateKey) return;
       if (openActivatorWebPath(`/activator/build/${encodeURIComponent(exactTemplateKey)}`, {
         buildKey: boat?.exact_build?.build_key || null,
-        hullNumber: boat?.exact_build?.hull_number || boat?.identity?.hull_number || boat?.identity?.hin || null,
+        hullNumber: resolvedHin,
         parentRoute: fixedMode ? "KeeprSpaceFleet" : "ActivatorHome",
         organizationId: resolvedOrgId,
         workspaceId: currentWorkspace?.workspace_id || null,
@@ -4453,7 +4458,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
       navigation.navigate("ActivatorExactBuild", {
         templateKey: exactTemplateKey,
         buildKey: boat?.exact_build?.build_key || null,
-        hullNumber: boat?.exact_build?.hull_number || boat?.identity?.hull_number || boat?.identity?.hin || null,
+        hullNumber: resolvedHin,
         parentRoute: fixedMode ? "KeeprSpaceFleet" : "ActivatorHome",
         organizationId: resolvedOrgId,
         workspaceId: currentWorkspace?.workspace_id || null,
@@ -4463,7 +4468,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
 
     const assetParams = {
       assetId: resolvedAssetId,
-      kac: boat.kac_id,
+      kac: resolvedKac,
       organizationId: resolvedOrgId,
       stewardshipId: boat.stewardship_id || boat.service_relationship?.stewardship_id || null,
       parentRoute: fixedMode ? "KeeprSpaceFleet" : "ActivatorHome",
@@ -4475,7 +4480,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
       navigateCanonicalBoatStory({
         boatId: resolvedAssetId,
         assetId: resolvedAssetId,
-        kac: boat.kac_id,
+        kac: resolvedKac,
         organizationId: resolvedOrgId,
         workspaceId: currentWorkspace?.workspace_id || null,
         relationshipRole: "oem",

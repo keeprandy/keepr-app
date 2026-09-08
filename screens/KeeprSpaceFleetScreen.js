@@ -20,6 +20,7 @@ import ActivatorBreadcrumb from "../components/ActivatorBreadcrumb";
 import { useWorkspace } from "../context/WorkspaceContext";
 import { getSignedUrl } from "../lib/attachmentsApi";
 import { fetchAssetHeroUris, getCachedAssetHeroUris } from "../lib/assetHeroResolver";
+import { assetBuildCode, assetHin, assetKacId } from "../lib/assetIdentity";
 import { getKeeprSpacePortfolio, removeKeeprSpaceBoatRelationship } from "../lib/keeprspaceApi";
 import { assetProjectionSemantics } from "../lib/assetProjectionSemantics";
 import { supabase } from "../lib/supabaseClient";
@@ -106,7 +107,7 @@ function titleForBoat(boat) {
     identity.year || boat?.year,
     identity.make || boat?.make,
     identity.model || boat?.model,
-  ]) || boat?.kac_id || "Connected asset";
+  ]) || assetKacId(boat) || "Connected asset";
 }
 
 function assetName(boat) {
@@ -161,10 +162,12 @@ function hasFactoryBuildLayer(boat) {
   const source = String(boat?.source_type || boat?.data_source || boat?.relationship_source || "").toLowerCase();
   const identity = boat?.identity || {};
   return Boolean(
-    boat?.exact_build?.build_key
+    assetBuildCode(boat)
+      || boat?.exact_build?.build_key
       || boat?.exact_build?.hull_number
       || identity.build_code
       || identity.hull_number
+      || assetHin(boat)
       || source.includes("factory_build")
       || source.includes("exact_build")
   );
@@ -173,11 +176,11 @@ function hasFactoryBuildLayer(boat) {
 function factoryBuildParamsForBoat(boat) {
   const identity = boat?.identity || {};
   const exact = boat?.exact_build || {};
-  const buildCode = exact.build_key || exact.build_code || identity.build_code;
+  const buildCode = assetBuildCode(boat);
   return {
     templateKey: exact.template_key || boat?.template?.template_key || null,
     buildKey: buildCode ? String(buildCode).toLowerCase() : null,
-    hullNumber: exact.hull_number || exact.hin || identity.hull_number || identity.hin || boat?.hin || null,
+    hullNumber: assetHin(boat),
   };
 }
 
@@ -201,7 +204,7 @@ async function signedHeroMediaUrl(hero, transform, expiresIn = 3600) {
 
 async function loadStewardshipHeroUrl(boat, organizationId, transform, expiresIn) {
   const assetId = boat?.asset_id || boat?.id || null;
-  const kac = boat?.kac_id || null;
+  const kac = assetKacId(boat);
   if (!assetId && !kac) return null;
 
   const rpc = kac
@@ -301,7 +304,7 @@ function BoatCard({ boat, onPress, heroUri = null, onOpenFactoryBuild = null, on
             </View>
             <View style={styles.relationshipCell}>
               <Text style={styles.relationshipLabel}>Keepr Code</Text>
-              <Text style={styles.relationshipValue} numberOfLines={1}>{boat?.kac_id || "Pending"}</Text>
+              <Text style={styles.relationshipValue} numberOfLines={1}>{assetKacId(boat) || "Pending"}</Text>
             </View>
           </View>
           <View style={styles.serviceRelationshipOpen}>
@@ -478,12 +481,13 @@ export default function KeeprSpaceFleetScreen({ route, navigation }) {
 
   const openBoat = (boat) => {
     const assetId = boat.asset_id || boat.id;
+    const kac = assetKacId(boat);
     if (!assetId) return;
     if (isOemWorkspace) {
       navigation.navigate("BoatStory", {
         boatId: assetId,
         assetId,
-        kac: boat.kac_id,
+        kac,
         organizationId: boat.organization_id || organizationId,
         workspaceId: currentWorkspace?.workspace_id || null,
         relationshipRole: "oem",
@@ -495,7 +499,7 @@ export default function KeeprSpaceFleetScreen({ route, navigation }) {
     }
     navigation.navigate("KeeprSpaceBoat", {
       assetId,
-      kac: boat.kac_id,
+      kac,
       organizationId: boat.organization_id || organizationId,
       stewardshipId: boat.stewardship_id || boat.service_relationship?.stewardship_id || null,
       parentRoute: "KeeprSpaceFleet",
