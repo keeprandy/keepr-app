@@ -2,6 +2,26 @@
 
 Review artifact only. Do not run against production until Andy explicitly approves.
 
+## Flattened Execution Package
+
+This directory is self-contained for production execution review. All migration
+SQL previously referenced by external `\ir` commands has been inlined into
+package-owned executable files. A rescan found no remaining `\ir`, `\include`,
+or `\i` commands in this directory.
+
+Executable SQL order:
+
+1. `00_preflight_readonly.sql`
+2. `01_schema_reconciliation.sql`
+3. `02_functions_reconciliation.sql`
+4. `03_compatibility_backfills.sql`
+5. `04_curated_reference_data.sql`
+6. `06_supplier_asset_enablement_delta.sql`
+7. `05_post_apply_smoke_readonly.sql`
+
+Checksums for the final executable SQL files are recorded in
+`CHECKSUMS.sha256`.
+
 ## RC Line
 
 - Base frozen RC: `c6bcf3be823c8cfeaa90c60ed9511897d93f11bd`
