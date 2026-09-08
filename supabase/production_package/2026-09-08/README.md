@@ -18,6 +18,8 @@ Executable SQL order:
 5. `04_curated_reference_data.sql`
 6. `06_supplier_asset_enablement_delta.sql`
 7. `05_post_apply_smoke_readonly.sql`
+8. `07_function_grant_hardening.sql`
+9. `08_function_grant_smoke_readonly.sql`
 
 Checksums for the final executable SQL files are recorded in
 `CHECKSUMS.sha256`.
@@ -62,6 +64,26 @@ scope and fixes only:
   `resource_type = 'other'` instead of invalid `oem_website`.
 - `keepr_prod_audit_ro` receives only read-only SELECT visibility on the new
   release-created tables needed by `05_post_apply_smoke_readonly.sql`.
+
+## 2026-09-08 Function Grant Hardening Patch
+
+Production convergence files `02` and `06` created/replaced functions that
+inherited PostgreSQL's default `PUBLIC` EXECUTE privilege. The convergence DB
+apply completed successfully and protected owner counts were preserved, but app
+deployment remains held until function grants are narrowed.
+
+The hardening patch is privileges-only:
+
+1. Verify `CHECKSUMS.sha256`.
+2. Apply `07_function_grant_hardening.sql` with the production owner/admin
+   apply connection.
+3. Disconnect the owner/admin apply session.
+4. Run `08_function_grant_smoke_readonly.sql` with `keepr_prod_audit_ro`.
+5. Confirm restricted anon violations return zero rows.
+6. Do not deploy application code until Andy explicitly approves.
+
+This patch does not alter tables, data, RLS policies, triggers, or function
+bodies.
 
 ## Production Owner/Admin Apply Procedure
 
@@ -215,6 +237,13 @@ No migration is `ALREADY PRESENT` in production by ledger or object inspection f
 7. `06_supplier_asset_enablement_delta.sql`
    Applies only today’s approved Supplier/Asset Enablement DB deltas after the Friday package.
 
+8. `07_function_grant_hardening.sql`
+   Privileges-only patch that revokes default function EXECUTE from `PUBLIC`
+   and grants only intended roles.
+
+9. `08_function_grant_smoke_readonly.sql`
+   Read-only catalog smoke for function EXECUTE privileges after hardening.
+
 ## Intended Production Order After Approval
 
 1. Run `00_preflight_readonly.sql` through `keepr_prod_audit_ro`.
@@ -226,14 +255,17 @@ No migration is `ALREADY PRESENT` in production by ledger or object inspection f
    both `postgres`; stop if not.
 6. Current forward-fix resume only: apply corrected
    `06_supplier_asset_enablement_delta.sql`.
-8. Disconnect the owner/admin apply session.
-9. Reconnect with `keepr_prod_audit_ro`.
-10. Run `05_post_apply_smoke_readonly.sql`.
-11. Confirm release-created object ownership check returns zero rows.
-12. Delete `.local-env/production-apply.env` after successful audit.
-13. Deploy the combined RC application code only after DB GO and explicit
+7. Disconnect the owner/admin apply session.
+8. Reconnect with `keepr_prod_audit_ro`.
+9. Run `05_post_apply_smoke_readonly.sql`.
+10. Confirm release-created object ownership check returns zero rows.
+11. Apply privileges-only `07_function_grant_hardening.sql` only after separate
     approval.
-14. Run browser/API smoke.
+12. Validate privileges with read-only `08_function_grant_smoke_readonly.sql`.
+13. Delete `.local-env/production-apply.env` after successful audit.
+14. Deploy the combined RC application code only after DB GO and explicit
+    approval.
+15. Run browser/API smoke.
 
 ## Expected Production Row Changes
 
