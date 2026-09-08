@@ -31,6 +31,58 @@ create index if not exists asset_model_template_items_template_system_template_i
   on public.asset_model_template_items (template_id, system_template_id)
   where system_template_id is not null;
 
+drop policy if exists "Connected org members read supplier attachment placements" on public.attachment_placements;
+create policy "Connected org members read supplier attachment placements"
+  on public.attachment_placements
+  for select
+  to authenticated
+  using (
+    target_type = 'org'
+    and exists (
+      select 1
+      from public.org_relationships r
+      where r.to_org_id = attachment_placements.target_id
+        and r.relationship_type in ('supplier', 'system_supplier', 'component_supplier')
+        and r.status in ('source_reported', 'active')
+        and public.activator_user_can_act_for_org(auth.uid(), r.from_org_id)
+    )
+  );
+
+drop policy if exists "Connected org members create supplier attachment placements" on public.attachment_placements;
+create policy "Connected org members create supplier attachment placements"
+  on public.attachment_placements
+  for insert
+  to authenticated
+  with check (
+    target_type = 'org'
+    and public.keepr_attachment_owned_by_user(auth.uid(), attachment_id)
+    and exists (
+      select 1
+      from public.org_relationships r
+      where r.to_org_id = attachment_placements.target_id
+        and r.relationship_type in ('supplier', 'system_supplier', 'component_supplier')
+        and r.status in ('source_reported', 'active')
+        and public.activator_user_can_act_for_org(auth.uid(), r.from_org_id)
+    )
+  );
+
+drop policy if exists "Connected org members delete supplier attachment placements" on public.attachment_placements;
+create policy "Connected org members delete supplier attachment placements"
+  on public.attachment_placements
+  for delete
+  to authenticated
+  using (
+    target_type = 'org'
+    and exists (
+      select 1
+      from public.org_relationships r
+      where r.to_org_id = attachment_placements.target_id
+        and r.relationship_type in ('supplier', 'system_supplier', 'component_supplier')
+        and r.status in ('source_reported', 'active')
+        and public.activator_user_can_act_for_org(auth.uid(), r.from_org_id)
+    )
+  );
+
 do $$
 declare
   v_mercury_id uuid;

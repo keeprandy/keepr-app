@@ -26,6 +26,9 @@ test("Supplier V1 projects canonical Organizations through relationships and Sys
   assert.match(sql, /st\.supplier_org_id = o\.id/);
   assert.match(sql, /template\.organization_id = p_organization_id/);
   assert.match(sql, /public\.asset_relationship_edges/);
+  assert.match(sql, /Connected org members create supplier attachment placements/);
+  assert.match(sql, /public\.keepr_attachment_owned_by_user\(auth\.uid\(\), attachment_id\)/);
+  assert.match(sql, /r\.to_org_id = attachment_placements\.target_id/);
   assert.doesNotMatch(sql, /min\(s\.relationship_id\)/);
   assert.doesNotMatch(sql, /o\.logo_url/);
   assert.doesNotMatch(sql, /o\.website/);
@@ -68,6 +71,13 @@ test("System Library links templates to supplier Organizations without replacing
   assert.match(systemLibrary, /template\?\.supplier_org_id/);
   assert.match(systemLibrary, /listSupplierNetwork/);
   assert.match(systemLibrary, /Canonical supplier Organization/);
+  assert.match(systemLibrary, /Attach to/);
+  assert.match(systemLibrary, /placeOnSystemTemplate/);
+  assert.match(systemLibrary, /placeOnSupplier/);
+  assert.match(systemLibrary, /placeOnOem/);
+  assert.match(systemLibrary, /target_type: "system_template"/);
+  assert.match(systemLibrary, /target_type: "org"/);
+  assert.match(systemLibrary, /placement_targets/);
   assert.match(systemLibrary, /Manufacturer \/ provider text remains for compatibility/);
   assert.match(systemLibrary, /supplierOrgId: draft\.supplierOrgId \|\| null/);
   assert.match(systemLibrary, /navSection: "ActivatorSuppliers"/);
