@@ -50,7 +50,9 @@ import { getKeeprSpacePortfolio, setKacHero } from "../lib/keeprspaceApi";
 import EventPill from "../components/EventPill";
 import ReportsModal from "../components/ReportsModal";
 import AssetWhatNextSection from "../components/AssetWhatNextSection";
+import AssetEnablementCard from "../components/AssetEnablementCard";
 import TransferOwnershipModal from "../components/TransferOwnershipModal";
+import { assetKacId } from "../lib/assetIdentity";
 
 const HERO_ASPECT = 4 / 3;
 const IS_WEB = Platform.OS === "web";
@@ -447,6 +449,7 @@ useEffect(() => {
   const [boatPickerVisible, setBoatPickerVisible] = useState(false);
   const scrollRef = useRef(null);
   const [timelineY, setTimelineY] = useState(null);
+  const [enablementY, setEnablementY] = useState(null);
 
   // Timeline filter
   const [timelineFilter, setTimelineFilter] = useState("all"); // all | service | moment| pro | diy
@@ -653,7 +656,7 @@ try {
       boatId: boat.id,
       assetId: boat.id,
       assetName: boat.name || "Boat",
-      kac: route?.params?.kac || boat.kac_id || boat.kac || null,
+      kac: boatKac || null,
       organizationId: route?.params?.organizationId || null,
       workspaceId: route?.params?.workspaceId || null,
       relationshipRole: route?.params?.relationshipRole || null,
@@ -669,7 +672,7 @@ try {
     navigation.navigate("AssetAttachments", {
       assetId: boat.id,
       assetName: boat.name || "Boat",
-      kac: route?.params?.kac || boat.kac_id || boat.kac || null,
+      kac: boatKac || null,
       organizationId: route?.params?.organizationId || null,
       workspaceId: route?.params?.workspaceId || null,
       relationshipRole: route?.params?.relationshipRole || null,
@@ -692,7 +695,7 @@ try {
         scope: "asset",
         assetId: boat.id,
         assetName: boatName || boat.name || "Boat",
-        parentAssetKac: boat.kac_id || boat.kac || null,
+        parentAssetKac: boatKac || null,
         launchComposer: true,
         contextImageUri: heroUri || null,
         contextType: "Asset",
@@ -822,7 +825,7 @@ const goToPublicStorySettings = () => {
     const organizationId = route?.params?.organizationId || null;
     navigation.navigate("EditAsset", {
       assetId: boat.id,
-      kac: route?.params?.kac || boat.kac_id || boat.kac || null,
+      kac: boatKac || null,
       organizationId,
       stewardshipId: route?.params?.stewardshipId || null,
       parentRoute: route?.params?.parentRoute || "BoatStory",
@@ -869,7 +872,7 @@ const goToPublicStorySettings = () => {
       boatId: boat.id,
       assetId: route?.params?.assetId || boat.id,
       boatName: boat.name || "Boat",
-      kac: route?.params?.kac || boat.kac_id || boat.kac || null,
+      kac: boatKac || null,
       organizationId: route?.params?.organizationId || null,
       workspaceId: route?.params?.workspaceId || null,
       relationshipRole: route?.params?.relationshipRole || null,
@@ -929,11 +932,7 @@ const goToPublicView = () => {
     null;
 
   const kacFromAsset =
-    boat?.kac ||
-    boat?.kac_code ||
-    boat?.kac_id ||
-    boat?.kacId ||
-    null;
+    assetKacId(boat) || null;
 
   const kac = (kacFromRoute || kacFromAsset || "").toString().trim();
 
@@ -965,6 +964,11 @@ const goToPublicView = () => {
   const scrollToTimeline = () => {
     if (!scrollRef.current || timelineY == null) return;
     scrollRef.current.scrollTo({ y: timelineY - 24, animated: true });
+  };
+
+  const scrollToEnablement = () => {
+    if (!scrollRef.current || enablementY == null) return;
+    scrollRef.current.scrollTo({ y: enablementY - 24, animated: true });
   };
 
 // Delete flow
@@ -1181,10 +1185,7 @@ const meta = {
   const boatDisplayName =
   `${boat?.year || ""} ${boat?.make || ""} ${boat?.model || ""}`.trim() || "Boat";
   const boatKac =
-    boat?.kac ||
-    boat?.kac_code ||
-    boat?.kac_id ||
-    boat?.kacId ||
+    assetKacId(boat) ||
     route?.params?.kac ||
     route?.params?.kacId ||
     route?.params?.kac_id ||
@@ -1633,6 +1634,12 @@ const meta = {
             contentContainerStyle={styles.quickActionsScroll}
           >
             <QuickActionChip
+              label="Keepr Enable"
+              icon="sparkles-outline"
+              onPress={scrollToEnablement}
+              isPrimary
+            />
+            <QuickActionChip
               label="Timeline"
               icon="time-outline"
               onPress={scrollToTimeline}
@@ -1853,6 +1860,21 @@ const meta = {
           assetType="boat"
           navigation={navigation}
         />
+
+        <View onLayout={(e) => setEnablementY(e.nativeEvent.layout.y)}>
+          <AssetEnablementCard
+            asset={boat}
+            systems={systems}
+            resources={storyAttachments}
+            serviceRecords={serviceRecords}
+            storyEvents={storyEvents}
+            onOpenSystems={goToBoatSystems}
+            onOpenAttachments={goToAttachmentFiles}
+            onOpenTimeline={goToAddTimelineRecord}
+            onEditAsset={goToEditBoat}
+            onAskKai={goToMessages}
+          />
+        </View>
 
         {/* Timeline */}
         <View
