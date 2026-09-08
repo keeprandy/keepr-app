@@ -1351,8 +1351,8 @@ const handleRequestServiceFromKeeprPro = useCallback(async (pro) => {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.sectionTitle}>Core System Template</Text>
                   <Text style={styles.sectionSubtitle}>
-                    Promote reusable knowledge from this exact system. Exact serials, photos, service history,
-                    condition, and KF018 evidence stay on this installed system.
+                    Update the reusable system knowledge this installed system points to. Serials, photos, service
+                    history, condition, and exact asset evidence stay on this installed system.
                   </Text>
                 </View>
                 {system?.system_template_id ? (
@@ -1406,10 +1406,10 @@ const handleRequestServiceFromKeeprPro = useCallback(async (pro) => {
                   color={colors.brandBlue}
                 />
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.detailTitle}>Promote non-photo resources by reference</Text>
+                  <Text style={styles.detailTitle}>Reuse manuals and support links on the shared template</Text>
                   <Text style={styles.recordNotes}>
-                    Manuals, support links, and reusable documents can be referenced by the System Template.
-                    Photos and exact evidence remain on this system.
+                    Manuals, warranty docs, specs, install guides, and support links become available to every
+                    asset using this System Template. Photos and exact evidence remain on this system.
                   </Text>
                 </View>
               </Pressable>
@@ -1420,7 +1420,11 @@ const handleRequestServiceFromKeeprPro = useCallback(async (pro) => {
               >
                 <Ionicons name="arrow-up-circle-outline" size={16} color={colors.brandWhite} style={{ marginRight: 8 }} />
                 <Text style={styles.primaryActionText}>
-                  {promotingSystem ? "Promoting..." : "Promote / Update System Template"}
+                  {promotingSystem
+                    ? "Updating..."
+                    : system?.system_template_id
+                      ? "Update Reusable System Template"
+                      : "Create Reusable System Template"}
                 </Text>
               </TouchableOpacity>
             </View>

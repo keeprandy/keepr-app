@@ -197,15 +197,23 @@ test("System Template promote and link operations are explicit product actions",
   assert.match(sql, /exact_truth_excluded/);
   assert.doesNotMatch(sql, /KAC-TIARA-56LS-KF018|tiara-2027-56-ls|Onan 13\.5kW Generator|Seakeeper SK10\.5/);
 
+  const linkedPromoteSql = read("supabase/migrations/20260908124500_promote_system_updates_linked_template.sql");
+  assert.match(linkedPromoteSql, /v_system\.system_template_id is not null/);
+  assert.match(linkedPromoteSql, /where id = v_system\.system_template_id/);
+  assert.match(linkedPromoteSql, /update public\.system_templates[\s\S]*where id = v_template\.id/);
+  assert.match(linkedPromoteSql, /updated_existing_linked_template/);
+
   assert.match(activatorApi, /export async function listSystemTemplates/);
   assert.match(activatorApi, /export async function linkModelItemSystemTemplate/);
   assert.match(activatorApi, /export async function unlinkModelItemSystemTemplate/);
   assert.match(activatorApi, /export async function promoteSystemToSystemTemplate/);
   assert.match(activatorApi, /export async function promoteModelItemToSystemTemplate/);
 
-  assert.match(systemStorySource, /Promote \/ Update System Template/);
+  assert.match(systemStorySource, /Update Reusable System Template/);
+  assert.match(systemStorySource, /Create Reusable System Template/);
+  assert.match(systemStorySource, /Reuse manuals and support links on the shared template/);
   assert.match(systemStorySource, /promote_resources: promoteResources/);
-  assert.match(systemStorySource, /exact serials, photos, service history/i);
+  assert.match(systemStorySource, /Serials, photos, service[\s\S]*exact asset evidence/i);
 
   assert.match(itemEditorSource, /Core System Template/);
   assert.match(itemEditorSource, /Promote to Library/);
@@ -231,6 +239,9 @@ test("System Library is a first-class UI over canonical system_templates", () =>
   assert.match(activatorSource, /navigation\.navigate\("SystemLibrary"/);
   assert.match(librarySource, /listSystemTemplates/);
   assert.match(librarySource, /upsertSystemTemplate/);
+  assert.match(librarySource, /retireSystemTemplate/);
+  assert.match(librarySource, /Retire System Template/);
+  assert.match(librarySource, /Existing references were preserved/);
   assert.match(librarySource, /target_type: "system_template"/);
   assert.match(librarySource, /System Template: reusable truth/);
   assert.match(librarySource, /System Template owner/);
@@ -241,6 +252,8 @@ test("System Library is a first-class UI over canonical system_templates", () =>
 
   assert.match(activatorApi, /export async function getSystemTemplate/);
   assert.match(activatorApi, /export async function upsertSystemTemplate/);
+  assert.match(activatorApi, /export async function retireSystemTemplate/);
+  assert.match(activatorApi, /authority_state: "retired"/);
   assert.match(activatorApi, /p_organization_id: organizationId/);
   assert.match(activatorApi, /p_scope: scope/);
   assert.match(activatorApi, /\.from\("system_templates"\)/);

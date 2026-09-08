@@ -17,7 +17,7 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import ActivatorBreadcrumb from "../components/ActivatorBreadcrumb";
 import { createLinkAttachment } from "../lib/attachmentsUploader";
 import { listAttachmentsForTarget, removePlacementById } from "../lib/attachmentsApi";
-import { getCatalogTemplates, getSystemTemplate, listSupplierNetwork, listSystemTemplates, linkModelItemSystemTemplate, upsertCatalogTemplateItem, upsertSystemTemplate } from "../lib/activatorApi";
+import { getCatalogTemplates, getSystemTemplate, listSupplierNetwork, listSystemTemplates, linkModelItemSystemTemplate, retireSystemTemplate, upsertCatalogTemplateItem, upsertSystemTemplate } from "../lib/activatorApi";
 import { searchKeeprSpaceOrganizations, upsertKeeprSpaceOrgRelationship } from "../lib/keeprspaceApi";
 import { supabase } from "../lib/supabaseClient";
 import { colors, radius, shadows, spacing } from "../styles/theme";
@@ -197,6 +197,7 @@ export default function SystemLibraryScreen() {
   const [resourceDraft, setResourceDraft] = useState(EMPTY_RESOURCE_DRAFT);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [retiring, setRetiring] = useState(false);
   const [resourceSaving, setResourceSaving] = useState(false);
   const [supplierQuery, setSupplierQuery] = useState("");
   const [supplierMatches, setSupplierMatches] = useState([]);
@@ -581,6 +582,36 @@ export default function SystemLibraryScreen() {
     }
   };
 
+  const confirmRetireTemplate = () => {
+    if (!selectedId) return;
+    Alert.alert(
+      "Retire System Template",
+      "Retire this reusable System Template? It will be hidden from normal System Library search, but existing references and history are preserved.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Retire",
+          style: "destructive",
+          onPress: async () => {
+            setRetiring(true);
+            setError("");
+            setNotice("");
+            try {
+              await retireSystemTemplate(selectedId, "retired_from_system_library");
+              setNotice("System Template retired. Existing references were preserved.");
+              startNew();
+              await loadList(query);
+            } catch (err) {
+              setError(err?.message || "Could not retire System Template.");
+            } finally {
+              setRetiring(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const addResource = async () => {
     if (!selectedId) {
       Alert.alert("Save first", "Save the System Template before adding reusable resources.");
@@ -739,10 +770,22 @@ export default function SystemLibraryScreen() {
               <Text style={styles.sectionEyebrow}>{draft.id ? "Edit Canonical System" : "Create Canonical System"}</Text>
               <Text style={styles.sectionTitle}>{draft.name || "Reusable system template"}</Text>
             </View>
-            <TouchableOpacity style={[styles.saveButton, (!canSave || saving) && styles.disabledButton]} onPress={save} disabled={!canSave || saving}>
-              {saving ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="save-outline" size={16} color="#fff" />}
-              <Text style={styles.saveButtonText}>{saving ? "Saving" : "Save"}</Text>
-            </TouchableOpacity>
+            <View style={styles.actionRow}>
+              {selectedId ? (
+                <TouchableOpacity
+                  style={[styles.retireButton, retiring && styles.disabledButton]}
+                  onPress={confirmRetireTemplate}
+                  disabled={retiring}
+                >
+                  {retiring ? <ActivityIndicator size="small" color="#b91c1c" /> : <Ionicons name="archive-outline" size={16} color="#b91c1c" />}
+                  <Text style={styles.retireButtonText}>{retiring ? "Retiring" : "Retire"}</Text>
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity style={[styles.saveButton, (!canSave || saving) && styles.disabledButton]} onPress={save} disabled={!canSave || saving}>
+                {saving ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="save-outline" size={16} color="#fff" />}
+                <Text style={styles.saveButtonText}>{saving ? "Saving" : "Save"}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
           <TouchableOpacity style={[styles.applyButton, !selectedId && styles.disabledButton]} onPress={openApplyModal} disabled={!selectedId}>
             <Ionicons name="arrow-redo-circle-outline" size={17} color={colors.primary} />
@@ -1027,8 +1070,11 @@ const styles = StyleSheet.create({
   sectionHeader: { flexDirection: "row", justifyContent: "space-between", gap: spacing.md, alignItems: "center" },
   sectionEyebrow: { fontSize: 11, fontWeight: "900", color: colors.primary, textTransform: "uppercase" },
   sectionTitle: { color: colors.text, fontSize: 18, fontWeight: "900" },
+  actionRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, flexWrap: "wrap", justifyContent: "flex-end" },
   saveButton: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.primary, paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.md },
   saveButtonText: { color: "#fff", fontWeight: "900" },
+  retireButton: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#fff", borderWidth: 1, borderColor: "#fecaca", paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.md },
+  retireButtonText: { color: "#b91c1c", fontWeight: "900" },
   disabledButton: { opacity: 0.55 },
   applyButton: { alignItems: "center", alignSelf: "flex-start", backgroundColor: "#fff", borderColor: "#bfdbfe", borderRadius: radius.md, borderWidth: 1, flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingVertical: 9 },
   formGrid: { flexDirection: "row", gap: spacing.sm, flexWrap: "wrap" },
