@@ -197,7 +197,7 @@ begin
       supplier_rows as (
         select
           s.supplier_org_id,
-          min(s.relationship_id) as relationship_id,
+          (array_agg(s.relationship_id) filter (where s.relationship_id is not null))[1] as relationship_id,
           coalesce(max(s.relationship_type), 'supplier') as relationship_type,
           coalesce(max(s.status), 'source_reported') as status,
           coalesce(max(s.authority_state), 'source_reported') as authority_state,
@@ -213,10 +213,10 @@ begin
           'organization_id', o.id,
           'name', coalesce(nullif(o.display_name, ''), nullif(o.name, ''), kp.display_name, kp.name, 'Supplier'),
           'slug', o.slug,
-          'logo_url', coalesce(o.logo_url, o.photo_url, kp.logo_url, kp.avatar_url),
-          'website', coalesce(o.website, kp.website, sr.relationship_source_url),
-          'phone', coalesce(o.phone, kp.phone),
-          'email', coalesce(o.email, kp.email),
+          'logo_url', coalesce(o.photo_url, o.team_photo_url, kp.logo_url, kp.avatar_url),
+          'website', coalesce(kp.website, o.source_url, sr.relationship_source_url),
+          'phone', kp.phone,
+          'email', kp.email,
           'classification', coalesce(o.organization_type, o.org_type, 'supplier'),
           'capabilities', coalesce(o.workspace_capabilities, o.source_metadata -> 'capabilities', '[]'::jsonb),
           'relationship_id', sr.relationship_id,
@@ -355,7 +355,7 @@ begin
           v_query = ''
           or lower(coalesce(o.display_name, o.name, kp.display_name, kp.name, '')) like '%' || v_query || '%'
           or lower(coalesce(o.slug, '')) like '%' || v_query || '%'
-          or lower(coalesce(o.website, kp.website, sr.relationship_source_url, '')) like '%' || v_query || '%'
+          or lower(coalesce(kp.website, o.source_url, sr.relationship_source_url, '')) like '%' || v_query || '%'
         )
       limit v_limit
     ), '[]'::jsonb),

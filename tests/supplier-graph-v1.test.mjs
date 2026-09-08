@@ -26,6 +26,11 @@ test("Supplier V1 projects canonical Organizations through relationships and Sys
   assert.match(sql, /st\.supplier_org_id = o\.id/);
   assert.match(sql, /template\.organization_id = p_organization_id/);
   assert.match(sql, /public\.asset_relationship_edges/);
+  assert.doesNotMatch(sql, /min\(s\.relationship_id\)/);
+  assert.doesNotMatch(sql, /o\.logo_url/);
+  assert.doesNotMatch(sql, /o\.website/);
+  assert.doesNotMatch(sql, /o\.phone/);
+  assert.doesNotMatch(sql, /o\.email/);
   assert.match(sql, /grant execute on function public\.list_organization_supplier_network/);
 });
 
