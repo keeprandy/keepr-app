@@ -26,6 +26,7 @@ import {
   getActivatorBoatBrowser,
   getCatalogTemplates,
   getExactBuildWorkQueue,
+  listSupplierNetwork,
 } from "../lib/activatorApi";
 import { createOrgModelTemplate } from "../lib/keeprAdminApi";
 import {
@@ -1637,6 +1638,230 @@ function NetworkPanel({ data, copy, workspace, config, onManageRelationships }) 
           </View>
         )) : null}
       </View>
+    </View>
+  );
+}
+
+function SupplierNetworkPanel({
+  suppliers = [],
+  loading = false,
+  organizationId = null,
+  organizationName = "this organization",
+  canManage = false,
+  onSaveSupplier,
+  saving = false,
+  onOpenSystemLibrary,
+}) {
+  const [selectedId, setSelectedId] = useState(null);
+  const [draft, setDraft] = useState({
+    to_org_id: null,
+    to_org_name: "",
+    relationship_type: "supplier",
+    status: "source_reported",
+    authority_state: "public_source_reported",
+    evidence_state: "keepr_seeded",
+    source_type: "org_reported",
+    source_name: "Supplier relationship",
+    source_url: "",
+  });
+  const selected = suppliers.find((supplier) => supplier.organization_id === selectedId) || suppliers[0] || null;
+
+  useEffect(() => {
+    if (!selectedId && suppliers[0]?.organization_id) {
+      setSelectedId(suppliers[0].organization_id);
+    }
+  }, [selectedId, suppliers]);
+
+  const resetDraft = () => setDraft({
+    to_org_id: null,
+    to_org_name: "",
+    relationship_type: "supplier",
+    status: "source_reported",
+    authority_state: "public_source_reported",
+    evidence_state: "keepr_seeded",
+    source_type: "org_reported",
+    source_name: "Supplier relationship",
+    source_url: "",
+  });
+
+  const submitSupplier = async () => {
+    await onSaveSupplier?.(draft);
+    resetDraft();
+  };
+
+  return (
+    <View style={styles.networkPanel}>
+      <View style={styles.networkHeader}>
+        <View>
+          <Text style={styles.sectionKicker}>Suppliers</Text>
+          <Text style={styles.sectionTitle}>Supplier network</Text>
+        </View>
+        <View style={styles.networkCount}>
+          <Text style={styles.networkCountValue}>{loading ? "..." : suppliers.length}</Text>
+          <Text style={styles.networkCountLabel}>connected</Text>
+        </View>
+      </View>
+      <Text style={styles.networkText}>
+        Suppliers are canonical Organizations connected through reusable System Templates, model applicability, and exact installed systems.
+      </Text>
+
+      {loading ? (
+        <View style={styles.centered}>
+          <ActivityIndicator size="small" color={colors.brandBlue} />
+          <Text style={styles.mutedText}>Resolving Supplier graph...</Text>
+        </View>
+      ) : (
+        <View style={styles.supplierLayout}>
+          <View style={styles.supplierList}>
+            {suppliers.length ? suppliers.map((supplier) => {
+              const active = supplier.organization_id === selected?.organization_id;
+              return (
+                <TouchableOpacity
+                  key={supplier.organization_id}
+                  style={[styles.supplierRow, active && styles.supplierRowActive]}
+                  activeOpacity={0.86}
+                  onPress={() => setSelectedId(supplier.organization_id)}
+                >
+                  <View style={styles.supplierIcon}>
+                    {supplier.logo_url ? (
+                      <Image source={{ uri: supplier.logo_url }} resizeMode="contain" style={styles.supplierLogo} />
+                    ) : (
+                      <Ionicons name="git-network-outline" size={17} color={colors.brandBlue} />
+                    )}
+                  </View>
+                  <View style={styles.supplierRowBody}>
+                    <Text style={styles.adminRowTitle} numberOfLines={1}>{supplier.name}</Text>
+                    <Text style={styles.adminRowMeta} numberOfLines={1}>
+                      {[labelize(supplier.relationship_type), labelize(supplier.authority_state), `${supplier.system_template_count || 0} systems`].filter(Boolean).join(" · ")}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            }) : (
+              <Text style={styles.mutedTextLeft}>No supplier organizations are connected yet.</Text>
+            )}
+          </View>
+
+          <View style={styles.supplierProfile}>
+            {selected ? (
+              <>
+                <View style={styles.supplierProfileHeader}>
+                  <View style={styles.supplierProfileLogo}>
+                    {selected.logo_url ? (
+                      <Image source={{ uri: selected.logo_url }} resizeMode="contain" style={styles.supplierLogoLarge} />
+                    ) : (
+                      <Text style={styles.dealerLogoFallback}>{initialsForName(selected.name)}</Text>
+                    )}
+                  </View>
+                  <View style={styles.supplierProfileTitleBlock}>
+                    <Text style={styles.sectionKicker}>Organization Profile</Text>
+                    <Text style={styles.sectionTitle}>{selected.name}</Text>
+                    <Text style={styles.networkText} numberOfLines={2}>
+                      {[selected.website, selected.phone, selected.email].filter(Boolean).join(" · ") || "Canonical supplier identity"}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.metricsRowCompact}>
+                  <MetricTile label="System Templates" value={selected.system_template_count || 0} icon="hardware-chip-outline" />
+                  <MetricTile label="OEM Models" value={selected.model_count || 0} icon="library-outline" />
+                  <MetricTile label="Installed Systems" value={selected.installed_system_count || 0} icon="boat-outline" />
+                  <MetricTile label="Resources" value={selected.resource_count || 0} icon="document-text-outline" />
+                </View>
+                <View style={styles.supplierDetailGrid}>
+                  <View style={styles.supplierDetailPanel}>
+                    <Text style={styles.adminFormTitle}>Relationship</Text>
+                    <Text style={styles.adminRowMeta}>{[labelize(selected.relationship_type), labelize(selected.relationship_status), labelize(selected.evidence_state)].filter(Boolean).join(" · ")}</Text>
+                    <Text style={styles.adminHelpText}>{selected.source_name || "Supplier graph projection"}</Text>
+                  </View>
+                  <View style={styles.supplierDetailPanel}>
+                    <Text style={styles.adminFormTitle}>Capabilities</Text>
+                    <Text style={styles.adminRowMeta}>{listFromValue(selected.capabilities).join(", ") || labelize(selected.classification)}</Text>
+                    <Text style={styles.adminHelpText}>Shared Organization profile, reusable for dealer, supplier, and service participants.</Text>
+                  </View>
+                </View>
+                <View style={styles.adminList}>
+                  {(selected.system_templates || []).slice(0, 8).map((template) => (
+                    <TouchableOpacity
+                      key={template.id}
+                      style={styles.adminRow}
+                      activeOpacity={0.86}
+                      onPress={() => onOpenSystemLibrary?.(template)}
+                    >
+                      <View style={styles.adminRowContent}>
+                        <Text style={styles.adminRowTitle}>{template.name}</Text>
+                        <Text style={styles.adminRowMeta}>
+                          {[template.manufacturer, template.system_category, template.authority_state, `${template.resource_count || 0} resources`].filter(Boolean).join(" · ")}
+                        </Text>
+                      </View>
+                      <Ionicons name="chevron-forward-outline" size={18} color={colors.textMuted} />
+                    </TouchableOpacity>
+                  ))}
+                  {selected.system_templates?.length ? null : (
+                    <Text style={styles.mutedTextLeft}>No System Templates are linked to this supplier yet.</Text>
+                  )}
+                </View>
+                <View style={styles.inlineChips}>
+                  {(selected.models || []).slice(0, 12).map((model) => (
+                    <View key={model.id || model.template_key} style={styles.smallChip}>
+                      <Text style={styles.smallChipText} numberOfLines={1}>
+                        {compact([model.model_year, model.manufacturer, model.model])}
+                      </Text>
+                      <Text style={styles.smallChipMeta} numberOfLines={1}>{model.template_key}</Text>
+                    </View>
+                  ))}
+                </View>
+              </>
+            ) : (
+              <View style={styles.emptyPanelCompact}>
+                <Text style={styles.emptyTitle}>Resolve suppliers first</Text>
+                <Text style={styles.mutedText}>Connect a canonical Organization, then link System Templates to that supplier identity.</Text>
+              </View>
+            )}
+          </View>
+        </View>
+      )}
+
+      {canManage ? (
+        <View style={styles.adminSection}>
+          <View style={styles.networkHeader}>
+            <View>
+              <Text style={styles.sectionKicker}>Lookup Before Create</Text>
+              <Text style={styles.sectionTitle}>Add Supplier</Text>
+            </View>
+          </View>
+          <Text style={styles.networkText}>
+            Search Keepr first. Connect an existing supplier Organization to {organizationName}; only create a new Organization when no match exists.
+          </Text>
+          <OrgResolutionPanel
+            draft={draft}
+            onChange={(next) => setDraft({
+              ...next,
+              relationship_type: next.relationship_type || "supplier",
+              status: next.status || "source_reported",
+              authority_state: next.authority_state || "public_source_reported",
+              evidence_state: next.evidence_state || "keepr_seeded",
+            })}
+            fromOrgId={organizationId}
+          />
+          <ConfigForm
+            title={draft.to_org_id ? "Connect selected supplier" : "Create or connect supplier Organization"}
+            fields={[
+              ["to_org_name", "Supplier organization name"],
+              ["relationship_type", "Relationship type"],
+              ["status", "Status"],
+              ["authority_state", "Authority state"],
+              ["evidence_state", "Evidence state"],
+              ["source_name", "Source name"],
+              ["source_url", "Source URL"],
+            ]}
+            draft={draft}
+            onChange={setDraft}
+            onSave={submitSupplier}
+            onReset={resetDraft}
+            saving={saving}
+          />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -3840,6 +4065,8 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   const [orgResourceRefreshKey, setOrgResourceRefreshKey] = useState(0);
   const [orgConfig, setOrgConfig] = useState(null);
   const [orgConfigLoading, setOrgConfigLoading] = useState(false);
+  const [supplierNetwork, setSupplierNetwork] = useState({ suppliers: [], counts: {} });
+  const [supplierNetworkLoading, setSupplierNetworkLoading] = useState(false);
   const [adminTab, setAdminTab] = useState("profile");
   const [adminSavingKey, setAdminSavingKey] = useState(null);
   const [savingProfile, setSavingProfile] = useState(false);
@@ -4108,6 +4335,20 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
         setOrgConfig(null);
       }
 
+      if (kind === "oem" && orgId) {
+        setSupplierNetworkLoading(true);
+        try {
+          setSupplierNetwork(await listSupplierNetwork({ organizationId: orgId, query: search, limit: 50 }));
+        } catch (supplierErr) {
+          console.warn("Supplier network unavailable:", supplierErr?.message || supplierErr);
+          setSupplierNetwork({ suppliers: [], counts: {} });
+        } finally {
+          setSupplierNetworkLoading(false);
+        }
+      } else {
+        setSupplierNetwork({ suppliers: [], counts: {} });
+      }
+
       setCatalogLoading(true);
       try {
         const nextTemplates = await getCatalogTemplates(kind === "oem" ? orgId : null);
@@ -4310,6 +4551,16 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
     const params = {
       organizationId: workspaceOrganizationId(currentWorkspace),
       workspaceId: currentWorkspace?.workspace_id || null,
+    };
+    if (openActivatorWebPath("/activator/system-library", params)) return;
+    navigation.navigate("SystemLibrary", params);
+  };
+
+  const openSupplierSystemTemplate = (systemTemplate) => {
+    const params = {
+      organizationId: workspaceOrganizationId(currentWorkspace),
+      workspaceId: currentWorkspace?.workspace_id || null,
+      systemTemplateId: systemTemplate?.id || null,
     };
     if (openActivatorWebPath("/activator/system-library", params)) return;
     navigation.navigate("SystemLibrary", params);
@@ -4817,6 +5068,37 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
     }
   };
 
+  const saveSupplierRelationship = async (relationship) => {
+    const orgId = brandProfile.organizationId || data?.context?.organization_id || currentWorkspace?.organization_id || currentWorkspace?.org_id || null;
+    if (!orgId) return;
+    setAdminSavingKey("supplier");
+    try {
+      await upsertKeeprSpaceOrgRelationship({
+        fromOrgId: orgId,
+        toOrgId: relationship.to_org_id || null,
+        toOrgName: relationship.to_org_name || relationship.supplier_name || relationship.name,
+        relationshipType: relationship.relationship_type || "supplier",
+        payload: {
+          ...relationship,
+          relationship_type: relationship.relationship_type || "supplier",
+          source_type: relationship.source_type || "org_reported",
+          source_name: relationship.source_name || "Supplier relationship",
+          metadata: {
+            ...(relationship.metadata || {}),
+            supplier_v1: true,
+            relationship_basis: "organization_resolution",
+          },
+        },
+      });
+      setSupplierNetwork(await listSupplierNetwork({ organizationId: orgId, query: search, limit: 50 }));
+      await load({ quiet: true });
+    } catch (err) {
+      Alert.alert("Could not save supplier", err?.message || "Please try again.");
+    } finally {
+      setAdminSavingKey(null);
+    }
+  };
+
   const saveOrgCapabilities = async (capabilities) => {
     const orgId = brandProfile.organizationId || data?.context?.organization_id || currentWorkspace?.organization_id || currentWorkspace?.org_id || null;
     if (!orgId) return;
@@ -4945,6 +5227,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
     routeNavSection === "ActivatorResources" ? "resources" :
     "catalog";
   const isDealerNetworkView = routeNavSection === "ActivatorDealerNetwork";
+  const isSupplierNetworkView = routeNavSection === "ActivatorSuppliers";
   const templateSubviewCopy =
     templateSubview === "aiContext"
       ? {
@@ -4988,6 +5271,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
     mode === "needs" ? "Recent / Needs Attention" :
     mode === "messages" ? "Messages" :
     mode === "connect" && isDealerNetworkView ? "Dealer Network" :
+    mode === "connect" && isSupplierNetworkView ? "Suppliers" :
     mode === "addBoat" ? "Add / Connect" :
     mode === "templates" ? templateSubviewCopy.breadcrumb :
     mode === "profile" && routeNavSection === "OrgIdentity" ? "Profile / Identity" :
@@ -5008,6 +5292,12 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
         eyebrow: "Dealer Network",
         title: `${copy.name} dealer network`,
         subtitle: "Connected dealer relationships, authority states, and source-reported network context for this organization.",
+      }
+    : mode === "connect" && isSupplierNetworkView
+    ? {
+        eyebrow: "Suppliers",
+        title: `${copy.name} supplier network`,
+        subtitle: "Canonical supplier organizations connected through System Templates, model applicability, and exact installed systems.",
       }
     : mode === "profile" && routeNavSection === "OrgIdentity"
     ? {
@@ -5113,10 +5403,10 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
               <View style={styles.commandHeader}>
                 <View>
                   <Text style={styles.commandKicker}>
-                    {mode === "fleet" ? "Find" : mode === "builds" ? buildsKicker : mode === "templates" ? templateSubviewCopy.kicker : mode === "connect" && isDealerNetworkView ? "Network" : mode === "profile" && routeNavSection === "OrgIdentity" ? "Identity" : mode === "profile" ? "Admin" : mode === "needs" ? "Needs Attention" : mode === "messages" ? "Engage" : mode === "addBoat" ? "Add / Connect" : "Network"}
+                    {mode === "fleet" ? "Find" : mode === "builds" ? buildsKicker : mode === "templates" ? templateSubviewCopy.kicker : mode === "connect" && (isDealerNetworkView || isSupplierNetworkView) ? "Network" : mode === "profile" && routeNavSection === "OrgIdentity" ? "Identity" : mode === "profile" ? "Admin" : mode === "needs" ? "Needs Attention" : mode === "messages" ? "Engage" : mode === "addBoat" ? "Add / Connect" : "Network"}
                   </Text>
                   <Text style={styles.commandTitle}>
-                    {mode === "fleet" ? "Find a Boat / Owner" : mode === "builds" ? buildsTitle : mode === "templates" ? templateSubviewCopy.commandTitle : mode === "connect" && isDealerNetworkView ? "Dealer Network" : mode === "profile" && routeNavSection === "OrgIdentity" ? "Profile / Identity" : mode === "profile" ? `${copy.modeMetric} Settings` : mode === "needs" ? "Recent / Needs Attention" : mode === "messages" ? "Messages" : mode === "addBoat" ? "Add Boat or Connect Owner" : copy.networkTitle}
+                    {mode === "fleet" ? "Find a Boat / Owner" : mode === "builds" ? buildsTitle : mode === "templates" ? templateSubviewCopy.commandTitle : mode === "connect" && isDealerNetworkView ? "Dealer Network" : mode === "connect" && isSupplierNetworkView ? "Suppliers" : mode === "profile" && routeNavSection === "OrgIdentity" ? "Profile / Identity" : mode === "profile" ? `${copy.modeMetric} Settings` : mode === "needs" ? "Recent / Needs Attention" : mode === "messages" ? "Messages" : mode === "addBoat" ? "Add Boat or Connect Owner" : copy.networkTitle}
                   </Text>
                 </View>
                 <View style={styles.commandBadge}>
@@ -5187,6 +5477,17 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
               <NeedsAttentionPanel data={data} onOpenAsset={openBoat} />
             ) : mode === "messages" ? (
               <MessagesPanel data={data} onOpenAsset={openBoat} />
+            ) : mode === "connect" && isSupplierNetworkView ? (
+              <SupplierNetworkPanel
+                suppliers={supplierNetwork?.suppliers || []}
+                loading={supplierNetworkLoading}
+                organizationId={workspaceOrganizationId(currentWorkspace)}
+                organizationName={copy.name}
+                canManage={canAuthorCatalog}
+                onSaveSupplier={saveSupplierRelationship}
+                saving={adminSavingKey === "supplier"}
+                onOpenSystemLibrary={openSupplierSystemTemplate}
+              />
             ) : mode === "connect" && isDealerNetworkView ? (
               <NetworkPanel
                 data={data}
@@ -5858,6 +6159,103 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: spacing.lg,
     ...shadows.sm,
+  },
+  supplierLayout: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.md,
+    marginTop: spacing.lg,
+  },
+  supplierList: {
+    flex: 0.9,
+    gap: spacing.sm,
+    minWidth: 280,
+  },
+  supplierRow: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.md,
+    minHeight: 70,
+    padding: spacing.md,
+  },
+  supplierRowActive: {
+    backgroundColor: "#EFF6FF",
+    borderColor: colors.brandBlue,
+  },
+  supplierIcon: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    height: 38,
+    justifyContent: "center",
+    overflow: "hidden",
+    width: 38,
+  },
+  supplierLogo: {
+    height: "86%",
+    width: "86%",
+  },
+  supplierRowBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+  supplierProfile: {
+    backgroundColor: colors.surfaceSubtle,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flex: 1.6,
+    gap: spacing.md,
+    minWidth: 420,
+    padding: spacing.md,
+  },
+  supplierProfileHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.md,
+  },
+  supplierProfileLogo: {
+    alignItems: "center",
+    backgroundColor: "#0B1220",
+    borderRadius: radius.sm,
+    height: 68,
+    justifyContent: "center",
+    overflow: "hidden",
+    width: 68,
+  },
+  supplierLogoLarge: {
+    height: "86%",
+    width: "86%",
+  },
+  supplierProfileTitleBlock: {
+    flex: 1,
+    minWidth: 0,
+  },
+  metricsRowCompact: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  supplierDetailGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+  },
+  supplierDetailPanel: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flex: 1,
+    minWidth: 220,
+    padding: spacing.md,
   },
   servicePanel: {
     backgroundColor: colors.surface,
