@@ -22,6 +22,40 @@ Executable SQL order:
 Checksums for the final executable SQL files are recorded in
 `CHECKSUMS.sha256`.
 
+## Apply Role Ownership Procedure
+
+The temporary production apply connection must be separate from
+`keepr_prod_audit_ro`. Do not use the audit role for write files.
+
+Because `keepr_prod_release_apply` is temporarily a member of `postgres`, the
+apply session must explicitly switch role ownership before executing package
+files `01` through `06`:
+
+```sql
+select current_database(), current_user, session_user;
+set role postgres;
+select current_database(), current_user, session_user;
+```
+
+With `SET ROLE postgres`, PostgreSQL evaluates subsequent DDL as
+`current_user = postgres`. New objects created by `CREATE TABLE`, `CREATE
+FUNCTION`, triggers, and other DDL are therefore owned by `postgres`, not by
+`keepr_prod_release_apply`. Existing objects replaced by `CREATE OR REPLACE
+FUNCTION` retain normal PostgreSQL ownership behavior under the active role;
+the post-apply smoke below must confirm no production object is owned by the
+temporary apply role.
+
+After executing files `01` through `06`:
+
+```sql
+reset role;
+select current_database(), current_user, session_user;
+```
+
+Then disconnect the apply session. Run `05_post_apply_smoke_readonly.sql` only
+through `keepr_prod_audit_ro`. The smoke includes an ownership check that must
+return zero rows for objects owned by `keepr_prod_release_apply`.
+
 ## RC Line
 
 - Base frozen RC: `c6bcf3be823c8cfeaa90c60ed9511897d93f11bd`
@@ -134,14 +168,19 @@ No migration is `ALREADY PRESENT` in production by ledger or object inspection f
 
 1. Run `00_preflight_readonly.sql`.
 2. Confirm protected counts still match or explain deltas.
-3. Apply `01_schema_reconciliation.sql`.
-4. Apply `02_functions_reconciliation.sql`.
-5. Apply `03_compatibility_backfills.sql`.
-6. Apply `04_curated_reference_data.sql`.
-7. Apply `06_supplier_asset_enablement_delta.sql`.
-8. Deploy the combined RC application code.
-9. Run `05_post_apply_smoke_readonly.sql`.
-10. Run browser/API smoke.
+3. Connect with `SUPABASE_PROD_APPLY_DB_URL` as `keepr_prod_release_apply`.
+4. Confirm production identity, then run `set role postgres;`.
+5. Apply `01_schema_reconciliation.sql`.
+6. Apply `02_functions_reconciliation.sql`.
+7. Apply `03_compatibility_backfills.sql`.
+8. Apply `04_curated_reference_data.sql`.
+9. Apply `06_supplier_asset_enablement_delta.sql`.
+10. Run `reset role;` and disconnect the apply session.
+11. Reconnect with `keepr_prod_audit_ro`.
+12. Run `05_post_apply_smoke_readonly.sql`.
+13. Disable/revoke/drop `keepr_prod_release_apply`.
+14. Deploy the combined RC application code only after DB GO.
+15. Run browser/API smoke.
 
 ## Expected Production Row Changes
 

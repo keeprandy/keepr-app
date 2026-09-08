@@ -35,3 +35,38 @@ select
     when to_regclass('public.exact_build_drafts') is null then null
     else (select count(*) from public.exact_build_drafts)
   end as exact_build_draft_rows;
+
+\echo '== temporary release apply role must own no production objects =='
+with owned_relations as (
+  select 'relation'::text as object_kind, n.nspname, c.relname as object_name
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  join pg_roles r on r.oid = c.relowner
+  where r.rolname = 'keepr_prod_release_apply'
+    and n.nspname not in ('pg_catalog', 'information_schema')
+),
+owned_functions as (
+  select 'function'::text as object_kind, n.nspname, p.proname as object_name
+  from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+  join pg_roles r on r.oid = p.proowner
+  where r.rolname = 'keepr_prod_release_apply'
+    and n.nspname not in ('pg_catalog', 'information_schema')
+),
+owned_types as (
+  select 'type'::text as object_kind, n.nspname, t.typname as object_name
+  from pg_type t
+  join pg_namespace n on n.oid = t.typnamespace
+  join pg_roles r on r.oid = t.typowner
+  where r.rolname = 'keepr_prod_release_apply'
+    and n.nspname not in ('pg_catalog', 'information_schema')
+)
+select object_kind, nspname, object_name
+from owned_relations
+union all
+select object_kind, nspname, object_name
+from owned_functions
+union all
+select object_kind, nspname, object_name
+from owned_types
+order by object_kind, nspname, object_name;
