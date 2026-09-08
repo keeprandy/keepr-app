@@ -16,7 +16,7 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import ActivatorBreadcrumb from "../components/ActivatorBreadcrumb";
 import { createLinkAttachment } from "../lib/attachmentsUploader";
 import { listAttachmentsForTarget, removePlacementById } from "../lib/attachmentsApi";
-import { getSystemTemplate, listSystemTemplates, upsertSystemTemplate } from "../lib/activatorApi";
+import { getSystemTemplate, listSupplierNetwork, listSystemTemplates, upsertSystemTemplate } from "../lib/activatorApi";
 import { supabase } from "../lib/supabaseClient";
 import { colors, radius, shadows, spacing } from "../styles/theme";
 
@@ -34,6 +34,7 @@ const EMPTY_DRAFT = {
   id: null,
   name: "",
   manufacturer: "",
+  supplierOrgId: null,
   canonicalKey: "",
   systemCategory: "",
   description: "",
@@ -91,6 +92,7 @@ function draftFromTemplate(template) {
     id: template?.id || null,
     name: template?.name || "",
     manufacturer: template?.manufacturer || "",
+    supplierOrgId: template?.supplier_org_id || null,
     canonicalKey: template?.canonical_key || canonicalKeyFor(template || {}),
     systemCategory: template?.system_category || "",
     description: template?.description || "",
@@ -176,6 +178,7 @@ export default function SystemLibraryScreen() {
   const initialSystemTemplateId = route?.params?.systemTemplateId || null;
   const [query, setQuery] = useState(route?.params?.query || "");
   const [templates, setTemplates] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
   const [selected, setSelected] = useState(null);
   const [draft, setDraft] = useState({ ...EMPTY_DRAFT, ownerOrgId: null });
   const [resources, setResources] = useState([]);
@@ -228,6 +231,26 @@ export default function SystemLibraryScreen() {
   }, [loadList]);
 
   useEffect(() => {
+    let active = true;
+    async function loadSuppliers() {
+      if (!organizationId) {
+        setSuppliers([]);
+        return;
+      }
+      try {
+        const result = await listSupplierNetwork({ organizationId, limit: 50 });
+        if (active) setSuppliers(result?.suppliers || []);
+      } catch (err) {
+        if (active) setSuppliers([]);
+      }
+    }
+    loadSuppliers();
+    return () => {
+      active = false;
+    };
+  }, [organizationId]);
+
+  useEffect(() => {
     if (!initialSystemTemplateId) return;
     let active = true;
     async function loadInitial() {
@@ -247,6 +270,7 @@ export default function SystemLibraryScreen() {
   const selectedId = selected?.id || draft.id || null;
   const canSave = draft.name.trim() && draft.canonicalKey.trim();
   const visibleTemplates = useMemo(() => templates || [], [templates]);
+  const selectedSupplier = suppliers.find((supplier) => supplier.organization_id === draft.supplierOrgId) || null;
 
   const updateDraft = (key, value) => {
     setDraft((current) => {
@@ -266,6 +290,15 @@ export default function SystemLibraryScreen() {
     setDraft({ ...EMPTY_DRAFT, ownerOrgId: null, canonicalKey: canonicalKeyFor({}) });
   };
 
+  const openSupplierNetwork = () => {
+    navigation.navigate("ActivatorHome", {
+      initialMode: "connect",
+      navSection: "ActivatorSuppliers",
+      organizationId,
+      workspaceId: organizationId ? `org:${organizationId}` : null,
+    });
+  };
+
   const save = async () => {
     setSaving(true);
     setError("");
@@ -276,6 +309,7 @@ export default function SystemLibraryScreen() {
         name: draft.name.trim(),
         canonicalKey: draft.canonicalKey.trim(),
         manufacturer: draft.manufacturer.trim(),
+        supplierOrgId: draft.supplierOrgId || null,
         ownerOrgId: draft.ownerOrgId || null,
         systemCategory: draft.systemCategory.trim(),
         description: draft.description.trim(),
@@ -435,6 +469,44 @@ export default function SystemLibraryScreen() {
             <Field label="Canonical key" value={draft.canonicalKey} onChangeText={(value) => updateDraft("canonicalKey", value)} placeholder="system_template.mercury.mercury_600_v12_verado" />
             <Field label="Category" value={draft.systemCategory} onChangeText={(value) => updateDraft("systemCategory", value)} placeholder="Propulsion" />
           </View>
+          <View style={styles.supplierPicker}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>Canonical supplier Organization</Text>
+              <Text style={styles.panelHint}>
+                Supplier identity comes from the OEM Supplier Network. Manufacturer / provider text remains for compatibility.
+              </Text>
+            </View>
+            <TouchableOpacity style={styles.secondaryButtonCompact} onPress={openSupplierNetwork}>
+              <Ionicons name="git-network-outline" size={15} color={colors.primary} />
+              <Text style={styles.secondaryButtonText}>Add Supplier</Text>
+            </TouchableOpacity>
+            <View style={styles.chipRow}>
+              <Chip
+                active={!draft.supplierOrgId}
+                label="Unresolved"
+                onPress={() => updateDraft("supplierOrgId", null)}
+              />
+              {suppliers.map((supplier) => (
+                <Chip
+                  key={supplier.organization_id}
+                  active={draft.supplierOrgId === supplier.organization_id}
+                  label={supplier.name}
+                  onPress={() => {
+                    setDraft((current) => ({
+                      ...current,
+                      supplierOrgId: supplier.organization_id,
+                      manufacturer: current.manufacturer.trim() ? current.manufacturer : supplier.name,
+                    }));
+                  }}
+                />
+              ))}
+            </View>
+            {selectedSupplier ? (
+              <Text style={styles.panelHint}>
+                Linked to {selectedSupplier.name}: {selectedSupplier.system_template_count || 0} systems, {selectedSupplier.model_count || 0} model references.
+              </Text>
+            ) : null}
+          </View>
           <OwnershipChoice
             activeOrgId={organizationId}
             ownerOrgId={draft.ownerOrgId}
@@ -527,6 +599,7 @@ const styles = StyleSheet.create({
   saveButtonText: { color: "#fff", fontWeight: "900" },
   disabledButton: { opacity: 0.55 },
   formGrid: { flexDirection: "row", gap: spacing.sm, flexWrap: "wrap" },
+  supplierPicker: { backgroundColor: "#f8fbff", borderColor: "#dfe5ec", borderRadius: radius.md, borderWidth: 1, gap: spacing.sm, padding: spacing.md },
   ownerChoice: { backgroundColor: "#f8fafc", borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, gap: spacing.sm, padding: spacing.md },
   field: { flex: 1, minWidth: 220, gap: 5 },
   label: { fontSize: 12, color: colors.textMuted, fontWeight: "900" },
@@ -545,6 +618,7 @@ const styles = StyleSheet.create({
   iconButton: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#fee2e2" },
   resourceForm: { gap: spacing.sm, marginTop: spacing.sm },
   secondaryButton: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderWidth: 1, borderColor: "#bfdbfe", borderRadius: radius.md, paddingVertical: 11 },
+  secondaryButtonCompact: { alignItems: "center", alignSelf: "flex-start", backgroundColor: "#fff", borderColor: "#bfdbfe", borderRadius: radius.md, borderWidth: 1, flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingVertical: 8 },
   secondaryButtonText: { color: colors.primary, fontWeight: "900" },
   countBadge: { color: colors.primary, fontWeight: "900", backgroundColor: "#eaf3ff", paddingHorizontal: 10, paddingVertical: 5, borderRadius: radius.full },
   ontologyPanel: { borderWidth: 1, borderColor: "#dfe5ec", backgroundColor: "#f8fafc", borderRadius: radius.md, padding: spacing.md, gap: 5 },
