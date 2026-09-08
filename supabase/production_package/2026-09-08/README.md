@@ -20,6 +20,7 @@ Executable SQL order:
 7. `05_post_apply_smoke_readonly.sql`
 8. `07_function_grant_hardening.sql`
 9. `08_function_grant_smoke_readonly.sql`
+10. `09_function_explicit_anon_revoke.sql`
 
 Checksums for the final executable SQL files are recorded in
 `CHECKSUMS.sha256`.
@@ -84,6 +85,29 @@ The hardening patch is privileges-only:
 
 This patch does not alter tables, data, RLS policies, triggers, or function
 bodies.
+
+## 2026-09-08 Explicit Anon Grant Forward-Fix
+
+`07_function_grant_hardening.sql` successfully revoked inherited EXECUTE from
+PostgreSQL's `PUBLIC` pseudo-role, but the read-only smoke showed restricted
+functions still had explicit direct grants to `anon` from earlier convergence
+migrations.
+
+The forward-fix is privileges-only:
+
+1. Verify `CHECKSUMS.sha256`.
+2. Apply `09_function_explicit_anon_revoke.sql` with the production owner/admin
+   apply connection.
+3. Disconnect the owner/admin apply session.
+4. Run updated `08_function_grant_smoke_readonly.sql` with
+   `keepr_prod_audit_ro`.
+5. Confirm `privilege matrix violations`, `restricted anon violations`, and
+   `trigger-only direct client exposure` all return zero rows.
+6. Rerun `05_post_apply_smoke_readonly.sql` with `keepr_prod_audit_ro`.
+7. Do not deploy application code until Andy explicitly approves.
+
+This patch does not alter function definitions, tables, data, RLS policies, or
+product behavior.
 
 ## Production Owner/Admin Apply Procedure
 
@@ -244,6 +268,11 @@ No migration is `ALREADY PRESENT` in production by ledger or object inspection f
 9. `08_function_grant_smoke_readonly.sql`
    Read-only catalog smoke for function EXECUTE privileges after hardening.
 
+10. `09_function_explicit_anon_revoke.sql`
+    Privileges-only forward-fix that removes explicit `anon` grants from
+    restricted functions while preserving intended authenticated/service-role
+    access.
+
 ## Intended Production Order After Approval
 
 1. Run `00_preflight_readonly.sql` through `keepr_prod_audit_ro`.
@@ -262,10 +291,13 @@ No migration is `ALREADY PRESENT` in production by ledger or object inspection f
 11. Apply privileges-only `07_function_grant_hardening.sql` only after separate
     approval.
 12. Validate privileges with read-only `08_function_grant_smoke_readonly.sql`.
-13. Delete `.local-env/production-apply.env` after successful audit.
-14. Deploy the combined RC application code only after DB GO and explicit
+13. If `08` shows explicit anon grants remain, apply privileges-only
+    `09_function_explicit_anon_revoke.sql` only after separate approval, then
+    rerun `08`.
+14. Delete `.local-env/production-apply.env` after successful audit.
+15. Deploy the combined RC application code only after DB GO and explicit
     approval.
-15. Run browser/API smoke.
+16. Run browser/API smoke.
 
 ## Expected Production Row Changes
 
