@@ -36,37 +36,72 @@ select
     else (select count(*) from public.exact_build_drafts)
   end as exact_build_draft_rows;
 
-\echo '== temporary release apply role must own no production objects =='
-with owned_relations as (
-  select 'relation'::text as object_kind, n.nspname, c.relname as object_name
+\echo '== release-created objects should be owned by postgres =='
+with expected_release_relations(relname) as (
+  values
+    ('brands'),
+    ('organization_brand_relationships'),
+    ('system_templates'),
+    ('keepr_links'),
+    ('exact_build_drafts'),
+    ('exact_build_draft_items')
+),
+expected_release_functions(proname) as (
+  values
+    ('keeprlink_slugify'),
+    ('keeprlink_normalize_address'),
+    ('keeprlink_compact_address'),
+    ('keeprlink_purpose'),
+    ('keeprlink_public_purpose'),
+    ('keeprlink_context_instructions'),
+    ('keeprlink_resource_projection'),
+    ('keeprlink_org_context'),
+    ('keeprlink_model_context'),
+    ('keeprlink_system_template_context'),
+    ('keeprlink_asset_context'),
+    ('keeprlink_system_instance_context'),
+    ('resolve_keeprlink_context'),
+    ('search_keeprspace_organizations'),
+    ('apply_system_template_reference_from_metadata'),
+    ('list_organization_supplier_network'),
+    ('ensure_asset_keepr_link'),
+    ('sync_asset_keepr_link'),
+    ('promote_system_to_system_template')
+),
+release_relations as (
+  select 'relation'::text as object_kind, n.nspname, c.relname as object_name, r.rolname as owner
   from pg_class c
   join pg_namespace n on n.oid = c.relnamespace
   join pg_roles r on r.oid = c.relowner
-  where r.rolname = 'keepr_prod_release_apply'
-    and n.nspname not in ('pg_catalog', 'information_schema')
+  join expected_release_relations e on e.relname = c.relname
+  where n.nspname = 'public'
+    and c.relkind in ('r', 'p')
+    and r.rolname <> 'postgres'
 ),
-owned_functions as (
-  select 'function'::text as object_kind, n.nspname, p.proname as object_name
+release_functions as (
+  select 'function'::text as object_kind, n.nspname, p.proname as object_name, r.rolname as owner
   from pg_proc p
   join pg_namespace n on n.oid = p.pronamespace
   join pg_roles r on r.oid = p.proowner
-  where r.rolname = 'keepr_prod_release_apply'
-    and n.nspname not in ('pg_catalog', 'information_schema')
+  join expected_release_functions e on e.proname = p.proname
+  where n.nspname = 'public'
+    and r.rolname <> 'postgres'
 ),
-owned_types as (
-  select 'type'::text as object_kind, n.nspname, t.typname as object_name
+release_types as (
+  select 'type'::text as object_kind, n.nspname, t.typname as object_name, r.rolname as owner
   from pg_type t
   join pg_namespace n on n.oid = t.typnamespace
   join pg_roles r on r.oid = t.typowner
-  where r.rolname = 'keepr_prod_release_apply'
-    and n.nspname not in ('pg_catalog', 'information_schema')
+  join expected_release_relations e on e.relname = t.typname
+  where n.nspname = 'public'
+    and r.rolname <> 'postgres'
 )
-select object_kind, nspname, object_name
-from owned_relations
+select object_kind, nspname, object_name, owner
+from release_relations
 union all
-select object_kind, nspname, object_name
-from owned_functions
+select object_kind, nspname, object_name, owner
+from release_functions
 union all
-select object_kind, nspname, object_name
-from owned_types
+select object_kind, nspname, object_name, owner
+from release_types
 order by object_kind, nspname, object_name;
