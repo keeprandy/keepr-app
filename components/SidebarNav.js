@@ -1279,10 +1279,6 @@ if (isPublicFlow) return null;
         window.location.assign("/keepr-admin");
         return;
       }
-      if (navHref && Platform.OS === "web" && typeof window !== "undefined") {
-        window.location.assign(navHref);
-        return;
-      }
       go(item.key);
     };
     const navContent = (
@@ -1326,7 +1322,7 @@ if (isPublicFlow) return null;
           aria-current={isActive ? "page" : undefined}
           onClick={(event) => {
             event.preventDefault();
-            if (typeof window !== "undefined") window.location.assign(navHref);
+            go(item.key);
           }}
         >
           {navContent}
