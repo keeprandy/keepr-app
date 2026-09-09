@@ -3311,7 +3311,7 @@ return (
                           />
                         ) : (
                           <View style={appStyles.webShell}>
-                            {isPersonalWebRoute || hideSidebarRoutes.includes(currentRouteName) ? null : (
+                            {(isPersonalWebRoute && !isOrgWorkspaceActive) || hideSidebarRoutes.includes(currentRouteName) ? null : (
                               <SidebarNav currentRouteName={currentRouteName} />
                             )}
 
