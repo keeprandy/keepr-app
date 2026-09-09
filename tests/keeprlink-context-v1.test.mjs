@@ -200,6 +200,7 @@ test("legacy public KAC source manifest strips signed Supabase storage URLs", ()
 
 test("KeeprLINK asset context v2 phase 1 projects bounded operational context without replacing v1", () => {
   const sql = read("supabase/migrations/20260909173000_keeprlink_asset_context_v2_phase1.sql");
+  const systemNormalization = read("supabase/migrations/20260909201000_keeprlink_asset_system_context_normalization.sql");
   const contract = read("docs/keeprlink-asset-context-v2-contract.md");
 
   assert.match(contract, /Cold-LLM Acceptance Test|BOAT-2008-3BOZ95 Acceptance Fixture/);
@@ -248,6 +249,19 @@ test("KeeprLINK asset context v2 phase 1 projects bounded operational context wi
   assert.doesNotMatch(sql, /insert into public\.actions/i);
   assert.doesNotMatch(sql, /update public\.actions/i);
   assert.doesNotMatch(sql, /delete from public\.actions/i);
+
+  assert.match(systemNormalization, /standard,identity,manufacturer/);
+  assert.match(systemNormalization, /s\.metadata #>> '\{standard,identity,manufacturer\}'/);
+  assert.match(systemNormalization, /s\.metadata #>> '\{standard,identity,model\}'/);
+  assert.match(systemNormalization, /s\.metadata #>> '\{standard,identity,serial_number\}'/);
+  assert.match(systemNormalization, /'provider_relationships'/);
+  assert.match(systemNormalization, /systems\.metadata\.standard\.relationships\.keepr_pro_ids/);
+  assert.match(systemNormalization, /'evidence_summary'/);
+  assert.match(systemNormalization, /'resource_bindings'/);
+  assert.match(systemNormalization, /where system_id = s\.id/);
+  assert.match(systemNormalization, /limit 5/);
+  assert.match(systemNormalization, /limit 8/);
+  assert.match(systemNormalization, /limit 10/);
 });
 
 test("organization-wide resources can be placed on org targets", () => {
