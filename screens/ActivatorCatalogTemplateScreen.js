@@ -230,6 +230,25 @@ function modelTemplateLabel(template = {}) {
   return [year, template.manufacturer, template.model].filter(Boolean).join(" ") || template.template_key || "Model";
 }
 
+function webSearchParam(name) {
+  if (Platform.OS !== "web" || typeof window === "undefined") return null;
+  try {
+    return new URLSearchParams(window.location.search || "").get(name);
+  } catch {
+    return null;
+  }
+}
+
+function webCatalogTemplateKey() {
+  if (Platform.OS !== "web" || typeof window === "undefined") return null;
+  try {
+    const match = (window.location.pathname || "").match(/^\/activator\/catalog\/([^/?#]+)/);
+    return match?.[1] ? decodeURIComponent(match[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeTemplateAttachmentMedia(row, template = {}) {
   const sourceContext = row?.source_context && typeof row.source_context === "object" ? row.source_context : {};
   const heroPlacementId = templateHeroPlacementId(template);
@@ -1305,7 +1324,9 @@ function ShowcaseGallery({
 }
 
 export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
-  const templateKey = route?.params?.templateKey || "tiara-2027-39-le";
+  const templateKey = route?.params?.templateKey || webCatalogTemplateKey() || "tiara-2027-39-le";
+  const routeOrganizationId = route?.params?.organizationId || webSearchParam("organizationId") || null;
+  const routeWorkspaceId = route?.params?.workspaceId || webSearchParam("workspaceId") || null;
   const [tab, setTab] = useState("overview");
   const [detail, setDetail] = useState(null);
   const [selectedItem, setSelectedItem] = useState(null);
@@ -1450,22 +1471,26 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
   const startExactBuild = () => {
     navigation.navigate("ActivatorExactBuild", {
       templateKey: template.template_key || templateKey,
-      organizationId: route?.params?.organizationId || null,
-      workspaceId: route?.params?.workspaceId || null,
+      organizationId: routeOrganizationId,
+      workspaceId: routeWorkspaceId,
     });
   };
 
   const customizeTemplate = (focusCanonicalKey = null) => {
     navigation.navigate("ActivatorTemplateCustomize", {
       templateKey: template.template_key || templateKey,
-      organizationId: route?.params?.organizationId || null,
-      workspaceId: route?.params?.workspaceId || null,
+      organizationId: routeOrganizationId,
+      workspaceId: routeWorkspaceId,
       focusCanonicalKey,
     });
   };
 
   const openTemplateItemEditor = (item) => {
-    const params = itemEditParams(item, template.template_key || templateKey, route?.params || {});
+    const params = itemEditParams(item, template.template_key || templateKey, {
+      ...(route?.params || {}),
+      organizationId: routeOrganizationId,
+      workspaceId: routeWorkspaceId,
+    });
     if (!params) return;
     navigation.navigate("ActivatorTemplateItemEditor", params);
   };
@@ -1545,7 +1570,7 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
     provenance_detail: "Uploaded to the reusable model template; not exact-hull evidence.",
     contribution_context: source,
     authority_state: "oem_published",
-    organization_id: route?.params?.organizationId || template.organization_id || null,
+    organization_id: routeOrganizationId || template.organization_id || null,
     template_id: template.id,
     template_key: template.template_key || templateKey,
     source_name: `${template.manufacturer || "OEM"} ${template.model || "model"}`.trim(),
@@ -1564,8 +1589,8 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
       contributor_role: "oem",
       contributed_by_org_role: "oem",
       authority_state: "official",
-      organization_id: route?.params?.organizationId || template.organization_id || null,
-      contributed_by_org_id: route?.params?.organizationId || template.organization_id || null,
+      organization_id: routeOrganizationId || template.organization_id || null,
+      contributed_by_org_id: routeOrganizationId || template.organization_id || null,
       contributed_by_org_label: orgName,
       provided_by_label: orgName,
       authored_by_label: orgName,
@@ -1926,8 +1951,8 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
       assetName: modelTemplateLabel(template),
       returnRoute: "ActivatorCatalogTemplate",
       templateKey: template.template_key || templateKey,
-      organizationId: route?.params?.organizationId || null,
-      workspaceId: route?.params?.workspaceId || null,
+      organizationId: routeOrganizationId,
+      workspaceId: routeWorkspaceId,
     });
   };
 
@@ -2045,8 +2070,8 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
               params: {
                 initialMode: "templates",
                 navSection: "ActivatorTemplates",
-                organizationId: route?.params?.organizationId || null,
-                workspaceId: route?.params?.workspaceId || null,
+                organizationId: routeOrganizationId,
+                workspaceId: routeWorkspaceId,
               },
             },
           ]}

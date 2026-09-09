@@ -5,6 +5,7 @@ import {
   Alert,
   Linking,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -20,6 +21,7 @@ import { listAttachmentsForTarget, removePlacementById } from "../lib/attachment
 import { getCatalogTemplates, getSystemTemplate, listSupplierNetwork, listSystemTemplates, linkModelItemSystemTemplate, retireSystemTemplate, upsertCatalogTemplateItem, upsertSystemTemplate } from "../lib/activatorApi";
 import { searchKeeprSpaceOrganizations, upsertKeeprSpaceOrgRelationship } from "../lib/keeprspaceApi";
 import { supabase } from "../lib/supabaseClient";
+import { useWorkspace } from "../context/WorkspaceContext";
 import { colors, radius, shadows, spacing } from "../styles/theme";
 
 const AUTHORITY_STATES = [
@@ -68,6 +70,15 @@ function slugify(value) {
 
 function canonicalKeyFor({ manufacturer, name }) {
   return `system_template.${slugify(manufacturer) || "generic"}.${slugify(name) || "system"}`;
+}
+
+function webSearchParam(name) {
+  if (Platform.OS !== "web" || typeof window === "undefined") return null;
+  try {
+    return new URLSearchParams(window.location.search || "").get(name);
+  } catch {
+    return null;
+  }
 }
 
 function linesToArray(value) {
@@ -186,7 +197,13 @@ function ResourceRow({ resource, onRemove }) {
 export default function SystemLibraryScreen() {
   const navigation = useNavigation();
   const route = useRoute();
-  const organizationId = route?.params?.organizationId || null;
+  const { currentWorkspace, setCurrentWorkspaceId, workspaces } = useWorkspace();
+  const workspaceId = route?.params?.workspaceId || webSearchParam("workspaceId") || null;
+  const organizationId =
+    route?.params?.organizationId ||
+    webSearchParam("organizationId") ||
+    (String(workspaceId || "").startsWith("org:") ? String(workspaceId).slice(4) : null) ||
+    null;
   const initialSystemTemplateId = route?.params?.systemTemplateId || null;
   const [query, setQuery] = useState(route?.params?.query || "");
   const [templates, setTemplates] = useState([]);
@@ -212,6 +229,26 @@ export default function SystemLibraryScreen() {
   const [applySaving, setApplySaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    if (!organizationId) return;
+    const orgWorkspace = workspaces.find((workspace) => {
+      if (!workspace?.workspace_type || workspace.workspace_type === "keepr") return false;
+      const candidateId =
+        workspace.organization_id ||
+        workspace.org_id ||
+        workspace.authority?.organization_id ||
+        workspace.authority?.org_id ||
+        workspace.authority?.subject_id ||
+        (String(workspace.workspace_id || workspace.id || "").startsWith("org:")
+          ? String(workspace.workspace_id || workspace.id).slice(4)
+          : null);
+      return candidateId === organizationId;
+    });
+    if (orgWorkspace?.workspace_id && orgWorkspace.workspace_id !== currentWorkspace?.workspace_id) {
+      setCurrentWorkspaceId(orgWorkspace.workspace_id);
+    }
+  }, [currentWorkspace?.workspace_id, organizationId, setCurrentWorkspaceId, workspaces]);
 
   const loadList = useCallback(async (queryOverride = query) => {
     setLoading(true);
@@ -347,7 +384,7 @@ export default function SystemLibraryScreen() {
       initialMode: "connect",
       navSection: "ActivatorSuppliers",
       organizationId,
-      workspaceId: organizationId ? `org:${organizationId}` : null,
+      workspaceId: workspaceId || (organizationId ? `org:${organizationId}` : null),
     });
   };
 
@@ -694,7 +731,7 @@ export default function SystemLibraryScreen() {
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <ActivatorBreadcrumb
         items={[
-          { label: "Activator Home", route: "ActivatorHome", params: { initialMode: "templates", organizationId } },
+          { label: "Activator Home", route: "ActivatorHome", params: { initialMode: "templates", organizationId, workspaceId } },
           { label: "System Library" },
         ]}
       />
