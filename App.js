@@ -327,6 +327,46 @@ function organizationIdFromWorkspace(workspace) {
   );
 }
 
+function webRequestedOrgWorkspaceIdentity() {
+  if (Platform.OS !== "web") return { workspaceId: null, organizationId: null };
+  try {
+    const params = new URLSearchParams(window.location.search || "");
+    const workspaceId = params.get("workspaceId") || null;
+    const organizationId =
+      params.get("organizationId") ||
+      (String(workspaceId || "").startsWith("org:") ? String(workspaceId).slice(4) : null);
+    return { workspaceId, organizationId };
+  } catch (_) {
+    return { workspaceId: null, organizationId: null };
+  }
+}
+
+function workspaceMatchesOrganization(workspace, organizationId) {
+  const orgId = String(organizationId || "");
+  if (!workspace || !orgId) return false;
+
+  return (
+    organizationIdFromWorkspace(workspace) === orgId ||
+    workspace.workspace_id === `org:${orgId}` ||
+    workspace.id === `org:${orgId}`
+  );
+}
+
+function hasWorkspaceForRequestedOrg(workspaces, organizationId, workspaceId) {
+  const orgId = String(organizationId || "");
+  const requestedWorkspaceId = String(workspaceId || "");
+  if (!orgId && !requestedWorkspaceId.startsWith("org:")) return true;
+
+  return (workspaces || []).some((workspace) =>
+    workspace?.workspace_type &&
+    workspace.workspace_type !== "keepr" &&
+    (
+      (orgId && workspaceMatchesOrganization(workspace, orgId)) ||
+      (requestedWorkspaceId && (workspace.workspace_id === requestedWorkspaceId || workspace.id === requestedWorkspaceId))
+    )
+  );
+}
+
 function activatorLandingParamsForWorkspace(workspace) {
   if (!workspace) return undefined;
   const workspaceId = workspace?.workspace_id || workspace?.id || null;
@@ -2452,8 +2492,30 @@ identifyCurrentUser();
   // Force correct landing route after profile gate resolves (web/state can be "sticky")
   const targetRoute = React.useMemo(() => {
     const webRoute = routeForCurrentWebPath();
+    const requestedOrg = webRequestedOrgWorkspaceIdentity();
+    const hasRequestedOrgAccess = hasWorkspaceForRequestedOrg(
+      workspaces,
+      requestedOrg.organizationId,
+      requestedOrg.workspaceId
+    );
+    const isOrgWebRouteWithoutAccess =
+      Platform.OS === "web" &&
+      user?.id &&
+      !loadingWorkspaces &&
+      webRoute &&
+      (
+        webRoute === "ActivatorHome" ||
+        webRoute === "SystemLibrary" ||
+        String(webRoute || "").startsWith("Activator")
+      ) &&
+      (requestedOrg.organizationId || String(requestedOrg.workspaceId || "").startsWith("org:")) &&
+      !hasRequestedOrgAccess;
+
     if (initializing) return Platform.OS === "web" && webRoute ? null : "SplashIntro";
     if (!user) return isResetLink ? "ResetPassword" : "Auth";
+    if (isOrgWebRouteWithoutAccess) {
+      return routeForWorkspace(currentWorkspace, legacyProfileRole || role);
+    }
     if (webRoute === "KeeprAdminHome" || webRoute === "KeeprAdminOrgDetail") return webRoute;
     if (Platform.OS === "web" && webRoute) {
       if (webRoute === "PersonalModule" && isOrgWorkspaceActive) {
@@ -2467,7 +2529,7 @@ identifyCurrentUser();
     return shouldRouteToOnboarding
       ? "OnboardingStack"
       : routeForWorkspace(currentWorkspace, legacyProfileRole || role);
-  }, [initializing, user, isResetLink, loadingRole, role, loadingWorkspaces, onboardingState, assetCount, isOrgWorkspaceActive, hasOrgWorkspace, shouldRouteToOnboarding, currentWorkspace, legacyProfileRole]);
+  }, [initializing, user, isResetLink, loadingRole, role, loadingWorkspaces, onboardingState, assetCount, isOrgWorkspaceActive, hasOrgWorkspace, shouldRouteToOnboarding, currentWorkspace, legacyProfileRole, workspaces]);
 
   const didInitialNavResolve = React.useRef(false);
   const lastResetRouteRef = React.useRef(null);
@@ -2518,6 +2580,18 @@ React.useEffect(() => {
       path.startsWith("/boat/") ||
       path.startsWith("/invite/") ||
       path.startsWith("/resolve/");
+    const requestedOrg = webRequestedOrgWorkspaceIdentity();
+    const hasRequestedOrgAccess = hasWorkspaceForRequestedOrg(
+      workspaces,
+      requestedOrg.organizationId,
+      requestedOrg.workspaceId
+    );
+    const isUnauthorizedOrgWebDeepLink =
+      user?.id &&
+      !loadingWorkspaces &&
+      (path === "/activator" || path.startsWith("/activator/")) &&
+      (requestedOrg.organizationId || String(requestedOrg.workspaceId || "").startsWith("org:")) &&
+      !hasRequestedOrgAccess;
     const isAuthenticatedWebDeepLink =
       path.startsWith("/inbox") ||
       path.startsWith("/super") ||
@@ -2540,7 +2614,11 @@ React.useEffect(() => {
       } catch (_) {}
     }
 
-if (isPublicWebDeepLink || (user?.id && isAuthenticatedWebDeepLink) || (initializing && isAuthenticatedWebDeepLink)) {
+if (
+  isPublicWebDeepLink ||
+  (user?.id && isAuthenticatedWebDeepLink && !isUnauthorizedOrgWebDeepLink) ||
+  (initializing && isAuthenticatedWebDeepLink)
+) {
       didInitialNavResolve.current = true;
       return;
     }
@@ -2580,7 +2658,7 @@ if (isPublicWebDeepLink || (user?.id && isAuthenticatedWebDeepLink) || (initiali
 
   didInitialNavResolve.current = true;
   lastResetRouteRef.current = targetRoute;
-}, [targetRoute, isResetLink, isOrgWorkspaceActive, activeTrigger?.type, initializing, user?.id]);
+}, [targetRoute, isResetLink, isOrgWorkspaceActive, activeTrigger?.type, initializing, user?.id, loadingWorkspaces, workspaces]);
 
   React.useEffect(() => {
     let mounted = true;
