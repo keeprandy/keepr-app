@@ -578,7 +578,11 @@ function heroMediaFromTemplate(template) {
     null;
   if (configured) return configured;
 
-  return (template?.showcase_media || []).find((item) => item.role === "hero" || item.metadata?.role === "hero");
+  const showcaseMedia = template?.showcase_media || [];
+  return (
+    showcaseMedia.find((item) => item.role === "hero" || item.metadata?.role === "hero") ||
+    showcaseMedia.find((item) => mediaAsset(item))
+  );
 }
 
 function assetIdForBoat(boat) {
