@@ -33,6 +33,7 @@ import { DEFAULT_MEMBER_AVATAR } from "../lib/memberAvatar";
 import { useAuth } from "../context/AuthContext";
 import { profileIdentityValues } from "../lib/profileIdentityInitialization";
 import {
+  clearStoredAuthActivationIntent,
   getActiveAuthActivationIntent,
   getStoredAuthActivationIntent,
   storeAuthActivationIntent,
@@ -390,8 +391,11 @@ export default function AuthScreen({ navigation, route }) {
       }
       const protectedReturnTo = getProtectedReturnTo(route?.params || null);
       cleanAuthUrl();
+      if (protectedReturnTo) {
+        await clearStoredAuthActivationIntent();
+        if (continueProtectedReturnTo(protectedReturnTo)) return true;
+      }
       if (await continueActivationJourney()) return true;
-      if (continueProtectedReturnTo(protectedReturnTo)) return true;
       return true;
     };
 
@@ -863,9 +867,14 @@ const continueActivationJourney = async () => {
           console.log("[AuthScreen] profile/claim failed:", e?.message || e);
         }
 
+        const protectedReturnTo = getProtectedReturnTo(route?.params || null);
+        if (protectedReturnTo) {
+          await clearStoredAuthActivationIntent();
+          if (continueProtectedReturnTo(protectedReturnTo)) return;
+        }
+
         const continued = await continueActivationJourney();
         if (continued) return;
-        if (continueProtectedReturnTo(route?.params?.returnTo || null)) return;
       }
       
     } catch (e) {

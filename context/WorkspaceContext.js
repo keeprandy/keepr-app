@@ -201,10 +201,24 @@ export function WorkspaceProvider({ children }) {
   const [legacyProfileRole, setLegacyProfileRole] = useState(null);
 
   const currentWorkspace = useMemo(() => {
-    return (
-      workspaces.find((w) => w.workspace_id === currentWorkspaceId || w.id === currentWorkspaceId) ||
-      workspaces[0]
-    );
+    const explicit = workspaces.find((w) => w.workspace_id === currentWorkspaceId || w.id === currentWorkspaceId);
+
+    if (Platform.OS === "web") {
+      const requested = webLocationWorkspaceRequest();
+      if (requested.wantsOrgWorkspace) {
+        const requestedOrgWorkspace = requested.organizationId
+          ? workspaces.find((workspace) => isOrgWorkspace(workspace) && workspaceMatchesOrganization(workspace, requested.organizationId))
+          : null;
+        if (requestedOrgWorkspace) return requestedOrgWorkspace;
+
+        const requestedWorkspace = requested.workspaceId
+          ? workspaces.find((workspace) => isOrgWorkspace(workspace) && (workspace.workspace_id === requested.workspaceId || workspace.id === requested.workspaceId))
+          : null;
+        if (requestedWorkspace) return requestedWorkspace;
+      }
+    }
+
+    return explicit || workspaces[0];
   }, [workspaces, currentWorkspaceId]);
 
   const loadWorkspaces = useCallback(async () => {
