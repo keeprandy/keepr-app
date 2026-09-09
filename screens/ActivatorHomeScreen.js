@@ -4145,9 +4145,9 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
       console.error("Activator mode route update failed:", err);
     }
   }, [
-    currentWorkspace?.org_id,
-    currentWorkspace?.organization_id,
-    currentWorkspace?.workspace_id,
+    activeWorkspace?.org_id,
+    activeWorkspace?.organization_id,
+    activeWorkspace?.workspace_id,
     currentWorkspace?.workspace_type,
     activeWorkspace,
     fixedMode,
@@ -4174,13 +4174,13 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
 
     if (routeForMode) {
       try {
-        const targetParams = { workspaceId: currentWorkspace?.workspace_id || null };
+        const targetParams = { workspaceId: activeWorkspace?.workspace_id || null };
         navigation.navigate(routeForMode, targetParams);
       } catch (err) {
         console.error("KeeprSpace in-page navigation failed:", err);
       }
     }
-  }, [currentWorkspace?.workspace_id, fixedMode, navigation, syncModeRoute]);
+  }, [activeWorkspace?.workspace_id, fixedMode, navigation, syncModeRoute]);
 
   const navigateKeeprSpaceBoat = useCallback((params) => {
     try {
@@ -4213,7 +4213,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
         workspace.workspace_type &&
         workspace.workspace_type !== "keepr"
       );
-      if (orgWorkspace?.workspace_id && orgWorkspace.workspace_id !== currentWorkspace?.workspace_id) {
+      if (orgWorkspace?.workspace_id && orgWorkspace.workspace_id !== activeWorkspace?.workspace_id) {
         setCurrentWorkspaceId(orgWorkspace.workspace_id);
       }
       return;
@@ -4224,33 +4224,33 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
         workspace.workspace_type &&
         workspace.workspace_type !== "keepr"
       );
-      if (orgWorkspace?.workspace_id && orgWorkspace.workspace_id !== currentWorkspace?.workspace_id) {
+      if (orgWorkspace?.workspace_id && orgWorkspace.workspace_id !== activeWorkspace?.workspace_id) {
         setCurrentWorkspaceId(orgWorkspace.workspace_id);
       }
       return;
     }
     if (
       requestedWorkspaceId &&
-      requestedWorkspaceId !== currentWorkspace?.workspace_id &&
+      requestedWorkspaceId !== activeWorkspace?.workspace_id &&
       workspaces.some((workspace) => workspace.workspace_id === requestedWorkspaceId || workspace.id === requestedWorkspaceId)
     ) {
       setCurrentWorkspaceId(requestedWorkspaceId);
     }
-  }, [currentWorkspace?.workspace_id, routeOrganizationId, routeWorkspaceId, setCurrentWorkspaceId, workspaces]);
+  }, [activeWorkspace?.workspace_id, routeOrganizationId, routeWorkspaceId, setCurrentWorkspaceId, workspaces]);
 
   useEffect(() => {
-    setBrandProfile(defaultBrandProfile(currentWorkspace));
+    setBrandProfile(defaultBrandProfile(activeWorkspace));
     setModelDraft({
       manufacturer:
-        currentWorkspace?.display_name ||
-        currentWorkspace?.name ||
-        currentWorkspace?.organization_name ||
+        activeWorkspace?.display_name ||
+        activeWorkspace?.name ||
+        activeWorkspace?.organization_name ||
         "",
       model: "",
       modelYear: "2027",
     });
-    setProjectionMode(defaultWorkspaceProjection(currentWorkspace) || "service");
-  }, [currentWorkspace]);
+    setProjectionMode(defaultWorkspaceProjection(activeWorkspace) || "service");
+  }, [activeWorkspace]);
 
   useEffect(() => {
     if (!projectionSwitchable) return;
@@ -4315,8 +4315,8 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
 
     try {
       let nextData;
-      const kind = workspaceKind(currentWorkspace);
-      const orgId = currentWorkspace?.organization_id || currentWorkspace?.org_id || null;
+      const kind = workspaceKind(activeWorkspace);
+      const orgId = activeWorkspace?.organization_id || activeWorkspace?.org_id || null;
 
       if (kind === "pro" || kind === "dealer") {
         nextData = await getKeeprSpacePortfolio({
@@ -4325,9 +4325,9 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
           limit: 50,
           offset: 0,
         });
-        setBrandProfile(brandProfileFromKeeprSpaceContext(nextData?.context, currentWorkspace));
+        setBrandProfile(brandProfileFromKeeprSpaceContext(nextData?.context, activeWorkspace));
       } else {
-        const nextFilters = normalizeFilters({ workspace: currentWorkspace, search });
+        const nextFilters = normalizeFilters({ workspace: activeWorkspace, search });
         nextData = await getActivatorBoatBrowser(nextFilters);
       }
       setData(nextData);
@@ -4338,7 +4338,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
           const nextConfig = await getKeeprSpaceOrgConfig({ organizationId: orgId });
           setOrgConfig(nextConfig);
           if (nextConfig?.organization) {
-            setBrandProfile(brandProfileFromOrgConfig(nextConfig, currentWorkspace));
+            setBrandProfile(brandProfileFromOrgConfig(nextConfig, activeWorkspace));
           }
         } catch (configErr) {
           console.warn("KeeprSpace org config unavailable:", configErr?.message || configErr);
@@ -4402,7 +4402,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
       setCatalogLoading(false);
       setRefreshing(false);
     }
-  }, [currentWorkspace, isPersonalKeepr, search]);
+  }, [activeWorkspace, isPersonalKeepr, search]);
 
   useEffect(() => {
     load();
@@ -4452,7 +4452,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
 
   const openBoat = (boat) => {
     const resolvedAssetId = boat?.asset_id || boat?.id || null;
-    const resolvedOrgId = boat?.organization_id || currentWorkspace?.organization_id || currentWorkspace?.org_id || null;
+    const resolvedOrgId = boat?.organization_id || activeWorkspace?.organization_id || activeWorkspace?.org_id || null;
     const resolvedKac = assetKacId(boat);
     const resolvedHin = assetHin(boat);
 
@@ -4464,7 +4464,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
         hullNumber: resolvedHin,
         parentRoute: fixedMode ? "KeeprSpaceFleet" : "ActivatorHome",
         organizationId: resolvedOrgId,
-        workspaceId: currentWorkspace?.workspace_id || null,
+        workspaceId: activeWorkspace?.workspace_id || null,
       })) return;
 
       navigation.navigate("ActivatorExactBuild", {
@@ -4473,7 +4473,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
         hullNumber: resolvedHin,
         parentRoute: fixedMode ? "KeeprSpaceFleet" : "ActivatorHome",
         organizationId: resolvedOrgId,
-        workspaceId: currentWorkspace?.workspace_id || null,
+        workspaceId: activeWorkspace?.workspace_id || null,
       });
       return;
     }
@@ -4484,7 +4484,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
       organizationId: resolvedOrgId,
       stewardshipId: boat.stewardship_id || boat.service_relationship?.stewardship_id || null,
       parentRoute: fixedMode ? "KeeprSpaceFleet" : "ActivatorHome",
-      workspaceId: currentWorkspace?.workspace_id || null,
+      workspaceId: activeWorkspace?.workspace_id || null,
       systemsRole: activeProjection || (currentKind === "oem" ? "oem" : null),
     };
 
@@ -4494,7 +4494,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
         assetId: resolvedAssetId,
         kac: resolvedKac,
         organizationId: resolvedOrgId,
-        workspaceId: currentWorkspace?.workspace_id || null,
+        workspaceId: activeWorkspace?.workspace_id || null,
         relationshipRole: "oem",
         teamMemberType: "oem",
         systemsRole: activeProjection || "oem",
@@ -4529,8 +4529,8 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
 
   const openCatalogTemplate = (template) => {
     if (openActivatorWebPath(`/activator/catalog/${encodeURIComponent(template.template_key)}`, {
-      organizationId: workspaceOrganizationId(currentWorkspace),
-      workspaceId: currentWorkspace?.workspace_id || null,
+      organizationId: workspaceOrganizationId(activeWorkspace),
+      workspaceId: activeWorkspace?.workspace_id || null,
     })) return;
 
     navigation.navigate("ActivatorCatalogTemplate", {
@@ -4540,34 +4540,34 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
 
   const openTemplateDraft = (draft) => {
     if (openActivatorWebPath(`/activator/catalog-drafts/${encodeURIComponent(draft.draft_key)}`, {
-      organizationId: workspaceOrganizationId(currentWorkspace),
-      workspaceId: currentWorkspace?.workspace_id || null,
+      organizationId: workspaceOrganizationId(activeWorkspace),
+      workspaceId: activeWorkspace?.workspace_id || null,
     })) return;
 
     navigation.navigate("ActivatorTemplateDraft", {
       draftKey: draft.draft_key,
-      organizationId: workspaceOrganizationId(currentWorkspace),
-      workspaceId: currentWorkspace?.workspace_id || null,
+      organizationId: workspaceOrganizationId(activeWorkspace),
+      workspaceId: activeWorkspace?.workspace_id || null,
     });
   };
 
   const openTemplateSourceReview = (template) => {
     if (openActivatorWebPath(`/activator/catalog/${encodeURIComponent(template.template_key)}/customize`, {
-      organizationId: workspaceOrganizationId(currentWorkspace),
-      workspaceId: currentWorkspace?.workspace_id || null,
+      organizationId: workspaceOrganizationId(activeWorkspace),
+      workspaceId: activeWorkspace?.workspace_id || null,
     })) return;
 
     navigation.navigate("ActivatorTemplateCustomize", {
       templateKey: template.template_key,
-      organizationId: workspaceOrganizationId(currentWorkspace),
-      workspaceId: currentWorkspace?.workspace_id || null,
+      organizationId: workspaceOrganizationId(activeWorkspace),
+      workspaceId: activeWorkspace?.workspace_id || null,
     });
   };
 
   const openSystemLibrary = () => {
     const params = {
-      organizationId: workspaceOrganizationId(currentWorkspace),
-      workspaceId: currentWorkspace?.workspace_id || null,
+      organizationId: workspaceOrganizationId(activeWorkspace),
+      workspaceId: activeWorkspace?.workspace_id || null,
     };
     if (openActivatorWebPath("/activator/system-library", params)) return;
     navigation.navigate("SystemLibrary", params);
@@ -4575,8 +4575,8 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
 
   const openSupplierSystemTemplate = (systemTemplate) => {
     const params = {
-      organizationId: workspaceOrganizationId(currentWorkspace),
-      workspaceId: currentWorkspace?.workspace_id || null,
+      organizationId: workspaceOrganizationId(activeWorkspace),
+      workspaceId: activeWorkspace?.workspace_id || null,
       systemTemplateId: systemTemplate?.id || null,
     };
     if (openActivatorWebPath("/activator/system-library", params)) return;
@@ -4590,8 +4590,8 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
       draftId: template.draftId || null,
       draftKey: template.draftKey || null,
       parentRoute: fixedMode ? "KeeprSpaceFleet" : "ActivatorHome",
-      organizationId: workspaceOrganizationId(currentWorkspace),
-      workspaceId: currentWorkspace?.workspace_id || null,
+      organizationId: workspaceOrganizationId(activeWorkspace),
+      workspaceId: activeWorkspace?.workspace_id || null,
     })) return;
 
     navigation.navigate("ActivatorExactBuild", {
@@ -4601,13 +4601,13 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
       draftId: template.draftId || null,
       draftKey: template.draftKey || null,
       parentRoute: fixedMode ? "KeeprSpaceFleet" : "ActivatorHome",
-      organizationId: workspaceOrganizationId(currentWorkspace),
-      workspaceId: currentWorkspace?.workspace_id || null,
+      organizationId: workspaceOrganizationId(activeWorkspace),
+      workspaceId: activeWorkspace?.workspace_id || null,
     });
   };
 
   const createCatalogModel = async () => {
-    const organizationId = workspaceOrganizationId(currentWorkspace);
+    const organizationId = workspaceOrganizationId(activeWorkspace);
     const modelYear = Number(modelDraft.modelYear);
     if (!organizationId) {
       Alert.alert("Missing organization", "Open an organization workspace before creating a model.");
@@ -4651,7 +4651,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
         ...(draft.url ? { url: draft.url } : {}),
         source_context: orgResourceSourceContext({
           draft,
-          orgId: workspaceOrganizationId(currentWorkspace),
+          orgId: workspaceOrganizationId(activeWorkspace),
           orgName: copy.name,
         }),
       })
@@ -4660,7 +4660,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   };
 
   const addOrgResourceLink = async () => {
-    const organizationId = workspaceOrganizationId(currentWorkspace);
+    const organizationId = workspaceOrganizationId(activeWorkspace);
     const rawUrl = orgResourceDraft.url.trim();
     const isEditing = !!orgResourceDraft.attachmentId;
     const url = rawUrl ? (/^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`) : "";
@@ -4789,7 +4789,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   const deleteOrgResource = async (resource) => {
     const attachmentId = resource?.attachment_id || resource?.source_artifact?.attachment_id || null;
     const assetResourceId = legacyAssetResourceId(resource);
-    const organizationId = workspaceOrganizationId(currentWorkspace);
+    const organizationId = workspaceOrganizationId(activeWorkspace);
     if ((!attachmentId && !assetResourceId) || !organizationId) {
       setOrgResourceError("This resource cannot be deleted because its resource reference is missing.");
       return;
@@ -4833,7 +4833,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   };
 
   const uploadOrgResourceFile = async () => {
-    const organizationId = workspaceOrganizationId(currentWorkspace);
+    const organizationId = workspaceOrganizationId(activeWorkspace);
     setOrgResourceMessage("");
     setOrgResourceError("");
     if (!organizationId) {
@@ -4905,16 +4905,16 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
     navigation.navigate("KeeprSpaceModule", {
       screen: "KeeprSpaceActivator",
       params: {
-        workspaceId: currentWorkspace?.workspace_id || null,
-        organizationId: workspaceOrganizationId(currentWorkspace),
+        workspaceId: activeWorkspace?.workspace_id || null,
+        organizationId: workspaceOrganizationId(activeWorkspace),
         intent,
         parentRoute: "ActivatorHome",
       },
     });
   }, [
-    currentWorkspace?.org_id,
-    currentWorkspace?.organization_id,
-    currentWorkspace?.workspace_id,
+    activeWorkspace?.org_id,
+    activeWorkspace?.organization_id,
+    activeWorkspace?.workspace_id,
     navigation,
   ]);
 
@@ -4943,7 +4943,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   };
 
   const saveBrandProfile = async () => {
-    const orgId = brandProfile.organizationId || data?.context?.organization_id || currentWorkspace?.organization_id || currentWorkspace?.org_id || null;
+    const orgId = brandProfile.organizationId || data?.context?.organization_id || activeWorkspace?.organization_id || activeWorkspace?.org_id || null;
     const keeprProId = brandProfile.keeprProId || data?.context?.keepr_pro_id || null;
     if (!orgId) {
       Alert.alert("Profile not connected", "This KeeprSpace does not have an organization profile to update yet.");
@@ -4976,7 +4976,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
       });
       if (nextConfig) {
         setOrgConfig(nextConfig);
-        setBrandProfile(brandProfileFromOrgConfig(nextConfig, currentWorkspace));
+        setBrandProfile(brandProfileFromOrgConfig(nextConfig, activeWorkspace));
       }
 
       if (keeprProId) {
@@ -5010,7 +5010,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   };
 
   const saveOrgLocation = async (location) => {
-    const orgId = brandProfile.organizationId || data?.context?.organization_id || currentWorkspace?.organization_id || currentWorkspace?.org_id || null;
+    const orgId = brandProfile.organizationId || data?.context?.organization_id || activeWorkspace?.organization_id || activeWorkspace?.org_id || null;
     if (!orgId) return;
     setAdminSavingKey("location");
     try {
@@ -5024,7 +5024,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   };
 
   const saveOrgTeam = async (team) => {
-    const orgId = brandProfile.organizationId || data?.context?.organization_id || currentWorkspace?.organization_id || currentWorkspace?.org_id || null;
+    const orgId = brandProfile.organizationId || data?.context?.organization_id || activeWorkspace?.organization_id || activeWorkspace?.org_id || null;
     if (!orgId) return;
     setAdminSavingKey("team");
     try {
@@ -5038,7 +5038,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   };
 
   const saveOrgMemberAssignment = async (assignment) => {
-    const orgId = brandProfile.organizationId || data?.context?.organization_id || currentWorkspace?.organization_id || currentWorkspace?.org_id || null;
+    const orgId = brandProfile.organizationId || data?.context?.organization_id || activeWorkspace?.organization_id || activeWorkspace?.org_id || null;
     if (!orgId) return;
     setAdminSavingKey("assignment");
     try {
@@ -5052,7 +5052,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   };
 
   const saveOrgService = async (service) => {
-    const orgId = brandProfile.organizationId || data?.context?.organization_id || currentWorkspace?.organization_id || currentWorkspace?.org_id || null;
+    const orgId = brandProfile.organizationId || data?.context?.organization_id || activeWorkspace?.organization_id || activeWorkspace?.org_id || null;
     if (!orgId) return;
     setAdminSavingKey("service");
     try {
@@ -5066,7 +5066,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   };
 
   const saveOrgRelationship = async (relationship) => {
-    const orgId = brandProfile.organizationId || data?.context?.organization_id || currentWorkspace?.organization_id || currentWorkspace?.org_id || null;
+    const orgId = brandProfile.organizationId || data?.context?.organization_id || activeWorkspace?.organization_id || activeWorkspace?.org_id || null;
     if (!orgId) return;
     setAdminSavingKey("relationship");
     try {
@@ -5086,7 +5086,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   };
 
   const saveSupplierRelationship = async (relationship) => {
-    const orgId = brandProfile.organizationId || data?.context?.organization_id || currentWorkspace?.organization_id || currentWorkspace?.org_id || null;
+    const orgId = brandProfile.organizationId || data?.context?.organization_id || activeWorkspace?.organization_id || activeWorkspace?.org_id || null;
     if (!orgId) return;
     setAdminSavingKey("supplier");
     try {
@@ -5117,7 +5117,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   };
 
   const saveOrgCapabilities = async (capabilities) => {
-    const orgId = brandProfile.organizationId || data?.context?.organization_id || currentWorkspace?.organization_id || currentWorkspace?.org_id || null;
+    const orgId = brandProfile.organizationId || data?.context?.organization_id || activeWorkspace?.organization_id || activeWorkspace?.org_id || null;
     if (!orgId) return;
     setAdminSavingKey("capabilities");
     try {
@@ -5152,7 +5152,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   };
 
   const resolveAddBoat = async () => {
-    const orgId = currentWorkspace?.organization_id || currentWorkspace?.org_id || null;
+    const orgId = activeWorkspace?.organization_id || activeWorkspace?.org_id || null;
     if (!addBoatQuery.trim()) return;
     setAddBoatLoading(true);
     try {
@@ -5170,7 +5170,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   };
 
   const connectAddBoatAsset = async (asset) => {
-    const orgId = currentWorkspace?.organization_id || currentWorkspace?.org_id || null;
+    const orgId = activeWorkspace?.organization_id || activeWorkspace?.org_id || null;
     if (!asset?.asset_id || !orgId) return;
     setAddBoatConnectingId(asset.asset_id);
     try {
@@ -5192,7 +5192,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   };
 
   const createAddBoat = async () => {
-    const orgId = currentWorkspace?.organization_id || currentWorkspace?.org_id || null;
+    const orgId = activeWorkspace?.organization_id || activeWorkspace?.org_id || null;
     if (!orgId) return;
     if (!newBoatDraft.make.trim() || !newBoatDraft.model.trim()) {
       Alert.alert("Make and model required", "Add at least the make and model to create a canonical boat.");
@@ -5372,7 +5372,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
           current={breadcrumbCurrent}
           homeParams={{
             initialMode: "fleet",
-            workspaceId: currentWorkspace?.workspace_id || null,
+            workspaceId: activeWorkspace?.workspace_id || null,
           }}
           right={(
             <View style={styles.breadcrumbWorkspace}>
@@ -5498,7 +5498,7 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
               <SupplierNetworkPanel
                 suppliers={supplierNetwork?.suppliers || []}
                 loading={supplierNetworkLoading}
-                organizationId={workspaceOrganizationId(currentWorkspace)}
+                organizationId={workspaceOrganizationId(activeWorkspace)}
                 organizationName={copy.name}
                 canManage={canAuthorCatalog}
                 onSaveSupplier={saveSupplierRelationship}
