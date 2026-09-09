@@ -308,7 +308,8 @@ function workspaceBoatRouteFromWebLocation() {
 function routeForWorkspace(workspace, legacyRole) {
   const type = workspace?.workspace_type || workspace?.type;
 
-  if (type === "keeproem" || type === "keeprdealer" || type === "keeprpro" || type === "pro") return "KeeprSpaceModule";
+  if (type === "keeproem") return "ActivatorHome";
+  if (type === "keeprdealer" || type === "keeprpro" || type === "pro") return "KeeprSpaceModule";
   if (legacyRole === "superkeepr") return "SuperKeeprStack";
   if (legacyRole === "keeprpro") return "KeeprSpaceModule";
   return "PersonalModule";
@@ -2393,7 +2394,12 @@ identifyCurrentUser();
     if (initializing) return Platform.OS === "web" && webRoute ? null : "SplashIntro";
     if (!user) return isResetLink ? "ResetPassword" : "Auth";
     if (webRoute === "KeeprAdminHome" || webRoute === "KeeprAdminOrgDetail") return webRoute;
-    if (Platform.OS === "web" && webRoute) return webRoute;
+    if (Platform.OS === "web" && webRoute) {
+      if (webRoute === "PersonalModule" && isOrgWorkspaceActive) {
+        return routeForWorkspace(currentWorkspace, legacyProfileRole || role);
+      }
+      return webRoute;
+    }
     if ((loadingRole && role === null) || loadingWorkspaces) return "SplashIntro";
     if (!role || onboardingState === null) return null;
 
@@ -2657,14 +2663,16 @@ const currentWebPathRoute = routeForCurrentWebPath();
 const isKeeprAdminWebPathRoute =
   currentWebPathRoute === "KeeprAdminHome" || currentWebPathRoute === "KeeprAdminOrgDetail";
 const isOrgWorkspaceWebPathRoute = isOrgWorkspaceActive && currentWebPathRoute;
+const isOrgWorkspaceOnPersonalWebPath =
+  isOrgWorkspaceActive && currentWebPathRoute === "PersonalModule";
 
 const initialRouteName = isResetLink
   ? "ResetPassword"
   : isKeeprAdminWebPathRoute
   ? currentWebPathRoute
-  : Platform.OS === "web" && isOrgWorkspaceWebPathRoute
+  : Platform.OS === "web" && isOrgWorkspaceWebPathRoute && !isOrgWorkspaceOnPersonalWebPath
   ? currentWebPathRoute
-  : Platform.OS === "web" && currentWebPathRoute
+  : Platform.OS === "web" && currentWebPathRoute && !isOrgWorkspaceOnPersonalWebPath
   ? currentWebPathRoute
   : !user
   ? "Auth"
