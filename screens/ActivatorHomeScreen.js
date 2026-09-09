@@ -90,6 +90,43 @@ function navSectionForActivatorMode(nextMode) {
   );
 }
 
+function sectionLoadPlan(navSection, mode, kind) {
+  const section = navSection || navSectionForActivatorMode(mode);
+  const isOem = kind === "oem";
+  const base = {
+    data: false,
+    orgConfig: true,
+    suppliers: false,
+    catalog: false,
+    media: false,
+    exactBuilds: false,
+  };
+
+  switch (section) {
+    case "ActivatorTemplates":
+      return { ...base, catalog: true, media: true };
+    case "ActivatorSystemLibrary":
+      return { ...base, suppliers: isOem };
+    case "ActivatorResources":
+    case "ActivatorAiContext":
+      return { ...base, catalog: true, media: true, suppliers: isOem };
+    case "ActivatorSuppliers":
+      return { ...base, suppliers: isOem };
+    case "ActivatorDealerNetwork":
+      return { ...base, data: true };
+    case "ActivatorWork":
+    case "ActivatorBuilds":
+    case "ActivatorWarranty":
+      return { ...base, catalog: true, media: true, exactBuilds: isOem };
+    case "ActivatorFind":
+    case "ActivatorFleet":
+    case "ActivatorOverview":
+    case "ActivatorHome":
+    default:
+      return { ...base, data: true, catalog: isOem, media: isOem, suppliers: isOem };
+  }
+}
+
 function activatorModeUrl(nextMode, { workspaceId = null, organizationId = null } = {}) {
   const params = new URLSearchParams();
   params.set("initialMode", nextMode || "fleet");
@@ -4313,25 +4350,11 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
     if (!quiet) setLoading(true);
     setError(null);
 
+    const kind = workspaceKind(activeWorkspace);
+    const orgId = activeWorkspace?.organization_id || activeWorkspace?.org_id || null;
+    const plan = sectionLoadPlan(routeNavSection, mode, kind);
+
     try {
-      let nextData;
-      const kind = workspaceKind(activeWorkspace);
-      const orgId = activeWorkspace?.organization_id || activeWorkspace?.org_id || null;
-
-      if (kind === "pro" || kind === "dealer") {
-        nextData = await getKeeprSpacePortfolio({
-          organizationId: orgId,
-          search,
-          limit: 50,
-          offset: 0,
-        });
-        setBrandProfile(brandProfileFromKeeprSpaceContext(nextData?.context, activeWorkspace));
-      } else {
-        const nextFilters = normalizeFilters({ workspace: activeWorkspace, search });
-        nextData = await getActivatorBoatBrowser(nextFilters);
-      }
-      setData(nextData);
-
       if (orgId) {
         setOrgConfigLoading(true);
         try {
@@ -4350,7 +4373,30 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
         setOrgConfig(null);
       }
 
-      if (kind === "oem" && orgId) {
+      if (plan.data) {
+        try {
+          let nextData;
+          if (kind === "pro" || kind === "dealer") {
+            nextData = await getKeeprSpacePortfolio({
+              organizationId: orgId,
+              search,
+              limit: 50,
+              offset: 0,
+            });
+            setBrandProfile(brandProfileFromKeeprSpaceContext(nextData?.context, activeWorkspace));
+          } else {
+            const nextFilters = normalizeFilters({ workspace: activeWorkspace, search });
+            nextData = await getActivatorBoatBrowser(nextFilters);
+          }
+          setData(nextData);
+        } catch (dataErr) {
+          console.error("Activator browser load failed:", dataErr);
+          setError(dataErr?.message || "Could not load this workspace.");
+          setData(null);
+        }
+      }
+
+      if (plan.suppliers && kind === "oem" && orgId) {
         setSupplierNetworkLoading(true);
         try {
           setSupplierNetwork(await listSupplierNetwork({ organizationId: orgId, query: search, limit: 50 }));
@@ -4364,25 +4410,29 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
         setSupplierNetwork({ suppliers: [], counts: {} });
       }
 
-      setCatalogLoading(true);
-      try {
-        const nextTemplates = await getCatalogTemplates(kind === "oem" ? orgId : null);
-        setCatalogTemplates(nextTemplates);
-        setCatalogLoading(false);
+      if (plan.catalog) {
+        setCatalogLoading(true);
         try {
-          setCatalogTemplateMediaById(await listModelTemplateMediaForTemplates(nextTemplates));
-        } catch (mediaErr) {
-          console.warn("Activator catalog template media unavailable:", mediaErr?.message || mediaErr);
+          const nextTemplates = await getCatalogTemplates(kind === "oem" ? orgId : null);
+          setCatalogTemplates(nextTemplates);
+          setCatalogLoading(false);
+          if (plan.media) {
+            try {
+              setCatalogTemplateMediaById(await listModelTemplateMediaForTemplates(nextTemplates));
+            } catch (mediaErr) {
+              console.warn("Activator catalog template media unavailable:", mediaErr?.message || mediaErr);
+              setCatalogTemplateMediaById({});
+            }
+          }
+        } catch (catalogErr) {
+          console.warn("Activator catalog templates unavailable:", catalogErr?.message || catalogErr);
+          setCatalogTemplates([]);
           setCatalogTemplateMediaById({});
+          setCatalogLoading(false);
         }
-      } catch (catalogErr) {
-        console.warn("Activator catalog templates unavailable:", catalogErr?.message || catalogErr);
-        setCatalogTemplates([]);
-        setCatalogTemplateMediaById({});
-        setCatalogLoading(false);
       }
 
-      if (kind === "oem" && orgId) {
+      if (plan.exactBuilds && kind === "oem" && orgId) {
         try {
           const nextDrafts = await getExactBuildWorkQueue(orgId);
           setExactBuildDrafts(nextDrafts);
@@ -4394,9 +4444,8 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
         setExactBuildDrafts([]);
       }
     } catch (err) {
-      console.error("Activator browser load failed:", err);
+      console.error("Activator section load failed:", err);
       setError(err?.message || "Could not load this workspace.");
-      setData(null);
     } finally {
       setLoading(false);
       setCatalogLoading(false);
