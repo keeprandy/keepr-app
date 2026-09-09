@@ -4055,12 +4055,27 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   const routeWorkspaceId = webActivatorParam("workspaceId") || route?.params?.workspaceId || null;
   const routeOrganizationId = webActivatorParam("organizationId") || route?.params?.organizationId || null;
   const routeNavSection = webActivatorParam("navSection") || route?.params?.navSection || null;
+  const routeOrgId = routeOrganizationId || organizationIdFromWorkspaceId(routeWorkspaceId);
+  const routeOrgWorkspace = useMemo(
+    () => routeOrgId
+      ? workspaces.find((workspace) =>
+          workspaceMatchesOrganization(workspace, routeOrgId) &&
+          workspace.workspace_type &&
+          workspace.workspace_type !== "keepr"
+        )
+      : null,
+    [routeOrgId, workspaces]
+  );
+  const activeWorkspace =
+    currentWorkspace?.workspace_type === "keepr" && routeOrgWorkspace
+      ? routeOrgWorkspace
+      : currentWorkspace;
   const initialMode = fixedMode || routeInitialMode || "fleet";
   const [modeState, setModeState] = useState(initialMode);
-  const [projectionMode, setProjectionMode] = useState(defaultWorkspaceProjection(currentWorkspace) || "service");
+  const [projectionMode, setProjectionMode] = useState(defaultWorkspaceProjection(activeWorkspace) || "service");
   const [search, setSearch] = useState("");
   const [fleetFilter, setFleetFilter] = useState("all");
-  const [brandProfile, setBrandProfile] = useState(defaultBrandProfile(currentWorkspace));
+  const [brandProfile, setBrandProfile] = useState(defaultBrandProfile(activeWorkspace));
   const [data, setData] = useState(null);
   const [assetHeroUrls, setAssetHeroUrls] = useState({});
   const [catalogTemplates, setCatalogTemplates] = useState([]);
@@ -4095,32 +4110,21 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
 
-  const currentKind = workspaceKind(currentWorkspace);
-  const memberRole = currentWorkspace?.authority?.member_role || currentWorkspace?.authority?.role || null;
+  const currentKind = workspaceKind(activeWorkspace);
+  const memberRole = activeWorkspace?.authority?.member_role || activeWorkspace?.authority?.role || null;
   const canAuthorCatalog =
     ["owner", "admin", "manager"].includes(String(memberRole || "").toLowerCase()) &&
-    (currentKind === "oem" || workspaceHasCapability(currentWorkspace, "model_catalog"));
-  const projectionSwitchable = canSwitchProjection(currentWorkspace);
-  const activeProjection = projectionSwitchable ? projectionMode : defaultWorkspaceProjection(currentWorkspace);
-  const copy = useMemo(() => copyForWorkspace(currentWorkspace, activeProjection), [currentWorkspace, activeProjection]);
+    (currentKind === "oem" || workspaceHasCapability(activeWorkspace, "model_catalog"));
+  const projectionSwitchable = canSwitchProjection(activeWorkspace);
+  const activeProjection = projectionSwitchable ? projectionMode : defaultWorkspaceProjection(activeWorkspace);
+  const copy = useMemo(() => copyForWorkspace(activeWorkspace, activeProjection), [activeWorkspace, activeProjection]);
   const isPersonalKeepr = currentKind === "owner";
-  const workAreas = useMemo(() => workAreasForProjection(currentWorkspace, activeProjection), [currentWorkspace, activeProjection]);
+  const workAreas = useMemo(() => workAreasForProjection(activeWorkspace, activeProjection), [activeWorkspace, activeProjection]);
   const mode = fixedMode || modeState;
   const syncModeRoute = useCallback((nextMode) => {
     if (fixedMode) return;
 
     const navSection = navSectionForActivatorMode(nextMode);
-    const routeOrgId = routeOrganizationId || organizationIdFromWorkspaceId(routeWorkspaceId);
-    const routeOrgWorkspace = routeOrgId
-      ? workspaces.find((workspace) =>
-          workspaceMatchesOrganization(workspace, routeOrgId) &&
-          workspace.workspace_type &&
-          workspace.workspace_type !== "keepr"
-        )
-      : null;
-    const activeWorkspace = currentWorkspace?.workspace_type === "keepr" && routeOrgWorkspace
-      ? routeOrgWorkspace
-      : currentWorkspace;
     const workspaceId = activeWorkspace?.workspace_type === "keepr"
       ? routeWorkspaceId || null
       : activeWorkspace?.workspace_id || routeWorkspaceId || null;
@@ -4145,13 +4149,13 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
     currentWorkspace?.organization_id,
     currentWorkspace?.workspace_id,
     currentWorkspace?.workspace_type,
+    activeWorkspace,
     fixedMode,
     navigation,
-    routeOrganizationId,
     routeInitialMode,
     routeNavSection,
+    routeOrgId,
     routeWorkspaceId,
-    workspaces,
   ]);
 
   const setMode = useCallback((nextMode) => {
