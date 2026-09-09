@@ -3181,6 +3181,20 @@ const isPublicWebRoute =
     ].includes(currentRouteName)
   );
 
+const isPersonalWebRoute =
+  pathname === "/dashboard" ||
+  pathname.startsWith("/dashboard/") ||
+  pathname === "/home" ||
+  pathname.startsWith("/home/") ||
+  pathname === "/garage" ||
+  pathname.startsWith("/garage/") ||
+  pathname === "/boats" ||
+  pathname.startsWith("/boats/") ||
+  pathname === "/settings" ||
+  pathname.startsWith("/settings/") ||
+  pathname === "/messages" ||
+  pathname.startsWith("/messages/");
+
 const hideSidebarRoutes = [
   "StoryPrint", 
   "Auth", 
@@ -3247,7 +3261,7 @@ return (
                           />
                         ) : (
                           <View style={appStyles.webShell}>
-                            {hideSidebarRoutes.includes(currentRouteName) ? null : (
+                            {isPersonalWebRoute || hideSidebarRoutes.includes(currentRouteName) ? null : (
                               <SidebarNav currentRouteName={currentRouteName} />
                             )}
 

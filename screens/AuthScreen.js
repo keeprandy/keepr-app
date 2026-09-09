@@ -117,7 +117,15 @@ function getWebAuthRedirectToForIntent(oauthIntent = "signin") {
     if (protectedReturnTo) url.searchParams.set("returnTo", protectedReturnTo);
     const returnTo = window.sessionStorage?.getItem("keepr.auth.activationIntent.v1") ||
       window.localStorage?.getItem("keepr.auth.activationIntent.v1");
-    if (returnTo && !protectedReturnTo) url.searchParams.set("returnTo", "hub_activation");
+    const currentParams = new URLSearchParams(window.location.search || "");
+    const isHubActivationAuthRoute =
+      currentParams.get("returnTo") === "hub_activation" ||
+      currentParams.get("source") === "hub_activation" ||
+      currentParams.has("hubId") ||
+      currentParams.has("hubSlug");
+    if (returnTo && !protectedReturnTo && isHubActivationAuthRoute) {
+      url.searchParams.set("returnTo", "hub_activation");
+    }
     return url.toString();
   } catch (_) {
     return redirectTo;
@@ -718,6 +726,22 @@ export default function AuthScreen({ navigation, route }) {
 const continueActivationJourney = async () => {
   const activationIntent = await getActiveAuthActivationIntent(route?.params || {});
   if (activationIntent?.type === "hub_quick_add") {
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search || "");
+      const isExplicitHubActivation =
+        route?.params?.activationIntent?.type === "hub_quick_add" ||
+        route?.params?.source === "hub_activation" ||
+        route?.params?.returnTo === "hub_activation" ||
+        params.get("returnTo") === "hub_activation" ||
+        params.get("source") === "hub_activation" ||
+        params.has("hubId") ||
+        params.has("hubSlug");
+      if (!isExplicitHubActivation) {
+        await clearStoredAuthActivationIntent();
+        return false;
+      }
+    }
+
     if (route?.params?.activationIntent?.type) {
       await storeAuthActivationIntent(route.params.activationIntent);
     }
