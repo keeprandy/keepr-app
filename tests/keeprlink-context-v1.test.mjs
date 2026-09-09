@@ -198,6 +198,58 @@ test("legacy public KAC source manifest strips signed Supabase storage URLs", ()
   assert.match(sourceRoute, /source_urls_include_private: isAuthenticated && sources\.some/);
 });
 
+test("KeeprLINK asset context v2 phase 1 projects bounded operational context without replacing v1", () => {
+  const sql = read("supabase/migrations/20260909173000_keeprlink_asset_context_v2_phase1.sql");
+  const contract = read("docs/keeprlink-asset-context-v2-contract.md");
+
+  assert.match(contract, /Cold-LLM Acceptance Test|BOAT-2008-3BOZ95 Acceptance Fixture/);
+  assert.match(sql, /create or replace function public\.keeprlink_asset_context/);
+  assert.match(sql, /create or replace function public\.resolve_keeprlink_context/);
+  assert.match(sql, /'keepr\.link\.context\.v2'/);
+  assert.match(sql, /v_context \? 'v2_contract'/);
+
+  // v1 compatibility keys remain present.
+  assert.match(sql, /'object'/);
+  assert.match(sql, /'identity'/);
+  assert.match(sql, /'parent_relationships'/);
+  assert.match(sql, /'systems'/);
+  assert.match(sql, /'applicable_resources'/);
+  assert.match(sql, /'known_operational_state'/);
+  assert.match(sql, /'knowledge_gaps'/);
+
+  // v2 phase 1 sections.
+  assert.match(sql, /'context_summary'/);
+  assert.match(sql, /'relationships'/);
+  assert.match(sql, /'resource_bindings'/);
+  assert.match(sql, /'evidence_placements'/);
+  assert.match(sql, /'operational_history'/);
+  assert.match(sql, /'facts'/);
+  assert.match(sql, /'claims'/);
+
+  // Existing canonical tables and helper projection are reused.
+  assert.match(sql, /from public\.systems s/);
+  assert.match(sql, /from public\.service_records/);
+  assert.match(sql, /from public\.asset_relationships/);
+  assert.match(sql, /from public\.asset_provider_stewardships/);
+  assert.match(sql, /from public\.attachment_placements/);
+  assert.match(sql, /join public\.attachments att/);
+  assert.match(sql, /public\.keeprlink_resource_projection/);
+
+  // Public projection guardrails and deterministic caps.
+  assert.match(sql, /internal_private\|private\|restricted\|secret/);
+  assert.match(sql, /storage\/v1\/object\/sign/);
+  assert.match(sql, /limit 10/);
+  assert.match(sql, /limit 40/);
+  assert.match(sql, /limit 80/);
+  assert.match(sql, /'actions_projected', false/);
+  assert.match(sql, /'playbook_applicability_projected', false/);
+
+  // Phase 1 does not add execution/action mutation surface.
+  assert.doesNotMatch(sql, /insert into public\.actions/i);
+  assert.doesNotMatch(sql, /update public\.actions/i);
+  assert.doesNotMatch(sql, /delete from public\.actions/i);
+});
+
 test("organization-wide resources can be placed on org targets", () => {
   const sql = read("supabase/migrations/20260904133500_org_attachment_placements.sql");
   const policies = read("supabase/migrations/20260904134500_org_resource_attachment_policies.sql");

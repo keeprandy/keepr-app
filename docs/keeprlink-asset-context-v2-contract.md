@@ -637,6 +637,14 @@ For `BOAT-2008-3BOZ95`, v2 should prove:
 - action/playbook sections are present even if empty or summarized;
 - public projection contains no signed/private storage URLs.
 
+## Cold-LLM Acceptance Test
+
+A general-purpose LLM with no prior Keepr knowledge, given only:
+
+`/api/k/BOAT-2008-3BOZ95/context?purpose=llm_context`
+
+should be able to accurately distinguish known facts, derived operational claims, service/history context, provider relationships, applicable resources, current operational state, and meaningful missing context. It may recommend useful next steps, but it must not promote inference, generic web knowledge, or missing values into Keepr-established truth.
+
 ## Rollout Plan
 
 Phase 1:
