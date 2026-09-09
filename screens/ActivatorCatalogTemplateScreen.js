@@ -24,6 +24,7 @@ import { getCatalogTemplateDetail } from "../lib/activatorApi";
 import { resolveAssetHero, ASSET_HERO_SCOPES } from "../lib/assetHeroResolver";
 import { getSignedUrl, listAttachmentsForTarget, removePlacementById } from "../lib/attachmentsApi";
 import { createLinkAttachment, uploadAttachmentFromUri } from "../lib/attachmentsUploader";
+import { useWorkspace } from "../context/WorkspaceContext";
 import { projectModelTemplateDetail } from "../lib/modelTemplateProjection";
 import { supabase } from "../lib/supabaseClient";
 import { layoutStyles } from "../styles/layout";
@@ -247,6 +248,19 @@ function webCatalogTemplateKey() {
   } catch {
     return null;
   }
+}
+
+function workspaceOrganizationId(workspace) {
+  const workspaceId = String(workspace?.workspace_id || workspace?.id || "");
+  return (
+    workspace?.organization_id ||
+    workspace?.org_id ||
+    workspace?.authority?.organization_id ||
+    workspace?.authority?.org_id ||
+    workspace?.authority?.subject_id ||
+    (workspaceId.startsWith("org:") ? workspaceId.slice(4) : null) ||
+    null
+  );
 }
 
 function normalizeTemplateAttachmentMedia(row, template = {}) {
@@ -1324,6 +1338,7 @@ function ShowcaseGallery({
 }
 
 export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
+  const { currentWorkspace, setCurrentWorkspaceId, workspaces } = useWorkspace();
   const templateKey = route?.params?.templateKey || webCatalogTemplateKey() || "tiara-2027-39-le";
   const routeOrganizationId = route?.params?.organizationId || webSearchParam("organizationId") || null;
   const routeWorkspaceId = route?.params?.workspaceId || webSearchParam("workspaceId") || null;
@@ -1351,19 +1366,43 @@ export default function ActivatorCatalogTemplateScreen({ navigation, route }) {
   const [savingIdentity, setSavingIdentity] = useState(false);
   const [resolvedTemplateHeroUri, setResolvedTemplateHeroUri] = useState(null);
 
+  useEffect(() => {
+    if (!routeOrganizationId) return;
+    const orgWorkspace = workspaces.find((workspace) =>
+      workspace?.workspace_type &&
+      workspace.workspace_type !== "keepr" &&
+      workspaceOrganizationId(workspace) === routeOrganizationId
+    );
+    if (orgWorkspace?.workspace_id && orgWorkspace.workspace_id !== currentWorkspace?.workspace_id) {
+      setCurrentWorkspaceId(orgWorkspace.workspace_id);
+    }
+  }, [currentWorkspace?.workspace_id, routeOrganizationId, setCurrentWorkspaceId, workspaces]);
+
   const load = useCallback(async ({ quiet = false } = {}) => {
     if (!quiet) setLoading(true);
     setError(null);
     try {
-      const next = await hydrateTemplatePhotoResources(await getCatalogTemplateDetail({ templateKey }));
-      const [attachmentMedia, attachmentResources] = await Promise.all([
-        hydrateTemplateAttachmentMedia(next?.template),
-        hydrateTemplateAttachmentResources(next?.template),
+      const baseDetail = await getCatalogTemplateDetail({ templateKey });
+      setDetail(baseDetail);
+      if (!quiet) setLoading(false);
+      const [next, attachmentMedia, attachmentResources] = await Promise.all([
+        hydrateTemplatePhotoResources(baseDetail).catch((err) => {
+          console.log("Template photo resource hydration failed", err);
+          return baseDetail;
+        }),
+        hydrateTemplateAttachmentMedia(baseDetail?.template).catch((err) => {
+          console.log("Template media hydration failed", err);
+          return [];
+        }),
+        hydrateTemplateAttachmentResources(baseDetail?.template).catch((err) => {
+          console.log("Template attachment resource hydration failed", err);
+          return [];
+        }),
       ]);
-      setDetail(next);
+      setDetail(next || baseDetail);
       setTemplateAttachmentMedia(attachmentMedia);
       setTemplateAttachmentResources(attachmentResources);
-      const items = next?.items || [];
+      const items = (next || baseDetail)?.items || [];
       setSelectedItem((current) => {
         if (!current) return null;
         if (String(current.id || "").startsWith("media-")) return current;
