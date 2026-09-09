@@ -2463,7 +2463,7 @@ React.useEffect(() => {
       path.startsWith("/KeeprHubInternal") ||
       path.startsWith("/KeeprStoryInternal");
 
-    if (!user?.id && isAuthenticatedWebDeepLink) {
+    if (!initializing && !user?.id && isAuthenticatedWebDeepLink) {
       try {
         const returnTo = `${window.location.pathname || ""}${window.location.search || ""}${window.location.hash || ""}`;
         const authUrl = new URL("/auth", window.location.origin);
@@ -2473,7 +2473,7 @@ React.useEffect(() => {
       } catch (_) {}
     }
 
-if (isPublicWebDeepLink || (user?.id && isAuthenticatedWebDeepLink)) {
+if (isPublicWebDeepLink || (user?.id && isAuthenticatedWebDeepLink) || (initializing && isAuthenticatedWebDeepLink)) {
       didInitialNavResolve.current = true;
       return;
     }
@@ -2495,7 +2495,7 @@ if (isPublicWebDeepLink || (user?.id && isAuthenticatedWebDeepLink)) {
 
   didInitialNavResolve.current = true;
   lastResetRouteRef.current = targetRoute;
-}, [targetRoute, isResetLink, isOrgWorkspaceActive, activeTrigger?.type]);
+}, [targetRoute, isResetLink, isOrgWorkspaceActive, activeTrigger?.type, initializing, user?.id]);
 
   React.useEffect(() => {
     let mounted = true;
