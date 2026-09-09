@@ -315,6 +315,30 @@ function routeForWorkspace(workspace, legacyRole) {
   return "PersonalModule";
 }
 
+function organizationIdFromWorkspace(workspace) {
+  const workspaceId = String(workspace?.workspace_id || workspace?.id || "");
+  return (
+    workspace?.organization_id ||
+    workspace?.org_id ||
+    workspace?.authority?.organization_id ||
+    workspace?.authority?.org_id ||
+    workspace?.authority?.subject_id ||
+    (workspaceId.startsWith("org:") ? workspaceId.slice(4) : null)
+  );
+}
+
+function activatorLandingParamsForWorkspace(workspace) {
+  if (!workspace) return undefined;
+  const workspaceId = workspace?.workspace_id || workspace?.id || null;
+  const organizationId = organizationIdFromWorkspace(workspace);
+  return {
+    initialMode: "fleet",
+    navSection: "ActivatorFind",
+    workspaceId,
+    organizationId,
+  };
+}
+
 function routeForCurrentWebPath() {
   if (Platform.OS !== "web") return null;
   try {
@@ -2492,10 +2516,28 @@ if (isPublicWebDeepLink || (user?.id && isAuthenticatedWebDeepLink) || (initiali
     return;
   }
 
-  if (current !== targetRoute) {
+  const targetParams =
+    targetRoute === "ActivatorHome"
+      ? activatorLandingParamsForWorkspace(currentWorkspace)
+      : targetRoute === "Auth"
+      ? authReturnParams
+      : undefined;
+
+  const shouldRefreshActivatorParams = (() => {
+    if (Platform.OS !== "web") return false;
+    if (targetRoute !== "ActivatorHome" || !isOrgWorkspaceActive) return false;
+    try {
+      const params = new URLSearchParams(window.location.search || "");
+      return !params.get("workspaceId") || !params.get("organizationId");
+    } catch (_) {
+      return false;
+    }
+  })();
+
+  if (current !== targetRoute || shouldRefreshActivatorParams) {
     navigationRef.reset({
       index: 0,
-      routes: [{ name: targetRoute, params: targetRoute === "Auth" ? authReturnParams : undefined }],
+      routes: [{ name: targetRoute, params: targetParams }],
     });
   }
 
