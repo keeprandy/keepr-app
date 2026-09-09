@@ -3,6 +3,19 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 
+const ASSET_FETCH_TIMEOUT_MS = 15000;
+
+function withAssetFetchTimeout(promise, label) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`${label || "Asset fetch"} timed out`));
+    }, ASSET_FETCH_TIMEOUT_MS);
+  });
+
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+}
+
 /**
  * useAssets(type, options)
  *
@@ -65,23 +78,30 @@ export function useAssets(type, options = {}) {
           .order("sort_rank", { ascending: true, nullsLast: true })
           .order("created_at", { ascending: true });
 
-        const { data, error: fetchError } = await query;
+        const { data, error: fetchError } = await withAssetFetchTimeout(
+          query,
+          `Asset list ${typeFilter || "all"}`
+        );
         if (fetchError) throw fetchError;
 
         setAssets(data || []);
         return;
       }
 
-      const { data, error: fetchError } = await supabase.rpc("get_authorized_assets", {
-        p_asset_type: typeFilter,
-        p_include_deleted: includeDeleted,
-      });
+      const { data, error: fetchError } = await withAssetFetchTimeout(
+        supabase.rpc("get_authorized_assets", {
+          p_asset_type: typeFilter,
+          p_include_deleted: includeDeleted,
+        }),
+        `Authorized asset list ${typeFilter || "all"}`
+      );
 
       if (fetchError) throw fetchError;
 
       setAssets((data || []).map((row) => row?.asset).filter(Boolean));
     } catch (err) {
       console.error("useAssets fetchAssets error", err);
+      setAssets([]);
       setError(err?.message || "Failed to load assets.");
     } finally {
       setLoading(false);

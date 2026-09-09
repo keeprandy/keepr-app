@@ -479,8 +479,7 @@ function shouldHideWebSidebar(currentRouteName, isPersonalWebRoute, currentWorks
   ];
 
   return (
-    hideSidebarRoutes.includes(currentRouteName) ||
-    (isPersonalWebRoute && !isOrgModuleRouteName(currentRouteName) && !isOrgWorkspaceActive)
+    hideSidebarRoutes.includes(currentRouteName)
   );
 }
 
