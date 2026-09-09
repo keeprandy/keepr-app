@@ -379,8 +379,8 @@ function replaceWebLocation(path, params = {}) {
     const nextUrl = `${path}${query.toString() ? `?${query.toString()}` : ""}`;
     const currentUrl = `${window.location.pathname || ""}${window.location.search || ""}`;
     if (currentUrl === nextUrl) return true;
-    window.location.assign(nextUrl);
-    return true;
+    window.history.pushState({}, "", nextUrl);
+    return false;
   } catch {
     return false;
   }
