@@ -448,6 +448,7 @@ function topRouteNameFromState(state) {
 function isOrgModuleRouteName(routeName) {
   return (
     routeName === "KeeprSpaceModule" ||
+    routeName === "SystemLibrary" ||
     String(routeName || "").startsWith("KeeprSpace") ||
     String(routeName || "").startsWith("Wilson") ||
     String(routeName || "").startsWith("Activator") ||
@@ -460,6 +461,43 @@ function shouldRestoreWebNavStateForWorkspace(state, workspace) {
   const isOrgWorkspace = workspace?.workspace_type && workspace.workspace_type !== "keepr";
   if (isOrgWorkspace) return false;
   return !isOrgModuleRouteName(topRouteNameFromState(state));
+}
+
+function shouldHideWebSidebar(currentRouteName, isPersonalWebRoute, currentWorkspace) {
+  const isOrgWorkspaceActive =
+    currentWorkspace?.workspace_type && currentWorkspace.workspace_type !== "keepr";
+  const hideSidebarRoutes = [
+    "StoryPrint",
+    "Auth",
+    "ResetPassword",
+    "PublicKeeprStory",
+    "KeeprHub",
+    "ShareAction",
+    "PublicAction",
+    "KacRoute",
+    "KacResolve",
+  ];
+
+  return (
+    hideSidebarRoutes.includes(currentRouteName) ||
+    (isPersonalWebRoute && !isOrgModuleRouteName(currentRouteName) && !isOrgWorkspaceActive)
+  );
+}
+
+function WebShellFrame({ children, currentRouteName, isPersonalWebRoute }) {
+  const { currentWorkspace } = useWorkspace();
+
+  return (
+    <View style={appStyles.webShell}>
+      {shouldHideWebSidebar(currentRouteName, isPersonalWebRoute, currentWorkspace) ? null : (
+        <SidebarNav currentRouteName={currentRouteName} />
+      )}
+
+      <View style={appStyles.webMain}>
+        <View style={appStyles.webMainInner}>{children}</View>
+      </View>
+    </View>
+  );
 }
 
 
@@ -3322,21 +3360,16 @@ return (
                             currentRouteName={currentRouteName}
                           />
                         ) : (
-                          <View style={appStyles.webShell}>
-                            {(isPersonalWebRoute && !isCurrentOrgShellRoute) || hideSidebarRoutes.includes(currentRouteName) ? null : (
-                              <SidebarNav currentRouteName={currentRouteName} />
-                            )}
-
-                            <View style={appStyles.webMain}>
-                              <View style={appStyles.webMainInner}>
-                                <Root
-                                  onRouteChange={setCurrentRouteName}
-                                  setCurrentRouteName={setCurrentRouteName}
-                                  currentRouteName={currentRouteName}
-                                />
-                              </View>
-                            </View>
-                          </View>
+                          <WebShellFrame
+                            currentRouteName={currentRouteName}
+                            isPersonalWebRoute={isPersonalWebRoute}
+                          >
+                            <Root
+                              onRouteChange={setCurrentRouteName}
+                              setCurrentRouteName={setCurrentRouteName}
+                              currentRouteName={currentRouteName}
+                            />
+                          </WebShellFrame>
                         )
                       ) : (
                         <Root
