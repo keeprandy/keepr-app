@@ -4408,6 +4408,38 @@ export default function ActivatorHomeScreen({ navigation, route, fixedMode = nul
     load();
   }, [load]);
 
+  useEffect(() => {
+    if (routeNavSection !== "ActivatorSuppliers") return;
+    if (currentKind !== "oem") return;
+    const orgId = workspaceOrganizationId(activeWorkspace);
+    if (!orgId) return;
+
+    let cancelled = false;
+    setSupplierNetworkLoading(true);
+    listSupplierNetwork({ organizationId: orgId, query: search, limit: 50 })
+      .then((nextNetwork) => {
+        if (!cancelled) setSupplierNetwork(nextNetwork);
+      })
+      .catch((supplierErr) => {
+        console.warn("Supplier network unavailable:", supplierErr?.message || supplierErr);
+        if (!cancelled) setSupplierNetwork({ suppliers: [], counts: {} });
+      })
+      .finally(() => {
+        if (!cancelled) setSupplierNetworkLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeWorkspace?.org_id,
+    activeWorkspace?.organization_id,
+    activeWorkspace?.workspace_id,
+    currentKind,
+    routeNavSection,
+    search,
+  ]);
+
   const boats = data?.boats || [];
   const counts = data?.counts || {};
   const fleetResults = useMemo(
