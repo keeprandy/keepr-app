@@ -3245,6 +3245,18 @@ const isPersonalWebRoute =
   pathname === "/messages" ||
   pathname.startsWith("/messages/");
 
+const isCurrentOrgShellRoute =
+  currentRouteName === "ActivatorHome" ||
+  currentRouteName === "SystemLibrary" ||
+  currentRouteName === "ActivatorCatalogTemplate" ||
+  currentRouteName === "ActivatorTemplateCustomize" ||
+  currentRouteName === "ActivatorTemplateItemEditor" ||
+  currentRouteName === "ActivatorExactBuild" ||
+  currentRouteName === "ActivatorBoatWorkspace" ||
+  currentRouteName === "KeeprSpaceModule" ||
+  String(currentRouteName || "").startsWith("Activator") ||
+  String(currentRouteName || "").startsWith("KeeprSpace");
+
 const hideSidebarRoutes = [
   "StoryPrint", 
   "Auth", 
@@ -3311,7 +3323,7 @@ return (
                           />
                         ) : (
                           <View style={appStyles.webShell}>
-                            {(isPersonalWebRoute && !isOrgWorkspaceActive) || hideSidebarRoutes.includes(currentRouteName) ? null : (
+                            {(isPersonalWebRoute && !isCurrentOrgShellRoute) || hideSidebarRoutes.includes(currentRouteName) ? null : (
                               <SidebarNav currentRouteName={currentRouteName} />
                             )}
 
