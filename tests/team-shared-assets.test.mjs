@@ -95,7 +95,7 @@ test("useAssets relies on RLS-visible assets instead of filtering by owner_id", 
   const source = read("hooks/useAssets.js");
 
   assert.match(source, /returns assets visible to the current user through RLS/);
-  assert.match(source, /Team-shared assets through asset_stewardships/);
+  assert.match(source, /explicitly shared Team\/stewardship assets/);
   assert.doesNotMatch(source, /\.eq\(["']owner_id["'],\s*ownerId\)/);
   assert.doesNotMatch(source, /\.filter\([^)]*owner_id[^)]*ownerId/s);
 });
@@ -194,10 +194,11 @@ test("Dashboard and category views consume RLS-visible useAssets results", () =>
   const dashboard = read("screens/DashboardScreen.js");
   const category = read("screens/AssetGroupDashboardScreen.js");
 
-  assert.match(dashboard, /useAssets\("home"\)/);
-  assert.match(dashboard, /useAssets\("vehicle"\)/);
-  assert.match(dashboard, /useAssets\("boat"\)/);
-  assert.match(dashboard, /useAssets\("other"\)/);
+  assert.match(dashboard, /useAssets\(\)/);
+  assert.match(dashboard, /asset\?\.[\s\S]*type === "home"/);
+  assert.match(dashboard, /asset\?\.[\s\S]*type === "vehicle"/);
+  assert.match(dashboard, /asset\?\.[\s\S]*type === "boat"/);
+  assert.match(dashboard, /asset\?\.[\s\S]*type === "other"/);
   assert.match(category, /useAssets\(assetType\)/);
 });
 
@@ -237,4 +238,3 @@ test("Public and Hub projections remain independent of authenticated useAssets l
   assert.match(hubScreen, /fetchHubStoryLinks/);
   assert.match(hubScreen, /fetchPublicStoryMedia/);
 });
-

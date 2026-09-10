@@ -230,35 +230,28 @@ export default function DashboardScreen({ navigation }) {
   const { user, initializing: authInitializing } = useAuth();
 
   const {
-    assets: rawHomes = [],
-    loading: lh,
-    error: eh,
-    refetch: refetchHomes,
-  } = useAssets("home");
+    assets: rawDashboardAssets = [],
+    loading,
+    error: anyError,
+    refetch: refetchDashboardAssets,
+  } = useAssets();
 
-  const {
-    assets: rawVehicles = [],
-    loading: lv,
-    error: ev,
-    refetch: refetchVehicles,
-  } = useAssets("vehicle");
-
-  const {
-    assets: rawBoats = [],
-    loading: lb,
-    error: eb,
-    refetch: refetchBoats,
-  } = useAssets("boat");
-
-      const {
-        assets: rawOtherAssets = [],
-        loading: lo,
-        error: eo,
-        refetch: refetchOtherAssets,
-      } = useAssets("other");
-
-  const loading = lh || lv || lb || lo;
-  const anyError = eh || ev || eb || eo;
+  const rawHomes = useMemo(
+    () => rawDashboardAssets.filter((asset) => asset?.type === "home"),
+    [rawDashboardAssets]
+  );
+  const rawVehicles = useMemo(
+    () => rawDashboardAssets.filter((asset) => asset?.type === "vehicle"),
+    [rawDashboardAssets]
+  );
+  const rawBoats = useMemo(
+    () => rawDashboardAssets.filter((asset) => asset?.type === "boat"),
+    [rawDashboardAssets]
+  );
+  const rawOtherAssets = useMemo(
+    () => rawDashboardAssets.filter((asset) => asset?.type === "other"),
+    [rawDashboardAssets]
+  );
 
   // Base sorted lists from DB
   const homesSorted = useMemo(() => sortAssets(rawHomes), [rawHomes]);
@@ -742,29 +735,23 @@ useEffect(() => {
   loadPendingOwnerHandoffs();
 }, [loadPendingOwnerHandoffs]);
 
-const reloadDashboard = useCallback(async () => {
-  try {
-    await Promise.all([
-      refetchHomes?.(),
-      refetchVehicles?.(),
-      refetchBoats?.(),
-      refetchOtherAssets?.(),
-      loadIdentityAndAchievements?.(),
-      loadSystemModeSummary?.(),
-      loadPendingOwnerHandoffs?.(),
-    ]);
-  } catch (e) {
-    console.log("Dashboard refresh on focus failed", e);
-  }
-}, [
-  refetchHomes,
-  refetchVehicles,
-  refetchBoats,
-  refetchOtherAssets,
-  loadIdentityAndAchievements,
-  loadSystemModeSummary,
-  loadPendingOwnerHandoffs,
-]);
+  const reloadDashboard = useCallback(async () => {
+    try {
+      await Promise.all([
+        refetchDashboardAssets?.(),
+        loadIdentityAndAchievements?.(),
+        loadSystemModeSummary?.(),
+        loadPendingOwnerHandoffs?.(),
+      ]);
+    } catch (e) {
+      console.log("Dashboard refresh on focus failed", e);
+    }
+  }, [
+    refetchDashboardAssets,
+    loadIdentityAndAchievements,
+    loadSystemModeSummary,
+    loadPendingOwnerHandoffs,
+  ]);
 
 const acceptOwnerHandoff = useCallback(async (handoff) => {
   if (!handoff?.asset_relationship_id) return;
@@ -772,7 +759,7 @@ const acceptOwnerHandoff = useCallback(async (handoff) => {
   try {
     await acceptAssetOwnerHandoff({ assetRelationshipId: handoff.asset_relationship_id });
     await Promise.all([
-      refetchBoats?.(),
+      refetchDashboardAssets?.(),
       loadPendingOwnerHandoffs(),
       loadIdentityAndAchievements?.(),
     ]);
@@ -782,7 +769,7 @@ const acceptOwnerHandoff = useCallback(async (handoff) => {
   } finally {
     setAcceptingHandoffId(null);
   }
-}, [loadIdentityAndAchievements, loadPendingOwnerHandoffs, refetchBoats]);
+}, [loadIdentityAndAchievements, loadPendingOwnerHandoffs, refetchDashboardAssets]);
 
 const onRefresh = useCallback(async () => {
   setRefreshing(true);
@@ -1040,13 +1027,8 @@ if (Platform.OS !== "ios") {
         }
       }
 
-      // 🔁 Refetch so Dashboard sees the new order immediately
-      await Promise.all([
-        refetchHomes?.(),
-        refetchVehicles?.(),
-        refetchBoats?.(),
-        refetchOtherAssets?.(),
-      ]);
+      // Refetch once so Dashboard sees the new order immediately.
+      await refetchDashboardAssets?.();
     } catch (e) {
       console.log("Save asset order error", e);
       Alert.alert("Couldn't save order", "Please try again.");
@@ -1055,7 +1037,7 @@ if (Platform.OS !== "ios") {
       // ✅ Leave reorder mode after save
       setReorderMode(false);
     }
-  }, [homeOrder, vehicleOrder, boatOrder, refetchHomes, refetchVehicles, refetchBoats, refetchOtherAssets]);
+  }, [homeOrder, vehicleOrder, boatOrder, otherOrder, refetchDashboardAssets]);
 
   /* ---- Circle strip model ---- */
 
