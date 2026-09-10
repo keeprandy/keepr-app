@@ -307,6 +307,7 @@ useEffect(() => {
   const [serviceAttachments, setServiceAttachments] = useState({});
   const [svcLoading, setSvcLoading] = useState(false);
   const [svcError, setSvcError] = useState(null);
+  const [storyAttachments, setStoryAttachments] = useState([]);
 
   // Story events
   const [storyEvents, setStoryEvents] = useState([]);
@@ -552,9 +553,19 @@ try {
   }
 
   setShowcasePhotos(deduped);
+  setStoryAttachments(
+    deduped.map((item) => ({
+      id: item.placement_id || item.uri,
+      uri: item.uri,
+      isShowcase: true,
+      placementId: item.placement_id || null,
+      createdAt: item.created_at || null,
+    }))
+  );
 } catch (err) {
   console.error("Error loading showcase photos", err);
   setShowcasePhotos([]);
+  setStoryAttachments([]);
 }
   }, [home?.id]);
 

@@ -121,6 +121,9 @@ test("story screens expose the generic owner-ready Asset Intelligence surface", 
   assert.match(story, /assetKacId\(boat\)/);
   assert.match(homeStory, /import AssetEnablementCard/);
   assert.match(homeStory, /asset=\{home\}/);
+  assert.match(homeStory, /const \[storyAttachments, setStoryAttachments\] = useState\(\[\]\)/);
+  assert.match(homeStory, /setStoryAttachments\(/);
+  assert.match(homeStory, /resources=\{storyAttachments\}/);
   assert.match(vehicleStory, /import AssetEnablementCard/);
   assert.match(vehicleStory, /asset=\{vehicle\}/);
   assert.match(otherStory, /import AssetEnablementCard/);
