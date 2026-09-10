@@ -145,7 +145,7 @@ const { data, error } = await supabase.rpc(
       continue;
     }
 
-    if (a.bucket && a.storage_path) {
+    if (a.bucket && (a.thumb_320_path || a.storage_path)) {
       fallbackRows.push(a);
       continue;
     }
@@ -169,20 +169,23 @@ const { data, error } = await supabase.rpc(
 
 async function resolveSignedHeroFallback(row) {
   if (!row?.placement_id) return null;
-  if (!row?.bucket || !row?.storage_path) {
+  const path = row?.thumb_320_path || row?.storage_path;
+  if (!row?.bucket || !path) {
     return row?.url ? [row.placement_id, row.url] : null;
   }
 
   try {
     const signed = await getSignedUrl({
       bucket: row.bucket,
-      path: row.storage_path,
-      transform: {
-        width: 320,
-        height: 320,
-        resize: "cover",
-        quality: 75,
-      },
+      path,
+      transform: row?.thumb_320_path
+        ? null
+        : {
+            width: 320,
+            height: 320,
+            resize: "cover",
+            quality: 75,
+          },
     });
 
     if (signed) return [row.placement_id, signed];
