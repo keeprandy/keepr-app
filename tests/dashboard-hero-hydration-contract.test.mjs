@@ -18,7 +18,8 @@ test("dashboard hero resolver migration returns thumbnail URL and preserves priv
 test("dashboard prefers precomputed thumbnails and guards unchanged hero placement hydration", () => {
   const source = read("screens/DashboardScreen.js");
 
-  assert.match(source, /if \(a\.thumb_320_url\) \{/);
+  assert.match(source, /function isPersistedSignedStorageUrl/);
+  assert.match(source, /if \(a\.thumb_320_url && !isPersistedSignedStorageUrl\(a\.thumb_320_url\)\) \{/);
   assert.match(source, /immediateEntries\.push\(\[placementId, a\.thumb_320_url\]\)/);
   assert.match(source, /fallbackRows\.push\(a\)/);
   assert.match(source, /if \(placementId\) \{\s*return null;\s*\}/);

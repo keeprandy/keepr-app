@@ -87,6 +87,11 @@ function legacyHeroUrl(asset) {
   return url;
 }
 
+function isPersistedSignedStorageUrl(url) {
+  if (typeof url !== "string") return false;
+  return /\/storage\/v1\/(?:object|render\/image)\/sign\//.test(url);
+}
+
 function isCommercial(asset) {
   return String(asset?.asset_mode || "").toLowerCase() === "commercial";
 }
@@ -135,7 +140,7 @@ const { data, error } = await supabase.rpc(
   const a = row;
     if (!placementId || !a || a.deleted_at) continue;
 
-    if (a.thumb_320_url) {
+    if (a.thumb_320_url && !isPersistedSignedStorageUrl(a.thumb_320_url)) {
       immediateEntries.push([placementId, a.thumb_320_url]);
       continue;
     }
