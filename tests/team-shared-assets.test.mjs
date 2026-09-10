@@ -109,6 +109,15 @@ test("useAssets preserves deleted/type filtering and deterministic ordering", ()
   assert.match(source, /\.order\("created_at", \{ ascending: true \}\)/);
 });
 
+test("useAssets aborts timed-out requests and preserves prior assets on refresh timeout", () => {
+  const source = read("hooks/useAssets.js");
+
+  assert.match(source, /AbortController/);
+  assert.match(source, /request\.abortSignal\(controller\.signal\)/);
+  assert.match(source, /assetsRef\.current\.length === 0/);
+  assert.match(source, /requestSeqRef\.current !== requestSeq/);
+});
+
 test("owner sees owned assets including the canonical shared fixture", () => {
   const scenario = sampleScenario();
   const rows = listVisibleAssets({

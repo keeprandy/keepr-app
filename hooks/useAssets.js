@@ -1,19 +1,29 @@
 // hooks/useAssets.js
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 
-const ASSET_FETCH_TIMEOUT_MS = 15000;
+const ASSET_FETCH_TIMEOUT_MS = 30000;
 
-function withAssetFetchTimeout(promise, label) {
+function isAssetFetchTimeout(err) {
+  return /timed out/i.test(String(err?.message || ""));
+}
+
+function withAssetFetchTimeout(request, label) {
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const query =
+    controller && typeof request?.abortSignal === "function"
+      ? request.abortSignal(controller.signal)
+      : request;
   let timeoutId;
   const timeout = new Promise((_, reject) => {
     timeoutId = setTimeout(() => {
+      controller?.abort?.();
       reject(new Error(`${label || "Asset fetch"} timed out`));
     }, ASSET_FETCH_TIMEOUT_MS);
   });
 
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+  return Promise.race([query, timeout]).finally(() => clearTimeout(timeoutId));
 }
 
 /**
@@ -40,6 +50,14 @@ export function useAssets(type, options = {}) {
   const [assets, setAssets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const assetsRef = useRef([]);
+  const requestSeqRef = useRef(0);
+
+  const applyAssets = useCallback((nextAssets) => {
+    const safeAssets = Array.isArray(nextAssets) ? nextAssets : [];
+    assetsRef.current = safeAssets;
+    setAssets(safeAssets);
+  }, []);
 
   const typeFilter = useMemo(() => {
     if (!type) return null;
@@ -54,13 +72,15 @@ export function useAssets(type, options = {}) {
       return;
     }
 
+    const requestSeq = requestSeqRef.current + 1;
+    requestSeqRef.current = requestSeq;
     setLoading(true);
     setError(null);
 
     try {
       // If we're in authenticated listing mode and we don't have a user yet, return empty.
       if (!includeAllOwners && !ownerId) {
-        setAssets([]);
+        applyAssets([]);
         return;
       }
       if (includeAllOwners) {
@@ -84,7 +104,8 @@ export function useAssets(type, options = {}) {
         );
         if (fetchError) throw fetchError;
 
-        setAssets(data || []);
+        if (requestSeqRef.current !== requestSeq) return;
+        applyAssets(data || []);
         return;
       }
 
@@ -98,15 +119,21 @@ export function useAssets(type, options = {}) {
 
       if (fetchError) throw fetchError;
 
-      setAssets((data || []).map((row) => row?.asset).filter(Boolean));
+      if (requestSeqRef.current !== requestSeq) return;
+      applyAssets((data || []).map((row) => row?.asset).filter(Boolean));
     } catch (err) {
+      if (requestSeqRef.current !== requestSeq) return;
       console.error("useAssets fetchAssets error", err);
-      setAssets([]);
+      if (!isAssetFetchTimeout(err) || assetsRef.current.length === 0) {
+        applyAssets([]);
+      }
       setError(err?.message || "Failed to load assets.");
     } finally {
-      setLoading(false);
+      if (requestSeqRef.current === requestSeq) {
+        setLoading(false);
+      }
     }
-  }, [authInitializing, includeAllOwners, includeDeleted, ownerId, typeFilter]);
+  }, [applyAssets, authInitializing, includeAllOwners, includeDeleted, ownerId, typeFilter]);
 
   useEffect(() => {
     fetchAssets();
