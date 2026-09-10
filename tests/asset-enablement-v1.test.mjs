@@ -47,6 +47,15 @@ test("asset enablement projection separates known, inheritable, missing, unresol
     },
     resources: [{ id: "resource-2", title: "KF018 commissioning photo", target_type: "asset" }],
     serviceRecords: [],
+    actions: [
+      {
+        id: "action-1",
+        asset_id: "asset-kf018",
+        title: "Schedule delivery walkthrough",
+        status: "open",
+        extra_metadata: { playbook_name: "Delivery" },
+      },
+    ],
   });
 
   assert.equal(projection.contract, "keepr.asset.enablement.v1");
@@ -64,6 +73,10 @@ test("asset enablement projection separates known, inheritable, missing, unresol
   assert.ok(projection.unresolved.some((item) => item.label === "Generator serial unresolved"));
   assert.ok(projection.proposed_actions.some((item) => item.target === "systems"));
   assert.ok(projection.proposed_actions.some((item) => item.target === "timeline"));
+  assert.ok(projection.owner.knows.some((item) => item.label === "Keepr knows this exact asset"));
+  assert.ok(projection.owner.needs_attention.some((item) => item.label === "Schedule delivery walkthrough"));
+  assert.ok(projection.owner.can_help.some((item) => item.label === "Continue the next care step"));
+  assert.ok(projection.owner.can_help.some((item) => item.target === "ai_context"));
 });
 
 test("bottom-up owner-created assets can start enablement without OEM model truth", async () => {
@@ -86,10 +99,15 @@ test("bottom-up owner-created assets can start enablement without OEM model trut
   assert.ok(projection.missing.some((item) => item.label === "Installed systems are not represented"));
   assert.ok(projection.proposed_actions.some((item) => item.key === "resolve-kac"));
   assert.ok(projection.proposed_actions.some((item) => item.key === "ask-kai"));
+  assert.ok(projection.owner.summary.includes("Keepr can start building useful intelligence"));
+  assert.ok(projection.owner.can_help.some((item) => item.label === "Ask KAI about this asset"));
 });
 
-test("BoatStory exposes the owner-ready Keepr Enable surface without new routing or task systems", () => {
+test("story screens expose the generic owner-ready Asset Intelligence surface", () => {
   const story = read("screens/BoatStoryScreen.js");
+  const homeStory = read("screens/HomeStoryScreen.js");
+  const vehicleStory = read("screens/VehicleStoryScreen.js");
+  const otherStory = read("screens/OtherAssetStoryScreen.js");
   const card = read("components/AssetEnablementCard.js");
 
   assert.match(story, /import AssetEnablementCard/);
@@ -101,10 +119,20 @@ test("BoatStory exposes the owner-ready Keepr Enable surface without new routing
   assert.match(story, /onEditAsset=\{goToEditBoat\}/);
   assert.match(story, /onAskKai=\{goToMessages\}/);
   assert.match(story, /assetKacId\(boat\)/);
+  assert.match(homeStory, /import AssetEnablementCard/);
+  assert.match(homeStory, /asset=\{home\}/);
+  assert.match(vehicleStory, /import AssetEnablementCard/);
+  assert.match(vehicleStory, /asset=\{vehicle\}/);
+  assert.match(otherStory, /import AssetEnablementCard/);
+  assert.match(otherStory, /asset=\{asset\}/);
 
   assert.match(card, /purpose=self_service/);
   assert.match(card, /projectAssetEnablement/);
-  assert.match(card, /Missing Intelligence/);
-  assert.match(card, /Proposed next action/);
+  assert.match(card, /What Keepr Knows/);
+  assert.match(card, /What Needs Attention/);
+  assert.match(card, /What Keepr Can Help Take Care Of/);
+  assert.match(card, /Unresolved Diagnostics/);
+  assert.match(card, /AI Context/);
+  assert.ok(card.includes("/k/${encodeURIComponent(kac)}/ai"));
   assert.doesNotMatch(card, /\.from\("actions"\)|\.insert\(|createAction/);
 });

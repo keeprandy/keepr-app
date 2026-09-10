@@ -49,6 +49,7 @@ import { formatContributionAttribution } from "../lib/provenance";
 import EventPill from "../components/EventPill";
 import ReportsModal from "../components/ReportsModal";
 import AssetWhatNextSection from "../components/AssetWhatNextSection";
+import AssetEnablementCard from "../components/AssetEnablementCard";
 
 const HERO_ASPECT = 4 / 3;
 const IS_WEB = Platform.OS === "web";
@@ -1642,6 +1643,19 @@ try {
           assetName={homeName}
           assetType="home"
           navigation={navigation}
+        />
+
+        <AssetEnablementCard
+          asset={home}
+          systems={systems}
+          resources={storyAttachments}
+          serviceRecords={serviceRecords}
+          storyEvents={storyEvents}
+          onOpenSystems={goToHomeSystems}
+          onOpenAttachments={goToAttachments}
+          onOpenTimeline={goToAddTimelineRecord}
+          onEditAsset={goToEditHome}
+          onAskKai={goToMessages}
         />
 
         {/* Timeline */}

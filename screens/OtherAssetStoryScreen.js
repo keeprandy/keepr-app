@@ -43,6 +43,7 @@ import { formatContributionAttribution } from "../lib/provenance";
 import EventPill from "../components/EventPill";
 import ReportsModal from "../components/ReportsModal";
 import AssetWhatNextSection from "../components/AssetWhatNextSection";
+import AssetEnablementCard from "../components/AssetEnablementCard";
 import { getAssetDefinition, formatAssetMetaValue } from "../lib/assetDefinitions";
 import { buildMessagesNavigationParams } from "../lib/messagesService";
 
@@ -1492,6 +1493,19 @@ const filteredTimelineItems = useMemo(() => {
           assetName={assetName}
           assetType="other"
           navigation={navigation}
+        />
+
+        <AssetEnablementCard
+          asset={asset}
+          systems={systems}
+          resources={storyAttachments}
+          serviceRecords={serviceRecords}
+          storyEvents={storyEvents}
+          onOpenSystems={goToAssetSystems}
+          onOpenAttachments={goToAttachments}
+          onOpenTimeline={goToAddTimelineRecord}
+          onEditAsset={goToEditAsset}
+          onAskKai={goToMessages}
         />
 
         {/* Timeline */}

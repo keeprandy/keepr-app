@@ -48,6 +48,7 @@ import { formatContributionAttribution } from "../lib/provenance";
 import EventPill from "../components/EventPill";
 import ReportsModal from "../components/ReportsModal";
 import AssetWhatNextSection from "../components/AssetWhatNextSection";
+import AssetEnablementCard from "../components/AssetEnablementCard";
 import { buildVehicleStory } from "../lib/storyBuilders";
 
 const HERO_ASPECT = 4 / 3;
@@ -1512,6 +1513,19 @@ const meta = {
           assetName={vehicleName}
           assetType="vehicle"
           navigation={navigation}
+        />
+
+        <AssetEnablementCard
+          asset={vehicle}
+          systems={systems}
+          resources={storyAttachments}
+          serviceRecords={serviceRecords}
+          storyEvents={storyEvents}
+          onOpenSystems={goToVehicleSystems}
+          onOpenAttachments={goToAttachments}
+          onOpenTimeline={goToAddTimelineRecord}
+          onEditAsset={goToEditVehicle}
+          onAskKai={goToMessages}
         />
 
         {/* Timeline */}
