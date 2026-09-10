@@ -1,6 +1,6 @@
 // screens/DashboardScreen.js
 import { Ionicons } from "@expo/vector-icons";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActionSheetIOS,
   ActivityIndicator,
@@ -106,7 +106,13 @@ async function resolveHeroUrisForAssets(allAssets) {
   .filter(Boolean);
 
   const uniqueIds = Array.from(new Set(placementIds));
-  if (!uniqueIds.length) return {};
+  if (!uniqueIds.length) {
+    return {
+      immediateMap: {},
+      fallbackRows: [],
+      stats: { requested: 0, returned: 0, thumbnailBacked: 0, signedFallback: 0 },
+    };
+  }
 
 const { data, error } = await supabase.rpc(
   "get_dashboard_hero_attachments",
@@ -114,29 +120,55 @@ const { data, error } = await supabase.rpc(
 );
 
   if (error) {
-    return {};
+    return {
+      immediateMap: {},
+      fallbackRows: [],
+      stats: { requested: uniqueIds.length, returned: 0, thumbnailBacked: 0, signedFallback: 0 },
+    };
   }
 
-const entries = await Promise.all((data || []).map(async (row) => {
+  const immediateEntries = [];
+  const fallbackRows = [];
+
+  for (const row of data || []) {
   const placementId = row?.placement_id;
   const a = row;
-  if (!placementId || !a || a.deleted_at) return null;
+    if (!placementId || !a || a.deleted_at) continue;
 
-if (a.thumb_320_url) {
+    if (a.thumb_320_url) {
+      immediateEntries.push([placementId, a.thumb_320_url]);
+      continue;
+    }
 
-console.log("DASH THUMB", {
-  placementId,
-  thumb: a.thumb_320_url,
-});
+    if (a.url) {
+      immediateEntries.push([placementId, a.url]);
+      continue;
+    }
 
-  return [placementId, a.thumb_320_url];
+    if (a.bucket && a.storage_path) {
+      fallbackRows.push(a);
+    }
+  }
+
+  return {
+    immediateMap: Object.fromEntries(immediateEntries),
+    fallbackRows,
+    stats: {
+      requested: uniqueIds.length,
+      returned: (data || []).length,
+      thumbnailBacked: immediateEntries.length,
+      signedFallback: fallbackRows.length,
+    },
+  };
 }
 
-if (a.bucket && a.storage_path) {
+async function resolveSignedHeroFallback(row) {
+  if (!row?.placement_id || !row?.bucket || !row?.storage_path) return null;
+
   try {
     const signed = await getSignedUrl({
-      bucket: a.bucket,
-      path: a.storage_path,
+      bucket: row.bucket,
+      path: row.storage_path,
       transform: {
         width: 320,
         height: 320,
@@ -145,49 +177,12 @@ if (a.bucket && a.storage_path) {
       },
     });
 
-    if (signed) return [placementId, signed];
+    if (signed) return [row.placement_id, signed];
   } catch (e) {
     console.log("Dashboard hero signed URL error", e);
   }
-}
-
-  /*
-  if (a.bucket && a.storage_path) {
-    try {
-      const signed = await getSignedUrl({
-        bucket: a.bucket,
-        path: a.storage_path,
-        transform: {
-          width: 320,
-          height: 320,
-          resize: "cover",
-          quality: 75,
-        },
-      });
-      if (signed) {
-        return [placementId, signed];
-      }
-    } catch (e) {
-      console.log("Dashboard hero signed URL error", {
-        placementId,
-        bucket: a.bucket,
-        path: a.storage_path,
-        e,
-      });
-    }
-  }
-  */
 
   return null;
-}));
-
-  const map = {};
-  entries.forEach((entry) => {
-    if (!entry) return;
-    const [placementId, uri] = entry;
-    map[placementId] = uri;
-  });
-  return map;
 }
 
 /** Collect route names so we can navigate safely. */
@@ -279,6 +274,9 @@ export default function DashboardScreen({ navigation }) {
   // Hero images
   const [heroUriByPlacementId, setHeroUriByPlacementId] = useState({});
   const [heroResolving, setHeroResolving] = useState(false);
+  const heroResolvedKeyRef = useRef("");
+  const heroResolvingKeyRef = useRef("");
+  const heroHydrationRunRef = useRef(0);
 
 
   // Identity / achievements (for avatar + accomplishments card)
@@ -457,15 +455,38 @@ const shouldShowKeeprProgress =
 
   
   // Hero resolution
+  const heroPlacementKey = useMemo(() => {
+    return allAssets
+      .map((a) => a?.hero_placement_id)
+      .filter(Boolean)
+      .sort()
+      .join("|");
+  }, [allAssets]);
+
   const refreshHeroUris = useCallback(async () => {
     if (!allAssets.length) {
       setHeroUriByPlacementId({});
+      heroResolvedKeyRef.current = "";
+      heroResolvingKeyRef.current = "";
       return;
     }
 
+    const requestedKey = heroPlacementKey;
+    if (!requestedKey) return;
+    if (
+      heroResolvedKeyRef.current === requestedKey ||
+      heroResolvingKeyRef.current === requestedKey
+    ) {
+      return;
+    }
+
+    const runId = heroHydrationRunRef.current + 1;
+    heroHydrationRunRef.current = runId;
+    heroResolvingKeyRef.current = requestedKey;
     setHeroResolving(true);
     try {
-      const map = await resolveHeroUrisForAssets(allAssets);
+      const result = await resolveHeroUrisForAssets(allAssets);
+      const map = result?.immediateMap || {};
       // Merge into existing cache so unchanged URIs remain stable (prevents flicker)
       setHeroUriByPlacementId((prev) => {
         const safePrev = prev || {};
@@ -483,18 +504,25 @@ const shouldShowKeeprProgress =
         }
         return next;
       });
+      heroResolvedKeyRef.current = requestedKey;
+
+      for (const row of result?.fallbackRows || []) {
+        resolveSignedHeroFallback(row).then((entry) => {
+          if (!entry || heroHydrationRunRef.current !== runId) return;
+          const [placementId, signed] = entry;
+          setHeroUriByPlacementId((prev) => {
+            if (prev?.[placementId] === signed) return prev;
+            return { ...(prev || {}), [placementId]: signed };
+          });
+        });
+      }
     } finally {
+      if (heroResolvingKeyRef.current === requestedKey) {
+        heroResolvingKeyRef.current = "";
+      }
       setHeroResolving(false);
     }
-  }, [allAssets]);
-
-  const heroPlacementKey = useMemo(() => {
-    return allAssets
-      .map((a) => a?.hero_placement_id)
-      .filter(Boolean)
-      .sort()
-      .join("|");
-  }, [allAssets]);
+  }, [allAssets, heroPlacementKey]);
 
     useEffect(() => {
       if (loading) return;
