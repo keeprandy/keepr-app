@@ -45,5 +45,5 @@ test("UI exposes dealer initiation and owner acceptance without replacing owners
   assert.match(detail, /projectionSemantics\.showInventoryActions/);
   assert.match(dashboard, /Owner Handoff/);
   assert.match(dashboard, /acceptOwnerHandoff/);
-  assert.match(dashboard, /refetchBoats/);
+  assert.match(dashboard, /refetchDashboardAssets/);
 });
