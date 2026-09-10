@@ -46,6 +46,7 @@ import {
   scheduleReminderPushNotification,
 } from "../lib/teamActions";
 import { loadMyKeeprProsForPicker } from "../lib/kpcApi";
+import { parseReminderPrefillParam } from "../lib/serviceActionPrefill";
 
 /* ------------------------------------------------------------- */
 /* Date helpers                                                  */
@@ -125,21 +126,18 @@ export default function CreateReminderScreen({ navigation, route }) {
   const reminderIdFromRoute = route?.params?.reminderId ?? null;
   const isEdit = !!reminderIdFromRoute;
 
+  const routePrefill = useMemo(
+    () => parseReminderPrefillParam(route?.params?.prefill),
+    [route?.params?.prefill]
+  );
   const prefillTitle = route?.params?.prefillTitle || "";
   const prefillNotes = route?.params?.prefillNotes || "";
-  
 
   const prefill = {
-  ...(route?.params?.prefill || {}),
-  title:
-    route?.params?.prefill?.title ||
-    prefillTitle ||
-    "",
-  notes:
-    route?.params?.prefill?.notes ||
-    prefillNotes ||
-    "",
-};
+    ...routePrefill,
+    title: routePrefill.title || prefillTitle || "",
+    notes: routePrefill.notes || prefillNotes || "",
+  };
   const afterSave = route?.params?.afterSave || "Notifications";
   const afterSaveParams = route?.params?.afterSaveParams || null;
 
@@ -1603,15 +1601,28 @@ const canSave = useMemo(
   const validate = useCallback(() => {
     if (!ownerId) return "Not signed in.";
     if (!dueDateISO) return "Please select a date.";
-    if (actionType === "service" && !effectiveServiceSnapshot) {
-      return "Please select a Service template.";
+    if (
+      actionType === "service" &&
+      serviceTemplates.length > 0 &&
+      !effectiveServiceSnapshot
+    ) {
+      return "Please select a Service template, or switch the action type to General Action.";
     }
     if (!title.trim()) return "Title is required.";
     if (hasTime && !normalizeTimeText(timeText)) {
       return "Please enter time as HH:MM in 24-hour format.";
     }
     return null;
-  }, [ownerId, dueDateISO, actionType, effectiveServiceSnapshot, title, hasTime, timeText]);
+  }, [
+    ownerId,
+    dueDateISO,
+    actionType,
+    serviceTemplates.length,
+    effectiveServiceSnapshot,
+    title,
+    hasTime,
+    timeText,
+  ]);
 
   const onSave = useCallback(
     async (nextStatus, completionMetadata = null) => {
@@ -1650,15 +1661,24 @@ const canSave = useMemo(
             ? "Team coordination"
             : extraMeta.action_context;
 
-        if (actionType === "service" && effectiveServiceSnapshot) {
+        if (actionType === "service") {
           extraMeta.action_type = "service";
           extraMeta.service_action = true;
-          extraMeta.service_template_id = effectiveServiceSnapshot.id || null;
-          extraMeta.service_template_key = effectiveServiceSnapshot.key || null;
-          extraMeta.service_template_name = effectiveServiceSnapshot.name || null;
-          extraMeta.service_template_label = effectiveServiceSnapshot.label || null;
-          extraMeta.service_template_snapshot = effectiveServiceSnapshot;
-          extraMeta.service_template_org_id = serviceOrgId || null;
+          if (effectiveServiceSnapshot) {
+            extraMeta.service_template_id = effectiveServiceSnapshot.id || null;
+            extraMeta.service_template_key = effectiveServiceSnapshot.key || null;
+            extraMeta.service_template_name = effectiveServiceSnapshot.name || null;
+            extraMeta.service_template_label = effectiveServiceSnapshot.label || null;
+            extraMeta.service_template_snapshot = effectiveServiceSnapshot;
+            extraMeta.service_template_org_id = serviceOrgId || null;
+          } else {
+            delete extraMeta.service_template_id;
+            delete extraMeta.service_template_key;
+            delete extraMeta.service_template_name;
+            delete extraMeta.service_template_label;
+            delete extraMeta.service_template_snapshot;
+            delete extraMeta.service_template_org_id;
+          }
         } else {
           if (extraMeta.action_type === "service") delete extraMeta.action_type;
           delete extraMeta.service_action;
@@ -1863,7 +1883,7 @@ const canSave = useMemo(
           owner_id: reminderIdFromRoute ? reminderOwnerId || ownerId : ownerId,
           title: title.trim(),
           notes: notes || null,
-          url: prefill.url || null,
+          url: routePrefill.url || null,
           due_at: dueAtISO,
           has_time: !!hasTime,
           is_urgent: !!isUrgent,
@@ -2097,7 +2117,7 @@ const canSave = useMemo(
       coordinationOrg?.id,
       title,
       notes,
-      prefill,
+      routePrefill,
       dueDateISO,
       hasTime,
       timeText,

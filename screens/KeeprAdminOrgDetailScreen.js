@@ -516,10 +516,10 @@ function ParentChain({ rows }) {
   return (
     <View style={styles.chainPanel}>
       <Text style={styles.relationshipListTitle}>Parent Company Chain</Text>
-      <Text style={styles.chainText}>{names.join(" -> ")}</Text>
+      <Text style={styles.chainText}>{names.join(" to ")}</Text>
       {rows.map((row) => (
         <Text key={`${row.depth}:${row.parent_org_id}`} style={styles.operatorMeta}>
-          {row.depth}. {row.child_name} -> {row.parent_name}
+          {row.depth}. {row.child_name} to {row.parent_name}
         </Text>
       ))}
     </View>

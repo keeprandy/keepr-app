@@ -51,6 +51,10 @@ import {
   setReminderNotificationHandler,
 } from "./lib/remindersNotifications";
 import { markNotificationRead } from "./lib/notificationsService";
+import {
+  parseReminderPrefillParam,
+  stringifyReminderPrefillParam,
+} from "./lib/serviceActionPrefill";
 
 import ManageTeamScreen from "./screens/ManageTeamScreen";
 import PrivacyTrustScreen from "./screens/PrivacyTrustScreen";
@@ -674,7 +678,15 @@ const linking = {
       },
     },
     TimelineRecord: "TimelineRecord",
-    CreateReminder: "CreateReminder",
+    CreateReminder: {
+      path: "CreateReminder",
+      parse: {
+        prefill: parseReminderPrefillParam,
+      },
+      stringify: {
+        prefill: stringifyReminderPrefillParam,
+      },
+    },
     BoatStory: "boat/:boatId/story",
     BoatShowcase: "boat/:boatId/showcase",
     BoatSystemStory: "boat/:boatId/system/:systemId",

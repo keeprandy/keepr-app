@@ -15,7 +15,9 @@ function loadPrefillHelpers() {
     `${source}
 return {
   buildServiceActionPrefill,
-  buildServiceActionRouteParams
+  buildServiceActionRouteParams,
+  parseReminderPrefillParam,
+  stringifyReminderPrefillParam
 };`
   )();
 }
@@ -61,6 +63,36 @@ test("system Add Service builds an Inbox Action prefill with system context", ()
   assert.match(params.prefill.notes, /Parent asset: Brighton Home/);
   assert.equal(params.prefill.extra_metadata.action_type, "service");
   assert.equal(params.prefill.extra_metadata.assignment_scope, "system");
+});
+
+test("CreateReminder web prefill params serialize as JSON and ignore legacy object strings", () => {
+  const {
+    buildServiceActionRouteParams,
+    parseReminderPrefillParam,
+    stringifyReminderPrefillParam,
+  } = loadPrefillHelpers();
+
+  const params = buildServiceActionRouteParams({
+    assetId: "asset-1",
+    assetName: "Alfa Romeo",
+    assetType: "vehicle",
+    sourceScreen: "garage",
+  });
+  const serialized = stringifyReminderPrefillParam(params.prefill);
+
+  assert.equal(typeof serialized, "string");
+  assert.notEqual(serialized, "[object Object]");
+  assert.deepEqual(parseReminderPrefillParam(serialized), params.prefill);
+  assert.deepEqual(parseReminderPrefillParam("[object Object]"), {});
+});
+
+test("generic service actions can save without a configured service template", () => {
+  const source = read("screens/CreateReminderScreen.js");
+
+  assert.match(source, /serviceTemplates\.length > 0[\s\S]*!effectiveServiceSnapshot/);
+  assert.match(source, /if \(actionType === "service"\) \{/);
+  assert.match(source, /extraMeta\.service_action = true;/);
+  assert.match(source, /delete extraMeta\.service_template_snapshot;/);
 });
 
 test("visible Add Service handlers navigate to CreateReminder instead of timeline or public story", () => {
