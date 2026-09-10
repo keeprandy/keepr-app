@@ -21,6 +21,7 @@ test("dashboard prefers precomputed thumbnails and guards unchanged hero placeme
   assert.match(source, /if \(a\.thumb_320_url\) \{/);
   assert.match(source, /immediateEntries\.push\(\[placementId, a\.thumb_320_url\]\)/);
   assert.match(source, /fallbackRows\.push\(a\)/);
+  assert.match(source, /if \(placementId\) \{\s*return null;\s*\}/);
   assert.match(source, /heroResolvedKeyRef\.current === requestedKey/);
   assert.match(source, /heroResolvingKeyRef\.current === requestedKey/);
   assert.match(source, /resolveSignedHeroFallback\(row\)\.then/);

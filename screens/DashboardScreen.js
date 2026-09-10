@@ -140,12 +140,12 @@ const { data, error } = await supabase.rpc(
       continue;
     }
 
-    if (a.url) {
-      immediateEntries.push([placementId, a.url]);
+    if (a.bucket && a.storage_path) {
+      fallbackRows.push(a);
       continue;
     }
 
-    if (a.bucket && a.storage_path) {
+    if (a.url) {
       fallbackRows.push(a);
     }
   }
@@ -163,7 +163,10 @@ const { data, error } = await supabase.rpc(
 }
 
 async function resolveSignedHeroFallback(row) {
-  if (!row?.placement_id || !row?.bucket || !row?.storage_path) return null;
+  if (!row?.placement_id) return null;
+  if (!row?.bucket || !row?.storage_path) {
+    return row?.url ? [row.placement_id, row.url] : null;
+  }
 
   try {
     const signed = await getSignedUrl({
@@ -545,6 +548,10 @@ const shouldShowKeeprProgress =
 
         if (asset?.hero_thumb_url) {
           return asset.hero_thumb_url;
+        }
+
+        if (placementId) {
+          return null;
         }
 
         return legacyHeroUrl(asset);
