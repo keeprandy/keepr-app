@@ -28,6 +28,7 @@
     { "source": "/invite/:slug", "destination": "/api/og/invite/:slug" },
     { "source": "/k/:kac/n/:nodeId", "destination": "/api/og/system/:kac/:nodeId" },
     { "source": "/k/:kac/source/files/:attachmentId/:fileName", "destination": "/api/k/:kac/source-file/:attachmentId?fileName=:fileName" },
+    { "source": "/k/:kac/ai", "destination": "/api/k/:kac/ai" },
     { "source": "/k/:kac/source.json", "destination": "/api/k/:kac/source" },
     { "source": "/k/:kac/source", "destination": "/" },
     { "source": "/k/:kac/actions", "destination": "/" },
