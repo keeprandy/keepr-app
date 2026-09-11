@@ -39,8 +39,6 @@ import {
   listPendingAssetOwnerHandoffs,
 } from "../lib/keeprspaceApi";
 
-const DASHBOARD_HERO_EXPIRES_IN_SECONDS = 60 * 60 * 24 * 7;
-
 /**
  * Sort helper: prefers explicit sort_rank, then "primary", then created_at, then name.
  */
@@ -179,7 +177,6 @@ async function resolveSignedHeroFallback(row) {
     const signed = await getSignedUrl({
       bucket: row.bucket,
       path: row.storage_path,
-      expiresIn: DASHBOARD_HERO_EXPIRES_IN_SECONDS,
       transform: {
         width: 320,
         height: 320,
@@ -467,7 +464,7 @@ const shouldShowKeeprProgress =
       .join("|");
   }, [allAssets]);
 
-  const refreshHeroUris = useCallback(async ({ force = false } = {}) => {
+  const refreshHeroUris = useCallback(async () => {
     if (!allAssets.length) {
       setHeroUriByPlacementId({});
       heroResolvedKeyRef.current = "";
@@ -477,10 +474,10 @@ const shouldShowKeeprProgress =
 
     const requestedKey = heroPlacementKey;
     if (!requestedKey) return;
-    if (!force && (
+    if (
       heroResolvedKeyRef.current === requestedKey ||
       heroResolvingKeyRef.current === requestedKey
-    )) {
+    ) {
       return;
     }
 
@@ -538,29 +535,6 @@ const shouldShowKeeprProgress =
 
       return () => clearTimeout(t);
     }, [loading, heroPlacementKey, refreshHeroUris]);
-
-    const handleHeroImageError = useCallback(
-      (asset, failedUrl) => {
-        const placementId = asset?.hero_placement_id || null;
-        if (!placementId) return;
-
-        console.warn("Dashboard hero image failed; refreshing signed URL", {
-          asset_id: asset?.id || asset?.asset_id || null,
-          hero_placement_id: placementId,
-          failed_url: failedUrl || null,
-        });
-
-        setHeroUriByPlacementId((prev) => {
-          if (!prev?.[placementId]) return prev;
-          const next = { ...prev };
-          delete next[placementId];
-          return next;
-        });
-        heroResolvedKeyRef.current = "";
-        refreshHeroUris({ force: true });
-      },
-      [refreshHeroUris]
-    );
 
     const getAssetHeroImage = useCallback(
       (asset) => {
@@ -774,7 +748,6 @@ useEffect(() => {
         loadSystemModeSummary?.(),
         loadPendingOwnerHandoffs?.(),
       ]);
-      await refreshHeroUris({ force: true });
     } catch (e) {
       console.log("Dashboard refresh on focus failed", e);
     }
@@ -783,7 +756,6 @@ useEffect(() => {
     loadIdentityAndAchievements,
     loadSystemModeSummary,
     loadPendingOwnerHandoffs,
-    refreshHeroUris,
   ]);
 
 const acceptOwnerHandoff = useCallback(async (handoff) => {
@@ -1470,11 +1442,7 @@ if (Platform.OS !== "ios") {
                       <View style={styles.circleWrapper}>
                         <View style={styles.circle}>
                           {typeof uri === "string" && uri.length > 0 ? (
-                            <Image
-                              source={{ uri }}
-                              style={styles.circleImg}
-                              onError={() => handleHeroImageError(c.asset, uri)}
-                            />
+                            <Image source={{ uri }} style={styles.circleImg} />
                           ) : (
                             <View style={styles.circleStub}>
                               <Ionicons
@@ -1554,7 +1522,6 @@ if (Platform.OS !== "ios") {
                       modeLine={commercialLabel(a)}
                       icon="home-outline"
                       image={getAssetHeroImage(a)}
-                      onImageError={() => handleHeroImageError(a, getAssetHeroImage(a))}
                       isOwner={isOwner}
                       isShared={isShared}
                       onPress={() => goStory("home", a)}
@@ -1592,7 +1559,6 @@ if (Platform.OS !== "ios") {
                       modeLine={commercialLabel(a)}
                       icon="car-outline"
                       image={getAssetHeroImage(a)}
-                      onImageError={() => handleHeroImageError(a, getAssetHeroImage(a))}
                       isOwner={isOwner}
                       isShared={isShared}
                       onPress={() => goStory("vehicle", a)}
@@ -1631,7 +1597,6 @@ if (Platform.OS !== "ios") {
                       modeLine={commercialLabel(a)}
                       icon="boat-outline"
                       image={getAssetHeroImage(a)}
-                      onImageError={() => handleHeroImageError(a, getAssetHeroImage(a))}
                       isOwner={isOwner}
                       isShared={isShared}
                       onPress={() => goStory("boat", a)}
@@ -1664,7 +1629,6 @@ if (Platform.OS !== "ios") {
                     modeLine={commercialLabel(a)}
                     icon="cube-outline"
                     image={getAssetHeroImage(a)}
-                    onImageError={() => handleHeroImageError(a, getAssetHeroImage(a))}
                     isOwner={isOwner}
                     isShared={isShared}
                     onPress={() => goStory("other", a)}
@@ -1802,7 +1766,7 @@ function AssetSection({ label, hint, icon, onViewAll, items, emptyText, renderIt
   );
 }
 
-function AssetRowCard({ title, subtitle, modeLine, icon, image, onImageError, isOwner, isShared, onPress, reorderMode, onMoveUp, onMoveDown }) {
+function AssetRowCard({ title, subtitle, modeLine, icon, image, isOwner, isShared, onPress, reorderMode, onMoveUp, onMoveDown }) {
   return (
     <TouchableOpacity
       style={styles.assetRowCard}
@@ -1811,7 +1775,7 @@ function AssetRowCard({ title, subtitle, modeLine, icon, image, onImageError, is
     >
       <View style={styles.assetThumb}>
         {typeof image === "string" && image.length > 0 ? (
-          <Image source={{ uri: image }} style={styles.assetThumbImg} onError={onImageError} />
+          <Image source={{ uri: image }} style={styles.assetThumbImg} />
         ) : (
           <View style={styles.assetThumbStub}>
             <Ionicons name={icon} size={18} color="#fff" />
