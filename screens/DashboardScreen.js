@@ -40,6 +40,15 @@ import {
 } from "../lib/keeprspaceApi";
 
 const DASHBOARD_HERO_EXPIRES_IN_SECONDS = 60 * 60 * 24 * 7;
+const DASHBOARD_HERO_SIGN_RETRY_MS = 500;
+
+function isTransientHeroSigningError(error) {
+  return /(?:timed out|timeout|http 504|network|fetch)/i.test(String(error?.message || error || ""));
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /**
  * Sort helper: prefers explicit sort_rank, then "primary", then created_at, then name.
@@ -175,22 +184,28 @@ async function resolveSignedHeroFallback(row) {
     return row?.url ? [row.placement_id, row.url] : null;
   }
 
-  try {
-    const signed = await getSignedUrl({
-      bucket: row.bucket,
-      path: row.storage_path,
-      expiresIn: DASHBOARD_HERO_EXPIRES_IN_SECONDS,
-      transform: {
-        width: 320,
-        height: 320,
-        resize: "cover",
-        quality: 75,
-      },
-    });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const signed = await getSignedUrl({
+        bucket: row.bucket,
+        path: row.storage_path,
+        expiresIn: DASHBOARD_HERO_EXPIRES_IN_SECONDS,
+        transform: {
+          width: 320,
+          height: 320,
+          resize: "cover",
+          quality: 75,
+        },
+      });
 
-    if (signed) return [row.placement_id, signed];
-  } catch (e) {
-    console.log("Dashboard hero signed URL error", e);
+      if (signed) return [row.placement_id, signed];
+    } catch (e) {
+      if (attempt === 0 && isTransientHeroSigningError(e)) {
+        await wait(DASHBOARD_HERO_SIGN_RETRY_MS);
+        continue;
+      }
+      console.log("Dashboard hero signed URL error", e);
+    }
   }
 
   return null;
@@ -511,13 +526,13 @@ const shouldShowKeeprProgress =
       heroResolvedKeyRef.current = requestedKey;
 
       for (const row of result?.fallbackRows || []) {
-        resolveSignedHeroFallback(row).then((entry) => {
-          if (!entry || heroHydrationRunRef.current !== runId) return;
-          const [placementId, signed] = entry;
-          setHeroUriByPlacementId((prev) => {
-            if (prev?.[placementId] === signed) return prev;
-            return { ...(prev || {}), [placementId]: signed };
-          });
+        const entry = await resolveSignedHeroFallback(row);
+        if (heroHydrationRunRef.current !== runId) return;
+        if (!entry) continue;
+        const [placementId, signed] = entry;
+        setHeroUriByPlacementId((prev) => {
+          if (prev?.[placementId] === signed) return prev;
+          return { ...(prev || {}), [placementId]: signed };
         });
       }
     } finally {
